@@ -26,7 +26,7 @@ def test_filenames(class_name):
      'Test%s.java' % class_name, 'Tests%s.java' % class_name, \
      'test%s.java' % class_name, 'tests%s.java' % class_name] 
 
-def is_with_unittest(commit):
+def find_unit_tests(commit):
     commit_id = commit['commit'].split('/')[-1]
     bug_id = "%s_%s" % (repo, commit_id[:7])
     
@@ -56,9 +56,9 @@ def is_with_unittest(commit):
         logfile_commit.writelines("Unit-tests are not found")
     logfile_commit.close()
     
-    return False if not unit_tests else True
+    return unit_tests 
 
-def do_repo(repo, bug_id):
+def do_repo(repo):
     #1. Find commit data of repo
     bug_file = None
     try:
@@ -81,33 +81,35 @@ def do_repo(repo, bug_id):
     for bugs_in_one_repo in bug_file.readlines():
         bugs_in_one_repo = json.loads(bugs_in_one_repo.split('\n')[0])
         for bug_commit in bugs_in_one_repo:
-            if is_with_unittest(bug_commit):
-                logfile.writelines("%s: has unit-test %s\n")
+            commit_id = bug_commit['commit'].split('/')[-1]
+            bug_id = "%s_%s" % (repo, commit_id[:7])
+            unit_tests = find_unit_tests(bug_commit)
+            if unit_tests:
+                logfile.writelines("%s: has unit-test \n" % bug_id)
             else:
-                logfile.writelines("%s: has no unit-tests\n")
+                logfile.writelines("%s: has no unit-tests\n" % bug_id)
     
     logfile.flush()
     bug_file.close()
     os.chdir("..")
     os.chdir("../..")
 
+def do_bug_in_parallel(repos, n_cpus=8):
+    p = Pool(n_cpus)
+    args = [[repo.split('\n')[0]] for repo in repos]
+    
+    p.starmap(do_repo, args)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", type=str, default='', help="specify NPE-fix commits by REPO")
-    parser.add_argument("--bug_id", type=str, default=0, help="specify NPE-fix ID in repo")
     parser.add_argument("--n_cpus", type=int, default=1, help="specify # of threads to use")
     parser.add_argument("-only-unit-test", type=bool, default=True, help="compile only commits with testcase")
     args = parser.parse_args()
    
     repo = args.repo
-    bug_id = args.bug_id
     n_cpus = args.n_cpus
 
-    if repo == '':
-        repo_file = open("repo.txt", 'r')
-        for repo in repo_file.readlines():
-            repo = repo.split('\n')[0]
-            do_repo(repo, bug_id)
-    else:
-        do_repo(repo, bug_id)
+    repo_file = open("repo.txt", 'r')
+    do_bug_in_parallel(repo_file.readlines(), n_cpus)
+
