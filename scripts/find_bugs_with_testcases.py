@@ -30,7 +30,7 @@ def is_with_unittest(commit):
     commit_id = commit['commit'].split('/')[-1]
     bug_id = "%s_%s" % (repo, commit_id[:7])
     
-    logfile_commit = open('%s.log' % bug_id)
+    logfile_commit = open('%s.log' % bug_id, 'w')
     unit_tests = []
 
     logfile_commit.writelines("==== Changed files ====\n")
@@ -47,7 +47,7 @@ def is_with_unittest(commit):
             if ret.stdout != '':
                 unit_tests.append(test_filename)
         
-        logfile_commit.writelines("%s\n" filename)
+        logfile_commit.writelines("%s\n" % filename)
 
     logfile_commit.writelines("\n==== RESULTS ====\n")
     if unit_tests:
@@ -56,7 +56,7 @@ def is_with_unittest(commit):
         logfile_commit.writelines("Unit-tests are not found")
     logfile_commit.close()
     
-    return (not unit_tests)? False: True
+    return False if not unit_tests else True
 
 def do_repo(repo, bug_id):
     #1. Find commit data of repo
@@ -75,7 +75,7 @@ def do_repo(repo, bug_id):
     ret_clone = EasyProcess(git_clone_cmd).call()
    
     #3. Check if unit-tests exist for each commit
-    os.chdir(bug['repo'])
+    os.chdir(repo)
     print(os.getcwd())
     
     for bugs_in_one_repo in bug_file.readlines():
@@ -86,7 +86,9 @@ def do_repo(repo, bug_id):
             else:
                 logfile.writelines("%s: has no unit-tests\n")
     
+    logfile.flush()
     bug_file.close()
+    os.chdir("..")
     os.chdir("../..")
 
 
