@@ -101,18 +101,16 @@ def testing(bug, logfile_repo):
 def do_bug(bug):
     git_http = "https://github.com/apache/" + bug['repo']
     commit_id = bug['commit'].split('/')[-1]
-    bug_id = bug['bug_id']
+    bug_id = "%s_%s" % (repo, commit_id[:7])
 
-    git_clone_cmd = "git clone " + git_http + " " + bug['bug_id']
-    git_checkout_cmd = "git checkout -f " + commit_id
-    chdir_cmd = "cd %s" % bug['bug_id']
+    git_clone_cmd = "git clone %s %s" % (git_http, bug_id)
+    git_checkout_cmd = "git checkout -f %s" % commit_id
     test_cmd = ""
 
     #1.git clone & chdir
     ret_clone = EasyProcess(git_clone_cmd).call()
     
-    print('\n' + chdir_cmd)
-    os.chdir(bug['bug_id'])
+    os.chdir(bug_id)
     print(os.getcwd())
 
     logfile_repo = open("compile.log", 'w')
