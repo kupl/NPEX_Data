@@ -74,7 +74,7 @@ def do_repo(repo):
             outputs = outputs + [data] 
             i = i + 1
 
-        output_file.write(json.dumps(outputs) + '\n')
+        output_file.write(json.dumps(outputs, indent=4) + '\n')
         outputs = []
         output_file.flush()
 

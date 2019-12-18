@@ -28,6 +28,7 @@ def test_filenames(class_name):
 
 def find_unit_tests(commit):
     commit_id = commit['commit'].split('/')[-1]
+    repo = commit['repo']
     bug_id = "%s_%s" % (repo, commit_id[:7])
     
     logfile_commit = open('%s.log' % bug_id, 'w')
@@ -59,6 +60,9 @@ def find_unit_tests(commit):
     return unit_tests 
 
 def do_repo(repo):
+    output_file = open("data/%s.json" % repo, 'w')
+    output = {}
+    
     #1. Find commit data of repo
     bug_file = None
     try:
@@ -86,15 +90,20 @@ def do_repo(repo):
             unit_tests = find_unit_tests(bug_commit)
             if unit_tests:
                 logfile.writelines("%s: has unit-test \n" % bug_id)
+                bug_commit['bug_id'] = bug_id
+                bug_commit['unit_tests'] = unit_tests
+                output[bug_id] = bug_commit
             else:
                 logfile.writelines("%s: has no unit-tests\n" % bug_id)
-    
+  
     logfile.flush()
     bug_file.close()
+    output_file.write(json.dumps(output, indent=4, sort_keys=True))
+    output_file.close()
     os.chdir("..")
     os.chdir("../..")
 
-def do_bug_in_parallel(repos, n_cpus=8):
+def do_parallel(repos, n_cpus=8):
     p = Pool(n_cpus)
     args = [[repo.split('\n')[0]] for repo in repos]
     
@@ -111,5 +120,4 @@ if __name__ == '__main__':
     n_cpus = args.n_cpus
 
     repo_file = open("repo.txt", 'r')
-    do_bug_in_parallel(repo_file.readlines(), n_cpus)
-
+    do_parallel(repo_file.readlines(), n_cpus)
