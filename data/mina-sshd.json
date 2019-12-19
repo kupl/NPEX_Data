@@ -1,0 +1,74 @@
+{
+    "mina-sshd_1419074": {
+        "bug_id": "mina-sshd_1419074",
+        "commit": "https://github.com/apache/mina-sshd/commit/141907415b3d0bb38c3b177d30bdcdef90983667",
+        "file": [
+            {
+                "additions": 8,
+                "blob_url": "https://github.com/apache/mina-sshd/blob/141907415b3d0bb38c3b177d30bdcdef90983667/sshd-core/src/main/java/org/apache/sshd/common/session/helpers/AbstractSession.java",
+                "changes": 11,
+                "contents_url": "https://api.github.com/repos/apache/mina-sshd/contents/sshd-core/src/main/java/org/apache/sshd/common/session/helpers/AbstractSession.java?ref=141907415b3d0bb38c3b177d30bdcdef90983667",
+                "deletions": 3,
+                "filename": "sshd-core/src/main/java/org/apache/sshd/common/session/helpers/AbstractSession.java",
+                "patch": "@@ -488,10 +488,15 @@ protected boolean handleFirstKexPacketFollows(int cmd, Buffer buffer, boolean fo\n      */\n     protected SimpleImmutableEntry<String, String> comparePreferredKexProposalOption(KexProposalOption option) {\n         String[] clientPreferences = GenericUtils.split(clientProposal.get(option), ',');\n-        String clientValue = clientPreferences[0];\n+        String clientValue = GenericUtils.isEmpty(clientPreferences) ? null : clientPreferences[0];\n         String[] serverPreferences = GenericUtils.split(serverProposal.get(option), ',');\n-        String serverValue = serverPreferences[0];\n-        return Objects.equals(clientValue, serverValue) ? null : new SimpleImmutableEntry<>(clientValue, serverValue);\n+        String serverValue = GenericUtils.isEmpty(serverPreferences) ? null : serverPreferences[0];\n+        if (GenericUtils.isEmpty(clientValue) || GenericUtils.isEmpty(serverValue)\n+                || (!Objects.equals(clientValue, serverValue))) {\n+            return new SimpleImmutableEntry<>(clientValue, serverValue);\n+        }\n+\n+        return null;\n     }\n \n     /**",
+                "raw_url": "https://github.com/apache/mina-sshd/raw/141907415b3d0bb38c3b177d30bdcdef90983667/sshd-core/src/main/java/org/apache/sshd/common/session/helpers/AbstractSession.java",
+                "sha": "cc5c926704f508b9ea916961b8557bef95295130",
+                "status": "modified"
+            }
+        ],
+        "message": "Fix possible NPE when handling immediate KEX packet follow-up in case a peer proposal is not yet set",
+        "parent": "https://github.com/apache/mina-sshd/commit/f68a8f513a6c3be6cde0af7d8ac46d18b251ab3a",
+        "repo": "mina-sshd",
+        "unit_tests": [
+            "AbstractSessionTest.java"
+        ]
+    },
+    "mina-sshd_8ec4b9c": {
+        "bug_id": "mina-sshd_8ec4b9c",
+        "commit": "https://github.com/apache/mina-sshd/commit/8ec4b9c36cd28e40cc81cf9f13f30706459295c9",
+        "file": [
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/mina-sshd/blob/8ec4b9c36cd28e40cc81cf9f13f30706459295c9/sshd-core/src/main/java/org/apache/sshd/common/session/helpers/AbstractSession.java",
+                "changes": 10,
+                "contents_url": "https://api.github.com/repos/apache/mina-sshd/contents/sshd-core/src/main/java/org/apache/sshd/common/session/helpers/AbstractSession.java?ref=8ec4b9c36cd28e40cc81cf9f13f30706459295c9",
+                "deletions": 4,
+                "filename": "sshd-core/src/main/java/org/apache/sshd/common/session/helpers/AbstractSession.java",
+                "patch": "@@ -849,9 +849,11 @@ protected void handleKexInit(Buffer buffer) throws Exception {\n         Map<KexProposalOption, String> result = negotiate();\n         String kexAlgorithm = result.get(KexProposalOption.ALGORITHMS);\n         Collection<? extends NamedFactory<KeyExchange>> kexFactories = getKeyExchangeFactories();\n-        kex = ValidateUtils.checkNotNull(NamedFactory.create(kexFactories, kexAlgorithm),\n-                \"Unknown negotiated KEX algorithm: %s\",\n-                kexAlgorithm);\n+        synchronized (pendingPackets) {\n+            kex = ValidateUtils.checkNotNull(NamedFactory.create(kexFactories, kexAlgorithm),\n+                    \"Unknown negotiated KEX algorithm: %s\",\n+                    kexAlgorithm);\n+        }\n \n         byte[] v_s = serverVersion.getBytes(StandardCharsets.UTF_8);\n         byte[] v_c = clientVersion.getBytes(StandardCharsets.UTF_8);\n@@ -889,8 +891,8 @@ protected void handleNewKeys(int cmd, Buffer buffer) throws Exception {\n         Collection<? extends Map.Entry<? extends SshFutureListener<IoWriteFuture>, IoWriteFuture>> pendingWrites;\n         synchronized (pendingPackets) {\n             pendingWrites = sendPendingPackets(pendingPackets);\n-            kexState.set(KexState.DONE);\n             kex = null; // discard and GC since KEX is completed\n+            kexState.set(KexState.DONE);\n         }\n \n         int pendingCount = pendingWrites.size();",
+                "raw_url": "https://github.com/apache/mina-sshd/raw/8ec4b9c36cd28e40cc81cf9f13f30706459295c9/sshd-core/src/main/java/org/apache/sshd/common/session/helpers/AbstractSession.java",
+                "sha": "ce4c3fe7f84c67ba164481895a6c2b88172df969",
+                "status": "modified"
+            }
+        ],
+        "message": "[SSHD-846] Nullify AbstractSession KEX instance before marking state as DONE to avoid race condition and possible NPE",
+        "parent": "https://github.com/apache/mina-sshd/commit/29d77123269047ada7e317ff6f1c9da0592399b7",
+        "repo": "mina-sshd",
+        "unit_tests": [
+            "AbstractSessionTest.java"
+        ]
+    },
+    "mina-sshd_9a27e72": {
+        "bug_id": "mina-sshd_9a27e72",
+        "commit": "https://github.com/apache/mina-sshd/commit/9a27e728436965c388be95211297853d2dd07f37",
+        "file": [
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/mina-sshd/blob/9a27e728436965c388be95211297853d2dd07f37/sshd-core/src/main/java/org/apache/sshd/common/session/AbstractSession.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/mina-sshd/contents/sshd-core/src/main/java/org/apache/sshd/common/session/AbstractSession.java?ref=9a27e728436965c388be95211297853d2dd07f37",
+                "deletions": 3,
+                "filename": "sshd-core/src/main/java/org/apache/sshd/common/session/AbstractSession.java",
+                "patch": "@@ -328,9 +328,9 @@ public void operationComplete(IoCloseFuture future) {\n                 try {\n                     closing = true;\n                     log.debug(\"Closing session\");\n-                    Channel[] channelToClose = channels.values().toArray(new Channel[channels.values().size()]);\n-                    if (channelToClose.length > 0) {\n-                        final AtomicInteger latch = new AtomicInteger(channelToClose.length);\n+                    List<Channel> channelToClose = new ArrayList<Channel>(channels.values());\n+                    if (channelToClose.size() > 0) {\n+                        final AtomicInteger latch = new AtomicInteger(channelToClose.size());\n                         for (Channel channel : channelToClose) {\n                             log.debug(\"Closing channel {}\", channel.getId());\n                             channel.close(immediately).addListener(new SshFutureListener() {",
+                "raw_url": "https://github.com/apache/mina-sshd/raw/9a27e728436965c388be95211297853d2dd07f37/sshd-core/src/main/java/org/apache/sshd/common/session/AbstractSession.java",
+                "sha": "f5e9cdf183eae6dea07f1690def2bcc28f75ea63",
+                "status": "modified"
+            }
+        ],
+        "message": "[SSHD-249] Data race in AbstractSession.close() may lead to NPE and blocks during shutdown",
+        "parent": "https://github.com/apache/mina-sshd/commit/cfc90d8a93845f250389718ddf86f6a1c59e8a25",
+        "repo": "mina-sshd",
+        "unit_tests": [
+            "AbstractSessionTest.java"
+        ]
+    }
+}

@@ -1,0 +1,194 @@
+{
+    "qpid-jms_125d72b": {
+        "bug_id": "qpid-jms_125d72b",
+        "commit": "https://github.com/apache/qpid-jms/commit/125d72b2a8b05ac7c8f9bbad599ed217107922f8",
+        "file": [
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/qpid-jms/blob/125d72b2a8b05ac7c8f9bbad599ed217107922f8/qpid-jms-client/src/main/java/org/apache/qpid/jms/provider/amqp/AmqpProvider.java",
+                "changes": 11,
+                "contents_url": "https://api.github.com/repos/apache/qpid-jms/contents/qpid-jms-client/src/main/java/org/apache/qpid/jms/provider/amqp/AmqpProvider.java?ref=125d72b2a8b05ac7c8f9bbad599ed217107922f8",
+                "deletions": 5,
+                "filename": "qpid-jms-client/src/main/java/org/apache/qpid/jms/provider/amqp/AmqpProvider.java",
+                "patch": "@@ -190,6 +190,12 @@ public void run() {\n                         }\n                     } catch (Exception e) {\n                         LOG.debug(\"Caught exception while closing proton connection: {}\", e.getMessage());\n+                    } finally {\n+                        if (nextIdleTimeoutCheck != null) {\n+                            LOG.trace(\"Cancelling scheduled IdleTimeoutCheck\");\n+                            nextIdleTimeoutCheck.cancel(false);\n+                            nextIdleTimeoutCheck = null;\n+                        }\n                     }\n                 }\n             });\n@@ -211,11 +217,6 @@ public void run() {\n                     }\n                 }\n \n-                if (nextIdleTimeoutCheck != null) {\n-                    LOG.trace(\"Cancelling IdleTimeoutCheck\");\n-                    nextIdleTimeoutCheck.cancel(false);\n-                    nextIdleTimeoutCheck = null;\n-                }\n                 serializer.shutdown();\n             }\n         }",
+                "raw_url": "https://github.com/apache/qpid-jms/raw/125d72b2a8b05ac7c8f9bbad599ed217107922f8/qpid-jms-client/src/main/java/org/apache/qpid/jms/provider/amqp/AmqpProvider.java",
+                "sha": "6a1597d06b96d90505135fcbacbde6e0cb0d8195",
+                "status": "modified"
+            }
+        ],
+        "message": "QPIDJMS-45: move the cancellation into the executor so it occurs earlier, and additionally avoids a potential NPE",
+        "parent": "https://github.com/apache/qpid-jms/commit/d33ea1d542b6b363388f860a2e0f5996eefe4d97",
+        "repo": "qpid-jms",
+        "unit_tests": [
+            "AmqpProviderTest.java"
+        ]
+    },
+    "qpid-jms_75f3cf8": {
+        "bug_id": "qpid-jms_75f3cf8",
+        "commit": "https://github.com/apache/qpid-jms/commit/75f3cf8d2b94f495af6c130856ae8a9904ce670b",
+        "file": [
+            {
+                "additions": 38,
+                "blob_url": "https://github.com/apache/qpid-jms/blob/75f3cf8d2b94f495af6c130856ae8a9904ce670b/qpid-jms-client/src/main/java/org/apache/qpid/jms/JmsQueueBrowser.java",
+                "changes": 78,
+                "contents_url": "https://api.github.com/repos/apache/qpid-jms/contents/qpid-jms-client/src/main/java/org/apache/qpid/jms/JmsQueueBrowser.java?ref=75f3cf8d2b94f495af6c130856ae8a9904ce670b",
+                "deletions": 40,
+                "filename": "qpid-jms-client/src/main/java/org/apache/qpid/jms/JmsQueueBrowser.java",
+                "patch": "@@ -23,6 +23,7 @@\n import javax.jms.IllegalStateException;\n import javax.jms.JMSException;\n import javax.jms.Message;\n+import javax.jms.MessageConsumer;\n import javax.jms.Queue;\n import javax.jms.QueueBrowser;\n \n@@ -61,7 +62,7 @@\n     private final JmsDestination destination;\n     private final String selector;\n \n-    private JmsMessageConsumer consumer;\n+    private volatile JmsMessageConsumer consumer;\n \n     private Message next;\n     private final AtomicBoolean closed = new AtomicBoolean();\n@@ -84,18 +85,6 @@ protected JmsQueueBrowser(JmsSession session, JmsDestination destination, String\n         this.selector = selector;\n     }\n \n-    private void destroyConsumer() {\n-        if (consumer == null) {\n-            return;\n-        }\n-        try {\n-            consumer.close();\n-            consumer = null;\n-        } catch (JMSException e) {\n-            e.printStackTrace();\n-        }\n-    }\n-\n     /**\n      * Gets an enumeration for browsing the current queue messages in the order they would be\n      * received.\n@@ -108,16 +97,9 @@ private void destroyConsumer() {\n     @Override\n     public Enumeration<Message> getEnumeration() throws JMSException {\n         checkClosed();\n-        if (consumer == null) {\n-            consumer = createConsumer();\n-        }\n-        return this;\n-    }\n+        createConsumer();\n \n-    private void checkClosed() throws IllegalStateException {\n-        if (closed.get()) {\n-            throw new IllegalStateException(\"The Consumer is closed\");\n-        }\n+        return this;\n     }\n \n     /**\n@@ -126,10 +108,9 @@ private void checkClosed() throws IllegalStateException {\n     @Override\n     public boolean hasMoreElements() {\n         while (true) {\n-            synchronized (this) {\n-                if (consumer == null) {\n-                    return false;\n-                }\n+            MessageConsumer consumer = this.consumer;\n+            if (consumer == null) {\n+                return false;\n             }\n \n             if (next == null) {\n@@ -160,11 +141,6 @@ public boolean hasMoreElements() {\n      */\n     @Override\n     public Message nextElement() {\n-        synchronized (this) {\n-            if (consumer == null) {\n-                return null;\n-            }\n-        }\n \n         if (hasMoreElements()) {\n             Message message = next;\n@@ -195,7 +171,6 @@ public void close() throws JMSException {\n      *         if the JMS provider fails to get the queue associated with this browser due to\n      *         some internal error.\n      */\n-\n     @Override\n     public Queue getQueue() throws JMSException {\n         return (Queue) destination;\n@@ -212,15 +187,38 @@ public String toString() {\n         return \"JmsQueueBrowser { value=\" + (consumer != null ? consumer.getConsumerId() : \"null\") + \" }\";\n     }\n \n-    private JmsMessageConsumer createConsumer() throws JMSException {\n-        JmsMessageConsumer rc = new JmsMessageConsumer(session.getNextConsumerId(), session, destination, selector, false) {\n+    private void checkClosed() throws IllegalStateException {\n+        if (closed.get()) {\n+            throw new IllegalStateException(\"The Consumer is closed\");\n+        }\n+    }\n \n-            @Override\n-            public boolean isBrowser() {\n-                return true;\n+    private synchronized void destroyConsumer() {\n+        synchronized (this) {\n+            try {\n+                if (consumer != null) {\n+                    consumer.close();\n+                    consumer = null;\n+                }\n+            } catch (JMSException e) {\n+                LOG.warn(\"Error closing down internal consumer: \", e);\n             }\n-        };\n-        rc.init();\n-        return rc;\n+        }\n+    }\n+\n+    private synchronized void createConsumer() throws JMSException {\n+        if (consumer == null) {\n+            JmsMessageConsumer result = new JmsMessageConsumer(session.getNextConsumerId(), session, destination, selector, false) {\n+\n+                @Override\n+                public boolean isBrowser() {\n+                    return true;\n+                }\n+            };\n+            result.init();\n+\n+            // Assign only after fully created and initialized.\n+            consumer = result;\n+        }\n     }\n }",
+                "raw_url": "https://github.com/apache/qpid-jms/raw/75f3cf8d2b94f495af6c130856ae8a9904ce670b/qpid-jms-client/src/main/java/org/apache/qpid/jms/JmsQueueBrowser.java",
+                "sha": "af1096b8668a94fbad8cae50a83acfa93176bff8",
+                "status": "modified"
+            }
+        ],
+        "message": "QPIDJMS-123 Add additional protections from possible NPE on concurrent\naccess.",
+        "parent": "https://github.com/apache/qpid-jms/commit/fa7445ffb7de15b57975762233d67326e49d7344",
+        "repo": "qpid-jms",
+        "unit_tests": [
+            "JmsQueueBrowserTest.java"
+        ]
+    },
+    "qpid-jms_a02c533": {
+        "bug_id": "qpid-jms_a02c533",
+        "commit": "https://github.com/apache/qpid-jms/commit/a02c533a6a7184c0243025f8eebc67edb68643a4",
+        "file": [
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/qpid-jms/blob/a02c533a6a7184c0243025f8eebc67edb68643a4/qpid-jms-client/src/main/java/org/apache/qpid/jms/provider/failover/FailoverProvider.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/qpid-jms/contents/qpid-jms-client/src/main/java/org/apache/qpid/jms/provider/failover/FailoverProvider.java?ref=a02c533a6a7184c0243025f8eebc67edb68643a4",
+                "deletions": 1,
+                "filename": "qpid-jms-client/src/main/java/org/apache/qpid/jms/provider/failover/FailoverProvider.java",
+                "patch": "@@ -696,7 +696,9 @@ public void run() {\n                         LOG.info(\"Connection attempt:[{}] to: {} failed\", reconnectAttempts, target);\n                         failure = e;\n                         try {\n-                            provider.close();\n+                            if (provider != null) {\n+                                provider.close();\n+                            }\n                         } catch (Throwable ex) {}\n                     }\n                 } else {",
+                "raw_url": "https://github.com/apache/qpid-jms/raw/a02c533a6a7184c0243025f8eebc67edb68643a4/qpid-jms-client/src/main/java/org/apache/qpid/jms/provider/failover/FailoverProvider.java",
+                "sha": "fa20ee12a7252051b5e3ffec0249c3f506f2eb98",
+                "status": "modified"
+            }
+        ],
+        "message": "/QPIDJMS-168 fix potential NPE",
+        "parent": "https://github.com/apache/qpid-jms/commit/c99ea859d3d6a8015ead5fc99c19dd64c6f0a07c",
+        "repo": "qpid-jms",
+        "unit_tests": [
+            "FailoverProviderTest.java"
+        ]
+    },
+    "qpid-jms_d0ccd40": {
+        "bug_id": "qpid-jms_d0ccd40",
+        "commit": "https://github.com/apache/qpid-jms/commit/d0ccd408be0a3921bf2b0db77ccd1b310d2d9512",
+        "file": [
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/qpid-jms/blob/d0ccd408be0a3921bf2b0db77ccd1b310d2d9512/qpid-jms-client/src/main/java/org/apache/qpid/jms/provider/failover/FailoverProvider.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/qpid-jms/contents/qpid-jms-client/src/main/java/org/apache/qpid/jms/provider/failover/FailoverProvider.java?ref=d0ccd408be0a3921bf2b0db77ccd1b310d2d9512",
+                "deletions": 2,
+                "filename": "qpid-jms-client/src/main/java/org/apache/qpid/jms/provider/failover/FailoverProvider.java",
+                "patch": "@@ -113,11 +113,11 @@ public FailoverProvider(Map<String, String> nestedOptions) {\n         this(null, nestedOptions);\n     }\n \n-    public FailoverProvider(URI[] uris) {\n+    public FailoverProvider(List<URI> uris) {\n         this(uris, null);\n     }\n \n-    public FailoverProvider(URI[] uris, Map<String, String> nestedOptions) {\n+    public FailoverProvider(List<URI> uris, Map<String, String> nestedOptions) {\n         this.uris = new FailoverUriPool(uris, nestedOptions);\n \n         this.serializer = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {",
+                "raw_url": "https://github.com/apache/qpid-jms/raw/d0ccd408be0a3921bf2b0db77ccd1b310d2d9512/qpid-jms-client/src/main/java/org/apache/qpid/jms/provider/failover/FailoverProvider.java",
+                "sha": "a080fb1f8467edfc12cb9558472e05d6af82fca7",
+                "status": "modified"
+            },
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/qpid-jms/blob/d0ccd408be0a3921bf2b0db77ccd1b310d2d9512/qpid-jms-client/src/main/java/org/apache/qpid/jms/provider/failover/FailoverUriPool.java",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/qpid-jms/contents/qpid-jms-client/src/main/java/org/apache/qpid/jms/provider/failover/FailoverUriPool.java?ref=d0ccd408be0a3921bf2b0db77ccd1b310d2d9512",
+                "deletions": 1,
+                "filename": "qpid-jms-client/src/main/java/org/apache/qpid/jms/provider/failover/FailoverUriPool.java",
+                "patch": "@@ -22,6 +22,7 @@\n import java.net.URISyntaxException;\n import java.util.Collections;\n import java.util.LinkedList;\n+import java.util.List;\n import java.util.Map;\n \n import org.apache.qpid.jms.util.URISupport;\n@@ -47,7 +48,7 @@ public FailoverUriPool() {\n         this.nestedOptions = Collections.emptyMap();\n     }\n \n-    public FailoverUriPool(URI[] uris, Map<String, String> nestedOptions) {\n+    public FailoverUriPool(List<URI> uris, Map<String, String> nestedOptions) {\n         this.uris = new LinkedList<URI>();\n         if (nestedOptions != null) {\n             this.nestedOptions = nestedOptions;",
+                "raw_url": "https://github.com/apache/qpid-jms/raw/d0ccd408be0a3921bf2b0db77ccd1b310d2d9512/qpid-jms-client/src/main/java/org/apache/qpid/jms/provider/failover/FailoverUriPool.java",
+                "sha": "624c05a717cf3dc4ab91264362cbdf21917fa86b",
+                "status": "modified"
+            },
+            {
+                "additions": 8,
+                "blob_url": "https://github.com/apache/qpid-jms/blob/d0ccd408be0a3921bf2b0db77ccd1b310d2d9512/qpid-jms-client/src/main/java/org/apache/qpid/jms/util/URISupport.java",
+                "changes": 15,
+                "contents_url": "https://api.github.com/repos/apache/qpid-jms/contents/qpid-jms-client/src/main/java/org/apache/qpid/jms/util/URISupport.java?ref=d0ccd408be0a3921bf2b0db77ccd1b310d2d9512",
+                "deletions": 7,
+                "filename": "qpid-jms-client/src/main/java/org/apache/qpid/jms/util/URISupport.java",
+                "patch": "@@ -34,14 +34,15 @@\n      * the individual URIs that comprise the composite one.\n      */\n     public static class CompositeData {\n+\n         private String host;\n         private String scheme;\n         private String path;\n-        private URI components[];\n-        private Map<String, String> parameters;\n+        private List<URI> components = Collections.emptyList();\n+        private Map<String, String> parameters = Collections.emptyMap();\n         private String fragment;\n \n-        public URI[] getComponents() {\n+        public List<URI> getComponents() {\n             return components;\n         }\n \n@@ -76,11 +77,11 @@ public URI toURI() throws URISyntaxException {\n                 sb.append(host);\n             } else {\n                 sb.append('(');\n-                for (int i = 0; i < components.length; i++) {\n+                for (int i = 0; i < components.size(); i++) {\n                     if (i != 0) {\n                         sb.append(',');\n                     }\n-                    sb.append(components[i].toString());\n+                    sb.append(components.get(i).toString());\n                 }\n                 sb.append(')');\n             }\n@@ -173,9 +174,9 @@ private static void parseComposite(URI uri, CompositeData rc, String ssp) throws\n         }\n \n         String components[] = splitComponents(componentString);\n-        rc.components = new URI[components.length];\n+        rc.components = new ArrayList<URI>(components.length);\n         for (int i = 0; i < components.length; i++) {\n-            rc.components[i] = new URI(components[i].trim());\n+            rc.components.add(new URI(components[i].trim()));\n         }\n \n         p = params.indexOf(\"?\");",
+                "raw_url": "https://github.com/apache/qpid-jms/raw/d0ccd408be0a3921bf2b0db77ccd1b310d2d9512/qpid-jms-client/src/main/java/org/apache/qpid/jms/util/URISupport.java",
+                "sha": "e2aaaa01b695dfc01f357133db72be1e28b84a05",
+                "status": "modified"
+            },
+            {
+                "additions": 8,
+                "blob_url": "https://github.com/apache/qpid-jms/blob/d0ccd408be0a3921bf2b0db77ccd1b310d2d9512/qpid-jms-client/src/test/java/org/apache/qpid/jms/provider/failover/FailoverUriPoolTest.java",
+                "changes": 16,
+                "contents_url": "https://api.github.com/repos/apache/qpid-jms/contents/qpid-jms-client/src/test/java/org/apache/qpid/jms/provider/failover/FailoverUriPoolTest.java?ref=d0ccd408be0a3921bf2b0db77ccd1b310d2d9512",
+                "deletions": 8,
+                "filename": "qpid-jms-client/src/test/java/org/apache/qpid/jms/provider/failover/FailoverUriPoolTest.java",
+                "patch": "@@ -71,7 +71,7 @@ public void testCreateEmptyPoolFromNullUris() {\n \n     @Test\n     public void testCreateEmptyPoolWithURIs() throws URISyntaxException {\n-        FailoverUriPool pool = new FailoverUriPool(uris.toArray(new URI[0]), null);\n+        FailoverUriPool pool = new FailoverUriPool(uris, null);\n         assertEquals(FailoverUriPool.DEFAULT_RANDOMIZE_ENABLED, pool.isRandomize());\n \n         assertNotNull(pool.getNestedOptions());\n@@ -88,7 +88,7 @@ public void testGetNextFromEmptyPool() {\n \n     @Test\n     public void testGetNextFromSingleValuePool() {\n-        FailoverUriPool pool = new FailoverUriPool(new URI[] {uris.get(0) }, null);\n+        FailoverUriPool pool = new FailoverUriPool(uris.subList(0, 1), null);\n \n         assertEquals(uris.get(0), pool.getNext());\n         assertEquals(uris.get(0), pool.getNext());\n@@ -106,7 +106,7 @@ public void testAddUriToEmptyPool() {\n \n     @Test\n     public void testDuplicatesNotAdded() {\n-        FailoverUriPool pool = new FailoverUriPool(uris.toArray(new URI[0]), null);\n+        FailoverUriPool pool = new FailoverUriPool(uris, null);\n \n         assertEquals(uris.size(), pool.size());\n         pool.add(uris.get(0));\n@@ -195,7 +195,7 @@ public void testDuplicatesNotAddedWhenQueryPresentAndUnresolveable() throws URIS\n     public void testAddUriToPoolRandomized() throws URISyntaxException {\n         URI newUri = new URI(\"tcp://192.168.2.\" + (uris.size() + 1) + \":5672\");\n \n-        FailoverUriPool pool = new FailoverUriPool(uris.toArray(new URI[0]), null);\n+        FailoverUriPool pool = new FailoverUriPool(uris, null);\n         pool.setRandomize(true);\n         pool.add(newUri);\n \n@@ -217,7 +217,7 @@ public void testAddUriToPoolRandomized() throws URISyntaxException {\n     public void testAddUriToPoolNotRandomized() throws URISyntaxException {\n         URI newUri = new URI(\"tcp://192.168.2.\" + (uris.size() + 1) + \":5672\");\n \n-        FailoverUriPool pool = new FailoverUriPool(uris.toArray(new URI[0]), null);\n+        FailoverUriPool pool = new FailoverUriPool(uris, null);\n         pool.setRandomize(false);\n         pool.add(newUri);\n \n@@ -230,7 +230,7 @@ public void testAddUriToPoolNotRandomized() throws URISyntaxException {\n \n     @Test\n     public void testRemoveURIFromPool() throws URISyntaxException {\n-        FailoverUriPool pool = new FailoverUriPool(uris.toArray(new URI[0]), null);\n+        FailoverUriPool pool = new FailoverUriPool(uris, null);\n         pool.setRandomize(false);\n \n         URI removed = uris.get(0);\n@@ -256,7 +256,7 @@ public void testConnectedDoesNotShufflesWhenNoRandomizing() {\n \n     private void assertConnectedEffectOnPool(boolean randomize, boolean shouldShuffle) {\n \n-        FailoverUriPool pool = new FailoverUriPool(uris.toArray(new URI[0]), null);\n+        FailoverUriPool pool = new FailoverUriPool(uris, null);\n         pool.setRandomize(randomize);\n \n         List<URI> current = new ArrayList<URI>();\n@@ -291,7 +291,7 @@ private void assertConnectedEffectOnPool(boolean randomize, boolean shouldShuffl\n \n     @Test\n     public void testAddOrRemoveNullHasNoAffect() throws URISyntaxException {\n-        FailoverUriPool pool = new FailoverUriPool(uris.toArray(new URI[0]), null);\n+        FailoverUriPool pool = new FailoverUriPool(uris, null);\n         assertEquals(uris.size(), pool.size());\n \n         pool.add(null);",
+                "raw_url": "https://github.com/apache/qpid-jms/raw/d0ccd408be0a3921bf2b0db77ccd1b310d2d9512/qpid-jms-client/src/test/java/org/apache/qpid/jms/provider/failover/FailoverUriPoolTest.java",
+                "sha": "2636830c5f8b7cc7470e2bfa9d6abcaca77e9d79",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/qpid-jms/blob/d0ccd408be0a3921bf2b0db77ccd1b310d2d9512/qpid-jms-client/src/test/java/org/apache/qpid/jms/provider/failover/FiloverProviderFactoryTest.java",
+                "changes": 1,
+                "contents_url": "https://api.github.com/repos/apache/qpid-jms/contents/qpid-jms-client/src/test/java/org/apache/qpid/jms/provider/failover/FiloverProviderFactoryTest.java?ref=d0ccd408be0a3921bf2b0db77ccd1b310d2d9512",
+                "deletions": 0,
+                "filename": "qpid-jms-client/src/test/java/org/apache/qpid/jms/provider/failover/FiloverProviderFactoryTest.java",
+                "patch": "@@ -44,6 +44,7 @@ public void setUp() throws URISyntaxException {\n \n     @Test(timeout = 60000)\n     public void testCreateProvider() throws Exception {\n+        assertNotNull(factory.getName());\n         Provider provider = factory.createProvider(baseURI);\n         assertNotNull(provider);\n         assertTrue(provider instanceof FailoverProvider);",
+                "raw_url": "https://github.com/apache/qpid-jms/raw/d0ccd408be0a3921bf2b0db77ccd1b310d2d9512/qpid-jms-client/src/test/java/org/apache/qpid/jms/provider/failover/FiloverProviderFactoryTest.java",
+                "sha": "d2db7c2ee72b9190606ab9aec300acfd6c1fc90e",
+                "status": "modified"
+            },
+            {
+                "additions": 10,
+                "blob_url": "https://github.com/apache/qpid-jms/blob/d0ccd408be0a3921bf2b0db77ccd1b310d2d9512/qpid-jms-client/src/test/java/org/apache/qpid/jms/util/URISupportTest.java",
+                "changes": 22,
+                "contents_url": "https://api.github.com/repos/apache/qpid-jms/contents/qpid-jms-client/src/test/java/org/apache/qpid/jms/util/URISupportTest.java?ref=d0ccd408be0a3921bf2b0db77ccd1b310d2d9512",
+                "deletions": 12,
+                "filename": "qpid-jms-client/src/test/java/org/apache/qpid/jms/util/URISupportTest.java",
+                "patch": "@@ -21,17 +21,15 @@\n import java.util.HashMap;\n import java.util.Map;\n \n-import org.apache.qpid.jms.util.PropertyUtil;\n-import org.apache.qpid.jms.util.URISupport;\n-import org.apache.qpid.jms.util.URISupport.CompositeData;\n-\n import junit.framework.TestCase;\n \n+import org.apache.qpid.jms.util.URISupport.CompositeData;\n+\n public class URISupportTest extends TestCase {\n \n     public void testEmptyCompositePath() throws Exception {\n         CompositeData data = URISupport.parseComposite(new URI(\"broker:()/localhost?persistent=false\"));\n-        assertEquals(0, data.getComponents().length);\n+        assertEquals(0, data.getComponents().size());\n     }\n \n     public void testCompositePath() throws Exception {\n@@ -43,19 +41,19 @@ public void testCompositePath() throws Exception {\n \n     public void testSimpleComposite() throws Exception {\n         CompositeData data = URISupport.parseComposite(new URI(\"test:part1\"));\n-        assertEquals(1, data.getComponents().length);\n+        assertEquals(1, data.getComponents().size());\n     }\n \n     public void testComposite() throws Exception {\n         URI uri = new URI(\"test:(part1://host,part2://(sub1://part,sube2:part))\");\n         CompositeData data = URISupport.parseComposite(uri);\n-        assertEquals(2, data.getComponents().length);\n+        assertEquals(2, data.getComponents().size());\n     }\n \n     public void testEmptyCompositeWithParenthesisInParam() throws Exception {\n         URI uri = new URI(\"failover://()?updateURIsURL=file:/C:/Dir(1)/a.csv\");\n         CompositeData data = URISupport.parseComposite(uri);\n-        assertEquals(0, data.getComponents().length);\n+        assertEquals(0, data.getComponents().size());\n         assertEquals(1, data.getParameters().size());\n         assertTrue(data.getParameters().containsKey(\"updateURIsURL\"));\n         assertEquals(\"file:/C:/Dir(1)/a.csv\", data.getParameters().get(\"updateURIsURL\"));\n@@ -64,17 +62,17 @@ public void testEmptyCompositeWithParenthesisInParam() throws Exception {\n     public void testCompositeWithParenthesisInParam() throws Exception {\n         URI uri = new URI(\"failover://(test)?updateURIsURL=file:/C:/Dir(1)/a.csv\");\n         CompositeData data = URISupport.parseComposite(uri);\n-        assertEquals(1, data.getComponents().length);\n+        assertEquals(1, data.getComponents().size());\n         assertEquals(1, data.getParameters().size());\n         assertTrue(data.getParameters().containsKey(\"updateURIsURL\"));\n         assertEquals(\"file:/C:/Dir(1)/a.csv\", data.getParameters().get(\"updateURIsURL\"));\n     }\n \n     public void testCompositeWithComponentParam() throws Exception {\n         CompositeData data = URISupport.parseComposite(new URI(\"test:(part1://host?part1=true)?outside=true\"));\n-        assertEquals(1, data.getComponents().length);\n+        assertEquals(1, data.getComponents().size());\n         assertEquals(1, data.getParameters().size());\n-        Map<String, String> part1Params = URISupport.parseParameters(data.getComponents()[0]);\n+        Map<String, String> part1Params = URISupport.parseParameters(data.getComponents().get(0));\n         assertEquals(1, part1Params.size());\n         assertTrue(part1Params.containsKey(\"part1\"));\n     }\n@@ -99,7 +97,7 @@ protected void assertMapKey(Map<String, String> map, String key, Object expected\n \n     public void testParsingCompositeURI() throws URISyntaxException {\n         CompositeData data = URISupport.parseComposite(new URI(\"broker://(tcp://localhost:61616)?name=foo\"));\n-        assertEquals(\"one component\", 1, data.getComponents().length);\n+        assertEquals(\"one component\", 1, data.getComponents().size());\n         assertEquals(\"Size: \" + data.getParameters(), 1, data.getParameters().size());\n     }\n ",
+                "raw_url": "https://github.com/apache/qpid-jms/raw/d0ccd408be0a3921bf2b0db77ccd1b310d2d9512/qpid-jms-client/src/test/java/org/apache/qpid/jms/util/URISupportTest.java",
+                "sha": "a858758db0b7b1526d93990156acc402142be631",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/qpid-jms/blob/d0ccd408be0a3921bf2b0db77ccd1b310d2d9512/qpid-jms-discovery/src/main/java/org/apache/qpid/jms/provider/discovery/DiscoveryProviderFactory.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/qpid-jms/contents/qpid-jms-discovery/src/main/java/org/apache/qpid/jms/provider/discovery/DiscoveryProviderFactory.java?ref=d0ccd408be0a3921bf2b0db77ccd1b310d2d9512",
+                "deletions": 1,
+                "filename": "qpid-jms-discovery/src/main/java/org/apache/qpid/jms/provider/discovery/DiscoveryProviderFactory.java",
+                "patch": "@@ -52,7 +52,7 @@ public Provider createProvider(URI remoteURI) throws Exception {\n         DiscoveryProvider discovery = new DiscoveryProvider(remoteURI, failover);\n         PropertyUtil.setProperties(discovery, options);\n \n-        DiscoveryAgent agent = DiscoveryAgentFactory.createAgent(composite.getComponents()[0]);\n+        DiscoveryAgent agent = DiscoveryAgentFactory.createAgent(composite.getComponents().get(0));\n         discovery.setDiscoveryAgent(agent);\n \n         return discovery;",
+                "raw_url": "https://github.com/apache/qpid-jms/raw/d0ccd408be0a3921bf2b0db77ccd1b310d2d9512/qpid-jms-discovery/src/main/java/org/apache/qpid/jms/provider/discovery/DiscoveryProviderFactory.java",
+                "sha": "1015e33ca0fdb37573c434a9fd421f618bae27a8",
+                "status": "modified"
+            }
+        ],
+        "message": "Just use collections and always return empty ones to avoid any NPE\nissues",
+        "parent": "https://github.com/apache/qpid-jms/commit/47348747d7bb91cb6aafa94b5f7cb37b66b238d2",
+        "repo": "qpid-jms",
+        "unit_tests": [
+            "DiscoveryProviderFactoryTest.java"
+        ]
+    },
+    "qpid-jms_d12430f": {
+        "bug_id": "qpid-jms_d12430f",
+        "commit": "https://github.com/apache/qpid-jms/commit/d12430f9b6b60abbbd8c7f1a24b08928dbfafab7",
+        "file": [
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/qpid-jms/blob/d12430f9b6b60abbbd8c7f1a24b08928dbfafab7/qpid-jms-client/src/main/java/org/apache/qpid/jms/provider/failover/FailoverProvider.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/qpid-jms/contents/qpid-jms-client/src/main/java/org/apache/qpid/jms/provider/failover/FailoverProvider.java?ref=d12430f9b6b60abbbd8c7f1a24b08928dbfafab7",
+                "deletions": 2,
+                "filename": "qpid-jms-client/src/main/java/org/apache/qpid/jms/provider/failover/FailoverProvider.java",
+                "patch": "@@ -20,6 +20,7 @@\n import java.net.URI;\n import java.util.ArrayList;\n import java.util.Arrays;\n+import java.util.ConcurrentModificationException;\n import java.util.LinkedHashMap;\n import java.util.List;\n import java.util.Locale;\n@@ -679,7 +680,8 @@ public void run() {\n                         for (int i = 0; i < uris.size(); ++i) {\n                             URI target = uris.getNext();\n                             if (target == null) {\n-                                LOG.warn(\"Failover URI collection unexpectedly modified during connection attempt.\");\n+                                LOG.trace(\"Failover URI collection unexpectedly modified during connection attempt.\");\n+                                failure = new ConcurrentModificationException(\"Failover URIs changed unexpectedly\");\n                                 continue;\n                             }\n \n@@ -708,7 +710,7 @@ public void run() {\n                             \"No remote URI available for reconnection during connection attempt: \" + reconnectAttempts);\n                     }\n                 } catch (Throwable unknownFailure) {\n-                    LOG.info(\"Connection attempt:[{}] failed abnormally.\", reconnectAttempts);\n+                    LOG.warn(\"Connection attempt:[{}] failed abnormally.\", reconnectAttempts);\n                     failure = failure == null ? unknownFailure : failure;\n                 } finally {\n                     if (provider == null) {",
+                "raw_url": "https://github.com/apache/qpid-jms/raw/d12430f9b6b60abbbd8c7f1a24b08928dbfafab7/qpid-jms-client/src/main/java/org/apache/qpid/jms/provider/failover/FailoverProvider.java",
+                "sha": "fe7ba539d68a2d69bf0726cb94787ec191c0e812",
+                "status": "modified"
+            }
+        ],
+        "message": "QPIDJMS-365 Polish the logging a bit and prevent edge case NPE",
+        "parent": "https://github.com/apache/qpid-jms/commit/bb7b596bbed768b3e3cf03a02a8951b7fdd6d686",
+        "repo": "qpid-jms",
+        "unit_tests": [
+            "FailoverProviderTest.java"
+        ]
+    }
+}

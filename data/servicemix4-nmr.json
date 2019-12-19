@@ -1,0 +1,50 @@
+{
+    "servicemix4-nmr_09942a3": {
+        "bug_id": "servicemix4-nmr_09942a3",
+        "commit": "https://github.com/apache/servicemix4-nmr/commit/09942a3f749fec03052bb347dc0e0befe4f5b7cc",
+        "file": [
+            {
+                "additions": 11,
+                "blob_url": "https://github.com/apache/servicemix4-nmr/blob/09942a3f749fec03052bb347dc0e0befe4f5b7cc/nmr/core/src/main/java/org/apache/servicemix/nmr/core/EndpointRegistryImpl.java",
+                "changes": 16,
+                "contents_url": "https://api.github.com/repos/apache/servicemix4-nmr/contents/nmr/core/src/main/java/org/apache/servicemix/nmr/core/EndpointRegistryImpl.java?ref=09942a3f749fec03052bb347dc0e0befe4f5b7cc",
+                "deletions": 5,
+                "filename": "nmr/core/src/main/java/org/apache/servicemix/nmr/core/EndpointRegistryImpl.java",
+                "patch": "@@ -123,17 +123,23 @@ public void unregister(Endpoint endpoint, Map<String, ?> properties) {\n         InternalEndpoint wrapper;\n         if (endpoint instanceof InternalEndpoint) {\n             wrapper = (InternalEndpoint) endpoint;\n-            endpoint = wrappers.remove(wrapper);\n-            endpoints.remove(endpoint);\n+            if (wrapper != null) {\n+                endpoint = wrappers.remove(wrapper);\n+                if (endpoint != null) {\n+                    endpoints.remove(endpoint);\n+                }\n+            }\n         } else {\n             wrapper = endpoints.remove(endpoint);\n             if (wrapper != null) {\n                 wrappers.remove(wrapper);\n             }\n         }\n-        registry.unregister(wrapper, properties);\n-        for (EndpointListener listener : nmr.getListenerRegistry().getListeners(EndpointListener.class)) {\n-            listener.endpointUnregistered(wrapper);\n+        if (wrapper != null) {\n+            registry.unregister(wrapper, properties);\n+            for (EndpointListener listener : nmr.getListenerRegistry().getListeners(EndpointListener.class)) {\n+                listener.endpointUnregistered(wrapper);\n+            }\n         }\n         for (DynamicReferenceImpl ref : references.keySet()) {\n             ref.setDirty();",
+                "raw_url": "https://github.com/apache/servicemix4-nmr/raw/09942a3f749fec03052bb347dc0e0befe4f5b7cc/nmr/core/src/main/java/org/apache/servicemix/nmr/core/EndpointRegistryImpl.java",
+                "sha": "d72cb05a7a7ad61738e3ef4c05cc70860614d3ab",
+                "status": "modified"
+            }
+        ],
+        "message": "SMX4NMR-44: NPE when unregistering endpoints\n\ngit-svn-id: https://svn.apache.org/repos/asf/servicemix/smx4/nmr/trunk@679025 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/servicemix4-nmr/commit/e55024ecac2002ac251c4f36a1081429142860ed",
+        "repo": "servicemix4-nmr",
+        "unit_tests": [
+            "EndpointRegistryImplTest.java"
+        ]
+    },
+    "servicemix4-nmr_4be081a": {
+        "bug_id": "servicemix4-nmr_4be081a",
+        "commit": "https://github.com/apache/servicemix4-nmr/commit/4be081a4f60efedb79f656452cda694c16d78fb8",
+        "file": [
+            {
+                "additions": 18,
+                "blob_url": "https://github.com/apache/servicemix4-nmr/blob/4be081a4f60efedb79f656452cda694c16d78fb8/jbi/deployer/src/main/java/org/apache/servicemix/jbi/deployer/impl/AssemblyReferencesListener.java",
+                "changes": 24,
+                "contents_url": "https://api.github.com/repos/apache/servicemix4-nmr/contents/jbi/deployer/src/main/java/org/apache/servicemix/jbi/deployer/impl/AssemblyReferencesListener.java?ref=4be081a4f60efedb79f656452cda694c16d78fb8",
+                "deletions": 6,
+                "filename": "jbi/deployer/src/main/java/org/apache/servicemix/jbi/deployer/impl/AssemblyReferencesListener.java",
+                "patch": "@@ -85,7 +85,7 @@ public void exchangeSent(Exchange exchange) {\n             if (exchange instanceof InternalExchange) {\n                 // Increment reference to the source SA\n                 InternalExchange ie = (InternalExchange) exchange;\n-                reference(endpoints.get(ie.getSource()));\n+                reference(ie.getSource());\n             }\n         }\n     }\n@@ -96,16 +96,16 @@ public void exchangeDelivered(Exchange exchange) {\n             if (exchange instanceof InternalExchange) {\n                 InternalExchange ie = (InternalExchange) exchange;\n                 // Decrement references to source and destination SA\n-                unreference(endpoints.get(ie.getSource()));\n-                unreference(endpoints.get(ie.getDestination()));\n+                unreference(ie.getSource());\n+                unreference(ie.getDestination());\n             }\n             // Check if this is a new exchange\n         } else if (exchange.getStatus() == Status.Active && exchange.getRole() == Role.Provider &&\n                 exchange.getOut(false) == null && exchange.getFault(false) == null) {\n             if (exchange instanceof InternalExchange) {\n                 // Increment reference to the destination SA\n                 InternalExchange ie = (InternalExchange) exchange;\n-                reference(endpoints.get(ie.getDestination()));\n+                reference(ie.getDestination());\n             }\n         }\n     }\n@@ -114,8 +114,8 @@ public void exchangeFailed(Exchange exchange) {\n         if (exchange instanceof InternalExchange) {\n             InternalExchange ie = (InternalExchange) exchange;\n             // Decrement references to source and destination SA\n-            unreference(endpoints.get(ie.getSource()));\n-            unreference(endpoints.get(ie.getDestination()));\n+            unreference(ie.getSource());\n+            unreference(ie.getDestination());\n         }\n     }\n \n@@ -134,6 +134,18 @@ public void waitFor(ServiceAssembly assembly) throws InterruptedException {\n         }\n     }\n \n+    private void reference(InternalEndpoint endpoint) {\n+        if (endpoint != null) {\n+            reference(endpoints.get(endpoint));\n+        }\n+    }\n+\n+    private void unreference(InternalEndpoint endpoint) {\n+        if (endpoint != null) {\n+            unreference(endpoints.get(endpoint));\n+        }\n+    }\n+\n     private void reference(ServiceAssembly assembly) {\n         if (assembly != null) {\n             AtomicInteger count = references.get(assembly);",
+                "raw_url": "https://github.com/apache/servicemix4-nmr/raw/4be081a4f60efedb79f656452cda694c16d78fb8/jbi/deployer/src/main/java/org/apache/servicemix/jbi/deployer/impl/AssemblyReferencesListener.java",
+                "sha": "ba53166c1298de5ac08b483bfa6b7b8d25e935ac",
+                "status": "modified"
+            }
+        ],
+        "message": "SMX4NMR-70: fix possible NPE\n\ngit-svn-id: https://svn.apache.org/repos/asf/servicemix/smx4/nmr/trunk@748127 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/servicemix4-nmr/commit/77df05a3f7feb743ae5680698f4088f0dc2dd710",
+        "repo": "servicemix4-nmr",
+        "unit_tests": [
+            "AssemblyReferencesListenerTest.java"
+        ]
+    }
+}

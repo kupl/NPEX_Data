@@ -1,0 +1,50 @@
+{
+    "maven-project-info-reports-plugin_1336217": {
+        "bug_id": "maven-project-info-reports-plugin_1336217",
+        "commit": "https://github.com/apache/maven-project-info-reports-plugin/commit/13362170733b12200da49fac8c4f14250eb4cdfb",
+        "file": [
+            {
+                "additions": 5,
+                "blob_url": "https://github.com/apache/maven-project-info-reports-plugin/blob/13362170733b12200da49fac8c4f14250eb4cdfb/src/main/java/org/apache/maven/report/projectinfo/ProjectInfoReportUtils.java",
+                "changes": 7,
+                "contents_url": "https://api.github.com/repos/apache/maven-project-info-reports-plugin/contents/src/main/java/org/apache/maven/report/projectinfo/ProjectInfoReportUtils.java?ref=13362170733b12200da49fac8c4f14250eb4cdfb",
+                "deletions": 2,
+                "filename": "src/main/java/org/apache/maven/report/projectinfo/ProjectInfoReportUtils.java",
+                "patch": "@@ -24,6 +24,7 @@\n import java.net.Authenticator;\n import java.net.PasswordAuthentication;\n import java.net.URL;\n+import java.util.Collections;\n import java.util.List;\n import java.util.Properties;\n \n@@ -168,8 +169,10 @@ public static String getArtifactUrl( ArtifactFactory factory, Artifact artifact,\n         }\n         try\n         {\n-            MavenProject pluginProject = mavenProjectBuilder.buildFromRepository( copyArtifact, remoteRepositories,\n-                                                                                  localRepository );\n+            MavenProject pluginProject =\n+                mavenProjectBuilder.buildFromRepository( copyArtifact,\n+                                                         remoteRepositories == null ? Collections.EMPTY_LIST\n+                                                                         : remoteRepositories, localRepository );\n \n             if ( isArtifactUrlValid( pluginProject.getUrl() ) )\n             {",
+                "raw_url": "https://github.com/apache/maven-project-info-reports-plugin/raw/13362170733b12200da49fac8c4f14250eb4cdfb/src/main/java/org/apache/maven/report/projectinfo/ProjectInfoReportUtils.java",
+                "sha": "a5f80fb609d62812a6bb14c21b7bfd2cb0b72da1",
+                "status": "modified"
+            }
+        ],
+        "message": "fix junit (prevent NPE in core)\n\ngit-svn-id: https://svn.apache.org/repos/asf/maven/plugins/trunk@817018 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/maven-project-info-reports-plugin/commit/f6749d29b08a10b11b94544f96e6d5da012ac7d1",
+        "repo": "maven-project-info-reports-plugin",
+        "unit_tests": [
+            "ProjectInfoReportUtilsTest.java"
+        ]
+    },
+    "maven-project-info-reports-plugin_a5a984b": {
+        "bug_id": "maven-project-info-reports-plugin_a5a984b",
+        "commit": "https://github.com/apache/maven-project-info-reports-plugin/commit/a5a984b160dcb7142e446a7f08008b1f0ba8f9ed",
+        "file": [
+            {
+                "additions": 23,
+                "blob_url": "https://github.com/apache/maven-project-info-reports-plugin/blob/a5a984b160dcb7142e446a7f08008b1f0ba8f9ed/src/main/java/org/apache/maven/report/projectinfo/DependenciesReport.java",
+                "changes": 36,
+                "contents_url": "https://api.github.com/repos/apache/maven-project-info-reports-plugin/contents/src/main/java/org/apache/maven/report/projectinfo/DependenciesReport.java?ref=a5a984b160dcb7142e446a7f08008b1f0ba8f9ed",
+                "deletions": 13,
+                "filename": "src/main/java/org/apache/maven/report/projectinfo/DependenciesReport.java",
+                "patch": "@@ -17,6 +17,7 @@\n  */\n \n import org.apache.maven.artifact.Artifact;\n+import org.apache.maven.artifact.repository.ArtifactRepository;\n import org.apache.maven.artifact.factory.ArtifactFactory;\n import org.apache.maven.model.Dependency;\n import org.apache.maven.project.MavenProject;\n@@ -84,6 +85,13 @@\n      */\n     private MavenProjectBuilder mavenProjectBuilder;\n \n+    /**\n+     * @parameter expression=\"${localRepository}\"\n+     * @required\n+     * @readonly\n+     */\n+    private ArtifactRepository localRepository;\n+\n     /**\n      * @see org.apache.maven.reporting.MavenReport#getName(java.util.Locale)\n      */\n@@ -139,7 +147,7 @@ public void executeReport( Locale locale )\n         throws MavenReportException\n     {\n         DependenciesRenderer r = new DependenciesRenderer( getSink(), getProject(), locale, mavenProjectBuilder,\n-                                                           artifactFactory );\n+                                                           artifactFactory, localRepository );\n \n         r.render();\n     }\n@@ -163,8 +171,11 @@ public String getOutputName()\n \n         private MavenProjectBuilder mavenProjectBuilder;\n \n+        private ArtifactRepository localRepository;\n+\n         public DependenciesRenderer( Sink sink, MavenProject project, Locale locale,\n-                                    MavenProjectBuilder mavenProjectBuilder, ArtifactFactory artifactFactory )\n+                                    MavenProjectBuilder mavenProjectBuilder, ArtifactFactory artifactFactory,\n+                                    ArtifactRepository localRepository )\n         {\n             super( sink );\n \n@@ -175,6 +186,8 @@ public DependenciesRenderer( Sink sink, MavenProject project, Locale locale,\n             this.mavenProjectBuilder = mavenProjectBuilder;\n \n             this.artifactFactory = artifactFactory;\n+\n+            this.localRepository = localRepository;\n         }\n \n         public String getTitle()\n@@ -187,7 +200,7 @@ public void renderBody()\n             // Dependencies report\n             List dependencies = project.getDependencies();\n \n-            if ( ( dependencies == null ) || ( dependencies.isEmpty() ) )\n+            if ( dependencies == null || dependencies.isEmpty() )\n             {\n                 startSection( getTitle() );\n \n@@ -224,7 +237,7 @@ public void renderBody()\n                 MavenProject artifactProject = null;\n                 try\n                 {\n-                    artifactProject = getMavenProjectFromRepository( artifact );\n+                    artifactProject = getMavenProjectFromRepository( artifact, localRepository );\n                 }\n                 catch ( ProjectBuildingException e )\n                 {\n@@ -269,16 +282,14 @@ public void renderBody()\n                     MavenProject artifactProject = null;\n                     try\n                     {\n-                        artifactProject = getMavenProjectFromRepository( artifact );\n+                        artifactProject = getMavenProjectFromRepository( artifact, localRepository );\n                     }\n                     catch ( ProjectBuildingException e )\n                     {\n                         throw new IllegalArgumentException(\n                                                             \"Can't find a valid Maven project in the repository for the artifact [\"\n                                                                 + artifact + \"].\" );\n                     }\n-                    System.out.println( \"nklj-----------------------------\" );\n-                    System.out.println( artifactProject.getUrl() );\n                     tableRow( new String[] {\n                         artifact.getGroupId(),\n                         artifact.getArtifactId(),\n@@ -308,7 +319,7 @@ private Set getTransitiveDependencies( MavenProject project )\n             List dependencies = project.getDependencies();\n             Set artifacts = project.getArtifacts();\n \n-            if ( ( dependencies == null ) || ( artifacts == null ) )\n+            if ( dependencies == null || artifacts == null )\n             {\n                 return transitiveDependencies;\n             }\n@@ -341,18 +352,17 @@ private Set getTransitiveDependencies( MavenProject project )\n         /**\n          * Get the <code>Maven project</code> from the repository depending\n          * the <code>Artifact</code> given.\n-         * \n+         *\n          * @param artifact\n          *            an artifact\n          * @return the Maven project for the given artifact\n-         * @throws ProjectBuildingException\n+         * @throws org.apache.maven.project.ProjectBuildingException\n          *             if any\n          */\n-        private MavenProject getMavenProjectFromRepository( Artifact artifact )\n+        private MavenProject getMavenProjectFromRepository( Artifact artifact, ArtifactRepository localRepository )\n             throws ProjectBuildingException\n         {\n-            return mavenProjectBuilder.buildFromRepository( artifact, project.getRepositories(), artifact\n-                .getRepository() );\n+            return mavenProjectBuilder.buildFromRepository( artifact, project.getRepositories(), localRepository );\n         }\n     }\n ",
+                "raw_url": "https://github.com/apache/maven-project-info-reports-plugin/raw/a5a984b160dcb7142e446a7f08008b1f0ba8f9ed/src/main/java/org/apache/maven/report/projectinfo/DependenciesReport.java",
+                "sha": "bbb8d7d317b790695e9e328d267589ff5efdcd49",
+                "status": "modified"
+            }
+        ],
+        "message": "fix NPE in dependencies report\n\n\n\ngit-svn-id: https://svn.apache.org/repos/asf/maven/components/trunk/maven-plugins@220050 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/maven-project-info-reports-plugin/commit/f67629a299c786f26a992d6920f1fb3de98b92b5",
+        "repo": "maven-project-info-reports-plugin",
+        "unit_tests": [
+            "DependenciesReportTest.java"
+        ]
+    }
+}

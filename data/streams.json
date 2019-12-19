@@ -1,0 +1,50 @@
+{
+    "streams_2f11ad0": {
+        "bug_id": "streams_2f11ad0",
+        "commit": "https://github.com/apache/streams/commit/2f11ad004cb199096457f1c29710498fab426566",
+        "file": [
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/streams/blob/2f11ad004cb199096457f1c29710498fab426566/streams-monitoring/src/main/java/org/apache/streams/monitoring/tasks/BroadcastMonitorThread.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/streams/contents/streams-monitoring/src/main/java/org/apache/streams/monitoring/tasks/BroadcastMonitorThread.java?ref=2f11ad004cb199096457f1c29710498fab426566",
+                "deletions": 2,
+                "filename": "streams-monitoring/src/main/java/org/apache/streams/monitoring/tasks/BroadcastMonitorThread.java",
+                "patch": "@@ -140,8 +140,8 @@ private void setWaitTime() {\n             if (streamConfig != null &&\n                     streamConfig.containsKey(\"monitoring_broadcast_interval_ms\") &&\n                     streamConfig.get(\"monitoring_broadcast_interval_ms\") != null &&\n-                    streamConfig.get(\"monitoring_broadcast_interval_ms\") instanceof Long ||\n-                    streamConfig.get(\"monitoring_broadcast_interval_ms\") instanceof Integer) {\n+                    (streamConfig.get(\"monitoring_broadcast_interval_ms\") instanceof Long ||\n+                    streamConfig.get(\"monitoring_broadcast_interval_ms\") instanceof Integer)) {\n                 waitTime = Long.parseLong(streamConfig.get(\"monitoring_broadcast_interval_ms\").toString());\n             } else {\n                 waitTime = DEFAULT_WAIT_TIME;",
+                "raw_url": "https://github.com/apache/streams/raw/2f11ad004cb199096457f1c29710498fab426566/streams-monitoring/src/main/java/org/apache/streams/monitoring/tasks/BroadcastMonitorThread.java",
+                "sha": "2a6a8f31610ef9d29eac82dc038655884735c5d3",
+                "status": "modified"
+            }
+        ],
+        "message": "STREAMS-223 | Fixing faulty if statement logic that was causing NPEs when stream config objects were not explicitly set",
+        "parent": "https://github.com/apache/streams/commit/b410556f871228cf4b65eabd2a12ca915d4df0bf",
+        "repo": "streams",
+        "unit_tests": [
+            "BroadcastMonitorThreadTest.java"
+        ]
+    },
+    "streams_4f6f7d5": {
+        "bug_id": "streams_4f6f7d5",
+        "commit": "https://github.com/apache/streams/commit/4f6f7d5f5ac277289deff43409bb27a99741f0cc",
+        "file": [
+            {
+                "additions": 12,
+                "blob_url": "https://github.com/apache/streams/blob/4f6f7d5f5ac277289deff43409bb27a99741f0cc/streams-runtimes/streams-runtime-local/src/main/java/org/apache/streams/local/builders/LocalStreamBuilder.java",
+                "changes": 22,
+                "contents_url": "https://api.github.com/repos/apache/streams/contents/streams-runtimes/streams-runtime-local/src/main/java/org/apache/streams/local/builders/LocalStreamBuilder.java?ref=4f6f7d5f5ac277289deff43409bb27a99741f0cc",
+                "deletions": 10,
+                "filename": "streams-runtimes/streams-runtime-local/src/main/java/org/apache/streams/local/builders/LocalStreamBuilder.java",
+                "patch": "@@ -200,14 +200,16 @@ public void start() {\n         attachShutdownHandler();\n         boolean isRunning = true;\n         this.executor = new ShutdownStreamOnUnhandleThrowableThreadPoolExecutor(this.totalTasks, this);\n-        this.monitor = Executors.newFixedThreadPool(this.monitorTasks + 1);\n+        this.monitor = Executors.newCachedThreadPool();\n         Map<String, StreamsProviderTask> provTasks = new HashMap<String, StreamsProviderTask>();\n         tasks = new HashMap<String, List<StreamsTask>>();\n         boolean forcedShutDown = false;\n \n         try {\n-            monitorThread = new LocalStreamProcessMonitorThread(executor, 10);\n-            this.monitor.submit(monitorThread);\n+            if (this.useDeprecatedMonitors) {\n+                monitorThread = new LocalStreamProcessMonitorThread(executor, 10);\n+                this.monitor.submit(monitorThread);\n+            }\n             setupComponentTasks(tasks);\n             setupProviderTasks(provTasks);\n             LOGGER.info(\"Started stream with {} components\", tasks.size());\n@@ -279,7 +281,9 @@ protected void forceShutdown(Map<String, List<StreamsTask>> streamsTasks) {\n \n     protected void shutdown(Map<String, List<StreamsTask>> streamsTasks) throws InterruptedException {\n         LOGGER.info(\"Attempting to shutdown tasks\");\n-        this.monitorThread.shutdown();\n+        if (this.monitorThread != null) {\n+            this.monitorThread.shutdown();\n+        }\n         this.executor.shutdown();\n         //complete stream shut down gracfully\n         for(StreamComponent prov : this.providers.values()) {\n@@ -322,13 +326,11 @@ protected void setupComponentTasks(Map<String, List<StreamsTask>> streamsTasks)\n                 task.setStreamConfig(this.streamConfig);\n                 this.futures.put(task, this.executor.submit(task));\n                 compTasks.add(task);\n-                if(comp.isOperationCountable() ) {\n-                    if(this.useDeprecatedMonitors) {\n-                        this.monitor.submit(new StatusCounterMonitorThread((DatumStatusCountable) comp.getOperation(), 10));\n-                        this.monitor.submit(new StatusCounterMonitorThread((DatumStatusCountable) task, 10));\n-                    }\n-                    this.monitor.submit(broadcastMonitor);\n+                if(this.useDeprecatedMonitors &&  comp.isOperationCountable() ) {\n+                    this.monitor.submit(new StatusCounterMonitorThread((DatumStatusCountable) comp.getOperation(), 10));\n+                    this.monitor.submit(new StatusCounterMonitorThread((DatumStatusCountable) task, 10));\n                 }\n+                this.monitor.submit(broadcastMonitor);\n             }\n             streamsTasks.put(comp.getId(), compTasks);\n         }",
+                "raw_url": "https://github.com/apache/streams/raw/4f6f7d5f5ac277289deff43409bb27a99741f0cc/streams-runtimes/streams-runtime-local/src/main/java/org/apache/streams/local/builders/LocalStreamBuilder.java",
+                "sha": "bef5ed7d3f20dd05937f425baa5770e54bacb297",
+                "status": "modified"
+            }
+        ],
+        "message": "STREAMS-252 | Fixing NPE issue causing Stream to drop datum in certain circumstances",
+        "parent": "https://github.com/apache/streams/commit/af7aabf45c4f938db305f311edda6962bd5140f7",
+        "repo": "streams",
+        "unit_tests": [
+            "LocalStreamBuilderTest.java"
+        ]
+    }
+}

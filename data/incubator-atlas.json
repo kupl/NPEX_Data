@@ -1,0 +1,230 @@
+{
+    "incubator-atlas_0c1d599": {
+        "bug_id": "incubator-atlas_0c1d599",
+        "commit": "https://github.com/apache/incubator-atlas/commit/0c1d599ddca7ad9e4c677c77908e96dd492a8f90",
+        "file": [
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/incubator-atlas/blob/0c1d599ddca7ad9e4c677c77908e96dd492a8f90/addons/hive-bridge/src/main/java/org/apache/atlas/hive/hook/HiveHook.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/incubator-atlas/contents/addons/hive-bridge/src/main/java/org/apache/atlas/hive/hook/HiveHook.java?ref=0c1d599ddca7ad9e4c677c77908e96dd492a8f90",
+                "deletions": 2,
+                "filename": "addons/hive-bridge/src/main/java/org/apache/atlas/hive/hook/HiveHook.java",
+                "patch": "@@ -248,7 +248,7 @@ private void collect(HiveEventContext event) throws Exception {\n \n         case CREATETABLE:\n             LinkedHashMap<Type, Referenceable> tablesCreated = handleEventOutputs(dgiBridge, event, Type.TABLE);\n-            if (tablesCreated.size() > 0) {\n+            if (tablesCreated != null && tablesCreated.size() > 0) {\n                 handleExternalTables(dgiBridge, event, tablesCreated);\n             }\n             break;\n@@ -730,7 +730,7 @@ private void handleExternalTables(final HiveMetaStoreBridge dgiBridge, final Hiv\n             final String location = lower(hiveTable.getDataLocation().toString());\n             final ReadEntity dfsEntity = new ReadEntity();\n             dfsEntity.setTyp(Type.DFS_DIR);\n-            dfsEntity.setName(location);\n+            dfsEntity.setD(new Path(location));\n \n             SortedMap<ReadEntity, Referenceable> hiveInputsMap = new TreeMap<ReadEntity, Referenceable>(entityComparator) {{\n                 put(dfsEntity, dgiBridge.fillHDFSDataSet(location));",
+                "raw_url": "https://github.com/apache/incubator-atlas/raw/0c1d599ddca7ad9e4c677c77908e96dd492a8f90/addons/hive-bridge/src/main/java/org/apache/atlas/hive/hook/HiveHook.java",
+                "sha": "16835cf88410276712a54d8de75cf78768fbe35c",
+                "status": "modified"
+            },
+            {
+                "additions": 21,
+                "blob_url": "https://github.com/apache/incubator-atlas/blob/0c1d599ddca7ad9e4c677c77908e96dd492a8f90/repository/src/main/java/org/apache/atlas/repository/store/graph/v1/AtlasEntityStoreV1.java",
+                "changes": 34,
+                "contents_url": "https://api.github.com/repos/apache/incubator-atlas/contents/repository/src/main/java/org/apache/atlas/repository/store/graph/v1/AtlasEntityStoreV1.java?ref=0c1d599ddca7ad9e4c677c77908e96dd492a8f90",
+                "deletions": 13,
+                "filename": "repository/src/main/java/org/apache/atlas/repository/store/graph/v1/AtlasEntityStoreV1.java",
+                "patch": "@@ -21,7 +21,6 @@\n import com.google.inject.Inject;\n import com.google.inject.Singleton;\n import org.apache.atlas.AtlasErrorCode;\n-import org.apache.atlas.AtlasException;\n import org.apache.atlas.GraphTransaction;\n import org.apache.atlas.RequestContextV1;\n import org.apache.atlas.exception.AtlasBaseException;\n@@ -38,12 +37,10 @@\n import org.apache.atlas.repository.store.graph.EntityGraphDiscovery;\n import org.apache.atlas.repository.store.graph.EntityGraphDiscoveryContext;\n import org.apache.atlas.type.AtlasEntityType;\n-import org.apache.atlas.type.AtlasStructType;\n import org.apache.atlas.type.AtlasStructType.AtlasAttribute;\n import org.apache.atlas.type.AtlasType;\n import org.apache.atlas.type.AtlasTypeRegistry;\n import org.apache.atlas.type.AtlasTypeUtil;\n-import org.apache.atlas.typesystem.persistence.Id;\n import org.apache.commons.collections.CollectionUtils;\n import org.apache.commons.collections.MapUtils;\n import org.apache.commons.lang3.StringUtils;\n@@ -326,17 +323,18 @@ public EntityMutationResponse deleteById(final String guid) throws AtlasBaseExce\n         // Retrieve vertices for requested guids.\n         AtlasVertex vertex = AtlasGraphUtilsV1.findByGuid(guid);\n \n-        if (LOG.isDebugEnabled()) {\n-            if (vertex == null) {\n+        Collection<AtlasVertex> deletionCandidates = new ArrayList<>();\n+\n+        if (vertex != null) {\n+            deletionCandidates.add(vertex);\n+        } else {\n+            if (LOG.isDebugEnabled()) {\n                 // Entity does not exist - treat as non-error, since the caller\n                 // wanted to delete the entity and it's already gone.\n                 LOG.debug(\"Deletion request ignored for non-existent entity with guid \" + guid);\n             }\n         }\n \n-        Collection<AtlasVertex> deletionCandidates = new ArrayList<>();\n-        deletionCandidates.add(vertex);\n-\n         EntityMutationResponse ret = deleteVertices(deletionCandidates);\n \n         // Notify the change listeners\n@@ -357,15 +355,16 @@ public EntityMutationResponse deleteByIds(final List<String> guids) throws Atlas\n         for (String guid : guids) {\n             // Retrieve vertices for requested guids.\n             AtlasVertex vertex = AtlasGraphUtilsV1.findByGuid(guid);\n-            if (LOG.isDebugEnabled()) {\n-                if (vertex == null) {\n+\n+            if (vertex != null) {\n+                deletionCandidates.add(vertex);\n+            } else {\n+                if (LOG.isDebugEnabled()) {\n                     // Entity does not exist - treat as non-error, since the caller\n                     // wanted to delete the entity and it's already gone.\n                     LOG.debug(\"Deletion request ignored for non-existent entity with guid \" + guid);\n                 }\n             }\n-            deletionCandidates.add(vertex);\n-\n         }\n \n         if (deletionCandidates.isEmpty()) {\n@@ -391,7 +390,16 @@ public EntityMutationResponse deleteByUniqueAttributes(AtlasEntityType entityTyp\n \n         final AtlasVertex vertex = AtlasGraphUtilsV1.findByUniqueAttributes(entityType, uniqAttributes);\n         Collection<AtlasVertex> deletionCandidates = new ArrayList<>();\n-        deletionCandidates.add(vertex);\n+\n+        if (vertex != null) {\n+            deletionCandidates.add(vertex);\n+        } else {\n+            if (LOG.isDebugEnabled()) {\n+                // Entity does not exist - treat as non-error, since the caller\n+                // wanted to delete the entity and it's already gone.\n+                LOG.debug(\"Deletion request ignored for non-existent entity with uniqueAttributes \" + uniqAttributes);\n+            }\n+        }\n \n         EntityMutationResponse ret = deleteVertices(deletionCandidates);\n ",
+                "raw_url": "https://github.com/apache/incubator-atlas/raw/0c1d599ddca7ad9e4c677c77908e96dd492a8f90/repository/src/main/java/org/apache/atlas/repository/store/graph/v1/AtlasEntityStoreV1.java",
+                "sha": "587f3c74ea95af926caaebf549bb4c443db414f8",
+                "status": "modified"
+            }
+        ],
+        "message": "ATLAS-1598: fix for NPE in Hive hook while processing create-table",
+        "parent": "https://github.com/apache/incubator-atlas/commit/08944c54de13054b4b7a76dbcba79218779f02d3",
+        "repo": "incubator-atlas",
+        "unit_tests": [
+            "AtlasEntityStoreV1Test.java"
+        ]
+    },
+    "incubator-atlas_29880e7": {
+        "bug_id": "incubator-atlas_29880e7",
+        "commit": "https://github.com/apache/incubator-atlas/commit/29880e77c953cf4ddc8e9733b5d71c6dd75a328c",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/incubator-atlas/blob/29880e77c953cf4ddc8e9733b5d71c6dd75a328c/release-log.txt",
+                "changes": 1,
+                "contents_url": "https://api.github.com/repos/apache/incubator-atlas/contents/release-log.txt?ref=29880e77c953cf4ddc8e9733b5d71c6dd75a328c",
+                "deletions": 0,
+                "filename": "release-log.txt",
+                "patch": "@@ -9,6 +9,7 @@ ATLAS-1060 Add composite indexes for exact match performance improvements for al\n ATLAS-1127 Modify creation and modification timestamps to Date instead of Long(sumasai)\n \n ALL CHANGES:\n+ATLAS-1258 BugFix for Indexer NPE on StructDef lookup (apoorvnaik via sumasai)\n ATLAS-1233 UnitTests for the TypeDefStores (apoorvnaik via sumasai)\n ATLAS-1240 Adding Change listeners to react on changes in TypesDef (apoorvnaik via sumasai)\n ATLAS-1239 when stopping Atlas on the command line it should explicitly say when it has stopped (ayubkhan via sumasai)",
+                "raw_url": "https://github.com/apache/incubator-atlas/raw/29880e77c953cf4ddc8e9733b5d71c6dd75a328c/release-log.txt",
+                "sha": "e44d8efb197dcd3a95d66dfe4ad70831941845f0",
+                "status": "modified"
+            },
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/incubator-atlas/blob/29880e77c953cf4ddc8e9733b5d71c6dd75a328c/repository/src/main/java/org/apache/atlas/repository/graph/GraphBackedSearchIndexer.java",
+                "changes": 12,
+                "contents_url": "https://api.github.com/repos/apache/incubator-atlas/contents/repository/src/main/java/org/apache/atlas/repository/graph/GraphBackedSearchIndexer.java?ref=29880e77c953cf4ddc8e9733b5d71c6dd75a328c",
+                "deletions": 9,
+                "filename": "repository/src/main/java/org/apache/atlas/repository/graph/GraphBackedSearchIndexer.java",
+                "patch": "@@ -280,17 +280,11 @@ private void createIndexForAttribute(AtlasGraphManagement management, String typ\n \n             if (isMapType || isArrayType || isClassificationType(atlasType) || isEntityType(atlasType)) {\n                 LOG.warn(\"Ignoring non-indexable attribute {}\", attribTypeName);\n-            }\n-\n-            if (isBuiltInType) {\n+            } else if (isBuiltInType) {\n                 createIndexes(management, propertyName, getPrimitiveClass(attribTypeName), isUnique, cardinality, false, isIndexable);\n-            }\n-\n-            if (isEnumType(atlasType)) {\n+            } else if (isEnumType(atlasType)) {\n                 createIndexes(management, propertyName, String.class, isUnique, cardinality, false, isIndexable);\n-            }\n-\n-            if (isStructType(atlasType)) {\n+            } else if (isStructType(atlasType)) {\n                 AtlasStructDef structDef = typeRegistry.getStructDefByName(attributeDef.getName());\n                 updateIndexForTypeDef(management, structDef);\n             }",
+                "raw_url": "https://github.com/apache/incubator-atlas/raw/29880e77c953cf4ddc8e9733b5d71c6dd75a328c/repository/src/main/java/org/apache/atlas/repository/graph/GraphBackedSearchIndexer.java",
+                "sha": "3c7f63bbf244d3e4a38ad6eca9f73d65293e5cb3",
+                "status": "modified"
+            }
+        ],
+        "message": "ATLAS-1258 BugFix for Indexer NPE on StructDef lookup (apoorvnaik via sumasai)",
+        "parent": "https://github.com/apache/incubator-atlas/commit/c9e58e0aa31fa833981a8c069e23a4ca3e07b293",
+        "repo": "incubator-atlas",
+        "unit_tests": [
+            "GraphBackedSearchIndexerTest.java"
+        ]
+    },
+    "incubator-atlas_906f365": {
+        "bug_id": "incubator-atlas_906f365",
+        "commit": "https://github.com/apache/incubator-atlas/commit/906f36517bd13cb3f5318e7843ebfd0276a2975f",
+        "file": [
+            {
+                "additions": 5,
+                "blob_url": "https://github.com/apache/incubator-atlas/blob/906f36517bd13cb3f5318e7843ebfd0276a2975f/authorization/src/main/java/org/apache/atlas/authorize/simple/AtlasAuthorizationUtils.java",
+                "changes": 5,
+                "contents_url": "https://api.github.com/repos/apache/incubator-atlas/contents/authorization/src/main/java/org/apache/atlas/authorize/simple/AtlasAuthorizationUtils.java?ref=906f36517bd13cb3f5318e7843ebfd0276a2975f",
+                "deletions": 0,
+                "filename": "authorization/src/main/java/org/apache/atlas/authorize/simple/AtlasAuthorizationUtils.java",
+                "patch": "@@ -44,6 +44,11 @@ public static String getApi(String contextPath) {\n         if (isDebugEnabled) {\n             LOG.debug(\"==> getApi({})\", contextPath);\n         }\n+\n+        if(contextPath == null){\n+            contextPath = \"\";\n+        }\n+\n         if (contextPath.startsWith(BASE_URL)) {\n             contextPath = contextPath.substring(BASE_URL.length());\n         } else {",
+                "raw_url": "https://github.com/apache/incubator-atlas/raw/906f36517bd13cb3f5318e7843ebfd0276a2975f/authorization/src/main/java/org/apache/atlas/authorize/simple/AtlasAuthorizationUtils.java",
+                "sha": "93d988e668ac4865621472b50724ead38406fee1",
+                "status": "modified"
+            }
+        ],
+        "message": "ATLAS-1878 - Fix for NPE when a request without any query path lands on atlas",
+        "parent": "https://github.com/apache/incubator-atlas/commit/c6081ddcfdb4c8100a4b099405ac8d397fbf9583",
+        "repo": "incubator-atlas",
+        "unit_tests": [
+            "AtlasAuthorizationUtilsTest.java"
+        ]
+    },
+    "incubator-atlas_93f3448": {
+        "bug_id": "incubator-atlas_93f3448",
+        "commit": "https://github.com/apache/incubator-atlas/commit/93f34483973e5b8cf7b0eb08852c2f69eb3f1da6",
+        "file": [
+            {
+                "additions": 9,
+                "blob_url": "https://github.com/apache/incubator-atlas/blob/93f34483973e5b8cf7b0eb08852c2f69eb3f1da6/repository/src/main/java/org/apache/hadoop/metadata/services/DefaultMetadataService.java",
+                "changes": 15,
+                "contents_url": "https://api.github.com/repos/apache/incubator-atlas/contents/repository/src/main/java/org/apache/hadoop/metadata/services/DefaultMetadataService.java?ref=93f34483973e5b8cf7b0eb08852c2f69eb3f1da6",
+                "deletions": 6,
+                "filename": "repository/src/main/java/org/apache/hadoop/metadata/services/DefaultMetadataService.java",
+                "patch": "@@ -53,6 +53,7 @@\n \n import javax.inject.Inject;\n import javax.inject.Singleton;\n+import java.util.HashMap;\n import java.util.LinkedHashSet;\n import java.util.List;\n import java.util.Map;\n@@ -83,8 +84,8 @@\n         this.typeSystem = TypeSystem.getInstance();\n         this.repository = repository;\n \n-        restoreTypeSystem();\n         registerListener(searchIndexer);\n+        restoreTypeSystem();\n     }\n \n     private void restoreTypeSystem() {\n@@ -113,17 +114,18 @@ private void createSuperTypes() throws MetadataException {\n             return; // this is already registered\n         }\n \n+        Map<String, IDataType> superTypes = new HashMap();\n         HierarchicalTypeDefinition<ClassType> superTypeDefinition =\n                 TypesUtil.createClassTypeDef(MetadataServiceClient.INFRASTRUCTURE_SUPER_TYPE,\n-                        ImmutableList.<String>of(),\n-                        NAME_ATTRIBUTE, DESCRIPTION_ATTRIBUTE);\n-        typeSystem.defineClassType(superTypeDefinition);\n+                        ImmutableList.<String>of(), NAME_ATTRIBUTE, DESCRIPTION_ATTRIBUTE);\n+        superTypes.put(MetadataServiceClient.INFRASTRUCTURE_SUPER_TYPE, typeSystem.defineClassType\n+                (superTypeDefinition));\n \n         superTypeDefinition =\n                 TypesUtil.createClassTypeDef(MetadataServiceClient.DATA_SET_SUPER_TYPE,\n                         ImmutableList.<String>of(),\n                         NAME_ATTRIBUTE, DESCRIPTION_ATTRIBUTE);\n-        typeSystem.defineClassType(superTypeDefinition);\n+        superTypes.put(MetadataServiceClient.DATA_SET_SUPER_TYPE, typeSystem.defineClassType(superTypeDefinition));\n \n         superTypeDefinition =\n                 TypesUtil.createClassTypeDef(MetadataServiceClient.PROCESS_SUPER_TYPE,\n@@ -136,7 +138,8 @@ private void createSuperTypes() throws MetadataException {\n                                 DataTypes.arrayTypeName(MetadataServiceClient.DATA_SET_SUPER_TYPE),\n                                 new Multiplicity(0, Integer.MAX_VALUE, false), false, null)\n                 );\n-        typeSystem.defineClassType(superTypeDefinition);\n+        superTypes.put(MetadataServiceClient.PROCESS_SUPER_TYPE, typeSystem.defineClassType(superTypeDefinition));\n+        onTypesAddedToRepo(superTypes);\n     }\n \n     /**",
+                "raw_url": "https://github.com/apache/incubator-atlas/raw/93f34483973e5b8cf7b0eb08852c2f69eb3f1da6/repository/src/main/java/org/apache/hadoop/metadata/services/DefaultMetadataService.java",
+                "sha": "6272cce6d7c55893a586bfc6adeba4400b8acd2a",
+                "status": "modified"
+            },
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/incubator-atlas/blob/93f34483973e5b8cf7b0eb08852c2f69eb3f1da6/typesystem/src/main/java/org/apache/hadoop/metadata/typesystem/types/HierarchicalType.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/incubator-atlas/contents/typesystem/src/main/java/org/apache/hadoop/metadata/typesystem/types/HierarchicalType.java?ref=93f34483973e5b8cf7b0eb08852c2f69eb3f1da6",
+                "deletions": 3,
+                "filename": "typesystem/src/main/java/org/apache/hadoop/metadata/typesystem/types/HierarchicalType.java",
+                "patch": "@@ -70,7 +70,7 @@\n         this.fieldMapping = null;\n         this.numFields = numFields;\n         this.superTypes = superTypes;\n-        this.immediateAttrs = null;\n+        this.immediateAttrs = ImmutableList.of();\n         this.attributeNameToType = null;\n     }\n \n@@ -86,7 +86,7 @@\n         this.attributeNameToType = p.right;\n         this.numFields = this.fieldMapping.fields.size();\n         this.superTypes = superTypes == null ? ImmutableList.<String>of() : superTypes;\n-        this.immediateAttrs = ImmutableList.<AttributeInfo>copyOf(fields);\n+        this.immediateAttrs = ImmutableList.copyOf(fields);\n     }\n \n     @Override\n@@ -184,7 +184,7 @@ private void setupSuperTypesGraph(ImmutableList<String> superTypes)\n                     (ST) typeSystem.getDataType(superTypeClass, currentPath.typeName);\n \n             ImmutableList<AttributeInfo> superTypeFields = superType == this ?\n-                    ImmutableList.<AttributeInfo>copyOf(fields) : superType.immediateAttrs;\n+                    ImmutableList.copyOf(fields) : superType.immediateAttrs;\n \n             Set<String> immediateFields = new HashSet<String>();\n ",
+                "raw_url": "https://github.com/apache/incubator-atlas/raw/93f34483973e5b8cf7b0eb08852c2f69eb3f1da6/typesystem/src/main/java/org/apache/hadoop/metadata/typesystem/types/HierarchicalType.java",
+                "sha": "7fff80683b374957b5ae69e26c3713c5faaf737b",
+                "status": "modified"
+            }
+        ],
+        "message": "BUG-38870 npe during loading of the data in atlas on restart",
+        "parent": "https://github.com/apache/incubator-atlas/commit/ef2332efec48f8172a4d9c4a632b1033acef28de",
+        "repo": "incubator-atlas",
+        "unit_tests": [
+            "HierarchicalTypeTest.java"
+        ]
+    },
+    "incubator-atlas_c331846": {
+        "bug_id": "incubator-atlas_c331846",
+        "commit": "https://github.com/apache/incubator-atlas/commit/c3318467eb3954b7fc6490312bee4ce0d36cf081",
+        "file": [
+            {
+                "additions": 7,
+                "blob_url": "https://github.com/apache/incubator-atlas/blob/c3318467eb3954b7fc6490312bee4ce0d36cf081/webapp/src/main/java/org/apache/atlas/web/adapters/AtlasStructFormatConverter.java",
+                "changes": 8,
+                "contents_url": "https://api.github.com/repos/apache/incubator-atlas/contents/webapp/src/main/java/org/apache/atlas/web/adapters/AtlasStructFormatConverter.java?ref=c3318467eb3954b7fc6490312bee4ce0d36cf081",
+                "deletions": 1,
+                "filename": "webapp/src/main/java/org/apache/atlas/web/adapters/AtlasStructFormatConverter.java",
+                "patch": "@@ -125,7 +125,13 @@ public Object fromV2ToV1(Object v2Obj, AtlasType type) throws AtlasBaseException\n             ret = new HashMap<>();\n \n             for (AtlasStructDef.AtlasAttributeDef attrDef : getAttributeDefs(structType)) {\n-                AtlasType            attrType      = structType.getAttributeType(attrDef.getName());\n+                AtlasType attrType = structType.getAttributeType(attrDef.getName());\n+\n+                if (attrType == null) {\n+                    LOG.warn(\"ignored attribute {}.{}: failed to find AtlasType\", structType.getTypeName(), attrDef.getName());\n+                    continue;\n+                }\n+\n                 AtlasFormatConverter attrConverter = converterRegistry.getConverter(attrType.getTypeCategory());\n \n                 Object v2Value = attributes.get(attrDef.getName());",
+                "raw_url": "https://github.com/apache/incubator-atlas/raw/c3318467eb3954b7fc6490312bee4ce0d36cf081/webapp/src/main/java/org/apache/atlas/web/adapters/AtlasStructFormatConverter.java",
+                "sha": "3565ab31c390ff63f95a5b0b59ac4ee7ebb94df7",
+                "status": "modified"
+            },
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/incubator-atlas/blob/c3318467eb3954b7fc6490312bee4ce0d36cf081/webapp/src/main/java/org/apache/atlas/web/rest/EntitiesREST.java",
+                "changes": 8,
+                "contents_url": "https://api.github.com/repos/apache/incubator-atlas/contents/webapp/src/main/java/org/apache/atlas/web/rest/EntitiesREST.java?ref=c3318467eb3954b7fc6490312bee4ce0d36cf081",
+                "deletions": 2,
+                "filename": "webapp/src/main/java/org/apache/atlas/web/rest/EntitiesREST.java",
+                "patch": "@@ -174,9 +174,13 @@ public EntityMutationResponse deleteById(@QueryParam(\"guid\") final List<String>\n         AtlasEntity.AtlasEntities atlasEntities = entitiesStore.searchEntities(searchFilter);\n         AtlasEntityHeader.AtlasEntityHeaders entityHeaders = new AtlasEntityHeader.AtlasEntityHeaders();\n         entityHeaders.setList(new LinkedList<AtlasEntityHeader>());\n-        for (AtlasEntity atlasEntity : atlasEntities.getList()) {\n-            entityHeaders.getList().add(new AtlasEntityHeader(atlasEntity.getTypeName(), atlasEntity.getAttributes()));\n+\n+        if (atlasEntities != null) {\n+            for (AtlasEntity atlasEntity : atlasEntities.getList()) {\n+                entityHeaders.getList().add(new AtlasEntityHeader(atlasEntity.getTypeName(), atlasEntity.getAttributes()));\n+            }\n         }\n+\n         return entityHeaders;\n     }\n ",
+                "raw_url": "https://github.com/apache/incubator-atlas/raw/c3318467eb3954b7fc6490312bee4ce0d36cf081/webapp/src/main/java/org/apache/atlas/web/rest/EntitiesREST.java",
+                "sha": "f6acd07b065584f232864ac3a07161d4017e86a6",
+                "status": "modified"
+            }
+        ],
+        "message": "ATLAS-1415: fix potential NPE issues found by Coverity scan",
+        "parent": "https://github.com/apache/incubator-atlas/commit/0e7ef3af9e59584bd9ea87b10d6264a97ba4b41e",
+        "repo": "incubator-atlas",
+        "unit_tests": [
+            "TestEntitiesREST.java"
+        ]
+    },
+    "incubator-atlas_ce61caa": {
+        "bug_id": "incubator-atlas_ce61caa",
+        "commit": "https://github.com/apache/incubator-atlas/commit/ce61caae71a9456d4e48cbc5c151c3b019dd4796",
+        "file": [
+            {
+                "additions": 9,
+                "blob_url": "https://github.com/apache/incubator-atlas/blob/ce61caae71a9456d4e48cbc5c151c3b019dd4796/repository/src/main/java/org/apache/hadoop/metadata/services/DefaultMetadataService.java",
+                "changes": 15,
+                "contents_url": "https://api.github.com/repos/apache/incubator-atlas/contents/repository/src/main/java/org/apache/hadoop/metadata/services/DefaultMetadataService.java?ref=ce61caae71a9456d4e48cbc5c151c3b019dd4796",
+                "deletions": 6,
+                "filename": "repository/src/main/java/org/apache/hadoop/metadata/services/DefaultMetadataService.java",
+                "patch": "@@ -53,6 +53,7 @@\n \n import javax.inject.Inject;\n import javax.inject.Singleton;\n+import java.util.HashMap;\n import java.util.LinkedHashSet;\n import java.util.List;\n import java.util.Map;\n@@ -83,8 +84,8 @@\n         this.typeSystem = TypeSystem.getInstance();\n         this.repository = repository;\n \n-        restoreTypeSystem();\n         registerListener(searchIndexer);\n+        restoreTypeSystem();\n     }\n \n     private void restoreTypeSystem() {\n@@ -113,17 +114,18 @@ private void createSuperTypes() throws MetadataException {\n             return; // this is already registered\n         }\n \n+        Map<String, IDataType> superTypes = new HashMap();\n         HierarchicalTypeDefinition<ClassType> superTypeDefinition =\n                 TypesUtil.createClassTypeDef(MetadataServiceClient.INFRASTRUCTURE_SUPER_TYPE,\n-                        ImmutableList.<String>of(),\n-                        NAME_ATTRIBUTE, DESCRIPTION_ATTRIBUTE);\n-        typeSystem.defineClassType(superTypeDefinition);\n+                        ImmutableList.<String>of(), NAME_ATTRIBUTE, DESCRIPTION_ATTRIBUTE);\n+        superTypes.put(MetadataServiceClient.INFRASTRUCTURE_SUPER_TYPE, typeSystem.defineClassType\n+                (superTypeDefinition));\n \n         superTypeDefinition =\n                 TypesUtil.createClassTypeDef(MetadataServiceClient.DATA_SET_SUPER_TYPE,\n                         ImmutableList.<String>of(),\n                         NAME_ATTRIBUTE, DESCRIPTION_ATTRIBUTE);\n-        typeSystem.defineClassType(superTypeDefinition);\n+        superTypes.put(MetadataServiceClient.DATA_SET_SUPER_TYPE, typeSystem.defineClassType(superTypeDefinition));\n \n         superTypeDefinition =\n                 TypesUtil.createClassTypeDef(MetadataServiceClient.PROCESS_SUPER_TYPE,\n@@ -136,7 +138,8 @@ private void createSuperTypes() throws MetadataException {\n                                 DataTypes.arrayTypeName(MetadataServiceClient.DATA_SET_SUPER_TYPE),\n                                 new Multiplicity(0, Integer.MAX_VALUE, false), false, null)\n                 );\n-        typeSystem.defineClassType(superTypeDefinition);\n+        superTypes.put(MetadataServiceClient.PROCESS_SUPER_TYPE, typeSystem.defineClassType(superTypeDefinition));\n+        onTypesAddedToRepo(superTypes);\n     }\n \n     /**",
+                "raw_url": "https://github.com/apache/incubator-atlas/raw/ce61caae71a9456d4e48cbc5c151c3b019dd4796/repository/src/main/java/org/apache/hadoop/metadata/services/DefaultMetadataService.java",
+                "sha": "6272cce6d7c55893a586bfc6adeba4400b8acd2a",
+                "status": "modified"
+            },
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/incubator-atlas/blob/ce61caae71a9456d4e48cbc5c151c3b019dd4796/typesystem/src/main/java/org/apache/hadoop/metadata/typesystem/types/HierarchicalType.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/incubator-atlas/contents/typesystem/src/main/java/org/apache/hadoop/metadata/typesystem/types/HierarchicalType.java?ref=ce61caae71a9456d4e48cbc5c151c3b019dd4796",
+                "deletions": 3,
+                "filename": "typesystem/src/main/java/org/apache/hadoop/metadata/typesystem/types/HierarchicalType.java",
+                "patch": "@@ -70,7 +70,7 @@\n         this.fieldMapping = null;\n         this.numFields = numFields;\n         this.superTypes = superTypes;\n-        this.immediateAttrs = null;\n+        this.immediateAttrs = ImmutableList.of();\n         this.attributeNameToType = null;\n     }\n \n@@ -86,7 +86,7 @@\n         this.attributeNameToType = p.right;\n         this.numFields = this.fieldMapping.fields.size();\n         this.superTypes = superTypes == null ? ImmutableList.<String>of() : superTypes;\n-        this.immediateAttrs = ImmutableList.<AttributeInfo>copyOf(fields);\n+        this.immediateAttrs = ImmutableList.copyOf(fields);\n     }\n \n     @Override\n@@ -184,7 +184,7 @@ private void setupSuperTypesGraph(ImmutableList<String> superTypes)\n                     (ST) typeSystem.getDataType(superTypeClass, currentPath.typeName);\n \n             ImmutableList<AttributeInfo> superTypeFields = superType == this ?\n-                    ImmutableList.<AttributeInfo>copyOf(fields) : superType.immediateAttrs;\n+                    ImmutableList.copyOf(fields) : superType.immediateAttrs;\n \n             Set<String> immediateFields = new HashSet<String>();\n ",
+                "raw_url": "https://github.com/apache/incubator-atlas/raw/ce61caae71a9456d4e48cbc5c151c3b019dd4796/typesystem/src/main/java/org/apache/hadoop/metadata/typesystem/types/HierarchicalType.java",
+                "sha": "7fff80683b374957b5ae69e26c3713c5faaf737b",
+                "status": "modified"
+            }
+        ],
+        "message": "Merge pull request #131 from shwethags/utf8\n\nBUG-38870 npe during loading of the data in atlas on restart",
+        "parent": "https://github.com/apache/incubator-atlas/commit/f0682e416947d069e6aa9df70f4dac1a78b95e79",
+        "repo": "incubator-atlas",
+        "unit_tests": [
+            "HierarchicalTypeTest.java"
+        ]
+    },
+    "incubator-atlas_eddab3b": {
+        "bug_id": "incubator-atlas_eddab3b",
+        "commit": "https://github.com/apache/incubator-atlas/commit/eddab3b12a1318f6e787d062816e28479715f077",
+        "file": [
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/incubator-atlas/blob/eddab3b12a1318f6e787d062816e28479715f077/webapp/src/main/java/org/apache/atlas/web/resources/AdminResource.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/incubator-atlas/contents/webapp/src/main/java/org/apache/atlas/web/resources/AdminResource.java?ref=eddab3b12a1318f6e787d062816e28479715f077",
+                "deletions": 0,
+                "filename": "webapp/src/main/java/org/apache/atlas/web/resources/AdminResource.java",
+                "patch": "@@ -370,6 +370,10 @@ public AtlasImportResult importData(@FormDataParam(\"request\") String jsonData,\n         AtlasImportResult result;\n \n         try {\n+            if (StringUtils.isEmpty(jsonData)) {\n+                jsonData = \"{}\";\n+            }\n+\n             AtlasImportRequest request = AtlasType.fromJson(jsonData, AtlasImportRequest.class);\n             ZipSource zipSource = new ZipSource(inputStream);\n ",
+                "raw_url": "https://github.com/apache/incubator-atlas/raw/eddab3b12a1318f6e787d062816e28479715f077/webapp/src/main/java/org/apache/atlas/web/resources/AdminResource.java",
+                "sha": "fe9111bb99c69a3678a1797d88b569b50d672db2",
+                "status": "modified"
+            }
+        ],
+        "message": "ATLAS-1939: added parameter validation to prevent NPE during import\n\nSigned-off-by: Madhan Neethiraj <madhan@apache.org>",
+        "parent": "https://github.com/apache/incubator-atlas/commit/84c6d52d266c6aa2039e7e8cb9a7edb8f4bb8a93",
+        "repo": "incubator-atlas",
+        "unit_tests": [
+            "AdminResourceTest.java"
+        ]
+    }
+}

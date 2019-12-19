@@ -1,0 +1,434 @@
+{
+    "phoenix_00ee941": {
+        "bug_id": "phoenix_00ee941",
+        "commit": "https://github.com/apache/phoenix/commit/00ee9415a95668c34e95b43003354fc898f6b4ea",
+        "file": [
+            {
+                "additions": 55,
+                "blob_url": "https://github.com/apache/phoenix/blob/00ee9415a95668c34e95b43003354fc898f6b4ea/phoenix-core/src/it/java/org/apache/phoenix/end2end/UpsertSelectIT.java",
+                "changes": 55,
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/it/java/org/apache/phoenix/end2end/UpsertSelectIT.java?ref=00ee9415a95668c34e95b43003354fc898f6b4ea",
+                "deletions": 0,
+                "filename": "phoenix-core/src/it/java/org/apache/phoenix/end2end/UpsertSelectIT.java",
+                "patch": "@@ -1318,6 +1318,61 @@ public void testDisallowNegativeValuesForRowTsColumn() throws Exception {\n         }\n     }\n     \n+    @Test\n+    public void testUpsertSelectWithFixedWidthNullByteSizeArray() throws Exception {\n+        long ts = nextTimestamp();\n+        Properties props = new Properties();\n+        props.setProperty(PhoenixRuntime.CURRENT_SCN_ATTRIB, Long.toString(ts));\n+        Connection conn = DriverManager.getConnection(getUrl(), props);\n+        conn.createStatement().execute(\n+                \"create table t1 (id bigint not null primary key, ca char(3)[])\");\n+        conn.close();\n+\n+        props.setProperty(PhoenixRuntime.CURRENT_SCN_ATTRIB, Long.toString(ts + 10));\n+        conn = DriverManager.getConnection(getUrl(), props);\n+        conn.createStatement().execute(\"upsert into t1 values (1, ARRAY['aaa', 'bbb'])\");\n+        conn.commit();\n+\n+        props.setProperty(PhoenixRuntime.CURRENT_SCN_ATTRIB, Long.toString(ts + 15));\n+        conn = DriverManager.getConnection(getUrl(), props);\n+        conn.createStatement().execute(\n+                \"upsert into t1(id, ca) select id, ARRAY['ccc', 'ddd'] from t1 WHERE id = 1\");\n+        conn.commit();\n+\n+        props.setProperty(PhoenixRuntime.CURRENT_SCN_ATTRIB, Long.toString(ts + 20));\n+        conn = DriverManager.getConnection(getUrl(), props);\n+        ResultSet rs = conn.createStatement().executeQuery(\"select * from t1\");\n+\n+        assertTrue(rs.next());\n+        assertEquals(1, rs.getLong(1));\n+        assertEquals(\"['ccc', 'ddd']\", rs.getArray(2).toString());\n+\n+        props.setProperty(PhoenixRuntime.CURRENT_SCN_ATTRIB, Long.toString(ts + 25));\n+        conn = DriverManager.getConnection(getUrl(), props);\n+        conn.createStatement().execute(\n+                \"create table t2 (id bigint not null primary key, ba binary(4)[])\");\n+        conn.close();\n+\n+        props.setProperty(PhoenixRuntime.CURRENT_SCN_ATTRIB, Long.toString(ts + 30));\n+        conn = DriverManager.getConnection(getUrl(), props);\n+        conn.createStatement().execute(\"upsert into t2 values (2, ARRAY[1, 27])\");\n+        conn.commit();\n+\n+        props.setProperty(PhoenixRuntime.CURRENT_SCN_ATTRIB, Long.toString(ts + 35));\n+        conn = DriverManager.getConnection(getUrl(), props);\n+        conn.createStatement().execute(\n+                \"upsert into t2(id, ba) select id, ARRAY[54, 1024] from t2 WHERE id = 2\");\n+        conn.commit();\n+\n+        props.setProperty(PhoenixRuntime.CURRENT_SCN_ATTRIB, Long.toString(ts + 40));\n+        conn = DriverManager.getConnection(getUrl(), props);\n+        rs = conn.createStatement().executeQuery(\"select * from t2\");\n+\n+        assertTrue(rs.next());\n+        assertEquals(2, rs.getLong(1));\n+        assertEquals(\"[[128,0,0,54], [128,0,4,0]]\", rs.getArray(2).toString());\n+    }\n+\n     private static Connection getConnection(long ts) throws SQLException {\n         Properties props = PropertiesUtil.deepCopy(TestUtil.TEST_PROPERTIES);\n         props.setProperty(PhoenixRuntime.CURRENT_SCN_ATTRIB, Long.toString(ts));",
+                "raw_url": "https://github.com/apache/phoenix/raw/00ee9415a95668c34e95b43003354fc898f6b4ea/phoenix-core/src/it/java/org/apache/phoenix/end2end/UpsertSelectIT.java",
+                "sha": "689562af42c48c1050fc2d05fd849e59b52d57a8",
+                "status": "modified"
+            },
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/phoenix/blob/00ee9415a95668c34e95b43003354fc898f6b4ea/phoenix-core/src/main/java/org/apache/phoenix/compile/ProjectionCompiler.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/compile/ProjectionCompiler.java?ref=00ee9415a95668c34e95b43003354fc898f6b4ea",
+                "deletions": 2,
+                "filename": "phoenix-core/src/main/java/org/apache/phoenix/compile/ProjectionCompiler.java",
+                "patch": "@@ -78,12 +78,12 @@\n import org.apache.phoenix.schema.PDatum;\n import org.apache.phoenix.schema.PName;\n import org.apache.phoenix.schema.PTable;\n-import org.apache.phoenix.schema.TableNotFoundException;\n import org.apache.phoenix.schema.PTable.IndexType;\n import org.apache.phoenix.schema.PTable.ViewType;\n import org.apache.phoenix.schema.PTableKey;\n import org.apache.phoenix.schema.PTableType;\n import org.apache.phoenix.schema.RowKeySchema;\n+import org.apache.phoenix.schema.TableNotFoundException;\n import org.apache.phoenix.schema.TableRef;\n import org.apache.phoenix.schema.ValueBitSet;\n import org.apache.phoenix.schema.tuple.Tuple;\n@@ -323,7 +323,7 @@ private static Expression coerceIfNecessary(int index, List<? extends PDatum> ta\n                 if (expression.getDataType() != null && !expression.getDataType().isCastableTo(targetType)) {\n                     throw new ArgumentTypeMismatchException(targetType, expression.getDataType(), \"column: \" + targetColumn);\n                 }\n-                expression = CoerceExpression.create(expression, targetType);\n+                expression = CoerceExpression.create(expression, targetType, targetColumn.getSortOrder(), targetColumn.getMaxLength());\n             }\n         }\n         return expression;",
+                "raw_url": "https://github.com/apache/phoenix/raw/00ee9415a95668c34e95b43003354fc898f6b4ea/phoenix-core/src/main/java/org/apache/phoenix/compile/ProjectionCompiler.java",
+                "sha": "7cc2e6638782e89bf6c346a8abbc93dcef155ea3",
+                "status": "modified"
+            },
+            {
+                "additions": 7,
+                "blob_url": "https://github.com/apache/phoenix/blob/00ee9415a95668c34e95b43003354fc898f6b4ea/phoenix-core/src/main/java/org/apache/phoenix/expression/CoerceExpression.java",
+                "changes": 8,
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/expression/CoerceExpression.java?ref=00ee9415a95668c34e95b43003354fc898f6b4ea",
+                "deletions": 1,
+                "filename": "phoenix-core/src/main/java/org/apache/phoenix/expression/CoerceExpression.java",
+                "patch": "@@ -50,8 +50,14 @@ public static Expression create(Expression expression, PDataType toType) throws\n         return new CoerceExpression(expression, toType);\n     }\n     \n+    public static Expression create(Expression expression, PDataType toType, SortOrder toSortOrder, Integer maxLength) throws SQLException {\n+        return create(expression, toType, toSortOrder, maxLength, true);\n+    }\n+    \n     public static Expression create(Expression expression, PDataType toType, SortOrder toSortOrder, Integer maxLength, boolean rowKeyOrderOptimizable) throws SQLException {\n-        if (toType == expression.getDataType() && toSortOrder == expression.getSortOrder()) {\n+        if (    toType == expression.getDataType() && \n+                toSortOrder == expression.getSortOrder() && \n+                (maxLength == null || maxLength.equals(expression.getMaxLength()))   ) {\n             return expression;\n         }\n         return new CoerceExpression(expression, toType, toSortOrder, maxLength, rowKeyOrderOptimizable);",
+                "raw_url": "https://github.com/apache/phoenix/raw/00ee9415a95668c34e95b43003354fc898f6b4ea/phoenix-core/src/main/java/org/apache/phoenix/expression/CoerceExpression.java",
+                "sha": "c31cb0a4df1cabbe1fdf7ae7aa27efd2d446771b",
+                "status": "modified"
+            }
+        ],
+        "message": "PHOENIX-2402 NPE when using UPSERT SELECT with a char array (Julian Jaffe)",
+        "parent": "https://github.com/apache/phoenix/commit/49be33e71b592e330f1304cfa20bbffc8bd18637",
+        "repo": "phoenix",
+        "unit_tests": [
+            "CoerceExpressionTest.java"
+        ]
+    },
+    "phoenix_0b5eddc": {
+        "bug_id": "phoenix_0b5eddc",
+        "commit": "https://github.com/apache/phoenix/commit/0b5eddc38a566b2c83cc30aff5a1b9f679efdad0",
+        "file": [
+            {
+                "additions": 88,
+                "blob_url": "https://github.com/apache/phoenix/blob/0b5eddc38a566b2c83cc30aff5a1b9f679efdad0/phoenix-core/src/main/java/org/apache/phoenix/mapreduce/index/IndexUpgradeTool.java",
+                "changes": 141,
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/mapreduce/index/IndexUpgradeTool.java?ref=0b5eddc38a566b2c83cc30aff5a1b9f679efdad0",
+                "deletions": 53,
+                "filename": "phoenix-core/src/main/java/org/apache/phoenix/mapreduce/index/IndexUpgradeTool.java",
+                "patch": "@@ -18,6 +18,7 @@\n package org.apache.phoenix.mapreduce.index;\n \n import com.google.common.annotations.VisibleForTesting;\n+import com.google.gson.Gson;\n import org.apache.commons.cli.CommandLine;\n import org.apache.commons.cli.CommandLineParser;\n import org.apache.commons.cli.DefaultParser;\n@@ -26,6 +27,8 @@\n import org.apache.commons.cli.Options;\n import org.apache.commons.cli.ParseException;\n import org.apache.hadoop.conf.Configured;\n+import org.apache.hadoop.util.Tool;\n+import org.apache.hadoop.util.ToolRunner;\n \n import org.apache.hadoop.hbase.HBaseConfiguration;\n import org.apache.hadoop.hbase.TableName;\n@@ -55,6 +58,7 @@\n import java.util.logging.Logger;\n import org.apache.hadoop.conf.Configuration;\n import org.apache.phoenix.util.SchemaUtil;\n+import org.apache.phoenix.util.StringUtil;\n \n import java.io.IOException;\n import java.nio.file.Files;\n@@ -70,7 +74,7 @@\n \n import static org.apache.phoenix.query.QueryServicesOptions.GLOBAL_INDEX_CHECKER_ENABLED_MAP_EXPIRATION_MIN;\n \n-public class IndexUpgradeTool extends Configured {\n+public class IndexUpgradeTool extends Configured implements Tool {\n \n     private static final Logger LOGGER = Logger.getLogger(IndexUpgradeTool.class.getName());\n \n@@ -145,21 +149,6 @@ public String getOperation() {\n         return operation;\n     }\n \n-    public static void main (String[] args) {\n-        CommandLine cmdLine = null;\n-\n-        IndexUpgradeTool iut = new IndexUpgradeTool();\n-        try {\n-            cmdLine = iut.parseOptions(args);\n-            LOGGER.info(\"Index Upgrade tool initiated: \"+ String.join(\",\", args));\n-        } catch (IllegalStateException e) {\n-            iut.printHelpAndExit(e.getMessage(), iut.getOptions());\n-        }\n-        iut.initializeTool(cmdLine);\n-        iut.prepareToolSetup();\n-        iut.executeTool();\n-    }\n-\n     public IndexUpgradeTool(String mode, String tables, String inputFile,\n             String outputFile, boolean dryRun, IndexTool indexTool) {\n         this.operation = mode;\n@@ -172,6 +161,21 @@ public IndexUpgradeTool(String mode, String tables, String inputFile,\n \n     public IndexUpgradeTool () { }\n \n+    @Override\n+    public int run(String[] args) throws Exception {\n+        CommandLine cmdLine = null;\n+        try {\n+            cmdLine = parseOptions(args);\n+            LOGGER.info(\"Index Upgrade tool initiated: \" + String.join(\",\", args));\n+        } catch (IllegalStateException e) {\n+            printHelpAndExit(e.getMessage(), getOptions());\n+        }\n+        initializeTool(cmdLine);\n+        prepareToolSetup();\n+        executeTool();\n+        return 0;\n+    }\n+\n     /**\n      * Parses the commandline arguments, throws IllegalStateException if mandatory arguments are\n      * missing.\n@@ -329,7 +333,7 @@ private int executeTool(Connection conn, ConnectionQueryServices queryServices,\n                 boolean mutable = !(dataTable.isImmutableRows());\n                 if (!mutable) {\n                     LOGGER.fine(\"Data table is immutable, waiting for \"\n-                            + GLOBAL_INDEX_CHECKER_ENABLED_MAP_EXPIRATION_MIN + 1\n+                            + (GLOBAL_INDEX_CHECKER_ENABLED_MAP_EXPIRATION_MIN + 1)\n                             + \" minutes for client cache to expire\");\n                     if (!test) {\n                         Thread.sleep(\n@@ -368,7 +372,7 @@ private void disableTable(Admin admin, String dataTable, HashSet<String>indexes)\n             }\n             LOGGER.info(\"Disabled data table \" + dataTable);\n         } else {\n-            LOGGER.info( \"Data table \" + dataTable +\" is already disabled\");\n+            LOGGER.info( \"Data table \" + dataTable + \" is already disabled\");\n         }\n         for (String indexName : indexes) {\n             if (admin.isTableEnabled(TableName.valueOf(indexName))) {\n@@ -377,7 +381,7 @@ private void disableTable(Admin admin, String dataTable, HashSet<String>indexes)\n                 }\n                 LOGGER.info(\"Disabled index table \" + indexName);\n             } else {\n-                LOGGER.info( \"Index table \" + indexName +\" is already disabled\");\n+                LOGGER.info( \"Index table \" + indexName + \" is already disabled\");\n             }\n         }\n     }\n@@ -390,7 +394,7 @@ private void enableTable(Admin admin, String dataTable, HashSet<String>indexes)\n             }\n             LOGGER.info(\"Enabled data table \" + dataTable);\n         } else {\n-            LOGGER.info( \"Data table \" + dataTable +\" is already enabled\");\n+            LOGGER.info( \"Data table \" + dataTable + \" is already enabled\");\n         }\n         for (String indexName : indexes) {\n             if(!admin.isTableEnabled(TableName.valueOf(indexName))) {\n@@ -399,7 +403,7 @@ private void enableTable(Admin admin, String dataTable, HashSet<String>indexes)\n                 }\n                 LOGGER.info(\"Enabled index table \" + indexName);\n             } else {\n-                LOGGER.info( \"Index table \" + indexName +\" is already enabled\");\n+                LOGGER.info( \"Index table \" + indexName + \" is already enabled\");\n             }\n         }\n     }\n@@ -431,26 +435,28 @@ private void modifyDataTable(Admin admin, String tableName)\n         }\n     }\n \n-    private void addCoprocessor(Admin admin, String tableName, TableDescriptorBuilder tableDescBuilder, String coprocName) throws IOException {\n+    private void addCoprocessor(Admin admin, String tableName, TableDescriptorBuilder tableDescBuilder,\n+            String coprocName) throws IOException {\n         if (!admin.getDescriptor(TableName.valueOf(tableName)).hasCoprocessor(coprocName)) {\n             if (!dryRun) {\n                 tableDescBuilder.addCoprocessor(coprocName,\n                         null, QueryServicesOptions.DEFAULT_COPROCESSOR_PRIORITY, prop);\n             }\n-            LOGGER.info(\"Loaded \"+coprocName+\" coprocessor on table \" + tableName);\n+            LOGGER.info(\"Loaded \" + coprocName + \" coprocessor on table \" + tableName);\n         } else {\n-            LOGGER.info(coprocName+\" coprocessor on table \" + tableName + \"is already loaded\");\n+            LOGGER.info(coprocName + \" coprocessor on table \" + tableName + \"is already loaded\");\n         }\n     }\n \n-    private void removeCoprocessor(Admin admin, String tableName, TableDescriptorBuilder tableDescBuilder, String coprocName) throws IOException {\n+    private void removeCoprocessor(Admin admin, String tableName, TableDescriptorBuilder tableDescBuilder,\n+            String coprocName) throws IOException {\n         if (admin.getDescriptor(TableName.valueOf(tableName)).hasCoprocessor(coprocName)) {\n             if (!dryRun) {\n                 tableDescBuilder.removeCoprocessor(coprocName);\n             }\n             LOGGER.info(\"Unloaded \"+ coprocName +\"coprocessor on table \" + tableName);\n         } else {\n-            LOGGER.info(coprocName+\" coprocessor on table \" + tableName + \" is already unloaded\");\n+            LOGGER.info(coprocName + \" coprocessor on table \" + tableName + \" is already unloaded\");\n         }\n     }\n \n@@ -534,7 +540,7 @@ private boolean extractTablesAndIndexes(PhoenixConnection conn) {\n                     //for upgrade or rollback\n                     tablesAndIndexes.put(physicalTableName, physicalIndexes);\n                 } else {\n-                    LOGGER.info(\"Skipping Table \" + tableName + \" because it is \"+\n+                    LOGGER.info(\"Skipping Table \" + tableName + \" because it is \" +\n                             (dataTable.isTransactional() ? \"transactional\" : \"not a data table\"));\n                 }\n             }\n@@ -550,13 +556,13 @@ private boolean extractTablesAndIndexes(PhoenixConnection conn) {\n \n     private void prepareToRebuildIndexes(Connection conn, String dataTableFullName) {\n         try {\n+            Gson gson = new Gson();\n             HashMap<String, IndexInfo> rebuildIndexes = new HashMap<>();\n             HashSet<String> physicalIndexes = tablesAndIndexes.get(dataTableFullName);\n \n             String viewIndexPhysicalName = MetaDataUtil\n                     .getViewIndexPhysicalName(dataTableFullName);\n             boolean hasViewIndex =  physicalIndexes.contains(viewIndexPhysicalName);\n-\n             String schemaName = SchemaUtil.getSchemaNameFromFullName(dataTableFullName);\n             String tableName = SchemaUtil.getTableNameFromFullName(dataTableFullName);\n \n@@ -572,40 +578,64 @@ private void prepareToRebuildIndexes(Connection conn, String dataTableFullName)\n             }\n \n             if (hasViewIndex) {\n-                ResultSet\n-                        rs =\n-                        conn.createStatement().executeQuery(\n-                                \"SELECT DISTINCT TABLE_NAME, TENANT_ID FROM \"\n-                                        + \"SYSTEM.CATALOG WHERE COLUMN_FAMILY = \\'\"\n-                                        + viewIndexPhysicalName\n-                                        + \"\\' AND TABLE_TYPE = \\'i\\' AND \" + \"LINK_TYPE = \"\n-                                        + PTable.LinkType.PHYSICAL_TABLE.getSerializedValue());\n+                String viewSql = \"SELECT DISTINCT TABLE_NAME, TENANT_ID FROM \"\n+                        + \"SYSTEM.CATALOG \"\n+                        + \"WHERE COLUMN_FAMILY = \\'\" + dataTableFullName + \"\\' \"\n+                        + (!StringUtil.EMPTY_STRING.equals(schemaName) ? \"AND TABLE_SCHEM = \\'\"\n+                        + schemaName + \"\\' \" : \"\")\n+                        + \"AND LINK_TYPE = \"\n+                        + PTable.LinkType.PHYSICAL_TABLE.getSerializedValue();\n+\n+                ResultSet rs = conn.createStatement().executeQuery(viewSql);\n+\n                 while (rs.next()) {\n-                    String viewIndexName = rs.getString(1);\n+                    String viewName = rs.getString(1);\n                     String tenantId = rs.getString(2);\n-                    ResultSet\n-                            innerRS =\n-                            conn.createStatement().executeQuery(\n-                                    \"SELECT DISTINCT TABLE_NAME FROM \"\n-                                            + \"SYSTEM.CATALOG WHERE COLUMN_FAMILY = \\'\"\n-                                            + viewIndexName\n-                                            + \"\\' AND TABLE_TYPE = \\'i\\' AND \" + \"LINK_TYPE = \"\n-                                            + PTable.LinkType.INDEX_TABLE.getSerializedValue());\n-                    innerRS.next();\n-                    String viewName = innerRS.getString(1);\n-                    IndexInfo indexInfo = new IndexInfo(schemaName, viewName, tenantId == null ?\n-                            GLOBAL_INDEX_ID: tenantId, viewIndexName);\n-                    rebuildIndexes.put(viewIndexName, indexInfo);\n+                    ArrayList<String> viewIndexes = findViewIndexes(conn, schemaName, viewName,\n+                           tenantId);\n+                    for (String viewIndex : viewIndexes) {\n+                        IndexInfo indexInfo = new IndexInfo(schemaName, viewName,\n+                               tenantId == null ? GLOBAL_INDEX_ID : tenantId, viewIndex);\n+                        rebuildIndexes.put(viewIndex, indexInfo);\n+                    }\n                 }\n             }\n-            //for rebuilding indexes in case of upgrade.\n-            rebuildMap.put(dataTableFullName, rebuildIndexes);\n+            //for rebuilding indexes in case of upgrade and if there are indexes on the table/view.\n+            if (!rebuildIndexes.isEmpty()) {\n+                rebuildMap.put(dataTableFullName, rebuildIndexes);\n+                String json = gson.toJson(rebuildMap);\n+                LOGGER.info(\"Index rebuild map \" + json);\n+            } else {\n+                LOGGER.info(\"No indexes to rebuild for table \" + dataTableFullName);\n+            }\n+\n         } catch (SQLException e) {\n-            LOGGER.severe(\"Failed to prepare the map for index rebuilds \"+e);\n+            LOGGER.severe(\"Failed to prepare the map for index rebuilds \" + e);\n             throw new RuntimeException(\"Failed to prepare the map for index rebuilds\");\n         }\n     }\n \n+    private ArrayList<String> findViewIndexes(Connection conn, String schemaName, String viewName,\n+            String tenantId) throws SQLException {\n+\n+        String viewIndexesSql = \"SELECT DISTINCT COLUMN_FAMILY FROM \"\n+                + \"SYSTEM.CATALOG \"\n+                + \"WHERE TABLE_NAME = \\'\" + viewName + \"\\'\"\n+                + (!StringUtil.EMPTY_STRING.equals(schemaName) ? \"AND TABLE_SCHEM = \\'\"\n+                + schemaName + \"\\' \" : \"\")\n+                + \"AND LINK_TYPE = \" + PTable.LinkType.INDEX_TABLE.getSerializedValue()\n+                + (tenantId != null ? \" AND TENANT_ID = \\'\" + tenantId + \"\\'\" : \"\");\n+        ArrayList<String> viewIndexes = new ArrayList<>();\n+        ResultSet\n+                rs =\n+                conn.createStatement().executeQuery(viewIndexesSql);\n+        while(rs.next()) {\n+            String viewIndexName = rs.getString(1);\n+            viewIndexes.add(viewIndexName);\n+        }\n+        return viewIndexes;\n+    }\n+\n     private class IndexInfo {\n         final private String schemaName;\n         final private String baseTable;\n@@ -635,4 +665,9 @@ public String getIndexName() {\n             return indexName;\n         }\n     }\n+\n+    public static void main (String[] args) throws Exception {\n+        int result = ToolRunner.run(new IndexUpgradeTool(), args);\n+        System.exit(result);\n+    }\n }",
+                "raw_url": "https://github.com/apache/phoenix/raw/0b5eddc38a566b2c83cc30aff5a1b9f679efdad0/phoenix-core/src/main/java/org/apache/phoenix/mapreduce/index/IndexUpgradeTool.java",
+                "sha": "daac60456c320fa583d961a65af8bd4f40d7a3ee",
+                "status": "modified"
+            }
+        ],
+        "message": "PHOENIX-5415: NPE in getting conf from addHbaseResources in IndexUpgradeTool",
+        "parent": "https://github.com/apache/phoenix/commit/665e224e4d9a0e991e38083b983ec38989dfd5e7",
+        "repo": "phoenix",
+        "unit_tests": [
+            "IndexUpgradeToolTest.java"
+        ]
+    },
+    "phoenix_0c21539": {
+        "bug_id": "phoenix_0c21539",
+        "commit": "https://github.com/apache/phoenix/commit/0c21539cc331b8d6ca144604cf899068ad74fb25",
+        "file": [
+            {
+                "additions": 48,
+                "blob_url": "https://github.com/apache/phoenix/blob/0c21539cc331b8d6ca144604cf899068ad74fb25/phoenix-core/src/it/java/org/apache/phoenix/end2end/UnionAllIT.java",
+                "changes": 49,
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/it/java/org/apache/phoenix/end2end/UnionAllIT.java?ref=0c21539cc331b8d6ca144604cf899068ad74fb25",
+                "deletions": 1,
+                "filename": "phoenix-core/src/it/java/org/apache/phoenix/end2end/UnionAllIT.java",
+                "patch": "@@ -40,7 +40,6 @@\n import org.junit.BeforeClass;\n import org.junit.Test;\n \n-\n public class UnionAllIT extends BaseOwnClusterHBaseManagedTimeIT {\n \n     @BeforeClass\n@@ -679,4 +678,52 @@ public void testBug2295() throws Exception {\n             conn.close();\n         }\n     }\n+\n+    @Test\n+    public void testParameterMetaDataNotNull() throws Exception {\n+        Properties props = PropertiesUtil.deepCopy(TEST_PROPERTIES);\n+        Connection conn = DriverManager.getConnection(getUrl(), props);\n+    \n+        String ddl = \"CREATE TABLE test_table \" +\n+                \"  (a_string varchar not null, col1 integer\" +\n+                \"  CONSTRAINT pk PRIMARY KEY (a_string))\\n\";\n+        createTestTable(getUrl(), ddl);\n+        String dml = \"UPSERT INTO test_table VALUES(?, ?)\";\n+        PreparedStatement stmt = conn.prepareStatement(dml);\n+        stmt.setString(1, \"a\");\n+        stmt.setInt(2, 10);\n+        stmt.execute();\n+        conn.commit();\n+\n+        ddl = \"CREATE TABLE b_table \" +\n+                \"  (a_string varchar not null, col1 integer\" +\n+                \"  CONSTRAINT pk PRIMARY KEY (a_string))\\n\";\n+        createTestTable(getUrl(), ddl);\n+        dml = \"UPSERT INTO b_table VALUES(?, ?)\";\n+        stmt = conn.prepareStatement(dml);\n+        stmt.setString(1, \"b\");\n+        stmt.setInt(2, 20);\n+        stmt.execute();\n+        conn.commit();\n+\n+        String query = \"select * from test_table union all select * from b_table\";\n+\n+        try{\n+            PreparedStatement pstmt = conn.prepareStatement(query);\n+            assertTrue(pstmt.getParameterMetaData() != null);\n+            ResultSet rs = pstmt.executeQuery();\n+            assertTrue(rs.next());\n+            assertEquals(\"a\",rs.getString(1));\n+            assertEquals(10,rs.getInt(2));\n+            assertTrue(rs.next());\n+            assertEquals(\"b\",rs.getString(1));\n+            assertEquals(20,rs.getInt(2));\n+            assertFalse(rs.next()); \n+        } catch (Exception ex) {\n+            ex.printStackTrace();\n+        } finally {\n+            conn.close();\n+        }\n+    } \n+\n }",
+                "raw_url": "https://github.com/apache/phoenix/raw/0c21539cc331b8d6ca144604cf899068ad74fb25/phoenix-core/src/it/java/org/apache/phoenix/end2end/UnionAllIT.java",
+                "sha": "b391dcc1e3885ceca4ed9e83f578244ff4a39329",
+                "status": "modified"
+            },
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/phoenix/blob/0c21539cc331b8d6ca144604cf899068ad74fb25/phoenix-core/src/main/java/org/apache/phoenix/compile/QueryCompiler.java",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/compile/QueryCompiler.java?ref=0c21539cc331b8d6ca144604cf899068ad74fb25",
+                "deletions": 1,
+                "filename": "phoenix-core/src/main/java/org/apache/phoenix/compile/QueryCompiler.java",
+                "patch": "@@ -182,7 +182,8 @@ public QueryPlan compileUnionAll(SelectStatement select) throws SQLException {\n         StatementContext context = new StatementContext(statement, resolver, scan, sequenceManager);\n \n         QueryPlan plan = compileSingleFlatQuery(context, select, statement.getParameters(), false, false, null, null, false);\n-        plan =  new UnionPlan(context, select, tableRef, plan.getProjector(), plan.getLimit(), plan.getOrderBy(), GroupBy.EMPTY_GROUP_BY, plans, null); \n+        plan =  new UnionPlan(context, select, tableRef, plan.getProjector(), plan.getLimit(), plan.getOrderBy(), GroupBy.EMPTY_GROUP_BY, \n+                plans, context.getBindManager().getParameterMetaData()); \n         return plan;\n     }\n ",
+                "raw_url": "https://github.com/apache/phoenix/raw/0c21539cc331b8d6ca144604cf899068ad74fb25/phoenix-core/src/main/java/org/apache/phoenix/compile/QueryCompiler.java",
+                "sha": "9e756c8d009bae851d14a8c5a538b11deac009d6",
+                "status": "modified"
+            }
+        ],
+        "message": "PHOENIX-2658 When using QueryRunner API UNION ALL queries fail with NPE (Alicia Ying Shu)",
+        "parent": "https://github.com/apache/phoenix/commit/18f7a69452eec7fd5fde38953510600c4a060151",
+        "repo": "phoenix",
+        "unit_tests": [
+            "QueryCompilerTest.java"
+        ]
+    },
+    "phoenix_31bd423": {
+        "bug_id": "phoenix_31bd423",
+        "commit": "https://github.com/apache/phoenix/commit/31bd42301cad35f0e1f0b0e363dcf13726d84fd1",
+        "file": [
+            {
+                "additions": 69,
+                "blob_url": "https://github.com/apache/phoenix/blob/31bd42301cad35f0e1f0b0e363dcf13726d84fd1/phoenix-core/src/it/java/org/apache/phoenix/end2end/RowValueConstructorIT.java",
+                "changes": 69,
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/it/java/org/apache/phoenix/end2end/RowValueConstructorIT.java?ref=31bd42301cad35f0e1f0b0e363dcf13726d84fd1",
+                "deletions": 0,
+                "filename": "phoenix-core/src/it/java/org/apache/phoenix/end2end/RowValueConstructorIT.java",
+                "patch": "@@ -1280,5 +1280,74 @@ public void testForceSkipScan() throws Exception {\n             conn.close();\n         }\n     }\n+    \n+    // query against non-multitenant table. Salted - yes \n+    @Test\n+    public void testComparisonAgainstRVCCombinedWithOrAnd_1() throws Exception {\n+    \tString tableDDL = \"CREATE TABLE RVC1 (tenantId char(15) NOT NULL, pk2 char(15) NOT NULL, pk3 INTEGER NOT NULL, c1 INTEGER constraint pk primary key (tenantId,pk2,pk3)) SALT_BUCKETS = 4\";\n+        createTestTable(getUrl(), tableDDL, null, nextTimestamp());\n+\n+        Connection conn = nextConnection(getUrl());\n+        conn.createStatement().executeUpdate(\"upsert into RVC1 (tenantId, pk2, pk3, c1) values ('ABC', 'helo1', 1, 1)\");\n+        conn.createStatement().executeUpdate(\"upsert into RVC1 (tenantId, pk2, pk3, c1) values ('ABC', 'helo2', 2, 2)\");\n+        conn.createStatement().executeUpdate(\"upsert into RVC1 (tenantId, pk2, pk3, c1) values ('DEF', 'helo3', 3, 3)\");\n+        conn.commit();\n+        conn.close();\n+\n+        conn = nextConnection(getUrl());\n+        PreparedStatement stmt = conn.prepareStatement(\"select pk2, pk3 from RVC1 WHERE (tenantId = ? OR tenantId = ?) AND (tenantId, pk2, pk3) > (?, ?, ?) LIMIT 100\");\n+        stmt.setString(1, \"ABC\");\n+        stmt.setString(2, \"DEF\");\n+        \n+        // give back all rows after row 1 - ABC|helo1|1\n+        stmt.setString(3, \"ABC\");\n+        stmt.setString(4, \"helo1\");\n+        stmt.setInt(5, 1);\n+        \n+        ResultSet rs = stmt.executeQuery();\n+        assertTrue(rs.next());\n+        assertEquals(\"helo2\", rs.getString(1));\n+        assertEquals(2, rs.getInt(2));\n+        assertTrue(rs.next());\n+        assertEquals(\"helo3\", rs.getString(1));\n+        assertEquals(3, rs.getInt(2));\n+        assertFalse(rs.next());\n+    }\n+    \n+    // query against tenant specific view. Salted base table.\n+    @Test\n+    public void testComparisonAgainstRVCCombinedWithOrAnd_2() throws Exception {\n+        String tenantId = \"ABC\";\n+        String tenantSpecificUrl = getUrl() + \";\" + PhoenixRuntime.TENANT_ID_ATTRIB + '=' + tenantId;\n+        String baseTableDDL = \"CREATE TABLE RVC2 (tenant_id char(15) NOT NULL, pk2 char(15) NOT NULL, pk3 INTEGER NOT NULL, c1 INTEGER constraint pk primary key (tenant_id,pk2,pk3)) MULTI_TENANT=true, SALT_BUCKETS = 4\";\n+        createTestTable(getUrl(), baseTableDDL, null, nextTimestamp());\n+        String tenantTableDDL = \"CREATE VIEW t_view AS SELECT * FROM RVC2\";\n+        createTestTable(tenantSpecificUrl, tenantTableDDL, null, nextTimestamp());\n+\n+        Connection conn = nextConnection(tenantSpecificUrl);\n+        conn.createStatement().executeUpdate(\"upsert into t_view (pk2, pk3, c1) values ('helo1', 1, 1)\");\n+        conn.createStatement().executeUpdate(\"upsert into t_view (pk2, pk3, c1) values ('helo2', 2, 2)\");\n+        conn.createStatement().executeUpdate(\"upsert into t_view (pk2, pk3, c1) values ('helo3', 3, 3)\");\n+        conn.commit();\n+        conn.close();\n+\n+        conn = nextConnection(tenantSpecificUrl);\n+        PreparedStatement stmt = conn.prepareStatement(\"select pk2, pk3 from t_view WHERE (pk2 = ? OR pk2 = ?) AND (pk2, pk3) > (?, ?) LIMIT 100\");\n+        stmt.setString(1, \"helo1\");\n+        stmt.setString(2, \"helo3\");\n+        \n+        // return rows after helo1|1 \n+        stmt.setString(3, \"helo1\");\n+        stmt.setInt(4, 1);\n+\n+        ResultSet rs = stmt.executeQuery();\n+        assertTrue(rs.next());\n+        assertEquals(\"helo3\", rs.getString(1));\n+        assertEquals(3, rs.getInt(2));\n+        assertFalse(rs.next());\n+        conn.close();\n+    }\n+\n+\n \n }",
+                "raw_url": "https://github.com/apache/phoenix/raw/31bd42301cad35f0e1f0b0e363dcf13726d84fd1/phoenix-core/src/it/java/org/apache/phoenix/end2end/RowValueConstructorIT.java",
+                "sha": "9e3a5b07c9393efd0af2ce1ceb35f298e462fc27",
+                "status": "modified"
+            },
+            {
+                "additions": 13,
+                "blob_url": "https://github.com/apache/phoenix/blob/31bd42301cad35f0e1f0b0e363dcf13726d84fd1/phoenix-core/src/main/java/org/apache/phoenix/compile/WhereOptimizer.java",
+                "changes": 21,
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/compile/WhereOptimizer.java?ref=31bd42301cad35f0e1f0b0e363dcf13726d84fd1",
+                "deletions": 8,
+                "filename": "phoenix-core/src/main/java/org/apache/phoenix/compile/WhereOptimizer.java",
+                "patch": "@@ -105,6 +105,14 @@ public static Expression pushKeyExpressionsToScan(StatementContext context, Filt\n             Expression whereClause, Set<Expression> extractNodes) {\n         PName tenantId = context.getConnection().getTenantId();\n         PTable table = context.getCurrentTable().getTable();\n+    \tInteger nBuckets = table.getBucketNum();\n+    \tboolean isSalted = nBuckets != null;\n+    \tRowKeySchema schema = table.getRowKeySchema();\n+    \tboolean isMultiTenant = tenantId != null && table.isMultiTenant();\n+    \tif (isMultiTenant) {\n+    \t\ttenantId = ScanUtil.padTenantIdIfNecessary(schema, isSalted, tenantId);\n+    \t}\n+\n         if (whereClause == null && (tenantId == null || !table.isMultiTenant()) && table.getViewIndexId() == null) {\n             context.setScanRanges(ScanRanges.EVERYTHING);\n             return whereClause;\n@@ -145,8 +153,6 @@ public static Expression pushKeyExpressionsToScan(StatementContext context, Filt\n         int nPKColumns = table.getPKColumns().size();\n         int[] slotSpan = new int[nPKColumns];\n         List<Expression> removeFromExtractNodes = null;\n-        Integer nBuckets = table.getBucketNum();\n-        RowKeySchema schema = table.getRowKeySchema();\n         List<List<KeyRange>> cnf = Lists.newArrayListWithExpectedSize(schema.getMaxFields());\n         KeyRange minMaxRange = keySlots.getMinMaxRange();\n         if (minMaxRange == null) {\n@@ -155,8 +161,6 @@ public static Expression pushKeyExpressionsToScan(StatementContext context, Filt\n         boolean hasMinMaxRange = (minMaxRange != KeyRange.EVERYTHING_RANGE);\n         int minMaxRangeOffset = 0;\n         byte[] minMaxRangePrefix = null;\n-        boolean isSalted = nBuckets != null;\n-        boolean isMultiTenant = tenantId != null && table.isMultiTenant();\n         boolean hasViewIndex = table.getViewIndexId() != null;\n         if (hasMinMaxRange) {\n             int minMaxRangeSize = (isSalted ? SaltingUtil.NUM_SALTING_BYTES : 0)\n@@ -181,7 +185,6 @@ public static Expression pushKeyExpressionsToScan(StatementContext context, Filt\n         \n         // Add tenant data isolation for tenant-specific tables\n         if (isMultiTenant) {\n-            tenantId = ScanUtil.padTenantIdIfNecessary(schema, isSalted, tenantId);\n             byte[] tenantIdBytes = tenantId.getBytes();\n             KeyRange tenantIdKeyRange = KeyRange.getKeyRange(tenantIdBytes);\n             cnf.add(singletonList(tenantIdKeyRange));\n@@ -703,9 +706,11 @@ private KeySlots orKeySlots(OrExpression orExpression, List<KeySlots> childSlots\n                     minMaxRange = minMaxRange.union(childSlot.getMinMaxRange());\n                     thePosition = initialPos;\n                     for (KeySlot slot : childSlot) {\n-                        List<Expression> extractNodes = slot.getKeyPart().getExtractNodes();\n-                        extractAll &= !extractNodes.isEmpty();\n-                        slotExtractNodes.addAll(extractNodes);\n+                    \tif (slot != null) {\n+                    \t\tList<Expression> extractNodes = slot.getKeyPart().getExtractNodes();\n+                    \t\textractAll &= !extractNodes.isEmpty();\n+                    \t\tslotExtractNodes.addAll(extractNodes);\n+                    \t}\n                     }\n                 } else {\n                     // TODO: Do the same optimization that we do for IN if the childSlots specify a fully qualified row key",
+                "raw_url": "https://github.com/apache/phoenix/raw/31bd42301cad35f0e1f0b0e363dcf13726d84fd1/phoenix-core/src/main/java/org/apache/phoenix/compile/WhereOptimizer.java",
+                "sha": "6a46a7b4a4fb0c87a6948b72267d58360214a0ee",
+                "status": "modified"
+            }
+        ],
+        "message": "PHOENIX-1397 RVC combined with OR on first row key column results in NPE (Samarth Jain)",
+        "parent": "https://github.com/apache/phoenix/commit/880fd9f9447da2bf435af2031c9468797558bb79",
+        "repo": "phoenix",
+        "unit_tests": [
+            "WhereOptimizerTest.java"
+        ]
+    },
+    "phoenix_54b3ef9": {
+        "bug_id": "phoenix_54b3ef9",
+        "commit": "https://github.com/apache/phoenix/commit/54b3ef98dd7a375c31e65873f8fb7eafc39f82ee",
+        "file": [
+            {
+                "additions": 15,
+                "blob_url": "https://github.com/apache/phoenix/blob/54b3ef98dd7a375c31e65873f8fb7eafc39f82ee/phoenix-core/src/it/java/org/apache/phoenix/end2end/RowValueConstructorIT.java",
+                "changes": 15,
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/it/java/org/apache/phoenix/end2end/RowValueConstructorIT.java?ref=54b3ef98dd7a375c31e65873f8fb7eafc39f82ee",
+                "deletions": 0,
+                "filename": "phoenix-core/src/it/java/org/apache/phoenix/end2end/RowValueConstructorIT.java",
+                "patch": "@@ -1311,6 +1311,21 @@ public void testComparisonAgainstRVCCombinedWithOrAnd_1() throws Exception {\n         assertEquals(\"helo3\", rs.getString(1));\n         assertEquals(3, rs.getInt(2));\n         assertFalse(rs.next());\n+        \n+        stmt = conn.prepareStatement(\"select pk2, pk3 from RVC1 WHERE tenantId = ? AND (tenantId, pk2, pk3) BETWEEN (?, ?, ?) AND (?, ?, ?) LIMIT 100\");\n+        stmt.setString(1, \"ABC\");\n+        stmt.setString(2, \"ABC\");\n+        stmt.setString(3, \"helo2\");\n+        stmt.setInt(4, 2);\n+        stmt.setString(5, \"DEF\");\n+        stmt.setString(6, \"helo3\");\n+        stmt.setInt(7, 3);\n+        \n+        rs = stmt.executeQuery();\n+        assertTrue(rs.next());\n+        assertEquals(\"helo2\", rs.getString(1));\n+        assertEquals(2, rs.getInt(2));\n+        assertFalse(rs.next());\n     }\n     \n     // query against tenant specific view. Salted base table.",
+                "raw_url": "https://github.com/apache/phoenix/raw/54b3ef98dd7a375c31e65873f8fb7eafc39f82ee/phoenix-core/src/it/java/org/apache/phoenix/end2end/RowValueConstructorIT.java",
+                "sha": "8d67fa41aaab932491017ca9e9de23d2fbee7489",
+                "status": "modified"
+            },
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/phoenix/blob/54b3ef98dd7a375c31e65873f8fb7eafc39f82ee/phoenix-core/src/main/java/org/apache/phoenix/compile/WhereOptimizer.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/compile/WhereOptimizer.java?ref=54b3ef98dd7a375c31e65873f8fb7eafc39f82ee",
+                "deletions": 1,
+                "filename": "phoenix-core/src/main/java/org/apache/phoenix/compile/WhereOptimizer.java",
+                "patch": "@@ -643,7 +643,9 @@ private KeySlots andKeySlots(AndExpression andExpression, List<KeySlots> childSl\n                     // with our minMaxRange, since it spans columns and this would mess up our skip scan.\n                     minMaxRange = minMaxRange.intersect(childSlot.getMinMaxRange());\n                     for (KeySlot slot : childSlot) {\n-                        minMaxExtractNodes.addAll(slot.getKeyPart().getExtractNodes());\n+                        if (slot != null) {\n+                    \t    minMaxExtractNodes.addAll(slot.getKeyPart().getExtractNodes());\n+                        }\n                     }\n                 } else {\n                     for (KeySlot slot : childSlot) {",
+                "raw_url": "https://github.com/apache/phoenix/raw/54b3ef98dd7a375c31e65873f8fb7eafc39f82ee/phoenix-core/src/main/java/org/apache/phoenix/compile/WhereOptimizer.java",
+                "sha": "f70ba21eda1e6aa756baf1bbcdf3dd2cecdfede8",
+                "status": "modified"
+            }
+        ],
+        "message": "PHOENIX-1474 NPE when RVC between combined with key part comparison",
+        "parent": "https://github.com/apache/phoenix/commit/0398178617cb2aeac3661510395635b9d00f814d",
+        "repo": "phoenix",
+        "unit_tests": [
+            "WhereOptimizerTest.java"
+        ]
+    },
+    "phoenix_692b8cb": {
+        "bug_id": "phoenix_692b8cb",
+        "commit": "https://github.com/apache/phoenix/commit/692b8cb1e653b0b7c9329ee1e2890f79d781ea50",
+        "file": [
+            {
+                "additions": 21,
+                "blob_url": "https://github.com/apache/phoenix/blob/692b8cb1e653b0b7c9329ee1e2890f79d781ea50/phoenix-core/src/it/java/org/apache/phoenix/end2end/AlterTableIT.java",
+                "changes": 22,
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/it/java/org/apache/phoenix/end2end/AlterTableIT.java?ref=692b8cb1e653b0b7c9329ee1e2890f79d781ea50",
+                "deletions": 1,
+                "filename": "phoenix-core/src/it/java/org/apache/phoenix/end2end/AlterTableIT.java",
+                "patch": "@@ -892,4 +892,24 @@ public void alterTableFromDifferentClient() throws Exception {\n         pstmt2.close();\n         conn1.close();\n     }\n-}\n+    \n+    @Test\n+    public void testAddColumnsUsingNewConnection() throws Exception {\n+        Properties props = PropertiesUtil.deepCopy(TEST_PROPERTIES);\n+        String ddl = \"CREATE TABLE T (\\n\"\n+                +\"ID1 VARCHAR(15) NOT NULL,\\n\"\n+                +\"ID2 VARCHAR(15) NOT NULL,\\n\"\n+                +\"CREATED_DATE DATE,\\n\"\n+                +\"CREATION_TIME BIGINT,\\n\"\n+                +\"LAST_USED DATE,\\n\"\n+                +\"CONSTRAINT PK PRIMARY KEY (ID1, ID2))\";\n+        Connection conn1 = DriverManager.getConnection(getUrl(), props);\n+        conn1.createStatement().execute(ddl);\n+        ddl = \"ALTER TABLE T ADD STRING VARCHAR, STRING_DATA_TYPES VARCHAR\";\n+        conn1.createStatement().execute(ddl);\n+        ddl = \"ALTER TABLE T DROP COLUMN STRING, STRING_DATA_TYPES\";\n+        conn1.createStatement().execute(ddl);\n+        ddl = \"ALTER TABLE T ADD STRING_ARRAY1 VARCHAR[]\";\n+        conn1.createStatement().execute(ddl);\n+        conn1.close();\n+    }}",
+                "raw_url": "https://github.com/apache/phoenix/raw/692b8cb1e653b0b7c9329ee1e2890f79d781ea50/phoenix-core/src/it/java/org/apache/phoenix/end2end/AlterTableIT.java",
+                "sha": "5745bf03f1c17adbc1289cb0420a03e1acaafcaa",
+                "status": "modified"
+            },
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/phoenix/blob/692b8cb1e653b0b7c9329ee1e2890f79d781ea50/phoenix-core/src/main/java/org/apache/phoenix/jdbc/PhoenixConnection.java",
+                "changes": 8,
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/jdbc/PhoenixConnection.java?ref=692b8cb1e653b0b7c9329ee1e2890f79d781ea50",
+                "deletions": 4,
+                "filename": "phoenix-core/src/main/java/org/apache/phoenix/jdbc/PhoenixConnection.java",
+                "patch": "@@ -742,11 +742,11 @@ public PMetaData removeTable(PName tenantId, String tableName, String parentTabl\n     }\n \n     @Override\n-    public PMetaData removeColumn(PName tenantId, String tableName, String familyName, String columnName,\n-            long tableTimeStamp, long tableSeqNum) throws SQLException {\n-        metaData = metaData.removeColumn(tenantId, tableName, familyName, columnName, tableTimeStamp, tableSeqNum);\n+    public PMetaData removeColumn(PName tenantId, String tableName, List<PColumn> columnsToRemove, long tableTimeStamp,\n+            long tableSeqNum) throws SQLException {\n+        metaData = metaData.removeColumn(tenantId, tableName, columnsToRemove, tableTimeStamp, tableSeqNum);\n         //Cascade through to connectionQueryServices too\n-        getQueryServices().removeColumn(tenantId, tableName, familyName, columnName, tableTimeStamp, tableSeqNum);\n+        getQueryServices().removeColumn(tenantId, tableName, columnsToRemove, tableTimeStamp, tableSeqNum);\n         return metaData;\n     }\n ",
+                "raw_url": "https://github.com/apache/phoenix/raw/692b8cb1e653b0b7c9329ee1e2890f79d781ea50/phoenix-core/src/main/java/org/apache/phoenix/jdbc/PhoenixConnection.java",
+                "sha": "4c57d0983b7a472b2fcc6aaf6475ab31fe05419a",
+                "status": "modified"
+            },
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/phoenix/blob/692b8cb1e653b0b7c9329ee1e2890f79d781ea50/phoenix-core/src/main/java/org/apache/phoenix/query/ConnectionQueryServicesImpl.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/query/ConnectionQueryServicesImpl.java?ref=692b8cb1e653b0b7c9329ee1e2890f79d781ea50",
+                "deletions": 2,
+                "filename": "phoenix-core/src/main/java/org/apache/phoenix/query/ConnectionQueryServicesImpl.java",
+                "patch": "@@ -512,12 +512,12 @@ public PMetaData removeTable(PName tenantId, final String tableName, String pare\n     }\n \n     @Override\n-    public PMetaData removeColumn(final PName tenantId, final String tableName, final String familyName, final String columnName, final long tableTimeStamp, final long tableSeqNum) throws SQLException {\n+    public PMetaData removeColumn(final PName tenantId, final String tableName, final List<PColumn> columnsToRemove, final long tableTimeStamp, final long tableSeqNum) throws SQLException {\n         return metaDataMutated(tenantId, tableName, tableSeqNum, new Mutator() {\n             @Override\n             public PMetaData mutate(PMetaData metaData) throws SQLException {\n                 try {\n-                    return metaData.removeColumn(tenantId, tableName, familyName, columnName, tableTimeStamp, tableSeqNum);\n+                    return metaData.removeColumn(tenantId, tableName, columnsToRemove, tableTimeStamp, tableSeqNum);\n                 } catch (TableNotFoundException e) {\n                     // The DROP TABLE may have been processed first, so just ignore.\n                     return metaData;",
+                "raw_url": "https://github.com/apache/phoenix/raw/692b8cb1e653b0b7c9329ee1e2890f79d781ea50/phoenix-core/src/main/java/org/apache/phoenix/query/ConnectionQueryServicesImpl.java",
+                "sha": "dbf786a17d2dc57eb6414d81b1e01e305b41f3da",
+                "status": "modified"
+            },
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/phoenix/blob/692b8cb1e653b0b7c9329ee1e2890f79d781ea50/phoenix-core/src/main/java/org/apache/phoenix/query/ConnectionlessQueryServicesImpl.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/query/ConnectionlessQueryServicesImpl.java?ref=692b8cb1e653b0b7c9329ee1e2890f79d781ea50",
+                "deletions": 3,
+                "filename": "phoenix-core/src/main/java/org/apache/phoenix/query/ConnectionlessQueryServicesImpl.java",
+                "patch": "@@ -152,9 +152,9 @@ public PMetaData removeTable(PName tenantId, String tableName, String parentTabl\n     }\n \n     @Override\n-    public PMetaData removeColumn(PName tenantId, String tableName, String familyName, String columnName,\n-            long tableTimeStamp, long tableSeqNum) throws SQLException {\n-        return metaData = metaData.removeColumn(tenantId, tableName, familyName, columnName, tableTimeStamp, tableSeqNum);\n+    public PMetaData removeColumn(PName tenantId, String tableName, List<PColumn> columnsToRemove, long tableTimeStamp,\n+            long tableSeqNum) throws SQLException {\n+        return metaData = metaData.removeColumn(tenantId, tableName, columnsToRemove, tableTimeStamp, tableSeqNum);\n     }\n \n     ",
+                "raw_url": "https://github.com/apache/phoenix/raw/692b8cb1e653b0b7c9329ee1e2890f79d781ea50/phoenix-core/src/main/java/org/apache/phoenix/query/ConnectionlessQueryServicesImpl.java",
+                "sha": "386050c6ebc049079ecdcf2147b79fec65bb85c9",
+                "status": "modified"
+            },
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/phoenix/blob/692b8cb1e653b0b7c9329ee1e2890f79d781ea50/phoenix-core/src/main/java/org/apache/phoenix/query/DelegateConnectionQueryServices.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/query/DelegateConnectionQueryServices.java?ref=692b8cb1e653b0b7c9329ee1e2890f79d781ea50",
+                "deletions": 3,
+                "filename": "phoenix-core/src/main/java/org/apache/phoenix/query/DelegateConnectionQueryServices.java",
+                "patch": "@@ -88,9 +88,9 @@ public PMetaData removeTable(PName tenantId, String tableName, String parentTabl\n     }\n \n     @Override\n-    public PMetaData removeColumn(PName tenantId, String tableName, String familyName, String columnName,\n-            long tableTimeStamp, long tableSeqNum) throws SQLException {\n-        return getDelegate().removeColumn(tenantId, tableName, familyName, columnName, tableTimeStamp, tableSeqNum);\n+    public PMetaData removeColumn(PName tenantId, String tableName, List<PColumn> columnsToRemove, long tableTimeStamp,\n+            long tableSeqNum) throws SQLException {\n+        return getDelegate().removeColumn(tenantId, tableName, columnsToRemove, tableTimeStamp, tableSeqNum);\n     }\n \n     @Override",
+                "raw_url": "https://github.com/apache/phoenix/raw/692b8cb1e653b0b7c9329ee1e2890f79d781ea50/phoenix-core/src/main/java/org/apache/phoenix/query/DelegateConnectionQueryServices.java",
+                "sha": "defad5b045372d3809d8b74be6d2b21ed932647a",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/phoenix/blob/692b8cb1e653b0b7c9329ee1e2890f79d781ea50/phoenix-core/src/main/java/org/apache/phoenix/query/MetaDataMutated.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/query/MetaDataMutated.java?ref=692b8cb1e653b0b7c9329ee1e2890f79d781ea50",
+                "deletions": 1,
+                "filename": "phoenix-core/src/main/java/org/apache/phoenix/query/MetaDataMutated.java",
+                "patch": "@@ -37,5 +37,5 @@\n     PMetaData addTable(PTable table) throws SQLException;\n     PMetaData removeTable(PName tenantId, String tableName, String parentTableName, long tableTimeStamp) throws SQLException;\n     PMetaData addColumn(PName tenantId, String tableName, List<PColumn> columns, long tableTimeStamp, long tableSeqNum, boolean isImmutableRows) throws SQLException;\n-    PMetaData removeColumn(PName tenantId, String tableName, String familyName, String columnName, long tableTimeStamp, long tableSeqNum) throws SQLException;\n+    PMetaData removeColumn(PName tenantId, String tableName, List<PColumn> columnsToRemove, long tableTimeStamp, long tableSeqNum) throws SQLException;\n }",
+                "raw_url": "https://github.com/apache/phoenix/raw/692b8cb1e653b0b7c9329ee1e2890f79d781ea50/phoenix-core/src/main/java/org/apache/phoenix/query/MetaDataMutated.java",
+                "sha": "cd4e2dedbfb4fb98d87563d23f910ecbb0131024",
+                "status": "modified"
+            },
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/phoenix/blob/692b8cb1e653b0b7c9329ee1e2890f79d781ea50/phoenix-core/src/main/java/org/apache/phoenix/schema/MetaDataClient.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/schema/MetaDataClient.java?ref=692b8cb1e653b0b7c9329ee1e2890f79d781ea50",
+                "deletions": 4,
+                "filename": "phoenix-core/src/main/java/org/apache/phoenix/schema/MetaDataClient.java",
+                "patch": "@@ -2308,10 +2308,8 @@ public MutationState dropColumn(DropColumnStatement statement) throws SQLExcepti\n                     // If we've done any index metadata updates, don't bother trying to update\n                     // client-side cache as it would be too painful. Just let it pull it over from\n                     // the server when needed.\n-                    if (columnsToDrop.size() > 0 && indexesToDrop.isEmpty()) {\n-                        for(PColumn columnToDrop : tableColumnsToDrop) {\n-                            connection.removeColumn(tenantId, SchemaUtil.getTableName(schemaName, tableName) , columnToDrop.getFamilyName().getString(), columnToDrop.getName().getString(), result.getMutationTime(), seqNum);\n-                        }\n+                    if (tableColumnsToDrop.size() > 0 && indexesToDrop.isEmpty()) {\n+                        connection.removeColumn(tenantId, SchemaUtil.getTableName(schemaName, tableName) , tableColumnsToDrop, result.getMutationTime(), seqNum);\n                     }\n                     // If we have a VIEW, then only delete the metadata, and leave the table data alone\n                     if (table.getType() != PTableType.VIEW) {",
+                "raw_url": "https://github.com/apache/phoenix/raw/692b8cb1e653b0b7c9329ee1e2890f79d781ea50/phoenix-core/src/main/java/org/apache/phoenix/schema/MetaDataClient.java",
+                "sha": "afe21e866569ffba848acc3d2d373564631f8f61",
+                "status": "modified"
+            },
+            {
+                "additions": 28,
+                "blob_url": "https://github.com/apache/phoenix/blob/692b8cb1e653b0b7c9329ee1e2890f79d781ea50/phoenix-core/src/main/java/org/apache/phoenix/schema/PMetaDataImpl.java",
+                "changes": 53,
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/schema/PMetaDataImpl.java?ref=692b8cb1e653b0b7c9329ee1e2890f79d781ea50",
+                "deletions": 25,
+                "filename": "phoenix-core/src/main/java/org/apache/phoenix/schema/PMetaDataImpl.java",
+                "patch": "@@ -365,38 +365,41 @@ public PMetaData removeTable(PName tenantId, String tableName, String parentTabl\n     }\n     \n     @Override\n-    public PMetaData removeColumn(PName tenantId, String tableName, String familyName, String columnName, long tableTimeStamp, long tableSeqNum) throws SQLException {\n+    public PMetaData removeColumn(PName tenantId, String tableName, List<PColumn> columnsToRemove, long tableTimeStamp, long tableSeqNum) throws SQLException {\n         PTableRef tableRef = metaData.get(new PTableKey(tenantId, tableName));\n         if (tableRef == null) {\n             return this;\n         }\n         PTable table = tableRef.table;\n         PTableCache tables = metaData.clone();\n-        PColumn column;\n-        if (familyName == null) {\n-            column = table.getPKColumn(columnName);\n-        } else {\n-            column = table.getColumnFamily(familyName).getColumn(columnName);\n-        }\n-        int positionOffset = 0;\n-        int position = column.getPosition();\n-        List<PColumn> oldColumns = table.getColumns();\n-        if (table.getBucketNum() != null) {\n-            position--;\n-            positionOffset = 1;\n-            oldColumns = oldColumns.subList(positionOffset, oldColumns.size());\n-        }\n-        List<PColumn> columns = Lists.newArrayListWithExpectedSize(oldColumns.size() - 1);\n-        columns.addAll(oldColumns.subList(0, position));\n-        // Update position of columns that follow removed column\n-        for (int i = position+1; i < oldColumns.size(); i++) {\n-            PColumn oldColumn = oldColumns.get(i);\n-            PColumn newColumn = new PColumnImpl(oldColumn.getName(), oldColumn.getFamilyName(), oldColumn.getDataType(), oldColumn.getMaxLength(), oldColumn.getScale(), oldColumn.isNullable(), i-1+positionOffset, oldColumn.getSortOrder(), oldColumn.getArraySize(), oldColumn.getViewConstant(), oldColumn.isViewReferenced());\n-            columns.add(newColumn);\n+        for (PColumn columnToRemove : columnsToRemove) {\n+            PColumn column;\n+            String familyName = columnToRemove.getFamilyName().getString();\n+            if (familyName == null) {\n+                column = table.getPKColumn(columnToRemove.getName().getString());\n+            } else {\n+                column = table.getColumnFamily(familyName).getColumn(columnToRemove.getName().getString());\n+            }\n+            int positionOffset = 0;\n+            int position = column.getPosition();\n+            List<PColumn> oldColumns = table.getColumns();\n+            if (table.getBucketNum() != null) {\n+                position--;\n+                positionOffset = 1;\n+                oldColumns = oldColumns.subList(positionOffset, oldColumns.size());\n+            }\n+            List<PColumn> columns = Lists.newArrayListWithExpectedSize(oldColumns.size() - 1);\n+            columns.addAll(oldColumns.subList(0, position));\n+            // Update position of columns that follow removed column\n+            for (int i = position+1; i < oldColumns.size(); i++) {\n+                PColumn oldColumn = oldColumns.get(i);\n+                PColumn newColumn = new PColumnImpl(oldColumn.getName(), oldColumn.getFamilyName(), oldColumn.getDataType(), oldColumn.getMaxLength(), oldColumn.getScale(), oldColumn.isNullable(), i-1+positionOffset, oldColumn.getSortOrder(), oldColumn.getArraySize(), oldColumn.getViewConstant(), oldColumn.isViewReferenced());\n+                columns.add(newColumn);\n+            }\n+            \n+            table = PTableImpl.makePTable(table, tableTimeStamp, tableSeqNum, columns);\n         }\n-        \n-        PTable newTable = PTableImpl.makePTable(table, tableTimeStamp, tableSeqNum, columns);\n-        tables.put(newTable.getKey(), newTable);\n+        tables.put(table.getKey(), table);\n         return new PMetaDataImpl(tables);\n     }\n ",
+                "raw_url": "https://github.com/apache/phoenix/raw/692b8cb1e653b0b7c9329ee1e2890f79d781ea50/phoenix-core/src/main/java/org/apache/phoenix/schema/PMetaDataImpl.java",
+                "sha": "0d75aa29bcdc9e0ec11a97256a599d4c0dca678d",
+                "status": "modified"
+            }
+        ],
+        "message": "PHOENIX-1385 Adding, dropping and adding columns fails with NPE (Samarth Jain, James Taylor)",
+        "parent": "https://github.com/apache/phoenix/commit/c0b617f554938ea31832a921b8caa579e87749aa",
+        "repo": "phoenix",
+        "unit_tests": [
+            "PMetaDataImplTest.java"
+        ]
+    },
+    "phoenix_b8f32ae": {
+        "bug_id": "phoenix_b8f32ae",
+        "commit": "https://github.com/apache/phoenix/commit/b8f32aeaa735689f231268d7c790efbd6051d7f4",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/phoenix/blob/b8f32aeaa735689f231268d7c790efbd6051d7f4/phoenix-core/src/main/java/org/apache/phoenix/iterate/SpoolingResultIterator.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/iterate/SpoolingResultIterator.java?ref=b8f32aeaa735689f231268d7c790efbd6051d7f4",
+                "deletions": 1,
+                "filename": "phoenix-core/src/main/java/org/apache/phoenix/iterate/SpoolingResultIterator.java",
+                "patch": "@@ -132,7 +132,7 @@ protected void thresholdReached() throws IOException {\n                 scanner.close();\n             } finally {\n                 try {\n-                    if (!usedOnDiskIterator) {\n+                    if (!usedOnDiskIterator && tempFile != null) {\n                         tempFile.delete();\n                     }\n                 } finally {",
+                "raw_url": "https://github.com/apache/phoenix/raw/b8f32aeaa735689f231268d7c790efbd6051d7f4/phoenix-core/src/main/java/org/apache/phoenix/iterate/SpoolingResultIterator.java",
+                "sha": "0ba6554077bb5a434ea84fef64cc1a4a1b16bd10",
+                "status": "modified"
+            }
+        ],
+        "message": "PHOENIX-1360: NPE in SpoolingResultIterator",
+        "parent": "https://github.com/apache/phoenix/commit/cf41cc63594ac7d8f3d831511215519fe43afea0",
+        "repo": "phoenix",
+        "unit_tests": [
+            "SpoolingResultIteratorTest.java"
+        ]
+    },
+    "phoenix_c0b617f": {
+        "bug_id": "phoenix_c0b617f",
+        "commit": "https://github.com/apache/phoenix/commit/c0b617f554938ea31832a921b8caa579e87749aa",
+        "file": [
+            {
+                "additions": 44,
+                "blob_url": "https://github.com/apache/phoenix/blob/c0b617f554938ea31832a921b8caa579e87749aa/phoenix-core/src/main/java/org/apache/phoenix/hbase/index/wal/IndexedKeyValue.java",
+                "changes": 46,
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/hbase/index/wal/IndexedKeyValue.java?ref=c0b617f554938ea31832a921b8caa579e87749aa",
+                "deletions": 2,
+                "filename": "phoenix-core/src/main/java/org/apache/phoenix/hbase/index/wal/IndexedKeyValue.java",
+                "patch": "@@ -34,7 +34,7 @@\n import org.apache.phoenix.hbase.index.util.ImmutableBytesPtr;\n \n public class IndexedKeyValue extends KeyValue {\n-    public static final byte [] COLUMN_FAMILY = Bytes.toBytes(\"INDEXEDKEYVALUE_FAKED_FAMILY\");\n+    public static final byte [] COLUMN_QUALIFIER = Bytes.toBytes(\"INDEXEDKEYVALUE_FAKED_COLUMN\");\n   \n     private static int calcHashCode(ImmutableBytesPtr indexTableName, Mutation mutation) {\n         final int prime = 31;\n@@ -71,9 +71,51 @@ public Mutation getMutation() {\n      */\n     @Override\n     public byte [] getFamily() {\n-      return COLUMN_FAMILY;\n+      return WALEdit.METAFAMILY;\n     }\n     \n+    @Override\n+    public byte[] getFamilyArray() {\n+        return WALEdit.METAFAMILY;\n+    }\n+\n+    /**\n+     * @return Family offset\n+     */\n+    @Override\n+    public int getFamilyOffset() {\n+        return 0;\n+    }\n+\n+    /**\n+     * @return Family length\n+     */\n+    @Override\n+    public byte getFamilyLength() {\n+        return (byte) WALEdit.METAFAMILY.length;\n+    }\n+\n+    @Override\n+    public byte[] getQualifierArray() {\n+        return COLUMN_QUALIFIER;\n+    }\n+\n+    /**\n+     * @return Qualifier offset\n+     */\n+    @Override\n+    public int getQualifierOffset() {\n+        return 0;\n+    }\n+\n+    /**\n+     * @return Qualifier length\n+     */\n+    @Override\n+    public int getQualifierLength() {\n+        return COLUMN_QUALIFIER.length;\n+    }\n+\n     /**\n      * This is a KeyValue that shouldn't actually be replayed/replicated, so we always mark it as \n      * an {@link WALEdit#METAFAMILY} so it isn't replayed/replicated via the normal replay mechanism",
+                "raw_url": "https://github.com/apache/phoenix/raw/c0b617f554938ea31832a921b8caa579e87749aa/phoenix-core/src/main/java/org/apache/phoenix/hbase/index/wal/IndexedKeyValue.java",
+                "sha": "0270de5530bf98491709d33ecb47a59d6f63fa64",
+                "status": "modified"
+            }
+        ],
+        "message": "PHOENIX-1381 NPE in CellUtil.matchingFamily() for IndexedKeyValue (Jeffrey Zhong)",
+        "parent": "https://github.com/apache/phoenix/commit/481d1bb878d08fc43fd1eb8f85c36244afdafe45",
+        "repo": "phoenix",
+        "unit_tests": [
+            "IndexedKeyValueTest.java"
+        ]
+    },
+    "phoenix_cd444d9": {
+        "bug_id": "phoenix_cd444d9",
+        "commit": "https://github.com/apache/phoenix/commit/cd444d9a6a8e560889826bc491db7d71ad1960e5",
+        "file": [
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/phoenix/blob/cd444d9a6a8e560889826bc491db7d71ad1960e5/phoenix-core/src/main/java/org/apache/phoenix/index/IndexMaintainer.java",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/index/IndexMaintainer.java?ref=cd444d9a6a8e560889826bc491db7d71ad1960e5",
+                "deletions": 0,
+                "filename": "phoenix-core/src/main/java/org/apache/phoenix/index/IndexMaintainer.java",
+                "patch": "@@ -1308,6 +1308,9 @@ public PDataType getDataType() {\n         int encodedEstimatedIndexRowKeyBytesAndImmutableRows = WritableUtils.readVInt(input);\n         this.immutableRows = encodedEstimatedIndexRowKeyBytesAndImmutableRows < 0;\n         this.estimatedIndexRowKeyBytes = Math.abs(encodedEstimatedIndexRowKeyBytesAndImmutableRows);\n+        // Needed for backward compatibility. Clients older than 4.10 will have non-encoded tables.\n+        this.immutableStorageScheme = ImmutableStorageScheme.ONE_CELL_PER_COLUMN;\n+        this.encodingScheme = QualifierEncodingScheme.NON_ENCODED_QUALIFIERS;\n         initCachedState();\n     }\n     ",
+                "raw_url": "https://github.com/apache/phoenix/raw/cd444d9a6a8e560889826bc491db7d71ad1960e5/phoenix-core/src/main/java/org/apache/phoenix/index/IndexMaintainer.java",
+                "sha": "26c24217c1f50b5a677c05900a145c749b06edae",
+                "status": "modified"
+            }
+        ],
+        "message": "PHOENIX-3765 NPE in IndexMaintainer when using old client and 4.10 server",
+        "parent": "https://github.com/apache/phoenix/commit/92e728e09ace5dfac93cd04a747f3db8043569ee",
+        "repo": "phoenix",
+        "unit_tests": [
+            "IndexMaintainerTest.java"
+        ]
+    },
+    "phoenix_d762c6a": {
+        "bug_id": "phoenix_d762c6a",
+        "commit": "https://github.com/apache/phoenix/commit/d762c6a83e8260297fd8d6afcb51bc1c49dce23f",
+        "file": [
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/phoenix/blob/d762c6a83e8260297fd8d6afcb51bc1c49dce23f/phoenix-core/src/main/java/org/apache/phoenix/jdbc/PhoenixPreparedStatement.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/jdbc/PhoenixPreparedStatement.java?ref=d762c6a83e8260297fd8d6afcb51bc1c49dce23f",
+                "deletions": 2,
+                "filename": "phoenix-core/src/main/java/org/apache/phoenix/jdbc/PhoenixPreparedStatement.java",
+                "patch": "@@ -444,8 +444,10 @@ public void setObject(int parameterIndex, Object o) throws SQLException {\n     @Override\n     public void setObject(int parameterIndex, Object o, int targetSqlType) throws SQLException {\n         PDataType targetType = PDataType.fromTypeId(targetSqlType);\n-        PDataType sourceType = PDataType.fromLiteral(o);\n-        o = targetType.toObject(o, sourceType);\n+        if (o != null) {\n+            PDataType sourceType = PDataType.fromLiteral(o);\n+            o = targetType.toObject(o, sourceType);\n+        }\n         setParameter(parameterIndex, o);\n     }\n ",
+                "raw_url": "https://github.com/apache/phoenix/raw/d762c6a83e8260297fd8d6afcb51bc1c49dce23f/phoenix-core/src/main/java/org/apache/phoenix/jdbc/PhoenixPreparedStatement.java",
+                "sha": "71ecb8d3c56d4dac7689ad101a3ca1e9007f51ed",
+                "status": "modified"
+            }
+        ],
+        "message": "PHOENIX-4072 Prevent NPE for PreparedStatement.setObject of null",
+        "parent": "https://github.com/apache/phoenix/commit/1e74895ad83dfe1ada90897f95fb5c93e2cc8eee",
+        "repo": "phoenix",
+        "unit_tests": [
+            "PhoenixPreparedStatementTest.java"
+        ]
+    },
+    "phoenix_dd97d44": {
+        "bug_id": "phoenix_dd97d44",
+        "commit": "https://github.com/apache/phoenix/commit/dd97d44e779bc34c1edfb2bb3fd6dd91514d0113",
+        "file": [
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/phoenix/blob/dd97d44e779bc34c1edfb2bb3fd6dd91514d0113/phoenix-core/src/main/java/org/apache/phoenix/schema/PDataType.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/schema/PDataType.java?ref=dd97d44e779bc34c1edfb2bb3fd6dd91514d0113",
+                "deletions": 3,
+                "filename": "phoenix-core/src/main/java/org/apache/phoenix/schema/PDataType.java",
+                "patch": "@@ -180,7 +180,7 @@ public String toStringLiteral(byte[] b, int offset, int length, Format formatter\n      */\n     CHAR(\"CHAR\", Types.CHAR, String.class, null) { // Delegate to VARCHAR\n         @Override\n-        public Object pad(Object object, int maxLength) {\n+        public Object pad(Object object, Integer maxLength) {\n             String s = (String) object;\n             if (s == null) {\n                 return s;\n@@ -3124,7 +3124,7 @@ public String toStringLiteral(byte[] b, int o, int length, Format formatter) {\n     },\n     BINARY(\"BINARY\", Types.BINARY, byte[].class, null) {\n         @Override\n-        public Object pad(Object object, int maxLength) {\n+        public Object pad(Object object, Integer maxLength) {\n             byte[] b = (byte[]) object;\n             if (b == null) {\n                 return null;\n@@ -7132,7 +7132,7 @@ public long getMillis(ImmutableBytesWritable ptr, SortOrder sortOrder) {\n         throw new UnsupportedOperationException(\"Operation not supported for type \" + this);\n     }\n \n-    public Object pad(Object object, int maxLength) {\n+    public Object pad(Object object, Integer maxLength) {\n         return object;\n     }\n     ",
+                "raw_url": "https://github.com/apache/phoenix/raw/dd97d44e779bc34c1edfb2bb3fd6dd91514d0113/phoenix-core/src/main/java/org/apache/phoenix/schema/PDataType.java",
+                "sha": "c2fcbf0006ba4537a65b9d6d1119f0fc029f9e09",
+                "status": "modified"
+            }
+        ],
+        "message": "PHOENIX-1131 Fix NPE in PhoenixRuntime.encodePk padding of row key values to max column length",
+        "parent": "https://github.com/apache/phoenix/commit/eeac05afa257a7e733298a5680efede4abcd5355",
+        "repo": "phoenix",
+        "unit_tests": [
+            "PDataTypeTest.java"
+        ]
+    },
+    "phoenix_fe18e96": {
+        "bug_id": "phoenix_fe18e96",
+        "commit": "https://github.com/apache/phoenix/commit/fe18e96ae429cc0e4291075177d0e0c5f5e9a5b1",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/phoenix/blob/fe18e96ae429cc0e4291075177d0e0c5f5e9a5b1/phoenix-core/src/main/java/org/apache/phoenix/schema/SaltingUtil.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/schema/SaltingUtil.java?ref=fe18e96ae429cc0e4291075177d0e0c5f5e9a5b1",
+                "deletions": 1,
+                "filename": "phoenix-core/src/main/java/org/apache/phoenix/schema/SaltingUtil.java",
+                "patch": "@@ -38,7 +38,7 @@\n     public static final String SALTING_COLUMN_NAME = \"_SALT\";\n     public static final String SALTED_ROW_KEY_NAME = \"_SALTED_KEY\";\n     public static final PColumnImpl SALTING_COLUMN = new PColumnImpl(\n-            PNameFactory.newName(SALTING_COLUMN_NAME), null, PDataType.BINARY, 1, 0, false, 0, null, 0);\n+            PNameFactory.newName(SALTING_COLUMN_NAME), null, PDataType.BINARY, 1, 0, false, 0, SortOrder.getDefault(), 0);\n     public static final RowKeySchema VAR_BINARY_SALTED_SCHEMA = new RowKeySchemaBuilder(1)\n         .addField(SALTING_COLUMN, false, SortOrder.getDefault())\n         .addField(SchemaUtil.VAR_BINARY_DATUM, false, SortOrder.getDefault()).build();",
+                "raw_url": "https://github.com/apache/phoenix/raw/fe18e96ae429cc0e4291075177d0e0c5f5e9a5b1/phoenix-core/src/main/java/org/apache/phoenix/schema/SaltingUtil.java",
+                "sha": "f743f26aa3b1121dcc174e7aea2cec7a38ad88b4",
+                "status": "modified"
+            }
+        ],
+        "message": "Fix NPE introduced by my previous fix for Phoenix-32 - SortOrder was being passed in as null instead of ASC.\nhttps://issues.apache.org/jira/browse/PHOENIX-32",
+        "parent": "https://github.com/apache/phoenix/commit/ae131f560987039142ea5d0ed468c19d4aca565d",
+        "repo": "phoenix",
+        "unit_tests": [
+            "SaltingUtilTest.java"
+        ]
+    }
+}

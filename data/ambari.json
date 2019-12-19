@@ -1,0 +1,530 @@
+{
+    "ambari_135b00e": {
+        "bug_id": "ambari_135b00e",
+        "commit": "https://github.com/apache/ambari/commit/135b00e22cd116ee54413ef8acc049a1ac75ad32",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/ambari/blob/135b00e22cd116ee54413ef8acc049a1ac75ad32/ambari-server/src/main/java/org/apache/ambari/server/state/host/HostImpl.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/ambari/contents/ambari-server/src/main/java/org/apache/ambari/server/state/host/HostImpl.java?ref=135b00e22cd116ee54413ef8acc049a1ac75ad32",
+                "deletions": 1,
+                "filename": "ambari-server/src/main/java/org/apache/ambari/server/state/host/HostImpl.java",
+                "patch": "@@ -121,7 +121,7 @@\n   private Map<Long, MaintenanceState> maintMap = null;\n \n   // In-memory status, based on host components states\n-  private String status;\n+  private String status = HealthStatus.UNKNOWN.name();\n \n   // In-memory prefix of log file paths that is retrieved when the agent registers with the server\n   private String prefix;",
+                "raw_url": "https://github.com/apache/ambari/raw/135b00e22cd116ee54413ef8acc049a1ac75ad32/ambari-server/src/main/java/org/apache/ambari/server/state/host/HostImpl.java",
+                "sha": "9ba38ebc60b750b8db8e8f4ff6a0445e1974b5b7",
+                "status": "modified"
+            }
+        ],
+        "message": "AMBARI-8337. Add wizard hangs adding hosts with NPE. (Nate via mahadev)",
+        "parent": "https://github.com/apache/ambari/commit/c7aea4b32bd0bf2a92cbe8f76547a67eb2965202",
+        "repo": "ambari",
+        "unit_tests": [
+            "HostImplTest.java"
+        ]
+    },
+    "ambari_21c3f58": {
+        "bug_id": "ambari_21c3f58",
+        "commit": "https://github.com/apache/ambari/commit/21c3f58d24ece92c42f0054f9e57e76f04927e91",
+        "file": [
+            {
+                "additions": 24,
+                "blob_url": "https://github.com/apache/ambari/blob/21c3f58d24ece92c42f0054f9e57e76f04927e91/ambari-server/src/main/java/org/apache/ambari/server/view/ViewRegistry.java",
+                "changes": 41,
+                "contents_url": "https://api.github.com/repos/apache/ambari/contents/ambari-server/src/main/java/org/apache/ambari/server/view/ViewRegistry.java?ref=21c3f58d24ece92c42f0054f9e57e76f04927e91",
+                "deletions": 17,
+                "filename": "ambari-server/src/main/java/org/apache/ambari/server/view/ViewRegistry.java",
+                "patch": "@@ -40,6 +40,7 @@\n import org.apache.ambari.server.view.configuration.EntityConfig;\n import org.apache.ambari.server.view.configuration.InstanceConfig;\n import org.apache.ambari.server.view.configuration.ParameterConfig;\n+import org.apache.ambari.server.view.configuration.PersistenceConfig;\n import org.apache.ambari.server.view.configuration.PropertyConfig;\n import org.apache.ambari.server.view.configuration.ResourceConfig;\n import org.apache.ambari.server.view.configuration.ViewConfig;\n@@ -266,11 +267,11 @@ public static ViewRegistry getInstance() {\n           try {\n             ClassLoader cl = URLClassLoader.newInstance(new URL[]{fileEntry.toURI().toURL()});\n \n-            InputStream    configStream     = cl.getResourceAsStream(VIEW_XML);\n-            JAXBContext    jaxbContext      = JAXBContext.newInstance(ViewConfig.class);\n-            Unmarshaller   jaxbUnmarshaller = jaxbContext.createUnmarshaller();\n-            ViewConfig     viewConfig       = (ViewConfig) jaxbUnmarshaller.unmarshal(configStream);\n-            ViewEntity viewDefinition       = installView(viewConfig, configuration, cl, fileEntry.getAbsolutePath());\n+            InputStream  configStream     = cl.getResourceAsStream(VIEW_XML);\n+            JAXBContext  jaxbContext      = JAXBContext.newInstance(ViewConfig.class);\n+            Unmarshaller jaxbUnmarshaller = jaxbContext.createUnmarshaller();\n+            ViewConfig   viewConfig       = (ViewConfig) jaxbUnmarshaller.unmarshal(configStream);\n+            ViewEntity   viewDefinition   = installView(viewConfig, configuration, cl, fileEntry.getAbsolutePath());\n \n             for (InstanceConfig instanceConfig : viewConfig.getInstances()) {\n               ViewInstanceEntity viewInstanceDefinition = new ViewInstanceEntity(viewDefinition, instanceConfig);\n@@ -288,7 +289,6 @@ public static ViewRegistry getInstance() {\n         }\n       }\n       try {\n-\n         instanceDefinitions.addAll(persistViews());\n       } catch (ClassNotFoundException e) {\n         LOG.error(\"Caught exception persisting views.\", e);\n@@ -528,20 +528,27 @@ private void installViewInstance(ViewEntity viewDefinition,\n \n   // Set the entities defined in the view persistence element for the given view instance\n   private static void setPersistenceEntities(ViewInstanceEntity viewInstanceDefinition) {\n-    ViewEntity viewDefinition = viewInstanceDefinition.getViewEntity();\n+    ViewEntity        viewDefinition    = viewInstanceDefinition.getViewEntity();\n+    ViewConfig        viewConfig        = viewDefinition.getConfiguration();\n+\n     Collection<ViewEntityEntity> entities = new HashSet<ViewEntityEntity>();\n \n-    ViewConfig viewConfig = viewDefinition.getConfiguration();\n-    for (EntityConfig entityConfiguration : viewConfig.getPersistence().getEntities()) {\n-      ViewEntityEntity viewEntityEntity = new ViewEntityEntity();\n+    if (viewConfig != null) {\n+      PersistenceConfig persistenceConfig = viewConfig.getPersistence();\n \n-      viewEntityEntity.setViewName(viewDefinition.getName());\n-      viewEntityEntity.setViewInstanceName(viewInstanceDefinition.getName());\n-      viewEntityEntity.setClassName(entityConfiguration.getClassName());\n-      viewEntityEntity.setIdProperty(entityConfiguration.getIdProperty());\n-      viewEntityEntity.setViewInstance(viewInstanceDefinition);\n+      if (persistenceConfig != null) {\n+        for (EntityConfig entityConfiguration : persistenceConfig.getEntities()) {\n+          ViewEntityEntity viewEntityEntity = new ViewEntityEntity();\n \n-      entities.add(viewEntityEntity);\n+          viewEntityEntity.setViewName(viewDefinition.getName());\n+          viewEntityEntity.setViewInstanceName(viewInstanceDefinition.getName());\n+          viewEntityEntity.setClassName(entityConfiguration.getClassName());\n+          viewEntityEntity.setIdProperty(entityConfiguration.getIdProperty());\n+          viewEntityEntity.setViewInstance(viewInstanceDefinition);\n+\n+          entities.add(viewEntityEntity);\n+        }\n+      }\n     }\n     viewInstanceDefinition.setEntities(entities);\n   }\n@@ -580,7 +587,7 @@ protected void configure() {\n   private Set<ViewInstanceEntity> persistViews() throws ClassNotFoundException {\n \n     Set<ViewInstanceEntity> instanceDefinitions = new HashSet<ViewInstanceEntity>();\n-    Set<String> persistedViews = new HashSet<String>();\n+    Set<String>             persistedViews      = new HashSet<String>();\n \n     for (ViewEntity viewEntity : viewDAO.findAll()) {\n       String name = viewEntity.getName();",
+                "raw_url": "https://github.com/apache/ambari/raw/21c3f58d24ece92c42f0054f9e57e76f04927e91/ambari-server/src/main/java/org/apache/ambari/server/view/ViewRegistry.java",
+                "sha": "c8da1ae7725a3345011166d4d16b3bded0d2b154",
+                "status": "modified"
+            }
+        ],
+        "message": "AMBARI-5642 - Ambari Views : NPE deploying view",
+        "parent": "https://github.com/apache/ambari/commit/3c799274aea8d73aa50a5d76fde32ee6573beee7",
+        "repo": "ambari",
+        "unit_tests": [
+            "ViewRegistryTest.java"
+        ]
+    },
+    "ambari_2c660d3": {
+        "bug_id": "ambari_2c660d3",
+        "commit": "https://github.com/apache/ambari/commit/2c660d32ea1b499cb8ee7908d43fec25f011f96f",
+        "file": [
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/ambari/blob/2c660d32ea1b499cb8ee7908d43fec25f011f96f/ambari-server/src/main/java/org/apache/ambari/server/state/cluster/ClustersImpl.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/ambari/contents/ambari-server/src/main/java/org/apache/ambari/server/state/cluster/ClustersImpl.java?ref=2c660d32ea1b499cb8ee7908d43fec25f011f96f",
+                "deletions": 0,
+                "filename": "ambari-server/src/main/java/org/apache/ambari/server/state/cluster/ClustersImpl.java",
+                "patch": "@@ -840,6 +840,10 @@ public void deleteHost(String hostname) throws AmbariException {\n     // a copy of this to ensure that we can pass in the original set of\n     // clusters that the host belonged to to the host removal event\n     Set<Cluster> clusters = hostClusterMap.get(hostname);\n+    if (clusters == null) {\n+      throw new HostNotFoundException(hostname);\n+    }\n+\n     Set<Cluster> hostsClusters = new HashSet<>(clusters);\n \n     deleteHostEntityRelationships(hostname);",
+                "raw_url": "https://github.com/apache/ambari/raw/2c660d32ea1b499cb8ee7908d43fec25f011f96f/ambari-server/src/main/java/org/apache/ambari/server/state/cluster/ClustersImpl.java",
+                "sha": "caab7dfc93a1eba2cb1ab8a165f3dee164611265",
+                "status": "modified"
+            }
+        ],
+        "message": "AMBARI-15726. Removing unknown host from cluster throws NPE (ajit)",
+        "parent": "https://github.com/apache/ambari/commit/df00fd6e4b769276a72373980aa819c26465b12f",
+        "repo": "ambari",
+        "unit_tests": [
+            "ClustersImplTest.java"
+        ]
+    },
+    "ambari_30cd715": {
+        "bug_id": "ambari_30cd715",
+        "commit": "https://github.com/apache/ambari/commit/30cd715793183e0c00ea7fdb900482cfcdc13a8a",
+        "file": [
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/ambari/blob/30cd715793183e0c00ea7fdb900482cfcdc13a8a/ambari-server/src/main/java/org/apache/ambari/server/controller/AmbariManagementControllerImpl.java",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/ambari/contents/ambari-server/src/main/java/org/apache/ambari/server/controller/AmbariManagementControllerImpl.java?ref=30cd715793183e0c00ea7fdb900482cfcdc13a8a",
+                "deletions": 0,
+                "filename": "ambari-server/src/main/java/org/apache/ambari/server/controller/AmbariManagementControllerImpl.java",
+                "patch": "@@ -2707,6 +2707,9 @@ protected RequestStageContainer doStageCreation(RequestStageContainer requestSta\n       return requestStages;\n     }\n \n+    // check all stack configs are present in desired configs\n+    configHelper.checkAllStageConfigsPresentInDesiredConfigs(cluster);\n+\n     // caching upgrade suspended\n     boolean isUpgradeSuspended = cluster.isUpgradeSuspended();\n ",
+                "raw_url": "https://github.com/apache/ambari/raw/30cd715793183e0c00ea7fdb900482cfcdc13a8a/ambari-server/src/main/java/org/apache/ambari/server/controller/AmbariManagementControllerImpl.java",
+                "sha": "fac7b94791417a511484a85361fce5e1e1c8bb47",
+                "status": "modified"
+            },
+            {
+                "additions": 27,
+                "blob_url": "https://github.com/apache/ambari/blob/30cd715793183e0c00ea7fdb900482cfcdc13a8a/ambari-server/src/main/java/org/apache/ambari/server/state/ConfigHelper.java",
+                "changes": 29,
+                "contents_url": "https://api.github.com/repos/apache/ambari/contents/ambari-server/src/main/java/org/apache/ambari/server/state/ConfigHelper.java?ref=30cd715793183e0c00ea7fdb900482cfcdc13a8a",
+                "deletions": 2,
+                "filename": "ambari-server/src/main/java/org/apache/ambari/server/state/ConfigHelper.java",
+                "patch": "@@ -699,7 +699,9 @@ public void removeConfigsByType(Cluster cluster, String type) {\n     for (PropertyInfo stackProperty : stackProperties) {\n       if (stackProperty.getPropertyTypes().contains(propertyType)) {\n         String stackPropertyConfigType = fileNameToConfigType(stackProperty.getFilename());\n-        result.put(stackProperty, actualConfigs.get(stackPropertyConfigType).getProperties().get(stackProperty.getName()));\n+        if (actualConfigs.containsKey(stackPropertyConfigType)) {\n+          result.put(stackProperty, actualConfigs.get(stackPropertyConfigType).getProperties().get(stackProperty.getName()));\n+        }\n       }\n     }\n \n@@ -776,13 +778,36 @@ public void removeConfigsByType(Cluster cluster, String type) {\n     for (PropertyInfo stackProperty : stackProperties) {\n       if (stackProperty.getPropertyTypes().contains(propertyType)) {\n         String stackPropertyConfigType = fileNameToConfigType(stackProperty.getFilename());\n-        result.add(actualConfigs.get(stackPropertyConfigType).getProperties().get(stackProperty.getName()));\n+        if (actualConfigs.containsKey(stackPropertyConfigType)) {\n+          result.add(actualConfigs.get(stackPropertyConfigType).getProperties().get(stackProperty.getName()));\n+        }\n       }\n     }\n \n     return result;\n   }\n \n+  public void checkAllStageConfigsPresentInDesiredConfigs(Cluster cluster) throws AmbariException {\n+    StackId stackId = cluster.getDesiredStackVersion();\n+    Set<String> stackConfigTypes = ambariMetaInfo.getStack(stackId.getStackName(),\n+            stackId.getStackVersion()).getConfigTypeAttributes().keySet();\n+    Map<String, Config> actualConfigs = new HashMap<>();\n+    Map<String, DesiredConfig> desiredConfigs = cluster.getDesiredConfigs();\n+\n+    for (Map.Entry<String, DesiredConfig> desiredConfigEntry : desiredConfigs.entrySet()) {\n+      String configType = desiredConfigEntry.getKey();\n+      DesiredConfig desiredConfig = desiredConfigEntry.getValue();\n+      actualConfigs.put(configType, cluster.getConfig(configType, desiredConfig.getTag()));\n+    }\n+\n+    for (String stackConfigType : stackConfigTypes) {\n+      if (!actualConfigs.containsKey(stackConfigType)) {\n+        LOG.error(String.format(\"Unable to find stack configuration %s in ambari configs!\", stackConfigType));\n+      }\n+    }\n+\n+  }\n+\n   /***\n    * Fetch all the config values of a given PropertyType. For eg: Fetch all stack configs that are of type \"user\"\n    * @param cluster",
+                "raw_url": "https://github.com/apache/ambari/raw/30cd715793183e0c00ea7fdb900482cfcdc13a8a/ambari-server/src/main/java/org/apache/ambari/server/state/ConfigHelper.java",
+                "sha": "e8250fefa12924750ae17681b41b79096022b2c6",
+                "status": "modified"
+            }
+        ],
+        "message": "AMBARI-21520. Ambari server logs NPE with no additional stack trace on any host component start/stop command.(vbrodetskyi)",
+        "parent": "https://github.com/apache/ambari/commit/4b189a1131a387f1a74e45624af95525e984d30a",
+        "repo": "ambari",
+        "unit_tests": [
+            "ConfigHelperTest.java"
+        ]
+    },
+    "ambari_33a573c": {
+        "bug_id": "ambari_33a573c",
+        "commit": "https://github.com/apache/ambari/commit/33a573cdb54229cee37e1f49837be783de3cba7b",
+        "file": [
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/ambari/blob/33a573cdb54229cee37e1f49837be783de3cba7b/ambari-server/src/main/java/org/apache/ambari/server/serveraction/kerberos/ConfigureAmbariIdentitiesServerAction.java",
+                "changes": 8,
+                "contents_url": "https://api.github.com/repos/apache/ambari/contents/ambari-server/src/main/java/org/apache/ambari/server/serveraction/kerberos/ConfigureAmbariIdentitiesServerAction.java?ref=33a573cdb54229cee37e1f49837be783de3cba7b",
+                "deletions": 2,
+                "filename": "ambari-server/src/main/java/org/apache/ambari/server/serveraction/kerberos/ConfigureAmbariIdentitiesServerAction.java",
+                "patch": "@@ -184,12 +184,16 @@ public boolean installAmbariServerIdentity(String principal,\n                   \"  This is not an error if an Ambari agent is not installed on the Ambari server host.\",\n               principal, ambariServerHostName);\n           LOG.warn(message);\n-          actionLog.writeStdErr(message);\n+          if(actionLog != null) {\n+            actionLog.writeStdErr(message);\n+          }\n         } else if (!kerberosPrincipalHostDAO.exists(principal, ambariServerHostID)) {\n           kerberosPrincipalHostDAO.create(principal, ambariServerHostID);\n         }\n \n-        actionLog.writeStdOut(String.format(\"Created Ambari server keytab file for %s at %s\", principal, destKeytabFile));\n+        if(actionLog != null) {\n+          actionLog.writeStdOut(String.format(\"Created Ambari server keytab file for %s at %s\", principal, destKeytabFile));\n+        }\n       }\n     } catch (InterruptedException | IOException e) {\n       throw new AmbariException(e.getLocalizedMessage(), e);",
+                "raw_url": "https://github.com/apache/ambari/raw/33a573cdb54229cee37e1f49837be783de3cba7b/ambari-server/src/main/java/org/apache/ambari/server/serveraction/kerberos/ConfigureAmbariIdentitiesServerAction.java",
+                "sha": "10647e8a01370dea90e7d102b18d26589f198590",
+                "status": "modified"
+            }
+        ],
+        "message": "AMBARI-18448. NPE when installing secure cluster via Blueprints due to null logger (rlevas)",
+        "parent": "https://github.com/apache/ambari/commit/ac0c66e986e14db6a746dfe1b84f36a662dacfbb",
+        "repo": "ambari",
+        "unit_tests": [
+            "ConfigureAmbariIdentitiesServerActionTest.java"
+        ]
+    },
+    "ambari_33f95a1": {
+        "bug_id": "ambari_33f95a1",
+        "commit": "https://github.com/apache/ambari/commit/33f95a12a31bfd01e5135ab8e4586affb6b815c9",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/ambari/blob/33f95a12a31bfd01e5135ab8e4586affb6b815c9/ambari-server/src/main/java/org/apache/ambari/server/state/ServiceInfo.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/ambari/contents/ambari-server/src/main/java/org/apache/ambari/server/state/ServiceInfo.java?ref=33f95a12a31bfd01e5135ab8e4586affb6b815c9",
+                "deletions": 1,
+                "filename": "ambari-server/src/main/java/org/apache/ambari/server/state/ServiceInfo.java",
+                "patch": "@@ -233,7 +233,7 @@ public boolean hasPropertyFor(String type, Collection<String> keyNames) {\n     Set<String> keys = configLayout.get(type);\n \n     for (String staleCheck : keyNames) {\n-      if (keys.contains(staleCheck))\n+      if (keys != null && keys.contains(staleCheck))\n         return true;\n     }\n     ",
+                "raw_url": "https://github.com/apache/ambari/raw/33f95a12a31bfd01e5135ab8e4586affb6b815c9/ambari-server/src/main/java/org/apache/ambari/server/state/ServiceInfo.java",
+                "sha": "c45531f1b0d7f129a551b4149f82d335d6926d81",
+                "status": "modified"
+            }
+        ],
+        "message": "AMBARI-4191. NPE exceptions / errors in server log. (swagle)",
+        "parent": "https://github.com/apache/ambari/commit/f0be471404f90af602b79d368cc8091560a891b1",
+        "repo": "ambari",
+        "unit_tests": [
+            "ServiceInfoTest.java"
+        ]
+    },
+    "ambari_3ae844f": {
+        "bug_id": "ambari_3ae844f",
+        "commit": "https://github.com/apache/ambari/commit/3ae844f0a9439cb29945e16c8f9963d4261e7c40",
+        "file": [
+            {
+                "additions": 15,
+                "blob_url": "https://github.com/apache/ambari/blob/3ae844f0a9439cb29945e16c8f9963d4261e7c40/ambari-server/src/main/java/org/apache/ambari/server/checks/DatabaseConsistencyCheckHelper.java",
+                "changes": 26,
+                "contents_url": "https://api.github.com/repos/apache/ambari/contents/ambari-server/src/main/java/org/apache/ambari/server/checks/DatabaseConsistencyCheckHelper.java?ref=3ae844f0a9439cb29945e16c8f9963d4261e7c40",
+                "deletions": 11,
+                "filename": "ambari-server/src/main/java/org/apache/ambari/server/checks/DatabaseConsistencyCheckHelper.java",
+                "patch": "@@ -511,17 +511,21 @@ public static void checkServiceConfigs()  {\n \n         //compare required service configs from stack with mapped service configs from db\n         Map<Integer, Multimap<String, String>> dbServiceVersionConfigs = dbClusterServiceVersionConfigs.get(clusterName);\n-        for (Integer serviceVersion : dbServiceVersionConfigs.keySet()) {\n-          Multimap<String, String> dbServiceConfigs = dbServiceVersionConfigs.get(serviceVersion);\n-          for (String serviceName : dbServiceConfigs.keySet()) {\n-            Collection<String> serviceConfigsFromStack = stackServiceConfigs.get(serviceName);\n-            Collection<String> serviceConfigsFromDB = dbServiceConfigs.get(serviceName);\n-            if (serviceConfigsFromDB != null && serviceConfigsFromStack != null) {\n-              serviceConfigsFromStack.removeAll(serviceConfigsFromDB);\n-              if (!serviceConfigsFromStack.isEmpty()) {\n-                LOG.error(\"Required config(s): {} is(are) not available for service {} with service config version {} in cluster {}\",\n-                        StringUtils.join(serviceConfigsFromStack, \",\"), serviceName, Integer.toString(serviceVersion), clusterName);\n-                errorAvailable = true;\n+        if (dbServiceVersionConfigs != null) {\n+          for (Integer serviceVersion : dbServiceVersionConfigs.keySet()) {\n+            Multimap<String, String> dbServiceConfigs = dbServiceVersionConfigs.get(serviceVersion);\n+            if (dbServiceConfigs != null) {\n+              for (String serviceName : dbServiceConfigs.keySet()) {\n+                Collection<String> serviceConfigsFromStack = stackServiceConfigs.get(serviceName);\n+                Collection<String> serviceConfigsFromDB = dbServiceConfigs.get(serviceName);\n+                if (serviceConfigsFromDB != null && serviceConfigsFromStack != null) {\n+                  serviceConfigsFromStack.removeAll(serviceConfigsFromDB);\n+                  if (!serviceConfigsFromStack.isEmpty()) {\n+                    LOG.error(\"Required config(s): {} is(are) not available for service {} with service config version {} in cluster {}\",\n+                            StringUtils.join(serviceConfigsFromStack, \",\"), serviceName, Integer.toString(serviceVersion), clusterName);\n+                    errorAvailable = true;\n+                  }\n+                }\n               }\n             }\n           }",
+                "raw_url": "https://github.com/apache/ambari/raw/3ae844f0a9439cb29945e16c8f9963d4261e7c40/ambari-server/src/main/java/org/apache/ambari/server/checks/DatabaseConsistencyCheckHelper.java",
+                "sha": "3035de98756059dad194323208c6a4a5e417e7be",
+                "status": "modified"
+            }
+        ],
+        "message": "AMBARI-17430. Fix serviceconfig NPE in db consistency checker.(vbrodetskyi)",
+        "parent": "https://github.com/apache/ambari/commit/0fc5b8fd3c474881cff2eaf2ebdafa91068336ae",
+        "repo": "ambari",
+        "unit_tests": [
+            "DatabaseConsistencyCheckHelperTest.java"
+        ]
+    },
+    "ambari_40637b1": {
+        "bug_id": "ambari_40637b1",
+        "commit": "https://github.com/apache/ambari/commit/40637b16746ea4e2eb772e909cee83989ec08d7e",
+        "file": [
+            {
+                "additions": 10,
+                "blob_url": "https://github.com/apache/ambari/blob/40637b16746ea4e2eb772e909cee83989ec08d7e/ambari-server/src/main/java/org/apache/ambari/server/controller/AmbariCustomCommandExecutionHelper.java",
+                "changes": 10,
+                "contents_url": "https://api.github.com/repos/apache/ambari/contents/ambari-server/src/main/java/org/apache/ambari/server/controller/AmbariCustomCommandExecutionHelper.java?ref=40637b16746ea4e2eb772e909cee83989ec08d7e",
+                "deletions": 0,
+                "filename": "ambari-server/src/main/java/org/apache/ambari/server/controller/AmbariCustomCommandExecutionHelper.java",
+                "patch": "@@ -557,6 +557,16 @@ private void findHostAndAddServiceCheckAction(final ActionExecutionContext actio\n       candidateHosts = serviceHostComponents.keySet();\n     }\n \n+    // check if all hostnames are valid.\n+    for(String candidateHostName: candidateHosts) {\n+      ServiceComponentHost serviceComponentHost = serviceHostComponents.get(candidateHostName);\n+\n+      if (serviceComponentHost == null) {\n+        throw new AmbariException(\"Provided hostname = \"\n+            + candidateHostName + \" is either not a valid cluster host or does not satisfy the filter condition.\");\n+      }\n+    }\n+\n     // Filter out hosts that are in maintenance mode - they should never be included in service checks\n     Set<String> hostsInMaintenanceMode = new HashSet<String>();\n     if (actionExecutionContext.isMaintenanceModeHostExcluded()) {",
+                "raw_url": "https://github.com/apache/ambari/raw/40637b16746ea4e2eb772e909cee83989ec08d7e/ambari-server/src/main/java/org/apache/ambari/server/controller/AmbariCustomCommandExecutionHelper.java",
+                "sha": "0cf46df5e70adb60a12474e4a130dc7949b698c2",
+                "status": "modified"
+            }
+        ],
+        "message": "AMBARI-18623. NPE when a non-existent host is provided as part of the host filter (aonishuk)",
+        "parent": "https://github.com/apache/ambari/commit/8d5e76fe84ffdc7eee43b6a9a08c984a8bcf4c5b",
+        "repo": "ambari",
+        "unit_tests": [
+            "AmbariCustomCommandExecutionHelperTest.java"
+        ]
+    },
+    "ambari_417a1f0": {
+        "bug_id": "ambari_417a1f0",
+        "commit": "https://github.com/apache/ambari/commit/417a1f03c3bf908265881313da835cad2dab3d4d",
+        "file": [
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/ambari/blob/417a1f03c3bf908265881313da835cad2dab3d4d/ambari-server/src/main/java/org/apache/ambari/server/controller/internal/BlueprintConfigurationProcessor.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/ambari/contents/ambari-server/src/main/java/org/apache/ambari/server/controller/internal/BlueprintConfigurationProcessor.java?ref=417a1f03c3bf908265881313da835cad2dab3d4d",
+                "deletions": 2,
+                "filename": "ambari-server/src/main/java/org/apache/ambari/server/controller/internal/BlueprintConfigurationProcessor.java",
+                "patch": "@@ -215,7 +215,7 @@ public BlueprintConfigurationProcessor(ClusterTopology clusterTopology) {\n           // cluster scoped configuration which also includes all default and BP properties\n           Map<String, Map<String, String>> clusterProps = clusterTopology.getConfiguration().getFullProperties();\n           Map<String, String> typeMap = clusterProps.get(type);\n-          if (typeMap != null && typeMap.containsKey(propertyName)) {\n+          if (typeMap != null && typeMap.containsKey(propertyName) && typeMap.get(propertyName) != null) {\n             requiredHostGroups.addAll(updater.getRequiredHostGroups(\n                 propertyName, typeMap.get(propertyName), clusterProps, clusterTopology));\n           }\n@@ -266,7 +266,7 @@ public BlueprintConfigurationProcessor(ClusterTopology clusterTopology) {\n \n           // topo cluster scoped configuration which also includes all default and BP properties\n           Map<String, String> typeMap = clusterProps.get(type);\n-          if (typeMap != null && typeMap.containsKey(propertyName)) {\n+          if (typeMap != null && typeMap.containsKey(propertyName) && typeMap.get(propertyName) != null) {\n             final String originalValue = typeMap.get(propertyName);\n             final String updatedValue =\n               updater.updateForClusterCreate(propertyName, originalValue, clusterProps, clusterTopology);",
+                "raw_url": "https://github.com/apache/ambari/raw/417a1f03c3bf908265881313da835cad2dab3d4d/ambari-server/src/main/java/org/apache/ambari/server/controller/internal/BlueprintConfigurationProcessor.java",
+                "sha": "a295bf77ec0d930c000c1740a05aff999c03c0e1",
+                "status": "modified"
+            }
+        ],
+        "message": "AMBARI-17793: Blueprint deployment throwing NPE when there is a config marked as deleted (jluniya)",
+        "parent": "https://github.com/apache/ambari/commit/9f79fa9f5ec5ccb50db7e6a28656f85bc2e3c3ff",
+        "repo": "ambari",
+        "unit_tests": [
+            "BlueprintConfigurationProcessorTest.java"
+        ]
+    },
+    "ambari_65e8193": {
+        "bug_id": "ambari_65e8193",
+        "commit": "https://github.com/apache/ambari/commit/65e8193187cf550071ecaaab228f4470dcb96bef",
+        "file": [
+            {
+                "additions": 8,
+                "blob_url": "https://github.com/apache/ambari/blob/65e8193187cf550071ecaaab228f4470dcb96bef/ambari-server/src/main/java/org/apache/ambari/server/view/ViewRegistry.java",
+                "changes": 9,
+                "contents_url": "https://api.github.com/repos/apache/ambari/contents/ambari-server/src/main/java/org/apache/ambari/server/view/ViewRegistry.java?ref=65e8193187cf550071ecaaab228f4470dcb96bef",
+                "deletions": 1,
+                "filename": "ambari-server/src/main/java/org/apache/ambari/server/view/ViewRegistry.java",
+                "patch": "@@ -58,6 +58,7 @@\n import java.net.URL;\n import java.net.URLClassLoader;\n import java.util.Collection;\n+import java.util.Collections;\n import java.util.HashMap;\n import java.util.HashSet;\n import java.util.List;\n@@ -170,7 +171,13 @@ public void addDefinition(ViewEntity definition) {\n    * @return the collection of view instances for the view definition\n    */\n   public Collection<ViewInstanceEntity> getInstanceDefinitions(ViewEntity definition) {\n-    return definition == null ? null : viewInstanceDefinitions.get(definition).values();\n+    if (definition != null) {\n+      Map<String, ViewInstanceEntity> instanceEntityMap = viewInstanceDefinitions.get(definition);\n+      if (instanceEntityMap != null) {\n+        return instanceEntityMap.values();\n+      }\n+    }\n+    return Collections.emptyList();\n   }\n \n   /**",
+                "raw_url": "https://github.com/apache/ambari/raw/65e8193187cf550071ecaaab228f4470dcb96bef/ambari-server/src/main/java/org/apache/ambari/server/view/ViewRegistry.java",
+                "sha": "a45cb3952d97e4a5a69484e85e87c713167ac626",
+                "status": "modified"
+            }
+        ],
+        "message": "AMBARI-5651 - Ambari Views : NPE deploying view with no instances defined",
+        "parent": "https://github.com/apache/ambari/commit/60db51efe596d617fe40779dce9dd610d25e8217",
+        "repo": "ambari",
+        "unit_tests": [
+            "ViewRegistryTest.java"
+        ]
+    },
+    "ambari_73f1dea": {
+        "bug_id": "ambari_73f1dea",
+        "commit": "https://github.com/apache/ambari/commit/73f1dea9674359ecbfd723917c83913b20986906",
+        "file": [
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/ambari/blob/73f1dea9674359ecbfd723917c83913b20986906/ambari-server/src/main/java/org/apache/ambari/server/controller/internal/JsonHttpPropertyRequest.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/ambari/contents/ambari-server/src/main/java/org/apache/ambari/server/controller/internal/JsonHttpPropertyRequest.java?ref=73f1dea9674359ecbfd723917c83913b20986906",
+                "deletions": 2,
+                "filename": "ambari-server/src/main/java/org/apache/ambari/server/controller/internal/JsonHttpPropertyRequest.java",
+                "patch": "@@ -62,7 +62,9 @@ public void populateResource(Resource resource, InputStream inputStream) throws\n \n     try {\n       Map<String, Object> responseMap = GSON.fromJson(IOUtils.toString(inputStream, \"UTF-8\"), MAP_TYPE);\n-\n+      if (responseMap == null){\n+        LOG.error(\"Properties map from HTTP response is null\");\n+      }\n       for (Map.Entry<String, String> entry : getPropertyMappings().entrySet()) {\n         Object propertyValueToSet = getPropertyValue(responseMap, entry.getKey());\n         resource.setProperty(entry.getValue(), propertyValueToSet);\n@@ -77,7 +79,7 @@ public void populateResource(Resource resource, InputStream inputStream) throws\n \n   // get the property value from the response map for the given property name\n   private Object getPropertyValue(Map<String, Object> responseMap, String property) throws SystemException {\n-    if (property == null) {\n+    if (property == null || responseMap == null) {\n       return null;\n     }\n ",
+                "raw_url": "https://github.com/apache/ambari/raw/73f1dea9674359ecbfd723917c83913b20986906/ambari-server/src/main/java/org/apache/ambari/server/controller/internal/JsonHttpPropertyRequest.java",
+                "sha": "16a7ae7be1a8f167ce9f9614e3d1a6ce9d5111d6",
+                "status": "modified"
+            },
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/ambari/blob/73f1dea9674359ecbfd723917c83913b20986906/ambari-server/src/main/java/org/apache/ambari/server/controller/internal/URLStreamProvider.java",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/ambari/contents/ambari-server/src/main/java/org/apache/ambari/server/controller/internal/URLStreamProvider.java?ref=73f1dea9674359ecbfd723917c83913b20986906",
+                "deletions": 0,
+                "filename": "ambari-server/src/main/java/org/apache/ambari/server/controller/internal/URLStreamProvider.java",
+                "patch": "@@ -241,6 +241,9 @@ public HttpURLConnection processURL(String spec, String requestMethod, byte[] bo\n     } else {\n         // not a 401 Unauthorized status code\n         // we would let the original response propagate\n+        if (statusCode == HttpStatus.SC_NOT_FOUND || statusCode == HttpStatus.SC_FORBIDDEN){\n+          LOG.error(String.format(\"Received HTTP %s response from URL: %s\", statusCode, spec));\n+        }\n         return connection;\n     }\n   }",
+                "raw_url": "https://github.com/apache/ambari/raw/73f1dea9674359ecbfd723917c83913b20986906/ambari-server/src/main/java/org/apache/ambari/server/controller/internal/URLStreamProvider.java",
+                "sha": "501aa0426a7980ae0f6246787d4ea2772109f13a",
+                "status": "modified"
+            }
+        ],
+        "message": "AMBARI-18588 Ambari server should not crash with NPE when parsing HTTP response for YARN RM properties (dili)",
+        "parent": "https://github.com/apache/ambari/commit/41c49e162f156320a0c366f487beea0280b95e38",
+        "repo": "ambari",
+        "unit_tests": [
+            "URLStreamProviderTest.java"
+        ]
+    },
+    "ambari_773541e": {
+        "bug_id": "ambari_773541e",
+        "commit": "https://github.com/apache/ambari/commit/773541ea06916d63aa2cd2c701b2759c6bd6384f",
+        "file": [
+            {
+                "additions": 10,
+                "blob_url": "https://github.com/apache/ambari/blob/773541ea06916d63aa2cd2c701b2759c6bd6384f/ambari-server/src/main/java/org/apache/ambari/server/controller/ganglia/GangliaPropertyProvider.java",
+                "changes": 12,
+                "contents_url": "https://api.github.com/repos/apache/ambari/contents/ambari-server/src/main/java/org/apache/ambari/server/controller/ganglia/GangliaPropertyProvider.java?ref=773541ea06916d63aa2cd2c701b2759c6bd6384f",
+                "deletions": 2,
+                "filename": "ambari-server/src/main/java/org/apache/ambari/server/controller/ganglia/GangliaPropertyProvider.java",
+                "patch": "@@ -487,8 +487,16 @@ public void putPropertyId(String metric, String id) {\n           metric.setHost_name(reader.readLine());\n           metric.setMetric_name(reader.readLine());\n \n-          int time = convertToNumber(reader.readLine()).intValue();\n-          int step = convertToNumber(reader.readLine()).intValue();\n+          String timeStr = reader.readLine();\n+          String stepStr = reader.readLine();\n+          if (timeStr == null || timeStr.isEmpty() || stepStr == null\n+              || stepStr.isEmpty()) {\n+            LOG.info(\"Unexpected end of stream reached while getting ganglia \" +\n+                \"metrics for spec => \" + spec);\n+            return Collections.emptySet();\n+          }\n+          int time = convertToNumber(timeStr).intValue();\n+          int step = convertToNumber(stepStr).intValue();\n \n           String val     = reader.readLine();\n           String lastVal = null;",
+                "raw_url": "https://github.com/apache/ambari/raw/773541ea06916d63aa2cd2c701b2759c6bd6384f/ambari-server/src/main/java/org/apache/ambari/server/controller/ganglia/GangliaPropertyProvider.java",
+                "sha": "a0c9b3ce60de45bf396714165cbac01c27913e04",
+                "status": "modified"
+            }
+        ],
+        "message": "AMBARI-5510. NPE in ganglia property provider (Eugene Chekanskiy via smohanty)",
+        "parent": "https://github.com/apache/ambari/commit/08d499f9ea87adc89ca0ee7509dd8f408b82a1ca",
+        "repo": "ambari",
+        "unit_tests": [
+            "GangliaPropertyProviderTest.java"
+        ]
+    },
+    "ambari_83bef41": {
+        "bug_id": "ambari_83bef41",
+        "commit": "https://github.com/apache/ambari/commit/83bef413c47c76cbf54bc64847620769168389ac",
+        "file": [
+            {
+                "additions": 8,
+                "blob_url": "https://github.com/apache/ambari/blob/83bef413c47c76cbf54bc64847620769168389ac/ambari-server/src/main/java/org/apache/ambari/server/controller/AmbariServer.java",
+                "changes": 12,
+                "contents_url": "https://api.github.com/repos/apache/ambari/contents/ambari-server/src/main/java/org/apache/ambari/server/controller/AmbariServer.java?ref=83bef413c47c76cbf54bc64847620769168389ac",
+                "deletions": 4,
+                "filename": "ambari-server/src/main/java/org/apache/ambari/server/controller/AmbariServer.java",
+                "patch": "@@ -794,10 +794,14 @@ protected void initDB() throws AmbariException {\n   }\n \n   public void stop() throws Exception {\n-    try {\n-      server.stop();\n-    } catch (Exception e) {\n-      LOG.error(\"Error stopping the server\", e);\n+    if (server == null) {\n+      throw new AmbariException(\"Error stopping the server\");\n+    } else {\n+      try {\n+        server.stop();\n+      } catch (Exception e) {\n+        LOG.error(\"Error stopping the server\", e);\n+      }\n     }\n   }\n ",
+                "raw_url": "https://github.com/apache/ambari/raw/83bef413c47c76cbf54bc64847620769168389ac/ambari-server/src/main/java/org/apache/ambari/server/controller/AmbariServer.java",
+                "sha": "b4161298c7d450037e315806816b714f80d5e323",
+                "status": "modified"
+            }
+        ],
+        "message": "AMBARI-14928 Ambari throws NPE in kerberos mode U14/S11 (dsen)",
+        "parent": "https://github.com/apache/ambari/commit/ed492292cd4fedd41ebe95ba97a73e57cceb0bae",
+        "repo": "ambari",
+        "unit_tests": [
+            "AmbariServerTest.java"
+        ]
+    },
+    "ambari_966f303": {
+        "bug_id": "ambari_966f303",
+        "commit": "https://github.com/apache/ambari/commit/966f3031d50b0106dfe5d19abbdd1e3b84d1f059",
+        "file": [
+            {
+                "additions": 11,
+                "blob_url": "https://github.com/apache/ambari/blob/966f3031d50b0106dfe5d19abbdd1e3b84d1f059/ambari-server/src/main/java/org/apache/ambari/server/state/cluster/ClusterImpl.java",
+                "changes": 12,
+                "contents_url": "https://api.github.com/repos/apache/ambari/contents/ambari-server/src/main/java/org/apache/ambari/server/state/cluster/ClusterImpl.java?ref=966f3031d50b0106dfe5d19abbdd1e3b84d1f059",
+                "deletions": 1,
+                "filename": "ambari-server/src/main/java/org/apache/ambari/server/state/cluster/ClusterImpl.java",
+                "patch": "@@ -2267,7 +2267,17 @@ public DesiredConfig transformEntry(@Nullable String key, @Nullable Set<DesiredC\n                 \" unknown configType=\" + e.getType());\n             continue;\n           }\n-          c.setVersion(allConfigs.get(e.getType()).get(e.getTag()).getVersion());\n+\n+          Map<String, Config> configMap = allConfigs.get(e.getType());\n+          if(!configMap.containsKey(e.getTag())) {\n+            LOG.debug(\"Config inconsistency exists for typeName=\" +\n+                    e.getType() +\n+                    \", unknown versionTag=\" + e.getTag());\n+            continue;\n+          }\n+\n+          Config config = configMap.get(e.getTag());\n+          c.setVersion(config.getVersion());\n \n           Set<DesiredConfig> configs = map.get(e.getType());\n           if (configs == null) {",
+                "raw_url": "https://github.com/apache/ambari/raw/966f3031d50b0106dfe5d19abbdd1e3b84d1f059/ambari-server/src/main/java/org/apache/ambari/server/state/cluster/ClusterImpl.java",
+                "sha": "57941d01e9795c903c036d400aeae72228fb3d76",
+                "status": "modified"
+            }
+        ],
+        "message": "AMBARI-14988: DB consistency - Add consistency check on clusterconfigmapping in ClusterImpl::getDesiredConfigs() for NPE.",
+        "parent": "https://github.com/apache/ambari/commit/f247ddcfa6c7cc48508cbcfa1e681169dce3b495",
+        "repo": "ambari",
+        "unit_tests": [
+            "ClusterImplTest.java"
+        ]
+    },
+    "ambari_b73f84c": {
+        "bug_id": "ambari_b73f84c",
+        "commit": "https://github.com/apache/ambari/commit/b73f84c9c32cfca28ad012960d0049af98ce65ed",
+        "file": [
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/ambari/blob/b73f84c9c32cfca28ad012960d0049af98ce65ed/ambari-server/src/main/java/org/apache/ambari/server/upgrade/UpgradeCatalog270.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/ambari/contents/ambari-server/src/main/java/org/apache/ambari/server/upgrade/UpgradeCatalog270.java?ref=b73f84c9c32cfca28ad012960d0049af98ce65ed",
+                "deletions": 2,
+                "filename": "ambari-server/src/main/java/org/apache/ambari/server/upgrade/UpgradeCatalog270.java",
+                "patch": "@@ -1282,8 +1282,10 @@ private boolean updateInfraKerberosDescriptor(KerberosDescriptor kerberosDescrip\n \n       for (KerberosServiceDescriptor serviceDescriptor : kerberosDescriptor.getServices().values()) {\n         updateKerberosIdentities(serviceDescriptor);\n-        for (KerberosComponentDescriptor componentDescriptor : serviceDescriptor.getComponents().values()) {\n-          updateKerberosIdentities(componentDescriptor);\n+        if (MapUtils.isNotEmpty(serviceDescriptor.getComponents())) {\n+          for (KerberosComponentDescriptor componentDescriptor : serviceDescriptor.getComponents().values()) {\n+            updateKerberosIdentities(componentDescriptor);\n+          }\n         }\n       }\n ",
+                "raw_url": "https://github.com/apache/ambari/raw/b73f84c9c32cfca28ad012960d0049af98ce65ed/ambari-server/src/main/java/org/apache/ambari/server/upgrade/UpgradeCatalog270.java",
+                "sha": "ed5c5281e973f4e0e0e10d9bc4d1aebdf8c5c948",
+                "status": "modified"
+            }
+        ],
+        "message": "AMBARI-24473. Ambari upgrade fails due to NPE when processing Ambari Infra kerberos descriptor changes (#2069)",
+        "parent": "https://github.com/apache/ambari/commit/db2c3c7e497e73a5d573afc92b19d7463be2dd66",
+        "repo": "ambari",
+        "unit_tests": [
+            "UpgradeCatalog270Test.java"
+        ]
+    },
+    "ambari_c9936ad": {
+        "bug_id": "ambari_c9936ad",
+        "commit": "https://github.com/apache/ambari/commit/c9936ad349e3e703dcbf6f2a1644f8a3e45a23d0",
+        "file": [
+            {
+                "additions": 20,
+                "blob_url": "https://github.com/apache/ambari/blob/c9936ad349e3e703dcbf6f2a1644f8a3e45a23d0/ambari-server/src/main/java/org/apache/ambari/server/upgrade/UpgradeCatalog260.java",
+                "changes": 38,
+                "contents_url": "https://api.github.com/repos/apache/ambari/contents/ambari-server/src/main/java/org/apache/ambari/server/upgrade/UpgradeCatalog260.java?ref=c9936ad349e3e703dcbf6f2a1644f8a3e45a23d0",
+                "deletions": 18,
+                "filename": "ambari-server/src/main/java/org/apache/ambari/server/upgrade/UpgradeCatalog260.java",
+                "patch": "@@ -775,26 +775,28 @@ protected void updateHiveConfigs() throws AmbariException {\n           // hive-interactive-site/hive.llap.zk.sm.keytab.file and hive-interactive-site/hive.llap.task.keytab.file respectively,\n           // based on what hive-interactive-site/hive.llap.daemon.keytab.file has.\n           Config hsiSiteConfig = cluster.getDesiredConfigByType(HIVE_INTERACTIVE_SITE);\n-          Map<String, String> hsiSiteConfigProperties = hsiSiteConfig.getProperties();\n-          if (hsiSiteConfigProperties != null &&\n-                  hsiSiteConfigProperties.containsKey(HIVE_LLAP_DAEMON_KEYTAB_FILE)) {\n-            String[] identities = {HIVE_LLAP_ZK_SM_KEYTAB_FILE, HIVE_LLAP_TASK_KEYTAB_FILE};\n-            Map<String, String> newProperties = new HashMap<>();\n-            for (String identity : identities) {\n-              // Update only if we were able to modify the corresponding kerberos descriptor,\n-              // reflected in list 'getYarnKerberosDescUpdatedList'.\n-              if (getYarnKerberosDescUpdatedList().contains(identity) && hsiSiteConfigProperties.containsKey(identity)) {\n-                newProperties.put(identity, hsiSiteConfigProperties.get(HIVE_LLAP_DAEMON_KEYTAB_FILE));\n+          if (hsiSiteConfig != null) {\n+            Map<String, String> hsiSiteConfigProperties = hsiSiteConfig.getProperties();\n+            if (hsiSiteConfigProperties != null &&\n+                    hsiSiteConfigProperties.containsKey(HIVE_LLAP_DAEMON_KEYTAB_FILE)) {\n+              String[] identities = {HIVE_LLAP_ZK_SM_KEYTAB_FILE, HIVE_LLAP_TASK_KEYTAB_FILE};\n+              Map<String, String> newProperties = new HashMap<>();\n+              for (String identity : identities) {\n+                // Update only if we were able to modify the corresponding kerberos descriptor,\n+                // reflected in list 'getYarnKerberosDescUpdatedList'.\n+                if (getYarnKerberosDescUpdatedList().contains(identity) && hsiSiteConfigProperties.containsKey(identity)) {\n+                  newProperties.put(identity, hsiSiteConfigProperties.get(HIVE_LLAP_DAEMON_KEYTAB_FILE));\n+                }\n               }\n-            }\n \n-            // Update step.\n-            if (newProperties.size() > 0) {\n-              try {\n-                updateConfigurationPropertiesForCluster(cluster, HIVE_INTERACTIVE_SITE, newProperties, true, false);\n-                LOG.info(\"Updated HSI config(s) : \" + newProperties.keySet() + \" with value(s) = \" + newProperties.values()+\" respectively.\");\n-              } catch (AmbariException e) {\n-                e.printStackTrace();\n+              // Update step.\n+              if (newProperties.size() > 0) {\n+                try {\n+                  updateConfigurationPropertiesForCluster(cluster, HIVE_INTERACTIVE_SITE, newProperties, true, false);\n+                  LOG.info(\"Updated HSI config(s) : \" + newProperties.keySet() + \" with value(s) = \" + newProperties.values() + \" respectively.\");\n+                } catch (AmbariException e) {\n+                  e.printStackTrace();\n+                }\n               }\n             }\n           }",
+                "raw_url": "https://github.com/apache/ambari/raw/c9936ad349e3e703dcbf6f2a1644f8a3e45a23d0/ambari-server/src/main/java/org/apache/ambari/server/upgrade/UpgradeCatalog260.java",
+                "sha": "4d9a5dacf894aa9fad29a0c461e1b00bf6172f05",
+                "status": "modified"
+            }
+        ],
+        "message": "AMBARI-22517. NPE during Ambari schema upgrade while updating Hive configs.",
+        "parent": "https://github.com/apache/ambari/commit/c5fe6cb96a6530d0fc44c4ffced2ec46db97233b",
+        "repo": "ambari",
+        "unit_tests": [
+            "UpgradeCatalog260Test.java"
+        ]
+    },
+    "ambari_d9bfcac": {
+        "bug_id": "ambari_d9bfcac",
+        "commit": "https://github.com/apache/ambari/commit/d9bfcac2c53fc44ffb9a45c5ea29c592153ad069",
+        "file": [
+            {
+                "additions": 10,
+                "blob_url": "https://github.com/apache/ambari/blob/d9bfcac2c53fc44ffb9a45c5ea29c592153ad069/ambari-server/src/main/java/org/apache/ambari/server/state/host/HostImpl.java",
+                "changes": 14,
+                "contents_url": "https://api.github.com/repos/apache/ambari/contents/ambari-server/src/main/java/org/apache/ambari/server/state/host/HostImpl.java?ref=d9bfcac2c53fc44ffb9a45c5ea29c592153ad069",
+                "deletions": 4,
+                "filename": "ambari-server/src/main/java/org/apache/ambari/server/state/host/HostImpl.java",
+                "patch": "@@ -22,6 +22,7 @@\n import java.util.HashMap;\n import java.util.List;\n import java.util.Map;\n+import java.util.Objects;\n import java.util.concurrent.ConcurrentHashMap;\n import java.util.concurrent.ConcurrentMap;\n import java.util.concurrent.CopyOnWriteArrayList;\n@@ -1254,16 +1255,21 @@ public void calculateHostStatus(Long clusterId) throws AmbariException {\n       String status = scHost.getState().name();\n \n       String category = componentInfo.getCategory();\n+      if (category == null) {\n+        LOG.warn(\"In stack {}-{} service {} component {} category is null!\",\n+                stackId.getStackName(), stackId.getStackVersion(), scHost.getServiceName(), scHost.getServiceComponentName());\n+        continue;\n+      }\n \n       if (MaintenanceState.OFF == maintenanceStateHelper.getEffectiveState(scHost, this)) {\n-        if (category.equals(\"MASTER\")) {\n+        if (Objects.equals(\"MASTER\", category)) {\n           ++masterCount;\n-          if (status.equals(\"STARTED\")) {\n+          if (Objects.equals(\"STARTED\", status)) {\n             ++mastersRunning;\n           }\n-        } else if (category.equals(\"SLAVE\")) {\n+        } else if (Objects.equals(\"SLAVE\", category)) {\n           ++slaveCount;\n-          if (status.equals(\"STARTED\")) {\n+          if (Objects.equals(\"STARTED\", status)) {\n             ++slavesRunning;\n           }\n         }",
+                "raw_url": "https://github.com/apache/ambari/raw/d9bfcac2c53fc44ffb9a45c5ea29c592153ad069/ambari-server/src/main/java/org/apache/ambari/server/state/host/HostImpl.java",
+                "sha": "cb7af46f882460f3d23f6984d6b32cf10d1c2f92",
+                "status": "modified"
+            }
+        ],
+        "message": "AMBARI-23838. Ambari Server NPE due to Agent failure during registration (#1285)",
+        "parent": "https://github.com/apache/ambari/commit/9671dd17d83d39589cb05e830ecaffcf2a025086",
+        "repo": "ambari",
+        "unit_tests": [
+            "HostImplTest.java"
+        ]
+    },
+    "ambari_dfb7f03": {
+        "bug_id": "ambari_dfb7f03",
+        "commit": "https://github.com/apache/ambari/commit/dfb7f03927aee48e81597a1dad0b270067c68563",
+        "file": [
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/ambari/blob/dfb7f03927aee48e81597a1dad0b270067c68563/AMBARI-666-CHANGES.txt",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/ambari/contents/AMBARI-666-CHANGES.txt?ref=dfb7f03927aee48e81597a1dad0b270067c68563",
+                "deletions": 0,
+                "filename": "AMBARI-666-CHANGES.txt",
+                "patch": "@@ -12,6 +12,9 @@ AMBARI-666 branch (unreleased changes)\n \n   NEW FEATURES\n \n+  AMBARI-801. Fix heartbeat message from the agent which is causing NPE at the\n+  server. (mahadev)\n+\n   AMBARI-778. Ensure data flows across all steps in installer wizard.\n   (Jaimin Jetly via yusaku)\n ",
+                "raw_url": "https://github.com/apache/ambari/raw/dfb7f03927aee48e81597a1dad0b270067c68563/AMBARI-666-CHANGES.txt",
+                "sha": "4ccfd6238b92c5c35bcdc33f8f48d5c23cce5d7d",
+                "status": "modified"
+            },
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/ambari/blob/dfb7f03927aee48e81597a1dad0b270067c68563/ambari-agent/src/main/python/ambari_agent/Controller.py",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/ambari/contents/ambari-agent/src/main/python/ambari_agent/Controller.py?ref=dfb7f03927aee48e81597a1dad0b270067c68563",
+                "deletions": 1,
+                "filename": "ambari-agent/src/main/python/ambari_agent/Controller.py",
+                "patch": "@@ -107,7 +107,8 @@ def heartbeatWithServer(self):\n       try:\n         if retry==False:\n           data = json.dumps(self.heartbeat.build(id))\n-\n+          pass\n+        logger.info(\"Sending HeartBeat \" + pprint.pformat(data))\n         req = urllib2.Request(self.heartbeatUrl, data, {'Content-Type': 'application/json'})\n         \n         logger.info(data)",
+                "raw_url": "https://github.com/apache/ambari/raw/dfb7f03927aee48e81597a1dad0b270067c68563/ambari-agent/src/main/python/ambari_agent/Controller.py",
+                "sha": "445399cc7340282bfaf8737dc207bf23cf892e3a",
+                "status": "modified"
+            },
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/ambari/blob/dfb7f03927aee48e81597a1dad0b270067c68563/ambari-agent/src/main/python/ambari_agent/Heartbeat.py",
+                "changes": 8,
+                "contents_url": "https://api.github.com/repos/apache/ambari/contents/ambari-agent/src/main/python/ambari_agent/Heartbeat.py?ref=dfb7f03927aee48e81597a1dad0b270067c68563",
+                "deletions": 2,
+                "filename": "ambari-agent/src/main/python/ambari_agent/Heartbeat.py",
+                "patch": "@@ -39,11 +39,15 @@ def build(self, id='-1'):\n     timestamp = int(time.time()*1000)\n     queueResult = self.actionQueue.result()\n     installedRoleStates = serverStatus.build()\n+    nodeStatus = { \"status\" : \"HEALTHY\",\n+                   \"cause\" : \"NONE\"}\n+    \n     heartbeat = { 'responseId'        : int(id),\n                   'timestamp'         : timestamp,\n                   'hostname'          : socket.gethostname(),\n-                  'reports'           : self.reports,\n-                  'componentStatus'   : self.componentStatus\n+                 # 'reports'           : self.reports,\n+                 # 'componentStatus'   : self.componentStatus,\n+                  'nodeStatus'        : nodeStatus\n                 }\n   \n     ",
+                "raw_url": "https://github.com/apache/ambari/raw/dfb7f03927aee48e81597a1dad0b270067c68563/ambari-agent/src/main/python/ambari_agent/Heartbeat.py",
+                "sha": "e9215f766fa187c951ee8b0e9937cf8debc83bf6",
+                "status": "modified"
+            },
+            {
+                "additions": 7,
+                "blob_url": "https://github.com/apache/ambari/blob/dfb7f03927aee48e81597a1dad0b270067c68563/ambari-server/src/main/java/org/apache/ambari/server/actionmanager/ActionManager.java",
+                "changes": 8,
+                "contents_url": "https://api.github.com/repos/apache/ambari/contents/ambari-server/src/main/java/org/apache/ambari/server/actionmanager/ActionManager.java?ref=dfb7f03927aee48e81597a1dad0b270067c68563",
+                "deletions": 1,
+                "filename": "ambari-server/src/main/java/org/apache/ambari/server/actionmanager/ActionManager.java",
+                "patch": "@@ -21,8 +21,13 @@\n \n import org.apache.ambari.server.agent.ActionQueue;\n import org.apache.ambari.server.agent.CommandReport;\n+import org.apache.ambari.server.agent.rest.AgentResource;\n import org.apache.ambari.server.state.live.Clusters;\n import org.apache.ambari.server.utils.StageUtils;\n+import org.apache.commons.logging.Log;\n+import org.apache.commons.logging.LogFactory;\n+import org.slf4j.Logger;\n+import org.slf4j.LoggerFactory;\n \n import com.google.inject.Inject;\n import com.google.inject.Singleton;\n@@ -38,7 +43,8 @@\n   private final ActionDBAccessor db;\n   private final ActionQueue actionQueue;\n   private final Clusters fsm;\n-\n+  private static Logger LOG = LoggerFactory.getLogger(ActionManager.class);\n+  \n   @Inject\n   public ActionManager(@Named(\"schedulerSleeptime\") long schedulerSleepTime,\n       @Named(\"actionTimeout\") long actionTimeout,",
+                "raw_url": "https://github.com/apache/ambari/raw/dfb7f03927aee48e81597a1dad0b270067c68563/ambari-server/src/main/java/org/apache/ambari/server/actionmanager/ActionManager.java",
+                "sha": "baa3df8fe89260b0fd093c6416863b726f005cad",
+                "status": "modified"
+            }
+        ],
+        "message": "AMBARI-801. Fix heartbeat message from the agent which is causing NPE at the server. (mahadev)\n\ngit-svn-id: https://svn.apache.org/repos/asf/incubator/ambari/branches/AMBARI-666@1393810 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/ambari/commit/ff66974b8912a037662212052cbd05b96c11f6e3",
+        "repo": "ambari",
+        "unit_tests": [
+            "TestActionManager.java"
+        ]
+    },
+    "ambari_f6aec32": {
+        "bug_id": "ambari_f6aec32",
+        "commit": "https://github.com/apache/ambari/commit/f6aec3286da30d42c7faef2e84e88b968bcdf040",
+        "file": [
+            {
+                "additions": 23,
+                "blob_url": "https://github.com/apache/ambari/blob/f6aec3286da30d42c7faef2e84e88b968bcdf040/ambari-server/src/main/java/org/apache/ambari/server/controller/ControllerModule.java",
+                "changes": 41,
+                "contents_url": "https://api.github.com/repos/apache/ambari/contents/ambari-server/src/main/java/org/apache/ambari/server/controller/ControllerModule.java?ref=f6aec3286da30d42c7faef2e84e88b968bcdf040",
+                "deletions": 18,
+                "filename": "ambari-server/src/main/java/org/apache/ambari/server/controller/ControllerModule.java",
+                "patch": "@@ -666,25 +666,30 @@ private void installFactories() {\n     // the dispatch factory\n     for (BeanDefinition beanDefinition : beanDefinitions) {\n       String className = beanDefinition.getBeanClassName();\n-      Class<?> clazz = ClassUtils.resolveClassName(className,\n-          ClassUtils.getDefaultClassLoader());\n-\n-      try {\n-        NotificationDispatcher dispatcher;\n-        if (clazz.equals(AmbariSNMPDispatcher.class)) {\n-          dispatcher = (NotificationDispatcher) clazz.getConstructor(Integer.class).newInstance(configuration.getAmbariSNMPUdpBindPort());\n-        } else if (clazz.equals(SNMPDispatcher.class)) {\n-          dispatcher = (NotificationDispatcher) clazz.getConstructor(Integer.class).newInstance(configuration.getSNMPUdpBindPort());\n-        } else {\n-          dispatcher = (NotificationDispatcher) clazz.newInstance();\n+      if (className != null) {\n+        Class<?> clazz = ClassUtils.resolveClassName(className,\n+                ClassUtils.getDefaultClassLoader());\n+        try {\n+          NotificationDispatcher dispatcher;\n+          if (clazz.equals(AmbariSNMPDispatcher.class)) {\n+            dispatcher = (NotificationDispatcher) clazz.getConstructor(Integer.class)\n+                    .newInstance(configuration.getAmbariSNMPUdpBindPort());\n+          } else if (clazz.equals(SNMPDispatcher.class)) {\n+            dispatcher = (NotificationDispatcher) clazz.getConstructor(Integer.class)\n+                    .newInstance(configuration.getSNMPUdpBindPort());\n+          } else {\n+            dispatcher = (NotificationDispatcher) clazz.newInstance();\n+          }\n+          dispatchFactory.register(dispatcher.getType(), dispatcher);\n+          bind((Class<NotificationDispatcher>) clazz).toInstance(dispatcher);\n+          LOG.info(\"Binding and registering notification dispatcher {}\", clazz);\n+        } catch (Exception exception) {\n+          LOG.error(\"Unable to bind and register notification dispatcher {}\",\n+                  clazz, exception);\n         }\n-        dispatchFactory.register(dispatcher.getType(), dispatcher);\n-        bind((Class<NotificationDispatcher>) clazz).toInstance(dispatcher);\n-\n-        LOG.info(\"Binding and registering notification dispatcher {}\", clazz);\n-      } catch (Exception exception) {\n-        LOG.error(\"Unable to bind and register notification dispatcher {}\",\n-            clazz, exception);\n+      } else {\n+        LOG.error(\"Binding and registering notification dispatcher is not possible for\" +\n+            \" beanDefinition: {} in the absence of className\", beanDefinition);\n       }\n     }\n ",
+                "raw_url": "https://github.com/apache/ambari/raw/f6aec3286da30d42c7faef2e84e88b968bcdf040/ambari-server/src/main/java/org/apache/ambari/server/controller/ControllerModule.java",
+                "sha": "f587c47b438fd98609f7b128f4db76cefcf77e62",
+                "status": "modified"
+            },
+            {
+                "additions": 17,
+                "blob_url": "https://github.com/apache/ambari/blob/f6aec3286da30d42c7faef2e84e88b968bcdf040/ambari-server/src/main/java/org/apache/ambari/server/controller/internal/ClusterResourceProvider.java",
+                "changes": 24,
+                "contents_url": "https://api.github.com/repos/apache/ambari/contents/ambari-server/src/main/java/org/apache/ambari/server/controller/internal/ClusterResourceProvider.java?ref=f6aec3286da30d42c7faef2e84e88b968bcdf040",
+                "deletions": 7,
+                "filename": "ambari-server/src/main/java/org/apache/ambari/server/controller/internal/ClusterResourceProvider.java",
+                "patch": "@@ -466,16 +466,26 @@ protected static ServiceConfigVersionRequest getServiceConfigVersionRequest(Stri\n       String absCategory = PropertyHelper.getPropertyCategory(entry.getKey());\n       String propName = PropertyHelper.getPropertyName(entry.getKey());\n \n-      if (absCategory.startsWith(parentCategory + \"/desired_service_config_version\")) {\n+      if (absCategory != null &&\n+              absCategory.startsWith(parentCategory + \"/desired_service_config_version\")) {\n         serviceConfigVersionRequest =\n             (serviceConfigVersionRequest ==null ) ? new ServiceConfigVersionRequest() : serviceConfigVersionRequest;\n \n-        if (propName.equals(\"service_name\"))\n-          serviceConfigVersionRequest.setServiceName(entry.getValue().toString());\n-        else if (propName.equals(\"service_config_version\"))\n-          serviceConfigVersionRequest.setVersion(Long.valueOf(entry.getValue().toString()));\n-        else if (propName.equals(\"service_config_version_note\")) {\n-          serviceConfigVersionRequest.setNote(entry.getValue().toString());\n+        if (propName != null) {\n+          switch (propName) {\n+            case \"service_name\": {\n+              serviceConfigVersionRequest.setServiceName(entry.getValue().toString());\n+              break;\n+            }\n+            case \"service_config_version\": {\n+              serviceConfigVersionRequest.setVersion(Long.valueOf(entry.getValue().toString()));\n+              break;\n+            }\n+            case \"service_config_version_note\": {\n+              serviceConfigVersionRequest.setNote(entry.getValue().toString());\n+              break;\n+            }\n+          }\n         }\n       }\n     }",
+                "raw_url": "https://github.com/apache/ambari/raw/f6aec3286da30d42c7faef2e84e88b968bcdf040/ambari-server/src/main/java/org/apache/ambari/server/controller/internal/ClusterResourceProvider.java",
+                "sha": "1c62f9ce2d92196c324dfdc072d970bc851b2f8c",
+                "status": "modified"
+            }
+        ],
+        "message": "AMBARI-25327 : Prevent NPE for bindNotificationDispatchers and getServiceConfigVersionRequest (#3037)\n\n* AMBARI-25327 : Prevent NPE for bindNotificationDispatchers and getServiceConfigVersionRequest\r\n\r\n* minor change\r\n\r\n* logging null classname instance",
+        "parent": "https://github.com/apache/ambari/commit/b066df1d3e2683251dc588cddd94fcdcfeaa1178",
+        "repo": "ambari",
+        "unit_tests": [
+            "ClusterResourceProviderTest.java"
+        ]
+    }
+}

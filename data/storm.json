@@ -1,0 +1,483 @@
+{
+    "storm_08938c2": {
+        "bug_id": "storm_08938c2",
+        "commit": "https://github.com/apache/storm/commit/08938c222e0f81f40c3d9bd3e5231bb86ae6e815",
+        "file": [
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/storm/blob/08938c222e0f81f40c3d9bd3e5231bb86ae6e815/storm-core/src/jvm/org/apache/storm/tuple/Fields.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/storm/contents/storm-core/src/jvm/org/apache/storm/tuple/Fields.java?ref=08938c222e0f81f40c3d9bd3e5231bb86ae6e815",
+                "deletions": 2,
+                "filename": "storm-core/src/jvm/org/apache/storm/tuple/Fields.java",
+                "patch": "@@ -59,8 +59,8 @@ public Fields(List<String> fields) {\n      */\n     public List<Object> select(Fields selector, List<Object> tuple) {\n         List<Object> ret = new ArrayList<>(selector.size());\n-        for(String s: selector) {\n-            ret.add(tuple.get(_index.get(s)));\n+        for (String s : selector) {\n+            ret.add(tuple.get(fieldIndex(s))); \n         }\n         return ret;\n     }",
+                "raw_url": "https://github.com/apache/storm/raw/08938c222e0f81f40c3d9bd3e5231bb86ae6e815/storm-core/src/jvm/org/apache/storm/tuple/Fields.java",
+                "sha": "840b2d32e2e47996e8982ac418ecd43b3d20e496",
+                "status": "modified"
+            }
+        ],
+        "message": "STORM-1594 org.apache.storm.tuple.Fields can throw NPE if given invalid field in selector\n\n* Closes #1522",
+        "parent": "https://github.com/apache/storm/commit/883a76b4d3b4d12b1a468597d5e358495cacf632",
+        "repo": "storm",
+        "unit_tests": [
+            "FieldsTest.java"
+        ]
+    },
+    "storm_1308f89": {
+        "bug_id": "storm_1308f89",
+        "commit": "https://github.com/apache/storm/commit/1308f89dc7316ea8b1483136cd5ca1209790ef81",
+        "file": [
+            {
+                "additions": 43,
+                "blob_url": "https://github.com/apache/storm/blob/1308f89dc7316ea8b1483136cd5ca1209790ef81/storm-core/src/clj/backtype/storm/stats.clj",
+                "changes": 88,
+                "contents_url": "https://api.github.com/repos/apache/storm/contents/storm-core/src/clj/backtype/storm/stats.clj?ref=1308f89dc7316ea8b1483136cd5ca1209790ef81",
+                "deletions": 45,
+                "filename": "storm-core/src/clj/backtype/storm/stats.clj",
+                "patch": "@@ -287,29 +287,52 @@\n       specific-stats\n       rate)))\n \n+(defn valid-number?\n+  \"Returns true if x is a number that is not NaN or Infinity, false otherwise\"\n+  [x]\n+  (and (number? x)\n+       (not (Double/isNaN x))\n+       (not (Double/isInfinite x))))\n+\n+(defn apply-default\n+  [f defaulting-fn & args]\n+  (apply f (map defaulting-fn args)))\n+\n+(defn apply-or-0\n+  [f & args]\n+  (apply apply-default\n+         f\n+         #(if (valid-number? %) % 0)\n+         args))\n+\n+(defn sum-or-0\n+  [& args]\n+  (apply apply-or-0 + args))\n+\n+(defn product-or-0\n+  [& args]\n+  (apply apply-or-0 * args))\n+\n+(defn max-or-0\n+  [& args]\n+  (apply apply-or-0 max args))\n+\n (defn- agg-bolt-lat-and-count\n   \"Aggregates number executed, process latency, and execute latency across all\n   streams.\"\n   [idk->exec-avg idk->proc-avg idk->num-executed]\n-  {:pre (apply = (map #(set (keys %))\n-                      [idk->exec-avg\n-                       idk->proc-avg\n-                       idk->num-executed]))}\n-  (letfn [(weight-avg [[id avg]] (let [num-e (get idk->num-executed id)]\n-                                   (if (and avg num-e)\n-                                     (* avg num-e)\n-                                     0)))]\n+  (letfn [(weight-avg [[id avg]]\n+            (let [num-e (get idk->num-executed id)]\n+              (product-or-0 avg num-e)))]\n     {:executeLatencyTotal (sum (map weight-avg idk->exec-avg))\n      :processLatencyTotal (sum (map weight-avg idk->proc-avg))\n      :executed (sum (vals idk->num-executed))}))\n \n (defn- agg-spout-lat-and-count\n   \"Aggregates number acked and complete latencies across all streams.\"\n   [sid->comp-avg sid->num-acked]\n-  {:pre (apply = (map #(set (keys %))\n-                      [sid->comp-avg\n-                       sid->num-acked]))}\n-  (letfn [(weight-avg [[id avg]] (* avg (get sid->num-acked id)))]\n+  (letfn [(weight-avg [[id avg]]\n+            (product-or-0 avg (get sid->num-acked id)))]\n     {:completeLatencyTotal (sum (map weight-avg sid->comp-avg))\n      :acked (sum (vals sid->num-acked))}))\n \n@@ -335,30 +358,21 @@\n (defn- agg-bolt-streams-lat-and-count\n   \"Aggregates number executed and process & execute latencies.\"\n   [idk->exec-avg idk->proc-avg idk->executed]\n-  {:pre (apply = (map #(set (keys %))\n-                      [idk->exec-avg\n-                       idk->proc-avg\n-                       idk->executed]))}\n-  (letfn [(weight-avg [id avg] (let [num-e (idk->executed id)]\n-                                   (if (and avg num-e)\n-                                     (* avg num-e)\n-                                     0)))]\n+  (letfn [(weight-avg [id avg]\n+            (let [num-e (idk->executed id)]\n+              (product-or-0 avg num-e)))]\n     (into {}\n       (for [k (keys idk->exec-avg)]\n-        [k {:executeLatencyTotal (weight-avg k (idk->exec-avg k))\n-            :processLatencyTotal (weight-avg k (idk->proc-avg k))\n+        [k {:executeLatencyTotal (weight-avg k (get idk->exec-avg k))\n+            :processLatencyTotal (weight-avg k (get idk->proc-avg k))\n             :executed (idk->executed k)}]))))\n \n (defn- agg-spout-streams-lat-and-count\n   \"Aggregates number acked and complete latencies.\"\n   [idk->comp-avg idk->acked]\n-  {:pre (apply = (map #(set (keys %))\n-                      [idk->comp-avg\n-                       idk->acked]))}\n-  (letfn [(weight-avg [id avg] (let [num-e (get idk->acked id)]\n-                                   (if (and avg num-e)\n-                                     (* avg num-e)\n-                                     0)))]\n+  (letfn [(weight-avg [id avg]\n+            (let [num-e (get idk->acked id)]\n+              (product-or-0 avg num-e)))]\n     (into {}\n       (for [k (keys idk->comp-avg)]\n         [k {:completeLatencyTotal (weight-avg k (get idk->comp-avg k))\n@@ -596,22 +610,6 @@\n                     vals\n                     sum)})}))\n \n-(defn apply-default\n-  [f defaulting-fn & args]\n-  (apply f (map defaulting-fn args)))\n-\n-(defn apply-or-0\n-  [f & args]\n-  (apply apply-default f #(or % 0) args))\n-\n-(defn sum-or-0\n-  [& args]\n-  (apply apply-or-0 + args))\n-\n-(defn max-or-0\n-  [& args]\n-  (apply apply-or-0 max args))\n-\n (defn merge-agg-comp-stats-comp-page-bolt\n   [{acc-in :cid+sid->input-stats\n     acc-out :sid->output-stats",
+                "raw_url": "https://github.com/apache/storm/raw/1308f89dc7316ea8b1483136cd5ca1209790ef81/storm-core/src/clj/backtype/storm/stats.clj",
+                "sha": "ea4efe41310b5f473d8f7af5cb01d637756db149",
+                "status": "modified"
+            },
+            {
+                "additions": 8,
+                "blob_url": "https://github.com/apache/storm/blob/1308f89dc7316ea8b1483136cd5ca1209790ef81/storm-core/src/jvm/backtype/storm/metric/internal/LatencyStatAndMetric.java",
+                "changes": 13,
+                "contents_url": "https://api.github.com/repos/apache/storm/contents/storm-core/src/jvm/backtype/storm/metric/internal/LatencyStatAndMetric.java?ref=1308f89dc7316ea8b1483136cd5ca1209790ef81",
+                "deletions": 5,
+                "filename": "storm-core/src/jvm/backtype/storm/metric/internal/LatencyStatAndMetric.java",
+                "patch": "@@ -19,11 +19,10 @@\n \n import java.util.Map;\n import java.util.HashMap;\n-import java.util.Timer;\n import java.util.TimerTask;\n-import java.util.concurrent.atomic.AtomicLong;\n \n import backtype.storm.metric.api.IMetric;\n+import backtype.storm.utils.Utils;\n \n /**\n  * Acts as a Latency Metric, but also keeps track of approximate latency\n@@ -145,7 +144,9 @@ synchronized Object getValueAndReset(long now) {\n         }\n \n         long timeSpent = now - _bucketStart;\n-        double ret = ((double)(lat + _exactExtraLat))/(count + _exactExtraCount);\n+        long exactExtraCountSum = count + _exactExtraCount;\n+        double ret = Utils.zeroIfNaNOrInf(\n+                ((double) (lat + _exactExtraLat)) / exactExtraCountSum);\n         _bucketStart = now;\n         _exactExtraLat = 0;\n         _exactExtraCount = 0;\n@@ -227,7 +228,9 @@ private synchronized void rotate(long lat, long count, long timeSpent, long targ\n         ret.put(\"600\", readApproximateLatAvg(lat, count, timeSpent, _tmTime, _tmLatBuckets, _tmCountBuckets, 600 * 1000));\n         ret.put(\"10800\", readApproximateLatAvg(lat, count, timeSpent, _thTime, _thLatBuckets, _thCountBuckets, 10800 * 1000));\n         ret.put(\"86400\", readApproximateLatAvg(lat, count, timeSpent, _odTime, _odLatBuckets, _odCountBuckets, 86400 * 1000));\n-        ret.put(\":all-time\", ((double)lat + _allTimeLat)/(count + _allTimeCount));\n+        long allTimeCountSum = count + _allTimeCount;\n+        ret.put(\":all-time\", Utils.zeroIfNaNOrInf(\n+                (double) lat + _allTimeLat)/allTimeCountSum);\n         return ret;\n     }\n \n@@ -242,7 +245,7 @@ private synchronized void rotate(long lat, long count, long timeSpent, long targ\n             totalCount += countBuckets[i];\n             timeNeeded -= bucketTime[i];\n         }\n-        return ((double)totalLat)/totalCount;\n+        return Utils.zeroIfNaNOrInf(((double) totalLat) / totalCount);\n     }\n \n     public void close() {",
+                "raw_url": "https://github.com/apache/storm/raw/1308f89dc7316ea8b1483136cd5ca1209790ef81/storm-core/src/jvm/backtype/storm/metric/internal/LatencyStatAndMetric.java",
+                "sha": "614f95ef24d11f25573b8c379fdeabb228cdb961",
+                "status": "modified"
+            },
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/storm/blob/1308f89dc7316ea8b1483136cd5ca1209790ef81/storm-core/src/jvm/backtype/storm/utils/Utils.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/storm/contents/storm-core/src/jvm/backtype/storm/utils/Utils.java?ref=1308f89dc7316ea8b1483136cd5ca1209790ef81",
+                "deletions": 0,
+                "filename": "storm-core/src/jvm/backtype/storm/utils/Utils.java",
+                "patch": "@@ -760,5 +760,9 @@ public static long zipFileSize(File myFile) throws IOException{\n         raf.close();\n         return val;\n     }\n+\n+    public static double zeroIfNaNOrInf(double x) {\n+        return (Double.isNaN(x) || Double.isInfinite(x)) ? 0.0 : x;\n+    }\n }\n ",
+                "raw_url": "https://github.com/apache/storm/raw/1308f89dc7316ea8b1483136cd5ca1209790ef81/storm-core/src/jvm/backtype/storm/utils/Utils.java",
+                "sha": "00af36736fae1b905e3ae94cc6e2adee538eff38",
+                "status": "modified"
+            }
+        ],
+        "message": "Merge branch 'storm-1208-ui-npe-nan' of https://github.com/d2r/storm",
+        "parent": "https://github.com/apache/storm/commit/1afa5a27cb7ab5191905d0cfafdb46f542a7c039",
+        "repo": "storm",
+        "unit_tests": [
+            "UtilsTest.java",
+            "TestUtils.java"
+        ]
+    },
+    "storm_28e65a8": {
+        "bug_id": "storm_28e65a8",
+        "commit": "https://github.com/apache/storm/commit/28e65a82bfcd60f38c93115974f6a8653756f9b5",
+        "file": [
+            {
+                "additions": 12,
+                "blob_url": "https://github.com/apache/storm/blob/28e65a82bfcd60f38c93115974f6a8653756f9b5/storm-core/src/jvm/backtype/storm/utils/Time.java",
+                "changes": 18,
+                "contents_url": "https://api.github.com/repos/apache/storm/contents/storm-core/src/jvm/backtype/storm/utils/Time.java?ref=28e65a82bfcd60f38c93115974f6a8653756f9b5",
+                "deletions": 6,
+                "filename": "storm-core/src/jvm/backtype/storm/utils/Time.java",
+                "patch": "@@ -36,14 +36,18 @@\n     private static AtomicLong simulatedCurrTimeMs; //should this be a thread local that's allowed to keep advancing?\n     \n     public static void startSimulating() {\n-        simulating.set(true);\n-        simulatedCurrTimeMs = new AtomicLong(0);\n-        threadSleepTimes = new ConcurrentHashMap<Thread, AtomicLong>();\n+        synchronized(sleepTimesLock) {\n+            simulating.set(true);\n+            simulatedCurrTimeMs = new AtomicLong(0);\n+            threadSleepTimes = new ConcurrentHashMap<Thread, AtomicLong>();\n+        }\n     }\n     \n     public static void stopSimulating() {\n-        simulating.set(false);             \n-        threadSleepTimes = null;  \n+        synchronized(sleepTimesLock) {\n+            simulating.set(false);             \n+            threadSleepTimes = null;  \n+        }\n     }\n     \n     public static boolean isSimulating() {\n@@ -61,7 +65,9 @@ public static void sleepUntil(long targetTimeMs) throws InterruptedException {\n                 }\n             } finally {\n                 synchronized(sleepTimesLock) {\n-                    threadSleepTimes.remove(Thread.currentThread());\n+                    if (simulating.get()) {\n+                        threadSleepTimes.remove(Thread.currentThread());\n+                    }\n                 }\n             }\n         } else {",
+                "raw_url": "https://github.com/apache/storm/raw/28e65a82bfcd60f38c93115974f6a8653756f9b5/storm-core/src/jvm/backtype/storm/utils/Time.java",
+                "sha": "50a79fd673a446712b7234251c69b8c229d5d910",
+                "status": "modified"
+            }
+        ],
+        "message": "Fix race condition in Time.java\n\nSome of my test runs were occasionally failing with a NullPointerException on `backtype.storm.utils.Time.java:64`.\r\n\r\nAfter a bit of investigation, it seems there's a race condition here; if we disable simulating mode while a thread is currently sleeping, then when it wakes up it won't re-check if it's still in \"simulating\" mode, it'll try to remove the sleep time, and get the NPE.\r\n\r\nRefs [STORM-260](https://issues.apache.org/jira/browse/STORM-260).",
+        "parent": "https://github.com/apache/storm/commit/d5dee0ef5f8ad403d1eff05f569c8e9b1e44508c",
+        "repo": "storm",
+        "unit_tests": [
+            "TimeTest.java"
+        ]
+    },
+    "storm_3857644": {
+        "bug_id": "storm_3857644",
+        "commit": "https://github.com/apache/storm/commit/3857644b4c459cbe42b78ca8a13bd55ef704fd30",
+        "file": [
+            {
+                "additions": 42,
+                "blob_url": "https://github.com/apache/storm/blob/3857644b4c459cbe42b78ca8a13bd55ef704fd30/storm-core/src/clj/backtype/storm/stats.clj",
+                "changes": 87,
+                "contents_url": "https://api.github.com/repos/apache/storm/contents/storm-core/src/clj/backtype/storm/stats.clj?ref=3857644b4c459cbe42b78ca8a13bd55ef704fd30",
+                "deletions": 45,
+                "filename": "storm-core/src/clj/backtype/storm/stats.clj",
+                "patch": "@@ -287,29 +287,51 @@\n       specific-stats\n       rate)))\n \n+(defn valid-number?\n+  \"Returns true if x is a number that is not NaN, false otherwise\"\n+  [x]\n+  (and (number? x)\n+       (not (Double/isNaN x))))\n+\n+(defn apply-default\n+  [f defaulting-fn & args]\n+  (apply f (map defaulting-fn args)))\n+\n+(defn apply-or-0\n+  [f & args]\n+  (apply apply-default\n+         f\n+         #(if (valid-number? %) % 0)\n+         args))\n+\n+(defn sum-or-0\n+  [& args]\n+  (apply apply-or-0 + args))\n+\n+(defn product-or-0\n+  [& args]\n+  (apply apply-or-0 * args))\n+\n+(defn max-or-0\n+  [& args]\n+  (apply apply-or-0 max args))\n+\n (defn- agg-bolt-lat-and-count\n   \"Aggregates number executed, process latency, and execute latency across all\n   streams.\"\n   [idk->exec-avg idk->proc-avg idk->num-executed]\n-  {:pre (apply = (map #(set (keys %))\n-                      [idk->exec-avg\n-                       idk->proc-avg\n-                       idk->num-executed]))}\n-  (letfn [(weight-avg [[id avg]] (let [num-e (get idk->num-executed id)]\n-                                   (if (and avg num-e)\n-                                     (* avg num-e)\n-                                     0)))]\n+  (letfn [(weight-avg [[id avg]]\n+            (let [num-e (get idk->num-executed id)]\n+              (product-or-0 avg num-e)))]\n     {:executeLatencyTotal (sum (map weight-avg idk->exec-avg))\n      :processLatencyTotal (sum (map weight-avg idk->proc-avg))\n      :executed (sum (vals idk->num-executed))}))\n \n (defn- agg-spout-lat-and-count\n   \"Aggregates number acked and complete latencies across all streams.\"\n   [sid->comp-avg sid->num-acked]\n-  {:pre (apply = (map #(set (keys %))\n-                      [sid->comp-avg\n-                       sid->num-acked]))}\n-  (letfn [(weight-avg [[id avg]] (* avg (get sid->num-acked id)))]\n+  (letfn [(weight-avg [[id avg]]\n+            (product-or-0 avg (get sid->num-acked id)))]\n     {:completeLatencyTotal (sum (map weight-avg sid->comp-avg))\n      :acked (sum (vals sid->num-acked))}))\n \n@@ -335,30 +357,21 @@\n (defn- agg-bolt-streams-lat-and-count\n   \"Aggregates number executed and process & execute latencies.\"\n   [idk->exec-avg idk->proc-avg idk->executed]\n-  {:pre (apply = (map #(set (keys %))\n-                      [idk->exec-avg\n-                       idk->proc-avg\n-                       idk->executed]))}\n-  (letfn [(weight-avg [id avg] (let [num-e (idk->executed id)]\n-                                   (if (and avg num-e)\n-                                     (* avg num-e)\n-                                     0)))]\n+  (letfn [(weight-avg [id avg]\n+            (let [num-e (idk->executed id)]\n+              (product-or-0 avg num-e)))]\n     (into {}\n       (for [k (keys idk->exec-avg)]\n-        [k {:executeLatencyTotal (weight-avg k (idk->exec-avg k))\n-            :processLatencyTotal (weight-avg k (idk->proc-avg k))\n+        [k {:executeLatencyTotal (weight-avg k (get idk->exec-avg k))\n+            :processLatencyTotal (weight-avg k (get idk->proc-avg k))\n             :executed (idk->executed k)}]))))\n \n (defn- agg-spout-streams-lat-and-count\n   \"Aggregates number acked and complete latencies.\"\n   [idk->comp-avg idk->acked]\n-  {:pre (apply = (map #(set (keys %))\n-                      [idk->comp-avg\n-                       idk->acked]))}\n-  (letfn [(weight-avg [id avg] (let [num-e (get idk->acked id)]\n-                                   (if (and avg num-e)\n-                                     (* avg num-e)\n-                                     0)))]\n+  (letfn [(weight-avg [id avg]\n+            (let [num-e (get idk->acked id)]\n+              (product-or-0 avg num-e)))]\n     (into {}\n       (for [k (keys idk->comp-avg)]\n         [k {:completeLatencyTotal (weight-avg k (get idk->comp-avg k))\n@@ -596,22 +609,6 @@\n                     vals\n                     sum)})}))\n \n-(defn apply-default\n-  [f defaulting-fn & args]\n-  (apply f (map defaulting-fn args)))\n-\n-(defn apply-or-0\n-  [f & args]\n-  (apply apply-default f #(or % 0) args))\n-\n-(defn sum-or-0\n-  [& args]\n-  (apply apply-or-0 + args))\n-\n-(defn max-or-0\n-  [& args]\n-  (apply apply-or-0 max args))\n-\n (defn merge-agg-comp-stats-comp-page-bolt\n   [{acc-in :cid+sid->input-stats\n     acc-out :sid->output-stats",
+                "raw_url": "https://github.com/apache/storm/raw/3857644b4c459cbe42b78ca8a13bd55ef704fd30/storm-core/src/clj/backtype/storm/stats.clj",
+                "sha": "cb77bb717d30a5efc630e7a436e934c0bf90d260",
+                "status": "modified"
+            },
+            {
+                "additions": 9,
+                "blob_url": "https://github.com/apache/storm/blob/3857644b4c459cbe42b78ca8a13bd55ef704fd30/storm-core/src/jvm/backtype/storm/metric/internal/LatencyStatAndMetric.java",
+                "changes": 12,
+                "contents_url": "https://api.github.com/repos/apache/storm/contents/storm-core/src/jvm/backtype/storm/metric/internal/LatencyStatAndMetric.java?ref=3857644b4c459cbe42b78ca8a13bd55ef704fd30",
+                "deletions": 3,
+                "filename": "storm-core/src/jvm/backtype/storm/metric/internal/LatencyStatAndMetric.java",
+                "patch": "@@ -145,7 +145,10 @@ synchronized Object getValueAndReset(long now) {\n         }\n \n         long timeSpent = now - _bucketStart;\n-        double ret = ((double)(lat + _exactExtraLat))/(count + _exactExtraCount);\n+        long exactExtraCountSum = count + _exactExtraCount;\n+        double ret = exactExtraCountSum > 0 ?\n+                ((double)(lat + _exactExtraLat))/exactExtraCountSum :\n+                0.0;\n         _bucketStart = now;\n         _exactExtraLat = 0;\n         _exactExtraCount = 0;\n@@ -227,7 +230,10 @@ private synchronized void rotate(long lat, long count, long timeSpent, long targ\n         ret.put(\"600\", readApproximateLatAvg(lat, count, timeSpent, _tmTime, _tmLatBuckets, _tmCountBuckets, 600 * 1000));\n         ret.put(\"10800\", readApproximateLatAvg(lat, count, timeSpent, _thTime, _thLatBuckets, _thCountBuckets, 10800 * 1000));\n         ret.put(\"86400\", readApproximateLatAvg(lat, count, timeSpent, _odTime, _odLatBuckets, _odCountBuckets, 86400 * 1000));\n-        ret.put(\":all-time\", ((double)lat + _allTimeLat)/(count + _allTimeCount));\n+        long allTimeCountSum = count + _allTimeCount;\n+        ret.put(\":all-time\", allTimeCountSum > 0 ?\n+                ((double)lat + _allTimeLat)/allTimeCountSum :\n+                0.0);\n         return ret;\n     }\n \n@@ -242,7 +248,7 @@ private synchronized void rotate(long lat, long count, long timeSpent, long targ\n             totalCount += countBuckets[i];\n             timeNeeded -= bucketTime[i];\n         }\n-        return ((double)totalLat)/totalCount;\n+        return totalCount > 0 ? ((double)totalLat)/totalCount : 0.0;\n     }\n \n     public void close() {",
+                "raw_url": "https://github.com/apache/storm/raw/3857644b4c459cbe42b78ca8a13bd55ef704fd30/storm-core/src/jvm/backtype/storm/metric/internal/LatencyStatAndMetric.java",
+                "sha": "8c472bd7cc3761f5a6da97618e12ac866d203d39",
+                "status": "modified"
+            }
+        ],
+        "message": "Guard against NPE, and avoid using NaN values",
+        "parent": "https://github.com/apache/storm/commit/5a79ba5f9b509d575e374e7dce58e286c1387430",
+        "repo": "storm",
+        "unit_tests": [
+            "LatencyStatAndMetricTest.java"
+        ]
+    },
+    "storm_3ad1937": {
+        "bug_id": "storm_3ad1937",
+        "commit": "https://github.com/apache/storm/commit/3ad1937ab019eff9cb5c74fa6b51785dffd46529",
+        "file": [
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/storm/blob/3ad1937ab019eff9cb5c74fa6b51785dffd46529/storm-server/src/main/java/org/apache/storm/scheduler/resource/strategies/scheduling/ConstraintSolverStrategy.java",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/storm/contents/storm-server/src/main/java/org/apache/storm/scheduler/resource/strategies/scheduling/ConstraintSolverStrategy.java?ref=3ad1937ab019eff9cb5c74fa6b51785dffd46529",
+                "deletions": 0,
+                "filename": "storm-server/src/main/java/org/apache/storm/scheduler/resource/strategies/scheduling/ConstraintSolverStrategy.java",
+                "patch": "@@ -99,6 +99,7 @@ public static boolean validateSolution(Cluster cluster, TopologyDetails td) {\n      */\n     private static boolean checkConstraintsSatisfied(Cluster cluster, TopologyDetails topo) {\n         LOG.info(\"Checking constraints...\");\n+        assert (cluster.getAssignmentById(topo.getId()) != null);\n         Map<ExecutorDetails, WorkerSlot> result = cluster.getAssignmentById(topo.getId()).getExecutorToSlot();\n         Map<ExecutorDetails, String> execToComp = topo.getExecutorToComponent();\n         //get topology constraints\n@@ -136,6 +137,7 @@ private static boolean checkConstraintsSatisfied(Cluster cluster, TopologyDetail\n \n     private static boolean checkSpreadSchedulingValid(Cluster cluster, TopologyDetails topo) {\n         LOG.info(\"Checking for a valid scheduling...\");\n+        assert (cluster.getAssignmentById(topo.getId()) != null);\n         Map<ExecutorDetails, WorkerSlot> result = cluster.getAssignmentById(topo.getId()).getExecutorToSlot();\n         Map<ExecutorDetails, String> execToComp = topo.getExecutorToComponent();\n         Map<WorkerSlot, HashSet<ExecutorDetails>> workerExecMap = new HashMap<>();\n@@ -174,6 +176,7 @@ private static boolean checkSpreadSchedulingValid(Cluster cluster, TopologyDetai\n      */\n     private static boolean checkResourcesCorrect(Cluster cluster, TopologyDetails topo) {\n         LOG.info(\"Checking Resources...\");\n+        assert (cluster.getAssignmentById(topo.getId()) != null);\n         Map<ExecutorDetails, WorkerSlot> result = cluster.getAssignmentById(topo.getId()).getExecutorToSlot();\n         Map<RAS_Node, Collection<ExecutorDetails>> nodeToExecs = new HashMap<>();\n         Map<ExecutorDetails, WorkerSlot> mergedExecToWorker = new HashMap<>();",
+                "raw_url": "https://github.com/apache/storm/raw/3ad1937ab019eff9cb5c74fa6b51785dffd46529/storm-server/src/main/java/org/apache/storm/scheduler/resource/strategies/scheduling/ConstraintSolverStrategy.java",
+                "sha": "bf527560175cc75fdbffd7a18c674a066828667c",
+                "status": "modified"
+            }
+        ],
+        "message": "STORM-3048 Fix a Potential NPE\n\n* Commits squashed by Jungtaek Lim <kabhwan@gmail.com>\n\nThis closes #2657",
+        "parent": "https://github.com/apache/storm/commit/41f977a9e1e10a53633fabd77b30852c052dba3f",
+        "repo": "storm",
+        "unit_tests": [
+            "TestConstraintSolverStrategy.java"
+        ]
+    },
+    "storm_3fc80c4": {
+        "bug_id": "storm_3fc80c4",
+        "commit": "https://github.com/apache/storm/commit/3fc80c4b0bfc83d2534fab160c72894af044dbc3",
+        "file": [
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/storm/blob/3fc80c4b0bfc83d2534fab160c72894af044dbc3/storm-core/src/jvm/org/apache/storm/stats/StatsUtil.java",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/storm/contents/storm-core/src/jvm/org/apache/storm/stats/StatsUtil.java?ref=3fc80c4b0bfc83d2534fab160c72894af044dbc3",
+                "deletions": 0,
+                "filename": "storm-core/src/jvm/org/apache/storm/stats/StatsUtil.java",
+                "patch": "@@ -1156,6 +1156,9 @@ public static List extractDataFromHb(Map executor2hostPort, Map task2component,\n     public static List extractDataFromHb(Map executor2hostPort, Map task2component, Map beats,\n                                          boolean includeSys, StormTopology topology, String compId) {\n         List ret = new ArrayList();\n+        if (executor2hostPort == null) {\n+            return ret;\n+        }\n         for (Object o : executor2hostPort.entrySet()) {\n             Map.Entry entry = (Map.Entry) o;\n             List key = (List) entry.getKey();",
+                "raw_url": "https://github.com/apache/storm/raw/3fc80c4b0bfc83d2534fab160c72894af044dbc3/storm-core/src/jvm/org/apache/storm/stats/StatsUtil.java",
+                "sha": "75ec2925c68d51a197b83217358bd25591e8d768",
+                "status": "modified"
+            }
+        ],
+        "message": "fixed a potential NPE",
+        "parent": "https://github.com/apache/storm/commit/e5564c0f888e40af2726a645d24cfad0aaeed26a",
+        "repo": "storm",
+        "unit_tests": [
+            "TestStatsUtil.java"
+        ]
+    },
+    "storm_440f1b5": {
+        "bug_id": "storm_440f1b5",
+        "commit": "https://github.com/apache/storm/commit/440f1b5d3dd6194feed81a7da21b63b51cde6544",
+        "file": [
+            {
+                "additions": 11,
+                "blob_url": "https://github.com/apache/storm/blob/440f1b5d3dd6194feed81a7da21b63b51cde6544/external/storm-kafka-client/src/main/java/org/apache/storm/kafka/spout/KafkaSpout.java",
+                "changes": 21,
+                "contents_url": "https://api.github.com/repos/apache/storm/contents/external/storm-kafka-client/src/main/java/org/apache/storm/kafka/spout/KafkaSpout.java?ref=440f1b5d3dd6194feed81a7da21b63b51cde6544",
+                "deletions": 10,
+                "filename": "external/storm-kafka-client/src/main/java/org/apache/storm/kafka/spout/KafkaSpout.java",
+                "patch": "@@ -77,7 +77,7 @@\n     private transient boolean initialized;                              // Flag indicating that the spout is still undergoing initialization process.\n     // Initialization is only complete after the first call to  KafkaSpoutConsumerRebalanceListener.onPartitionsAssigned()\n \n-    private transient Map<TopicPartition, OffsetManager> acked;         // Tuples that were successfully acked. These tuples will be committed periodically when the commit timer expires, or after a consumer rebalance, or during close/deactivate\n+    private transient Map<TopicPartition, OffsetManager> offsetManagers;// Tuples that were successfully acked/emitted. These tuples will be committed periodically when the commit timer expires, or after a consumer rebalance, or during close/deactivate\n     private transient Set<KafkaSpoutMessageId> emitted;                 // Tuples that have been emitted but that are \"on the wire\", i.e. pending being acked or failed. Not used if it's AutoCommitMode\n     private transient Iterator<ConsumerRecord<K, V>> waitingToEmit;     // Records that have been polled and are queued to be emitted in the nextTuple() call. One record is emitted per nextTuple()\n     private transient long numUncommittedOffsets;                       // Number of offsets that have been polled and emitted but not yet been committed. Not used if auto commit mode is enabled.\n@@ -117,7 +117,7 @@ public void open(Map conf, TopologyContext context, SpoutOutputCollector collect\n         }\n         refreshSubscriptionTimer = new Timer(TIMER_DELAY_MS, kafkaSpoutConfig.getPartitionRefreshPeriodMs(), TimeUnit.MILLISECONDS);\n \n-        acked = new HashMap<>();\n+        offsetManagers = new HashMap<>();\n         emitted = new HashSet<>();\n         waitingToEmit = Collections.emptyListIterator();\n \n@@ -147,7 +147,7 @@ public void onPartitionsAssigned(Collection<TopicPartition> partitions) {\n \n         private void initialize(Collection<TopicPartition> partitions) {\n             if (!consumerAutoCommitMode) {\n-                acked.keySet().retainAll(partitions);   // remove from acked all partitions that are no longer assigned to this spout\n+                offsetManagers.keySet().retainAll(partitions);   // remove from acked all partitions that are no longer assigned to this spout\n             }\n \n             retryService.retainAll(partitions);\n@@ -205,8 +205,8 @@ private long doSeek(TopicPartition tp, OffsetAndMetadata committedOffset) {\n \n     private void setAcked(TopicPartition tp, long fetchOffset) {\n         // If this partition was previously assigned to this spout, leave the acked offsets as they were to resume where it left off\n-        if (!consumerAutoCommitMode && !acked.containsKey(tp)) {\n-            acked.put(tp, new OffsetManager(tp, fetchOffset));\n+        if (!consumerAutoCommitMode && !offsetManagers.containsKey(tp)) {\n+            offsetManagers.put(tp, new OffsetManager(tp, fetchOffset));\n         }\n     }\n \n@@ -319,7 +319,7 @@ private void emit() {\n     private boolean emitTupleIfNotEmitted(ConsumerRecord<K, V> record) {\n         final TopicPartition tp = new TopicPartition(record.topic(), record.partition());\n         final KafkaSpoutMessageId msgId = new KafkaSpoutMessageId(record);\n-        if (acked.containsKey(tp) && acked.get(tp).contains(msgId)) {   // has been acked\n+        if (offsetManagers.containsKey(tp) && offsetManagers.get(tp).contains(msgId)) {   // has been acked\n             LOG.trace(\"Tuple for record [{}] has already been acked. Skipping\", record);\n         } else if (emitted.contains(msgId)) {   // has been emitted and it's pending ack or fail\n             LOG.trace(\"Tuple for record [{}] has already been emitted. Skipping\", record);\n@@ -337,6 +337,7 @@ private boolean emitTupleIfNotEmitted(ConsumerRecord<K, V> record) {\n                         }\n                     } else {\n                         emitted.add(msgId);\n+                        offsetManagers.get(tp).addToEmitMsgs(msgId.offset());\n                         if (isScheduled) {  // Was scheduled for retry and re-emitted, so remove from schedule.\n                             retryService.remove(msgId);\n                         } else {            //New tuple, hence increment the uncommitted offset counter\n@@ -371,7 +372,7 @@ private boolean isEmitTuple(List<Object> tuple) {\n     private void commitOffsetsForAckedTuples() {\n         // Find offsets that are ready to be committed for every topic partition\n         final Map<TopicPartition, OffsetAndMetadata> nextCommitOffsets = new HashMap<>();\n-        for (Map.Entry<TopicPartition, OffsetManager> tpOffset : acked.entrySet()) {\n+        for (Map.Entry<TopicPartition, OffsetManager> tpOffset : offsetManagers.entrySet()) {\n             final OffsetAndMetadata nextCommitOffset = tpOffset.getValue().findNextCommitOffset();\n             if (nextCommitOffset != null) {\n                 nextCommitOffsets.put(tpOffset.getKey(), nextCommitOffset);\n@@ -387,7 +388,7 @@ private void commitOffsetsForAckedTuples() {\n             for (Map.Entry<TopicPartition, OffsetAndMetadata> tpOffset : nextCommitOffsets.entrySet()) {\n                 //Update the OffsetManager for each committed partition, and update numUncommittedOffsets\n                 final TopicPartition tp = tpOffset.getKey();\n-                final OffsetManager offsetManager = acked.get(tp);\n+                final OffsetManager offsetManager = offsetManagers.get(tp);\n                 long numCommittedOffsets = offsetManager.commit(tpOffset.getValue());\n                 numUncommittedOffsets -= numCommittedOffsets;\n                 LOG.debug(\"[{}] uncommitted offsets across all topic partitions\",\n@@ -413,7 +414,7 @@ public void ack(Object messageId) {\n             }\n         } else {\n             if (!consumerAutoCommitMode) {  // Only need to keep track of acked tuples if commits are not done automatically\n-                acked.get(msgId.getTopicPartition()).add(msgId);\n+                offsetManagers.get(msgId.getTopicPartition()).addToAckMsgs(msgId);\n             }\n             emitted.remove(msgId);\n         }\n@@ -493,7 +494,7 @@ public void declareOutputFields(OutputFieldsDeclarer declarer) {\n     @Override\n     public String toString() {\n         return \"KafkaSpout{\" +\n-                \"acked=\" + acked +\n+                \"offsetManagers =\" + offsetManagers +\n                 \", emitted=\" + emitted +\n                 \"}\";\n     }",
+                "raw_url": "https://github.com/apache/storm/raw/440f1b5d3dd6194feed81a7da21b63b51cde6544/external/storm-kafka-client/src/main/java/org/apache/storm/kafka/spout/KafkaSpout.java",
+                "sha": "310902e89c813c0137d4da5c83d6b5e1103b0d3b",
+                "status": "modified"
+            },
+            {
+                "additions": 42,
+                "blob_url": "https://github.com/apache/storm/blob/440f1b5d3dd6194feed81a7da21b63b51cde6544/external/storm-kafka-client/src/main/java/org/apache/storm/kafka/spout/internal/OffsetManager.java",
+                "changes": 47,
+                "contents_url": "https://api.github.com/repos/apache/storm/contents/external/storm-kafka-client/src/main/java/org/apache/storm/kafka/spout/internal/OffsetManager.java?ref=440f1b5d3dd6194feed81a7da21b63b51cde6544",
+                "deletions": 5,
+                "filename": "external/storm-kafka-client/src/main/java/org/apache/storm/kafka/spout/internal/OffsetManager.java",
+                "patch": "@@ -39,6 +39,8 @@\n     private final long initialFetchOffset;\n     // Last offset committed to Kafka. Initially it is set to fetchOffset - 1\n     private long committedOffset;\n+    // Emitted Offsets List\n+    private final NavigableSet<Long> emittedOffsets = new TreeSet<>();\n     // Acked messages sorted by ascending order of offset\n     private final NavigableSet<KafkaSpoutMessageId> ackedMsgs = new TreeSet<>(OFFSET_COMPARATOR);\n \n@@ -49,10 +51,14 @@ public OffsetManager(TopicPartition tp, long initialFetchOffset) {\n         LOG.debug(\"Instantiated {}\", this);\n     }\n \n-    public void add(KafkaSpoutMessageId msgId) {          // O(Log N)\n+    public void addToAckMsgs(KafkaSpoutMessageId msgId) {          // O(Log N)\n         ackedMsgs.add(msgId);\n     }\n \n+    public void addToEmitMsgs(long offset) {\n+        this.emittedOffsets.add(offset);                  // O(Log N)\n+    }\n+\n     /**\n      * An offset is only committed when all records with lower offset have been\n      * acked. This guarantees that all offsets smaller than the committedOffset\n@@ -68,13 +74,34 @@ public OffsetAndMetadata findNextCommitOffset() {\n         KafkaSpoutMessageId nextCommitMsg = null;     // this is a convenience variable to make it faster to create OffsetAndMetadata\n \n         for (KafkaSpoutMessageId currAckedMsg : ackedMsgs) {  // complexity is that of a linear scan on a TreeMap\n-            if ((currOffset = currAckedMsg.offset()) == nextCommitOffset + 1) {            // found the next offset to commit\n+            currOffset = currAckedMsg.offset();\n+            if (currOffset == nextCommitOffset + 1) {            // found the next offset to commit\n                 found = true;\n                 nextCommitMsg = currAckedMsg;\n                 nextCommitOffset = currOffset;\n-            } else if (currAckedMsg.offset() > nextCommitOffset + 1) {    // offset found is not continuous to the offsets listed to go in the next commit, so stop search\n-                LOG.debug(\"topic-partition [{}] has non-continuous offset [{}]. It will be processed in a subsequent batch.\", tp, currOffset);\n-                break;\n+            } else if (currOffset > nextCommitOffset + 1) {\n+                if (emittedOffsets.contains(nextCommitOffset + 1)) {\n+                    LOG.debug(\"topic-partition [{}] has non-continuous offset [{}]. It will be processed in a subsequent batch.\", tp, currOffset);\n+                    break;\n+                } else {\n+                    /*\n+                        This case will arise in case of non contiguous offset being processed.\n+                        So, if the topic doesn't contain offset = committedOffset + 1 (possible\n+                        if the topic is compacted or deleted), the consumer should jump to\n+                        the next logical point in the topic. Next logical offset should be the\n+                        first element after committedOffset in the ascending ordered emitted set.\n+                     */\n+                    LOG.debug(\"Processed non contiguous offset. (committedOffset+1) is no longer part of the topic. Committed: [{}], Processed: [{}]\", committedOffset, currOffset);\n+                    final Long nextEmittedOffset = emittedOffsets.ceiling(nextCommitOffset);\n+                    if (nextEmittedOffset != null && currOffset == nextEmittedOffset) {\n+                        found = true;\n+                        nextCommitMsg = currAckedMsg;\n+                        nextCommitOffset = currOffset;\n+                    } else {\n+                        LOG.debug(\"topic-partition [{}] has non-continuous offset [{}]. Next Offset to commit should be [{}]\", tp, currOffset, nextEmittedOffset);\n+                        break;\n+                    }\n+                }\n             } else {\n                 //Received a redundant ack. Ignore and continue processing.\n                 LOG.warn(\"topic-partition [{}] has unexpected offset [{}]. Current committed Offset [{}]\",\n@@ -113,6 +140,15 @@ public long commit(OffsetAndMetadata committedOffset) {\n                 break;\n             }\n         }\n+\n+        for (Iterator<Long> iterator = emittedOffsets.iterator(); iterator.hasNext();) {\n+            if (iterator.next() <= committedOffset.offset()) {\n+                iterator.remove();\n+            } else {\n+                break;\n+            }\n+        }\n+\n         LOG.trace(\"{}\", this);\n         \n         LOG.debug(\"Committed offsets [{}-{} = {}] for topic-partition [{}].\",\n@@ -143,6 +179,7 @@ public String toString() {\n             + \"topic-partition=\" + tp\n             + \", fetchOffset=\" + initialFetchOffset\n             + \", committedOffset=\" + committedOffset\n+            + \", emittedOffsets=\" + emittedOffsets\n             + \", ackedMsgs=\" + ackedMsgs\n             + '}';\n     }",
+                "raw_url": "https://github.com/apache/storm/raw/440f1b5d3dd6194feed81a7da21b63b51cde6544/external/storm-kafka-client/src/main/java/org/apache/storm/kafka/spout/internal/OffsetManager.java",
+                "sha": "0bf41325d65e270653fcf24339cce4b191592fe0",
+                "status": "modified"
+            }
+        ],
+        "message": "[STORM-2505] Spout to support topic compaction\n\n[STORM-2505] Maintaining a emitted set in OffsetManager to handle the voids in the topic\n\n[STORM-2505] Handling NPE in Boxed Long to primitive type comparison\n\n[STORM-2505] Rephrased the log message when a non contiguous offset is acked by the spout\n\n[STORM-2505] Updated comment\n\n[STORM-2505] Renamed the methods ack/emit to addToAckMsgs and addToEmitMsgs in OffsetManager",
+        "parent": "https://github.com/apache/storm/commit/9755ff547de3247fe4aa1b60a778983145f43f76",
+        "repo": "storm",
+        "unit_tests": [
+            "OffsetManagerTest.java"
+        ]
+    },
+    "storm_5b86f47": {
+        "bug_id": "storm_5b86f47",
+        "commit": "https://github.com/apache/storm/commit/5b86f4712f92d34c32134e933b8f2c7fc3c866f0",
+        "file": [
+            {
+                "additions": 11,
+                "blob_url": "https://github.com/apache/storm/blob/5b86f4712f92d34c32134e933b8f2c7fc3c866f0/storm-core/src/jvm/backtype/storm/utils/Time.java",
+                "changes": 12,
+                "contents_url": "https://api.github.com/repos/apache/storm/contents/storm-core/src/jvm/backtype/storm/utils/Time.java?ref=5b86f4712f92d34c32134e933b8f2c7fc3c866f0",
+                "deletions": 1,
+                "filename": "storm-core/src/jvm/backtype/storm/utils/Time.java",
+                "patch": "@@ -58,14 +58,24 @@ public static void sleepUntil(long targetTimeMs) throws InterruptedException {\n         if(simulating.get()) {\n             try {\n                 synchronized(sleepTimesLock) {\n+                    if (threadSleepTimes == null) {\n+                        LOG.debug(\"{} is still sleeping after simulated time disabled.\", Thread.currentThread(), new RuntimeException(\"STACK TRACE\"));\n+                        throw new InterruptedException();\n+                    }\n                     threadSleepTimes.put(Thread.currentThread(), new AtomicLong(targetTimeMs));\n                 }\n                 while(simulatedCurrTimeMs.get() < targetTimeMs) {\n+                    synchronized(sleepTimesLock) {\n+                        if (threadSleepTimes == null) {\n+                            LOG.debug(\"{} is still sleeping after simulated time disabled.\", Thread.currentThread(), new RuntimeException(\"STACK TRACE\"));\n+                            throw new InterruptedException();\n+                        }\n+                    }\n                     Thread.sleep(10);\n                 }\n             } finally {\n                 synchronized(sleepTimesLock) {\n-                    if (simulating.get()) {\n+                    if (simulating.get() && threadSleepTimes != null) {\n                         threadSleepTimes.remove(Thread.currentThread());\n                     }\n                 }",
+                "raw_url": "https://github.com/apache/storm/raw/5b86f4712f92d34c32134e933b8f2c7fc3c866f0/storm-core/src/jvm/backtype/storm/utils/Time.java",
+                "sha": "6af7185ac350f2875e80493bb88630b80ff985d3",
+                "status": "modified"
+            }
+        ],
+        "message": "STORM-1108: Fix NPE in simulated time.",
+        "parent": "https://github.com/apache/storm/commit/f0049e6fadb015be2744dde30a6e2fa46e168697",
+        "repo": "storm",
+        "unit_tests": [
+            "TimeTest.java"
+        ]
+    },
+    "storm_6408063": {
+        "bug_id": "storm_6408063",
+        "commit": "https://github.com/apache/storm/commit/6408063df31a758a70bf06e67dda7cf7ec744cb0",
+        "file": [
+            {
+                "additions": 11,
+                "blob_url": "https://github.com/apache/storm/blob/6408063df31a758a70bf06e67dda7cf7ec744cb0/storm-core/src/jvm/backtype/storm/utils/Time.java",
+                "changes": 12,
+                "contents_url": "https://api.github.com/repos/apache/storm/contents/storm-core/src/jvm/backtype/storm/utils/Time.java?ref=6408063df31a758a70bf06e67dda7cf7ec744cb0",
+                "deletions": 1,
+                "filename": "storm-core/src/jvm/backtype/storm/utils/Time.java",
+                "patch": "@@ -58,14 +58,24 @@ public static void sleepUntil(long targetTimeMs) throws InterruptedException {\n         if(simulating.get()) {\n             try {\n                 synchronized(sleepTimesLock) {\n+                    if (threadSleepTimes == null) {\n+                        LOG.debug(\"{} is still sleeping after simulated time disabled.\", Thread.currentThread(), new RuntimeException(\"STACK TRACE\"));\n+                        throw new InterruptedException();\n+                    }\n                     threadSleepTimes.put(Thread.currentThread(), new AtomicLong(targetTimeMs));\n                 }\n                 while(simulatedCurrTimeMs.get() < targetTimeMs) {\n+                    synchronized(sleepTimesLock) {\n+                        if (threadSleepTimes == null) {\n+                            LOG.debug(\"{} is still sleeping after simulated time disabled.\", Thread.currentThread(), new RuntimeException(\"STACK TRACE\"));\n+                            throw new InterruptedException();\n+                        }\n+                    }\n                     Thread.sleep(10);\n                 }\n             } finally {\n                 synchronized(sleepTimesLock) {\n-                    if (simulating.get()) {\n+                    if (simulating.get() && threadSleepTimes != null) {\n                         threadSleepTimes.remove(Thread.currentThread());\n                     }\n                 }",
+                "raw_url": "https://github.com/apache/storm/raw/6408063df31a758a70bf06e67dda7cf7ec744cb0/storm-core/src/jvm/backtype/storm/utils/Time.java",
+                "sha": "6af7185ac350f2875e80493bb88630b80ff985d3",
+                "status": "modified"
+            }
+        ],
+        "message": "Merge branch 'STORM-1108' of https://github.com/revans2/incubator-storm into STORM-1108\n\nSTORM-1108: Fix NPE in simulated time",
+        "parent": "https://github.com/apache/storm/commit/415654dcc5c6301d05df95ba9ab15d9bb03f95ea",
+        "repo": "storm",
+        "unit_tests": [
+            "TimeTest.java"
+        ]
+    },
+    "storm_88fc18b": {
+        "bug_id": "storm_88fc18b",
+        "commit": "https://github.com/apache/storm/commit/88fc18b2f2d031e9915b852e16cd406fbc21a91e",
+        "file": [
+            {
+                "additions": 8,
+                "blob_url": "https://github.com/apache/storm/blob/88fc18b2f2d031e9915b852e16cd406fbc21a91e/storm-server/src/main/java/org/apache/storm/daemon/supervisor/BasicContainer.java",
+                "changes": 12,
+                "contents_url": "https://api.github.com/repos/apache/storm/contents/storm-server/src/main/java/org/apache/storm/daemon/supervisor/BasicContainer.java?ref=88fc18b2f2d031e9915b852e16cd406fbc21a91e",
+                "deletions": 4,
+                "filename": "storm-server/src/main/java/org/apache/storm/daemon/supervisor/BasicContainer.java",
+                "patch": "@@ -213,10 +213,14 @@ public void cleanUpForRestart() throws IOException {\n         super.cleanUpForRestart();\n         synchronized (_localState) {\n             Map<String, Integer> workersToPort = _localState.getApprovedWorkers();\n-            workersToPort.remove(origWorkerId);\n-            removeWorkersOn(workersToPort, _port);\n-            _localState.setApprovedWorkers(workersToPort);\n-            LOG.info(\"Removed Worker ID {}\", origWorkerId);\n+            if (workersToPort != null) {\n+                workersToPort.remove(origWorkerId);\n+                removeWorkersOn(workersToPort, _port);\n+                _localState.setApprovedWorkers(workersToPort);\n+                LOG.info(\"Removed Worker ID {}\", origWorkerId);\n+            } else {\n+                LOG.warn(\"No approved workers exists\");\n+            }\n         }\n     }\n ",
+                "raw_url": "https://github.com/apache/storm/raw/88fc18b2f2d031e9915b852e16cd406fbc21a91e/storm-server/src/main/java/org/apache/storm/daemon/supervisor/BasicContainer.java",
+                "sha": "9a6e5264e93ac9e80efb2c12e1cc95260ca3ba53",
+                "status": "modified"
+            }
+        ],
+        "message": "Merge branch 'agresch_storm-3208' of https://github.com/agresch/storm into STORM-3208\n\nSTORM-3208 fix worker kill NPE\n\nThis closes #2816",
+        "parent": "https://github.com/apache/storm/commit/8ea2679d47dd14443f44944fed98b9e7b6c6c516",
+        "repo": "storm",
+        "unit_tests": [
+            "BasicContainerTest.java"
+        ]
+    },
+    "storm_91458a3": {
+        "bug_id": "storm_91458a3",
+        "commit": "https://github.com/apache/storm/commit/91458a32cded87fb64dbb1b22db8059edd6af99d",
+        "file": [
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/storm/blob/91458a32cded87fb64dbb1b22db8059edd6af99d/storm-server/src/main/java/org/apache/storm/daemon/supervisor/BasicContainer.java",
+                "changes": 10,
+                "contents_url": "https://api.github.com/repos/apache/storm/contents/storm-server/src/main/java/org/apache/storm/daemon/supervisor/BasicContainer.java?ref=91458a32cded87fb64dbb1b22db8059edd6af99d",
+                "deletions": 4,
+                "filename": "storm-server/src/main/java/org/apache/storm/daemon/supervisor/BasicContainer.java",
+                "patch": "@@ -213,10 +213,12 @@ public void cleanUpForRestart() throws IOException {\n         super.cleanUpForRestart();\n         synchronized (_localState) {\n             Map<String, Integer> workersToPort = _localState.getApprovedWorkers();\n-            workersToPort.remove(origWorkerId);\n-            removeWorkersOn(workersToPort, _port);\n-            _localState.setApprovedWorkers(workersToPort);\n-            LOG.info(\"Removed Worker ID {}\", origWorkerId);\n+            if (workersToPort != null) {\n+                workersToPort.remove(origWorkerId);\n+                removeWorkersOn(workersToPort, _port);\n+                _localState.setApprovedWorkers(workersToPort);\n+                LOG.info(\"Removed Worker ID {}\", origWorkerId);\n+            }\n         }\n     }\n ",
+                "raw_url": "https://github.com/apache/storm/raw/91458a32cded87fb64dbb1b22db8059edd6af99d/storm-server/src/main/java/org/apache/storm/daemon/supervisor/BasicContainer.java",
+                "sha": "082fc3b2bd68b0bcd0ae03b42627173a1d0707db",
+                "status": "modified"
+            }
+        ],
+        "message": "STORM-3208 fix worker kill NPE",
+        "parent": "https://github.com/apache/storm/commit/aa6bc4d2cc49a36f65dcf9c4792c426f17fff069",
+        "repo": "storm",
+        "unit_tests": [
+            "BasicContainerTest.java"
+        ]
+    },
+    "storm_917be55": {
+        "bug_id": "storm_917be55",
+        "commit": "https://github.com/apache/storm/commit/917be55a5bd6be8baa4811c6684897da949c3bb1",
+        "file": [
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/storm/blob/917be55a5bd6be8baa4811c6684897da949c3bb1/storm-server/src/main/java/org/apache/storm/daemon/nimbus/Nimbus.java",
+                "changes": 10,
+                "contents_url": "https://api.github.com/repos/apache/storm/contents/storm-server/src/main/java/org/apache/storm/daemon/nimbus/Nimbus.java?ref=917be55a5bd6be8baa4811c6684897da949c3bb1",
+                "deletions": 4,
+                "filename": "storm-server/src/main/java/org/apache/storm/daemon/nimbus/Nimbus.java",
+                "patch": "@@ -487,14 +487,16 @@ public Nimbus(Map<String, Object> conf, INimbus inimbus, IStormClusterState stor\n             blobStore = ServerUtils.getNimbusBlobStore(conf, this.nimbusHostPortInfo, null);\n         }\n         this.blobStore = blobStore;\n+\n+        if (topoCache == null) {\n+            topoCache = new TopoCache(blobStore, conf);\n+        }\n         if (leaderElector == null) {\n             leaderElector = Zookeeper.zkLeaderElector(conf, zkClient, blobStore, topoCache, stormClusterState, getNimbusAcls(conf));\n         }\n         this.leaderElector = leaderElector;\n         this.blobStore.setLeaderElector(this.leaderElector);\n-        if (topoCache == null) {\n-            topoCache = new TopoCache(blobStore, conf);\n-        }\n+\n         this.topoCache = topoCache;\n         this.assignmentsDistributer = AssignmentDistributionService.getInstance(conf);\n         this.idToSchedStatus = new AtomicReference<>(new HashMap<>());\n@@ -2136,7 +2138,7 @@ private void mkAssignments(String scratchTopoId) throws Exception {\n                 LOG.info(\"Fragmentation after scheduling is: {} MB, {} PCore CPUs\", fragmentedMemory(), fragmentedCpu());\n                 nodeIdToResources.get().forEach((id, node) ->\n                                                     LOG.info(\n-                                                        \"Node Id: {} Total Mem: {}, Used Mem: {}, Avialble Mem: {}, Total CPU: {}, Used \" +\n+                                                        \"Node Id: {} Total Mem: {}, Used Mem: {}, Available Mem: {}, Total CPU: {}, Used \" +\n                                                         \"CPU: {}, Available CPU: {}, fragmented: {}\",\n                                                         id, node.getTotalMem(), node.getUsedMem(), node.getAvailableMem(),\n                                                         node.getTotalCpu(), node.getUsedCpu(), node.getAvailableCpu(), isFragmented(node)));",
+                "raw_url": "https://github.com/apache/storm/raw/917be55a5bd6be8baa4811c6684897da949c3bb1/storm-server/src/main/java/org/apache/storm/daemon/nimbus/Nimbus.java",
+                "sha": "48e8c210a2e1dd26730b02da683f898a736ce83e",
+                "status": "modified"
+            }
+        ],
+        "message": "STORM-3075 fix NPE",
+        "parent": "https://github.com/apache/storm/commit/14b0b4fc5e0945456769fd58a3595188e3dea234",
+        "repo": "storm",
+        "unit_tests": [
+            "NimbusTest.java"
+        ]
+    },
+    "storm_9833f54": {
+        "bug_id": "storm_9833f54",
+        "commit": "https://github.com/apache/storm/commit/9833f5449e598b7f257a229e64ed2f479c4d07ac",
+        "file": [
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/storm/blob/9833f5449e598b7f257a229e64ed2f479c4d07ac/storm-core/test/clj/org/apache/storm/nimbus_test.clj",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/storm/contents/storm-core/test/clj/org/apache/storm/nimbus_test.clj?ref=9833f5449e598b7f257a229e64ed2f479c4d07ac",
+                "deletions": 0,
+                "filename": "storm-core/test/clj/org/apache/storm/nimbus_test.clj",
+                "patch": "@@ -537,6 +537,10 @@\n                                 (TestPlannerSpout. true) (Integer. 4))}\n                          {}))\n         (bind state (.getClusterState cluster))\n+        ; get topology history when there's no topology history\n+        (let [hist-topo-ids (vec (sort (.get_topo_ids (.getTopologyHistory (.getNimbus cluster) (System/getProperty \"user.name\")))))]\n+             (log-message \"Checking user \" (System/getProperty \"user.name\") \" \" hist-topo-ids)\n+             (is (= 0 (count hist-topo-ids))))\n         (.submitTopology cluster \"test\" {TOPOLOGY-MESSAGE-TIMEOUT-SECS 20, LOGS-USERS [\"alice\", (System/getProperty \"user.name\")]} topology)\n         (bind storm-id (StormCommon/getStormId state \"test\"))\n         (.advanceClusterTime cluster 5)",
+                "raw_url": "https://github.com/apache/storm/raw/9833f5449e598b7f257a229e64ed2f479c4d07ac/storm-core/test/clj/org/apache/storm/nimbus_test.clj",
+                "sha": "c4f3fadc0228ceab8011fa26f1278290229f590f",
+                "status": "modified"
+            },
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/storm/blob/9833f5449e598b7f257a229e64ed2f479c4d07ac/storm-server/src/main/java/org/apache/storm/daemon/nimbus/Nimbus.java",
+                "changes": 8,
+                "contents_url": "https://api.github.com/repos/apache/storm/contents/storm-server/src/main/java/org/apache/storm/daemon/nimbus/Nimbus.java?ref=9833f5449e598b7f257a229e64ed2f479c4d07ac",
+                "deletions": 2,
+                "filename": "storm-server/src/main/java/org/apache/storm/daemon/nimbus/Nimbus.java",
+                "patch": "@@ -2116,9 +2116,13 @@ private boolean isUserPartOf(String user, Collection<String> groupsToCheck) thro\n \n     private List<String> readTopologyHistory(String user, Collection<String> adminUsers) throws IOException {\n         LocalState state = topologyHistoryState;\n+        List<LSTopoHistory> topoHistoryList = state.getTopoHistoryList();\n+        if (topoHistoryList == null || topoHistoryList.isEmpty()) {\n+            return Collections.emptyList();\n+        }\n+\n         List<String> ret = new ArrayList<>();\n-        for (LSTopoHistory history: state.getTopoHistoryList()) {\n-            \n+        for (LSTopoHistory history: topoHistoryList) {\n             if (user == null || //Security off\n                     adminUsers.contains(user) || //is admin\n                     isUserPartOf(user, history.get_groups()) || //is in allowed group",
+                "raw_url": "https://github.com/apache/storm/raw/9833f5449e598b7f257a229e64ed2f479c4d07ac/storm-server/src/main/java/org/apache/storm/daemon/nimbus/Nimbus.java",
+                "sha": "5fcf1ec3c9b3889be8f195ead6b5b9f305e7a7ad",
+                "status": "modified"
+            }
+        ],
+        "message": "STORM-2635 Deep log search doesn\u2019t work when there\u2019s no topology in topology history\n\n* just fix the NPE issue",
+        "parent": "https://github.com/apache/storm/commit/e1dd247ce97ad560c72554ed612e1ec8e69e9777",
+        "repo": "storm",
+        "unit_tests": [
+            "NimbusTest.java"
+        ]
+    },
+    "storm_b25d580": {
+        "bug_id": "storm_b25d580",
+        "commit": "https://github.com/apache/storm/commit/b25d580780d31598f568bbe8dde800fe4b0d6f61",
+        "file": [
+            {
+                "additions": 5,
+                "blob_url": "https://github.com/apache/storm/blob/b25d580780d31598f568bbe8dde800fe4b0d6f61/storm-core/src/clj/org/apache/storm/ui/core.clj",
+                "changes": 10,
+                "contents_url": "https://api.github.com/repos/apache/storm/contents/storm-core/src/clj/org/apache/storm/ui/core.clj?ref=b25d580780d31598f568bbe8dde800fe4b0d6f61",
+                "deletions": 5,
+                "filename": "storm-core/src/clj/org/apache/storm/ui/core.clj",
+                "patch": "@@ -46,7 +46,7 @@\n   (:import [org.apache.storm.generated AuthorizationException ProfileRequest ProfileAction NodeInfo])\n   (:import [org.apache.storm.security.auth AuthUtils])\n   (:import [org.apache.storm.utils VersionInfo ConfigUtils Utils WebAppUtils])\n-  (:import [org.apache.storm Config])\n+  (:import [org.apache.storm Config Constants])\n   (:import [java.io File])\n   (:import [java.net URLEncoder URLDecoder])\n   (:import [org.json.simple JSONValue])\n@@ -425,8 +425,8 @@\n            resourceSummary (if (> (.size sups) 0)\n                              (reduce #(map + %1 %2)\n                                (for [^SupervisorSummary s sups\n-                                     :let [sup-total-mem (get (.get_total_resources s) Config/SUPERVISOR_MEMORY_CAPACITY_MB)\n-                                           sup-total-cpu (get (.get_total_resources s) Config/SUPERVISOR_CPU_CAPACITY)\n+                                     :let [sup-total-mem (get (.get_total_resources s) Constants/COMMON_TOTAL_MEMORY_RESOURCE_NAME)\n+                                           sup-total-cpu (get (.get_total_resources s) Constants/COMMON_CPU_RESOURCE_NAME)\n                                            sup-avail-mem (max (- sup-total-mem (.get_used_mem s)) 0.0)\n                                            sup-avail-cpu (max (- sup-total-cpu (.get_used_cpu s)) 0.0)\n                                            sup-fragmented-cpu (.get_fragmented_cpu s)\n@@ -518,8 +518,8 @@\n   (let [slotsTotal (.get_num_workers summary)\n         slotsUsed (.get_num_used_workers summary)\n         slotsFree (max (- slotsTotal slotsUsed) 0)\n-        totalMem (get (.get_total_resources summary) Config/SUPERVISOR_MEMORY_CAPACITY_MB)\n-        totalCpu (get (.get_total_resources summary) Config/SUPERVISOR_CPU_CAPACITY)\n+        totalMem (get (.get_total_resources summary) Constants/COMMON_TOTAL_MEMORY_RESOURCE_NAME)\n+        totalCpu (get (.get_total_resources summary) Constants/COMMON_CPU_RESOURCE_NAME)\n         usedMem (.get_used_mem summary)\n         usedCpu (.get_used_cpu summary)\n         availMem (max (- totalMem usedMem) 0)",
+                "raw_url": "https://github.com/apache/storm/raw/b25d580780d31598f568bbe8dde800fe4b0d6f61/storm-core/src/clj/org/apache/storm/ui/core.clj",
+                "sha": "d12ff749832753013b22d7edab56cf5815d00d99",
+                "status": "modified"
+            },
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/storm/blob/b25d580780d31598f568bbe8dde800fe4b0d6f61/storm-server/src/main/java/org/apache/storm/daemon/nimbus/Nimbus.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/storm/contents/storm-server/src/main/java/org/apache/storm/daemon/nimbus/Nimbus.java?ref=b25d580780d31598f568bbe8dde800fe4b0d6f61",
+                "deletions": 2,
+                "filename": "storm-server/src/main/java/org/apache/storm/daemon/nimbus/Nimbus.java",
+                "patch": "@@ -958,8 +958,8 @@ private static void setLoggerTimeouts(LogLevel level) {\n             List<DataPoint> metrics = new ArrayList<>();\n             metrics.add(new DataPoint(\"slotsTotal\", sup.get_num_workers()));\n             metrics.add(new DataPoint(\"slotsUsed\", sup.get_num_used_workers()));\n-            metrics.add(new DataPoint(\"totalMem\", sup.get_total_resources().get(Config.SUPERVISOR_MEMORY_CAPACITY_MB)));\n-            metrics.add(new DataPoint(\"totalCpu\", sup.get_total_resources().get(Config.SUPERVISOR_CPU_CAPACITY)));\n+            metrics.add(new DataPoint(\"totalMem\", sup.get_total_resources().get(Constants.COMMON_TOTAL_MEMORY_RESOURCE_NAME)));\n+            metrics.add(new DataPoint(\"totalCpu\", sup.get_total_resources().get(Constants.COMMON_CPU_RESOURCE_NAME)));\n             metrics.add(new DataPoint(\"usedMem\", sup.get_used_mem()));\n             metrics.add(new DataPoint(\"usedCpu\", sup.get_used_cpu()));\n             ret.put(info, metrics);",
+                "raw_url": "https://github.com/apache/storm/raw/b25d580780d31598f568bbe8dde800fe4b0d6f61/storm-server/src/main/java/org/apache/storm/daemon/nimbus/Nimbus.java",
+                "sha": "f878cf052dd45b5de4a6b89dc830d840a19bfd86",
+                "status": "modified"
+            }
+        ],
+        "message": "STORM-2808: Fix for NPE in UI",
+        "parent": "https://github.com/apache/storm/commit/ee1be2b73fffff05e32cfd15857561c24655d90c",
+        "repo": "storm",
+        "unit_tests": [
+            "NimbusTest.java"
+        ]
+    },
+    "storm_e3f6cb9": {
+        "bug_id": "storm_e3f6cb9",
+        "commit": "https://github.com/apache/storm/commit/e3f6cb96a1da5bb6e570a356e47ca9a6b8bc1e70",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/storm/blob/e3f6cb96a1da5bb6e570a356e47ca9a6b8bc1e70/storm-core/src/jvm/backtype/storm/security/auth/authorizer/SimpleACLAuthorizer.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/storm/contents/storm-core/src/jvm/backtype/storm/security/auth/authorizer/SimpleACLAuthorizer.java?ref=e3f6cb96a1da5bb6e570a356e47ca9a6b8bc1e70",
+                "deletions": 1,
+                "filename": "storm-core/src/jvm/backtype/storm/security/auth/authorizer/SimpleACLAuthorizer.java",
+                "patch": "@@ -110,7 +110,7 @@ public boolean permit(ReqContext context, String operation, Map topology_conf) {\n             }\n \n             Set<String> topoGroups = new HashSet<String>();\n-            if (topology_conf.containsKey(Config.TOPOLOGY_GROUPS)) {\n+            if (topology_conf.containsKey(Config.TOPOLOGY_GROUPS) && topology_conf.get(Config.TOPOLOGY_GROUPS) != null) {\n                 topoGroups.addAll((Collection<String>)topology_conf.get(Config.TOPOLOGY_GROUPS));\n             }\n ",
+                "raw_url": "https://github.com/apache/storm/raw/e3f6cb96a1da5bb6e570a356e47ca9a6b8bc1e70/storm-core/src/jvm/backtype/storm/security/auth/authorizer/SimpleACLAuthorizer.java",
+                "sha": "1a3433ed6ac7c7b7c97cac52e4a34d695514257c",
+                "status": "modified"
+            }
+        ],
+        "message": "Merge branch 'STORM-565' of https://github.com/harshach/incubator-storm into STORM-565\n\nSTORM-565: FIx NPE if topology.groups is null.",
+        "parent": "https://github.com/apache/storm/commit/bf6e41c8909fee918eed879e7cf2c8f4a28424f7",
+        "repo": "storm",
+        "unit_tests": [
+            "SimpleACLAuthorizerTest.java"
+        ]
+    },
+    "storm_e69fbc5": {
+        "bug_id": "storm_e69fbc5",
+        "commit": "https://github.com/apache/storm/commit/e69fbc51ada2fd542d717bbd7623c39f4f6a1cb8",
+        "file": [
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/storm/blob/e69fbc51ada2fd542d717bbd7623c39f4f6a1cb8/storm-client/src/jvm/org/apache/storm/topology/WindowedBoltExecutor.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/storm/contents/storm-client/src/jvm/org/apache/storm/topology/WindowedBoltExecutor.java?ref=e69fbc51ada2fd542d717bbd7623c39f4f6a1cb8",
+                "deletions": 1,
+                "filename": "storm-client/src/jvm/org/apache/storm/topology/WindowedBoltExecutor.java",
+                "patch": "@@ -327,7 +327,9 @@ public void execute(Tuple input) {\n \n     @Override\n     public void cleanup() {\n-        waterMarkEventGenerator.shutdown();\n+        if (waterMarkEventGenerator != null) {\n+            waterMarkEventGenerator.shutdown();\n+        }\n         windowManager.shutdown();\n         bolt.cleanup();\n     }",
+                "raw_url": "https://github.com/apache/storm/raw/e69fbc51ada2fd542d717bbd7623c39f4f6a1cb8/storm-client/src/jvm/org/apache/storm/topology/WindowedBoltExecutor.java",
+                "sha": "5089f64f807b5f6c6600d49709132b3abeed4f86",
+                "status": "modified"
+            }
+        ],
+        "message": "STORM-2779 NPE on shutting down WindowedBoltExecutor\n\n* waterMarkEventGenerator could be null when timestamp field is not specified",
+        "parent": "https://github.com/apache/storm/commit/c8947c2fede62036c20472c9e0335ef90a06b536",
+        "repo": "storm",
+        "unit_tests": [
+            "WindowedBoltExecutorTest.java"
+        ]
+    },
+    "storm_faaacae": {
+        "bug_id": "storm_faaacae",
+        "commit": "https://github.com/apache/storm/commit/faaacaee046bfa4f458c19cade678515a021d836",
+        "file": [
+            {
+                "additions": 17,
+                "blob_url": "https://github.com/apache/storm/blob/faaacaee046bfa4f458c19cade678515a021d836/storm-core/src/jvm/org/apache/storm/stats/StatsUtil.java",
+                "changes": 23,
+                "contents_url": "https://api.github.com/repos/apache/storm/contents/storm-core/src/jvm/org/apache/storm/stats/StatsUtil.java?ref=faaacaee046bfa4f458c19cade678515a021d836",
+                "deletions": 6,
+                "filename": "storm-core/src/jvm/org/apache/storm/stats/StatsUtil.java",
+                "patch": "@@ -578,7 +578,7 @@ public static Map postAggregateTopoStats(\n         Map ret = new HashMap();\n         putRawKV(ret, NUM_TASKS, task2comp.size());\n         putRawKV(ret, NUM_WORKERS, ((Set) getByKeyword(accData, WORKERS_SET)).size());\n-        putRawKV(ret, NUM_EXECUTORS, exec2nodePort.size());\n+        putRawKV(ret, NUM_EXECUTORS, exec2nodePort != null ? exec2nodePort.size() : 0);\n \n         Map bolt2stats = getMapByKeyword(accData, BOLT_TO_STATS);\n         Map aggBolt2stats = new HashMap();\n@@ -1339,11 +1339,18 @@ private static Map mergeMaps(Map m1, Map m2) {\n      */\n     private static Map filterSysStreams(Map stats, boolean includeSys) {\n         if (!includeSys) {\n-            for (Object win : stats.keySet()) {\n-                Map stream2stat = (Map) stats.get(win);\n-                for (Iterator itr = stream2stat.keySet().iterator(); itr.hasNext(); ) {\n-                    Object key = itr.next();\n-                    if (key instanceof String && Utils.isSystemId((String) key)) {\n+            for (Iterator itr = stats.keySet().iterator(); itr.hasNext(); ) {\n+                Object winOrStream = itr.next();\n+                if (isWindow(winOrStream)) {\n+                    Map stream2stat = (Map) stats.get(winOrStream);\n+                    for (Iterator subItr = stream2stat.keySet().iterator(); subItr.hasNext(); ) {\n+                        Object key = subItr.next();\n+                        if (key instanceof String && Utils.isSystemId((String) key)) {\n+                            subItr.remove();\n+                        }\n+                    }\n+                } else {\n+                    if (winOrStream instanceof String && Utils.isSystemId((String) winOrStream)) {\n                         itr.remove();\n                     }\n                 }\n@@ -1352,6 +1359,10 @@ private static Map filterSysStreams(Map stats, boolean includeSys) {\n         return stats;\n     }\n \n+    private static boolean isWindow(Object key) {\n+        return key.equals(\"600\") || key.equals(\"10800\") || key.equals(\"86400\") || key.equals(\":all-time\");\n+    }\n+\n     /**\n      * equals to clojure's: (merge-with (partial merge-with sum-or-0) acc-out spout-out)\n      */",
+                "raw_url": "https://github.com/apache/storm/raw/faaacaee046bfa4f458c19cade678515a021d836/storm-core/src/jvm/org/apache/storm/stats/StatsUtil.java",
+                "sha": "0ed2af96de4ff8a306c213844863dba9efa4a831",
+                "status": "modified"
+            }
+        ],
+        "message": "fix possible NPE & ClassCastException",
+        "parent": "https://github.com/apache/storm/commit/abe9b676c0f15fa47809ae4a094001e345521de6",
+        "repo": "storm",
+        "unit_tests": [
+            "TestStatsUtil.java"
+        ]
+    }
+}

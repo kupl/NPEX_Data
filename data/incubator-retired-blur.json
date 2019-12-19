@@ -1,0 +1,242 @@
+{
+    "incubator-retired-blur_146214d": {
+        "bug_id": "incubator-retired-blur_146214d",
+        "commit": "https://github.com/apache/incubator-retired-blur/commit/146214d9c8d6230a102dddba4455f5c66934260e",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/incubator-retired-blur/blob/146214d9c8d6230a102dddba4455f5c66934260e/blur-mapred/src/main/java/org/apache/blur/mapreduce/lib/update/Driver.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/incubator-retired-blur/contents/blur-mapred/src/main/java/org/apache/blur/mapreduce/lib/update/Driver.java?ref=146214d9c8d6230a102dddba4455f5c66934260e",
+                "deletions": 3,
+                "filename": "blur-mapred/src/main/java/org/apache/blur/mapreduce/lib/update/Driver.java",
+                "patch": "@@ -105,10 +105,8 @@ public int run(String[] args) throws Exception {\n       inprogressPathList = movePathList(fileSystem, inprogressData, srcPathList);\n \n       Job job = Job.getInstance(getConf(), \"Blur Row Updater for table [\" + table + \"]\");\n-\n-      waitForOtherSnapshotsToBeRemoved(client, table, MRUPDATE_SNAPSHOT);\n-\n       client = BlurClient.getClientFromZooKeeperConnectionStr(blurZkConnection);\n+      waitForOtherSnapshotsToBeRemoved(client, table, MRUPDATE_SNAPSHOT);\n       client.createSnapshot(table, MRUPDATE_SNAPSHOT);\n       TableDescriptor descriptor = client.describe(table);\n       Path tablePath = new Path(descriptor.getTableUri());",
+                "raw_url": "https://github.com/apache/incubator-retired-blur/raw/146214d9c8d6230a102dddba4455f5c66934260e/blur-mapred/src/main/java/org/apache/blur/mapreduce/lib/update/Driver.java",
+                "sha": "04cd81ea0e6b26182bbe8cd07c48bc1936424e65",
+                "status": "modified"
+            }
+        ],
+        "message": "Fixing another NPE.",
+        "parent": "https://github.com/apache/incubator-retired-blur/commit/1985869099fefa12f90ee386a736401e2c4bc04d",
+        "repo": "incubator-retired-blur",
+        "unit_tests": [
+            "DriverTest.java"
+        ]
+    },
+    "incubator-retired-blur_19749a3": {
+        "bug_id": "incubator-retired-blur_19749a3",
+        "commit": "https://github.com/apache/incubator-retired-blur/commit/19749a390bf29ca799c911cc93a662fd57ad2c6d",
+        "file": [
+            {
+                "additions": 16,
+                "blob_url": "https://github.com/apache/incubator-retired-blur/blob/19749a390bf29ca799c911cc93a662fd57ad2c6d/blur-core/src/main/java/org/apache/blur/server/cache/ThriftCache.java",
+                "changes": 32,
+                "contents_url": "https://api.github.com/repos/apache/incubator-retired-blur/contents/blur-core/src/main/java/org/apache/blur/server/cache/ThriftCache.java?ref=19749a390bf29ca799c911cc93a662fd57ad2c6d",
+                "deletions": 16,
+                "filename": "blur-core/src/main/java/org/apache/blur/server/cache/ThriftCache.java",
+                "patch": "@@ -84,6 +84,22 @@ public ThriftCache(long totalNumberOfBytes) {\n     _hits = Metrics.newMeter(new MetricName(ORG_APACHE_BLUR, THRIFT_CACHE, HIT), HIT, TimeUnit.SECONDS);\n     _misses = Metrics.newMeter(new MetricName(ORG_APACHE_BLUR, THRIFT_CACHE, MISS), MISS, TimeUnit.SECONDS);\n     _evictions = Metrics.newMeter(new MetricName(ORG_APACHE_BLUR, THRIFT_CACHE, EVICTION), EVICTION, TimeUnit.SECONDS);\n+    _cacheMap = new ConcurrentLinkedHashMap.Builder<ThriftCacheKey<?>, ThriftCacheValue<?>>()\n+        .weigher(new EntryWeigher<ThriftCacheKey<?>, ThriftCacheValue<?>>() {\n+          @Override\n+          public int weightOf(ThriftCacheKey<?> key, ThriftCacheValue<?> value) {\n+            return key.size() + value.size();\n+          }\n+        }).listener(new EvictionListener<ThriftCacheKey<?>, ThriftCacheValue<?>>() {\n+          @Override\n+          public void onEviction(ThriftCacheKey<?> key, ThriftCacheValue<?> value) {\n+            _evictions.mark();\n+            _evictionsAtomicLong.incrementAndGet();\n+          }\n+        }).maximumWeightedCapacity(totalNumberOfBytes).build();\n+    _hitsAtomicLong = new AtomicLong();\n+    _missesAtomicLong = new AtomicLong();\n+    _evictionsAtomicLong = new AtomicLong();\n     Metrics.newGauge(new MetricName(ORG_APACHE_BLUR, THRIFT_CACHE, SIZE), new Gauge<Long>() {\n       @Override\n       public Long value() {\n@@ -102,22 +118,6 @@ public Long value() {\n         return (long) _attributeKeys.size();\n       }\n     });\n-    _cacheMap = new ConcurrentLinkedHashMap.Builder<ThriftCacheKey<?>, ThriftCacheValue<?>>()\n-        .weigher(new EntryWeigher<ThriftCacheKey<?>, ThriftCacheValue<?>>() {\n-          @Override\n-          public int weightOf(ThriftCacheKey<?> key, ThriftCacheValue<?> value) {\n-            return key.size() + value.size();\n-          }\n-        }).listener(new EvictionListener<ThriftCacheKey<?>, ThriftCacheValue<?>>() {\n-          @Override\n-          public void onEviction(ThriftCacheKey<?> key, ThriftCacheValue<?> value) {\n-            _evictions.mark();\n-            _evictionsAtomicLong.incrementAndGet();\n-          }\n-        }).maximumWeightedCapacity(totalNumberOfBytes).build();\n-    _hitsAtomicLong = new AtomicLong();\n-    _missesAtomicLong = new AtomicLong();\n-    _evictionsAtomicLong = new AtomicLong();\n   }\n \n   public <K extends TBase<?, ?>, V extends TBase<?, ?>> V put(ThriftCacheKey<K> key, V t) throws BlurException {",
+                "raw_url": "https://github.com/apache/incubator-retired-blur/raw/19749a390bf29ca799c911cc93a662fd57ad2c6d/blur-core/src/main/java/org/apache/blur/server/cache/ThriftCache.java",
+                "sha": "382fecd392b972c8d32b4e549d4ad280c74c370b",
+                "status": "modified"
+            }
+        ],
+        "message": "Fixing possible NPE for metric when asked for metric before construction of cache map is complete.",
+        "parent": "https://github.com/apache/incubator-retired-blur/commit/77e1f4f2f0f73c1e7c392e4453abf0566d868b76",
+        "repo": "incubator-retired-blur",
+        "unit_tests": [
+            "ThriftCacheTest.java"
+        ]
+    },
+    "incubator-retired-blur_1985869": {
+        "bug_id": "incubator-retired-blur_1985869",
+        "commit": "https://github.com/apache/incubator-retired-blur/commit/1985869099fefa12f90ee386a736401e2c4bc04d",
+        "file": [
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/incubator-retired-blur/blob/1985869099fefa12f90ee386a736401e2c4bc04d/blur-mapred/src/main/java/org/apache/blur/mapreduce/lib/update/Driver.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/incubator-retired-blur/contents/blur-mapred/src/main/java/org/apache/blur/mapreduce/lib/update/Driver.java?ref=1985869099fefa12f90ee386a736401e2c4bc04d",
+                "deletions": 1,
+                "filename": "blur-mapred/src/main/java/org/apache/blur/mapreduce/lib/update/Driver.java",
+                "patch": "@@ -144,7 +144,9 @@ public int run(String[] args) throws Exception {\n         LOG.error(\"Indexing job failed!\");\n         movePathList(fileSystem, newData, inprogressPathList);\n       }\n-      client.removeSnapshot(table, MRUPDATE_SNAPSHOT);\n+      if (client != null) {\n+        client.removeSnapshot(table, MRUPDATE_SNAPSHOT);\n+      }\n     }\n \n     if (success) {",
+                "raw_url": "https://github.com/apache/incubator-retired-blur/raw/1985869099fefa12f90ee386a736401e2c4bc04d/blur-mapred/src/main/java/org/apache/blur/mapreduce/lib/update/Driver.java",
+                "sha": "7447673a53a8db042091fb2425a1a5d38f1d6cda",
+                "status": "modified"
+            }
+        ],
+        "message": "Fixing NPE.",
+        "parent": "https://github.com/apache/incubator-retired-blur/commit/1c7aba2619270aa64747f2dae6fc7756e51d382a",
+        "repo": "incubator-retired-blur",
+        "unit_tests": [
+            "DriverTest.java"
+        ]
+    },
+    "incubator-retired-blur_2da8d8f": {
+        "bug_id": "incubator-retired-blur_2da8d8f",
+        "commit": "https://github.com/apache/incubator-retired-blur/commit/2da8d8f91c4a02856ee234ba774958cb3d0a08fe",
+        "file": [
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/incubator-retired-blur/blob/2da8d8f91c4a02856ee234ba774958cb3d0a08fe/blur-core/src/main/java/org/apache/blur/manager/writer/BlurIndexSimpleWriter.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/incubator-retired-blur/contents/blur-core/src/main/java/org/apache/blur/manager/writer/BlurIndexSimpleWriter.java?ref=2da8d8f91c4a02856ee234ba774958cb3d0a08fe",
+                "deletions": 1,
+                "filename": "blur-core/src/main/java/org/apache/blur/manager/writer/BlurIndexSimpleWriter.java",
+                "patch": "@@ -425,7 +425,9 @@ private Closeable makeCloseable(final BlurIndexWriter blurIndexWriter) {\n     return new Closeable() {\n       @Override\n       public void close() throws IOException {\n-        blurIndexWriter.close(false);\n+        if (blurIndexWriter != null) {\n+          blurIndexWriter.close(false);\n+        }\n       }\n     };\n   }",
+                "raw_url": "https://github.com/apache/incubator-retired-blur/raw/2da8d8f91c4a02856ee234ba774958cb3d0a08fe/blur-core/src/main/java/org/apache/blur/manager/writer/BlurIndexSimpleWriter.java",
+                "sha": "21d49419e4f5135e062904771b136c49eee45f63",
+                "status": "modified"
+            }
+        ],
+        "message": "Fixing a NPE.",
+        "parent": "https://github.com/apache/incubator-retired-blur/commit/0e4e324acf064d6e9cc11e2fb741ad715cb54673",
+        "repo": "incubator-retired-blur",
+        "unit_tests": [
+            "BlurIndexSimpleWriterTest.java"
+        ]
+    },
+    "incubator-retired-blur_500114e": {
+        "bug_id": "incubator-retired-blur_500114e",
+        "commit": "https://github.com/apache/incubator-retired-blur/commit/500114e6d2331d7f34b7ad6513280b0920638168",
+        "file": [
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/incubator-retired-blur/blob/500114e6d2331d7f34b7ad6513280b0920638168/src/blur-core/src/main/java/org/apache/blur/manager/IndexManager.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/incubator-retired-blur/contents/src/blur-core/src/main/java/org/apache/blur/manager/IndexManager.java?ref=500114e6d2331d7f34b7ad6513280b0920638168",
+                "deletions": 3,
+                "filename": "src/blur-core/src/main/java/org/apache/blur/manager/IndexManager.java",
+                "patch": "@@ -106,7 +106,6 @@\n import org.apache.lucene.search.TopDocs;\n import org.apache.lucene.util.ReaderUtil;\n \n-\n public class IndexManager {\n \n   private static final String NOT_FOUND = \"NOT_FOUND\";\n@@ -123,7 +122,6 @@\n   private BlurMetrics _blurMetrics;\n   private QueryMetrics _queryMetrics;\n   private long _defaultParallelCallTimeout = TimeUnit.MINUTES.toMillis(1);\n-  \n \n   public void setMaxClauseCount(int maxClauseCount) {\n     BooleanQuery.setMaxClauseCount(maxClauseCount);\n@@ -867,7 +865,9 @@ private void doUpdateRowMutation(RowMutation mutation, BlurIndex blurIndex) thro\n       long s = System.nanoTime();\n       // Finally, replace the existing row with the new row we have built.\n       blurIndex.replaceRow(mutation.waitToBeVisible, mutation.wal, newRow);\n-      _queryMetrics.recordDataMutate(System.nanoTime() - s, newRow.records.size());\n+      if (newRow != null && newRow.records != null) {\n+        _queryMetrics.recordDataMutate(System.nanoTime() - s, newRow.records.size());\n+      }\n     } else {\n       throw new BException(\"Mutation cannot update row that does not exist.\", mutation);\n     }",
+                "raw_url": "https://github.com/apache/incubator-retired-blur/raw/500114e6d2331d7f34b7ad6513280b0920638168/src/blur-core/src/main/java/org/apache/blur/manager/IndexManager.java",
+                "sha": "725174a93e4f1923b37b2018475908c29daab9ec",
+                "status": "modified"
+            }
+        ],
+        "message": "Fixed NPE.",
+        "parent": "https://github.com/apache/incubator-retired-blur/commit/6d05a5e8f8acd20409a4ceadbd03c40a331d6704",
+        "repo": "incubator-retired-blur",
+        "unit_tests": [
+            "IndexManagerTest.java"
+        ]
+    },
+    "incubator-retired-blur_7734b86": {
+        "bug_id": "incubator-retired-blur_7734b86",
+        "commit": "https://github.com/apache/incubator-retired-blur/commit/7734b86fd5885d6d57cd1cf56e46d742f29792b7",
+        "file": [
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/incubator-retired-blur/blob/7734b86fd5885d6d57cd1cf56e46d742f29792b7/blur-core/src/main/java/org/apache/blur/manager/clusterstatus/ZookeeperClusterStatus.java",
+                "changes": 5,
+                "contents_url": "https://api.github.com/repos/apache/incubator-retired-blur/contents/blur-core/src/main/java/org/apache/blur/manager/clusterstatus/ZookeeperClusterStatus.java?ref=7734b86fd5885d6d57cd1cf56e46d742f29792b7",
+                "deletions": 1,
+                "filename": "blur-core/src/main/java/org/apache/blur/manager/clusterstatus/ZookeeperClusterStatus.java",
+                "patch": "@@ -609,7 +609,10 @@ private void assignTableUri(TableDescriptor tableDescriptor) {\n \n   private void assignMapReduceWorkingPath(TableDescriptor tableDescriptor) throws IOException {\n     Map<String, String> tableProperties = tableDescriptor.getTableProperties();\n-    String mrIncWorkingPathStr = tableProperties.get(BlurConstants.BLUR_BULK_UPDATE_WORKING_PATH);\n+    String mrIncWorkingPathStr = null;\n+    if (tableProperties != null) {\n+      mrIncWorkingPathStr = tableProperties.get(BlurConstants.BLUR_BULK_UPDATE_WORKING_PATH);\n+    }\n     if (mrIncWorkingPathStr == null) {\n       // If not set on the table, try to use cluster default\n       mrIncWorkingPathStr = _configuration.get(BlurConstants.BLUR_BULK_UPDATE_WORKING_PATH);",
+                "raw_url": "https://github.com/apache/incubator-retired-blur/raw/7734b86fd5885d6d57cd1cf56e46d742f29792b7/blur-core/src/main/java/org/apache/blur/manager/clusterstatus/ZookeeperClusterStatus.java",
+                "sha": "7ae57610c41b7ee96e1e5a55480fdcee5b43a437",
+                "status": "modified"
+            }
+        ],
+        "message": "Fixing a NPE.",
+        "parent": "https://github.com/apache/incubator-retired-blur/commit/582eaa854f87840315b63c7b058e6dcd7d2078cd",
+        "repo": "incubator-retired-blur",
+        "unit_tests": [
+            "ZookeeperClusterStatusTest.java"
+        ]
+    },
+    "incubator-retired-blur_7ef345f": {
+        "bug_id": "incubator-retired-blur_7ef345f",
+        "commit": "https://github.com/apache/incubator-retired-blur/commit/7ef345f8f01e459435e5b1302754ce12dbe10d0f",
+        "file": [
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/incubator-retired-blur/blob/7ef345f8f01e459435e5b1302754ce12dbe10d0f/blur-store/src/main/java/org/apache/blur/store/blockcache/BlockCache.java",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/incubator-retired-blur/contents/blur-store/src/main/java/org/apache/blur/store/blockcache/BlockCache.java?ref=7ef345f8f01e459435e5b1302754ce12dbe10d0f",
+                "deletions": 0,
+                "filename": "blur-store/src/main/java/org/apache/blur/store/blockcache/BlockCache.java",
+                "patch": "@@ -262,6 +262,9 @@ private ByteBuffer getSlab(int slabId) {\n   }\n \n   public int getSize() {\n+    if (_cache == null) {\n+      return 0;\n+    }\n     return _cache.size();\n   }\n ",
+                "raw_url": "https://github.com/apache/incubator-retired-blur/raw/7ef345f8f01e459435e5b1302754ce12dbe10d0f/blur-store/src/main/java/org/apache/blur/store/blockcache/BlockCache.java",
+                "sha": "4597ffac95b693fa2d8897bf043221e022fbefae",
+                "status": "modified"
+            }
+        ],
+        "message": "Hit a bug during startup that caused a NPE.",
+        "parent": "https://github.com/apache/incubator-retired-blur/commit/be55844a7047c2a1a8026576202956f915321405",
+        "repo": "incubator-retired-blur",
+        "unit_tests": [
+            "BlockCacheTest.java"
+        ]
+    },
+    "incubator-retired-blur_9b83279": {
+        "bug_id": "incubator-retired-blur_9b83279",
+        "commit": "https://github.com/apache/incubator-retired-blur/commit/9b832793b4d06ce165f0066ac62fb619d3ccaacb",
+        "file": [
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/incubator-retired-blur/blob/9b832793b4d06ce165f0066ac62fb619d3ccaacb/blur-core/src/main/java/org/apache/blur/manager/writer/BlurIndexSimpleWriter.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/incubator-retired-blur/contents/blur-core/src/main/java/org/apache/blur/manager/writer/BlurIndexSimpleWriter.java?ref=9b832793b4d06ce165f0066ac62fb619d3ccaacb",
+                "deletions": 2,
+                "filename": "blur-core/src/main/java/org/apache/blur/manager/writer/BlurIndexSimpleWriter.java",
+                "patch": "@@ -663,8 +663,10 @@ public boolean accept(Path path) {\n     }\n \n     public void cleanupFiles(List<Path> unsortedPaths, Path sorted) throws IOException {\n-      for (Path p : unsortedPaths) {\n-        _fileSystem.delete(p, false);\n+      if (unsortedPaths != null) {\n+        for (Path p : unsortedPaths) {\n+          _fileSystem.delete(p, false);\n+        }\n       }\n       if (sorted != null) {\n         _fileSystem.delete(sorted, false);",
+                "raw_url": "https://github.com/apache/incubator-retired-blur/raw/9b832793b4d06ce165f0066ac62fb619d3ccaacb/blur-core/src/main/java/org/apache/blur/manager/writer/BlurIndexSimpleWriter.java",
+                "sha": "975022a4486f3b040896a13f4a265c94fc8c425f",
+                "status": "modified"
+            }
+        ],
+        "message": "Fixing NPE.",
+        "parent": "https://github.com/apache/incubator-retired-blur/commit/b4dfa04f57db095cbeec526577825cacd792df85",
+        "repo": "incubator-retired-blur",
+        "unit_tests": [
+            "BlurIndexSimpleWriterTest.java"
+        ]
+    },
+    "incubator-retired-blur_c7385fb": {
+        "bug_id": "incubator-retired-blur_c7385fb",
+        "commit": "https://github.com/apache/incubator-retired-blur/commit/c7385fb29de3d0f553c458336b01c6709d80e605",
+        "file": [
+            {
+                "additions": 11,
+                "blob_url": "https://github.com/apache/incubator-retired-blur/blob/c7385fb29de3d0f553c458336b01c6709d80e605/blur-query/src/main/java/org/apache/blur/analysis/HdfsFieldManager.java",
+                "changes": 14,
+                "contents_url": "https://api.github.com/repos/apache/incubator-retired-blur/contents/blur-query/src/main/java/org/apache/blur/analysis/HdfsFieldManager.java?ref=c7385fb29de3d0f553c458336b01c6709d80e605",
+                "deletions": 3,
+                "filename": "blur-query/src/main/java/org/apache/blur/analysis/HdfsFieldManager.java",
+                "patch": "@@ -38,6 +38,8 @@\n \n public class HdfsFieldManager extends BaseFieldManager {\n \n+  private static final List<String> EMPTY_LIST = new ArrayList<String>();\n+\n   public static abstract class Lock {\n \n     public abstract void lock();\n@@ -86,14 +88,20 @@ public HdfsFieldManager(String fieldLessField, Analyzer defaultAnalyzerForQueryi\n     _configuration = configuration;\n     _fileSystem = _storagePath.getFileSystem(_configuration);\n   }\n-  \n+\n   @Override\n   protected List<String> getFieldNamesToLoad() throws IOException {\n+    if (!_fileSystem.exists(_storagePath)) {\n+      return EMPTY_LIST;\n+    }\n     FileStatus[] listStatus = _fileSystem.listStatus(_storagePath);\n-    List<String> fieldNames = new ArrayList<String>();\n+    if (listStatus == null) {\n+      return EMPTY_LIST;\n+    }\n+    List<String> fieldNames = EMPTY_LIST;\n     for (FileStatus fileStatus : listStatus) {\n       if (!fileStatus.isDir()) {\n-        fieldNames.add(fileStatus.getPath().getName());  \n+        fieldNames.add(fileStatus.getPath().getName());\n       }\n     }\n     return fieldNames;",
+                "raw_url": "https://github.com/apache/incubator-retired-blur/raw/c7385fb29de3d0f553c458336b01c6709d80e605/blur-query/src/main/java/org/apache/blur/analysis/HdfsFieldManager.java",
+                "sha": "70f6c3c05179c9274c87191aecc8e5918249f879",
+                "status": "modified"
+            }
+        ],
+        "message": "Fixed NPE.",
+        "parent": "https://github.com/apache/incubator-retired-blur/commit/510de9917c1db85a2c573c15de0c2612691f7f22",
+        "repo": "incubator-retired-blur",
+        "unit_tests": [
+            "HdfsFieldManagerTest.java"
+        ]
+    },
+    "incubator-retired-blur_ebce22d": {
+        "bug_id": "incubator-retired-blur_ebce22d",
+        "commit": "https://github.com/apache/incubator-retired-blur/commit/ebce22d9c57bbe3f0558100f19c23e3306cc0cc2",
+        "file": [
+            {
+                "additions": 24,
+                "blob_url": "https://github.com/apache/incubator-retired-blur/blob/ebce22d9c57bbe3f0558100f19c23e3306cc0cc2/blur-core/src/main/java/org/apache/blur/manager/IndexManager.java",
+                "changes": 40,
+                "contents_url": "https://api.github.com/repos/apache/incubator-retired-blur/contents/blur-core/src/main/java/org/apache/blur/manager/IndexManager.java?ref=ebce22d9c57bbe3f0558100f19c23e3306cc0cc2",
+                "deletions": 16,
+                "filename": "blur-core/src/main/java/org/apache/blur/manager/IndexManager.java",
+                "patch": "@@ -154,11 +154,13 @@ public void setMaxClauseCount(int maxClauseCount) {\n   }\n \n   public void init() {\n-    _readRecordsMeter = Metrics.newMeter(new MetricName(ORG_APACHE_BLUR, BLUR, \"Read Records/s\"), \"Records/s\", TimeUnit.SECONDS);\n+    _readRecordsMeter = Metrics.newMeter(new MetricName(ORG_APACHE_BLUR, BLUR, \"Read Records/s\"), \"Records/s\",\n+        TimeUnit.SECONDS);\n     _readRowMeter = Metrics.newMeter(new MetricName(ORG_APACHE_BLUR, BLUR, \"Read Row/s\"), \"Row/s\", TimeUnit.SECONDS);\n-    _writeRecordsMeter = Metrics.newMeter(new MetricName(ORG_APACHE_BLUR, BLUR, \"Write Records/s\"), \"Records/s\", TimeUnit.SECONDS);\n+    _writeRecordsMeter = Metrics.newMeter(new MetricName(ORG_APACHE_BLUR, BLUR, \"Write Records/s\"), \"Records/s\",\n+        TimeUnit.SECONDS);\n     _writeRowMeter = Metrics.newMeter(new MetricName(ORG_APACHE_BLUR, BLUR, \"Write Row/s\"), \"Row/s\", TimeUnit.SECONDS);\n-    \n+\n     _queriesExternalMeter = Metrics.newMeter(new MetricName(ORG_APACHE_BLUR, BLUR, \"External Queries/s\"),\n         \"External Queries/s\", TimeUnit.SECONDS);\n     _queriesInternalMeter = Metrics.newMeter(new MetricName(ORG_APACHE_BLUR, BLUR, \"Internal Queries/s\"),\n@@ -204,13 +206,15 @@ public void fetchRow(String table, Selector selector, FetchResult fetchResult) t\n       Map<String, BlurIndex> blurIndexes = _indexServer.getIndexes(table);\n       if (blurIndexes == null) {\n         LOG.error(\"Table [{0}] not found\", table);\n-        //@TODO probably should make a enum for not found on this server so the controller knows to try another server.\n+        // @TODO probably should make a enum for not found on this server so the\n+        // controller knows to try another server.\n         throw new BException(\"Table [\" + table + \"] not found\");\n       }\n       index = blurIndexes.get(shard);\n       if (index == null) {\n         LOG.error(\"Shard [{0}] not found in table [{1}]\", shard, table);\n-        //@TODO probably should make a enum for not found on this server so the controller knows to try another server.\n+        // @TODO probably should make a enum for not found on this server so the\n+        // controller knows to try another server.\n         throw new BException(\"Shard [\" + shard + \"] not found in table [\" + table + \"]\");\n       }\n     } catch (BlurException e) {\n@@ -235,7 +239,8 @@ public void fetchRow(String table, Selector selector, FetchResult fetchResult) t\n \n       Query highlightQuery = getHighlightQuery(selector, table, analyzer);\n \n-      fetchRow(searcher.getIndexReader(), table, shard, selector, fetchResult, highlightQuery, analyzer, _maxHeapPerRowFetch);\n+      fetchRow(searcher.getIndexReader(), table, shard, selector, fetchResult, highlightQuery, analyzer,\n+          _maxHeapPerRowFetch);\n       if (fetchResult.rowResult != null) {\n         if (fetchResult.rowResult.row != null && fetchResult.rowResult.row.records != null) {\n           _readRecordsMeter.mark(fetchResult.rowResult.row.records.size());\n@@ -419,7 +424,7 @@ public void cancel() {\n       BlurQueryStatus queryStatus = status.getQueryStatus();\n       QueryState state = queryStatus.getState();\n       if (state == QueryState.BACK_PRESSURE_INTERRUPTED) {\n-        throw new BlurException(\"Cannot execute query right now.\", null, ErrorType.BACK_PRESSURE);  \n+        throw new BlurException(\"Cannot execute query right now.\", null, ErrorType.BACK_PRESSURE);\n       } else if (state == QueryState.INTERRUPTED) {\n         throw new BlurException(\"Cannot execute query right now.\", null, ErrorType.QUERY_CANCEL);\n       }\n@@ -428,7 +433,7 @@ public void cancel() {\n       BlurQueryStatus queryStatus = status.getQueryStatus();\n       QueryState state = queryStatus.getState();\n       if (state == QueryState.BACK_PRESSURE_INTERRUPTED) {\n-        throw new BlurException(\"Cannot execute query right now.\", null, ErrorType.BACK_PRESSURE);  \n+        throw new BlurException(\"Cannot execute query right now.\", null, ErrorType.BACK_PRESSURE);\n       } else if (state == QueryState.INTERRUPTED) {\n         throw new BlurException(\"Cannot execute query right now.\", null, ErrorType.QUERY_CANCEL);\n       }\n@@ -511,13 +516,14 @@ public BlurQueryStatus queryStatus(String table, long uuid) {\n     return _statusManager.queryStatusIdList(table);\n   }\n \n-  public static void fetchRow(IndexReader reader, String table, String shard, Selector selector, FetchResult fetchResult,\n-      Query highlightQuery, int maxHeap) throws CorruptIndexException, IOException {\n+  public static void fetchRow(IndexReader reader, String table, String shard, Selector selector,\n+      FetchResult fetchResult, Query highlightQuery, int maxHeap) throws CorruptIndexException, IOException {\n     fetchRow(reader, table, shard, selector, fetchResult, highlightQuery, null, maxHeap);\n   }\n \n-  public static void fetchRow(IndexReader reader, String table, String shard, Selector selector, FetchResult fetchResult,\n-      Query highlightQuery, BlurAnalyzer analyzer, int maxHeap) throws CorruptIndexException, IOException {\n+  public static void fetchRow(IndexReader reader, String table, String shard, Selector selector,\n+      FetchResult fetchResult, Query highlightQuery, BlurAnalyzer analyzer, int maxHeap) throws CorruptIndexException,\n+      IOException {\n     fetchResult.table = table;\n     String locationId = selector.locationId;\n     int lastSlash = locationId.lastIndexOf('/');\n@@ -962,7 +968,10 @@ private void doMutate(RowMutation mutation) throws BlurException, IOException {\n \n   private Row updateMetrics(Row row) {\n     _writeRowMeter.mark();\n-    _writeRecordsMeter.mark(row.getRecords().size());\n+    List<Record> records = row.getRecords();\n+    if (records != null) {\n+      _writeRecordsMeter.mark(records.size());\n+    }\n     return row;\n   }\n \n@@ -1184,14 +1193,13 @@ public void optimize(String table, int numberOfSegmentsPerShard) throws BExcepti\n   public void setClusterStatus(ClusterStatus clusterStatus) {\n     _clusterStatus = clusterStatus;\n   }\n-  \n+\n   public void setFetchCount(int fetchCount) {\n     _fetchCount = fetchCount;\n   }\n-  \n+\n   public void setMaxHeapPerRowFetch(int maxHeapPerRowFetch) {\n     _maxHeapPerRowFetch = maxHeapPerRowFetch;\n   }\n-  \n \n }",
+                "raw_url": "https://github.com/apache/incubator-retired-blur/raw/ebce22d9c57bbe3f0558100f19c23e3306cc0cc2/blur-core/src/main/java/org/apache/blur/manager/IndexManager.java",
+                "sha": "4d04459ae1c07aed4ca524afad780cd8eed95c11",
+                "status": "modified"
+            }
+        ],
+        "message": "Unit test was breaking because of a NPE.",
+        "parent": "https://github.com/apache/incubator-retired-blur/commit/07f0756fd7ecd571aabfe51b15584f52d768fb16",
+        "repo": "incubator-retired-blur",
+        "unit_tests": [
+            "IndexManagerTest.java"
+        ]
+    }
+}

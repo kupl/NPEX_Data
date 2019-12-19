@@ -1,0 +1,110 @@
+{
+    "zookeeper_13dd5d0": {
+        "bug_id": "zookeeper_13dd5d0",
+        "commit": "https://github.com/apache/zookeeper/commit/13dd5d0db7a5c4fa926d1e44fc2047c24d5d012c",
+        "file": [
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/zookeeper/blob/13dd5d0db7a5c4fa926d1e44fc2047c24d5d012c/src/java/main/org/apache/zookeeper/server/NIOServerCnxnFactory.java",
+                "changes": 5,
+                "contents_url": "https://api.github.com/repos/apache/zookeeper/contents/src/java/main/org/apache/zookeeper/server/NIOServerCnxnFactory.java?ref=13dd5d0db7a5c4fa926d1e44fc2047c24d5d012c",
+                "deletions": 1,
+                "filename": "src/java/main/org/apache/zookeeper/server/NIOServerCnxnFactory.java",
+                "patch": "@@ -815,8 +815,11 @@ public void touchCnxn(NIOServerCnxn cnxn) {\n         cnxnExpiryQueue.update(cnxn, cnxn.getSessionTimeout());\n     }\n \n-    private void addCnxn(NIOServerCnxn cnxn) {\n+    private void addCnxn(NIOServerCnxn cnxn) throws IOException {\n         InetAddress addr = cnxn.getSocketAddress();\n+        if (addr == null) {\n+            throw new IOException(\"Socket of \" + cnxn + \" has been closed\");\n+        }\n         Set<NIOServerCnxn> set = ipMap.get(addr);\n         if (set == null) {\n             // in general we will see 1 connection from each",
+                "raw_url": "https://github.com/apache/zookeeper/raw/13dd5d0db7a5c4fa926d1e44fc2047c24d5d012c/src/java/main/org/apache/zookeeper/server/NIOServerCnxnFactory.java",
+                "sha": "e343bc0f5287bc153d5b143f51bdd466848a70e2",
+                "status": "modified"
+            }
+        ],
+        "message": "ZOOKEEPER-3009: Potential NPE in NIOServerCnxnFactory\n\nWe have developed a static analysis tool [NPEDetector](https://github.com/lujiefsi/NPEDetector) to find some potential NPE. Our analysis shows that NPE reason can be simple:some callees may return null directly in corner case(e.g. node crash , IO exception), some of their callers have  !=null check but some do not have.\n### Bug:\nCallee getSocketAddress can return null, may caused by node crash, network exception....\n<pre>\n    public InetAddress getSocketAddress() {\n        if (sock.isOpen() == false) {\n            return null;\n        }\n        return sock.socket().getInetAddress();\n    }\n</pre>\ngetSocketAddress has two callers:  removeCnxn and removeCnxn\n\ncaller removeCnxn has null check\n<pre>\n public boolean removeCnxn(NIOServerCnxn cnxn) {\n        //other code\n        InetAddress addr = cnxn.getSocketAddress();\n        if (addr != null) {\n            Set<NIOServerCnxn> set = ipMap.get(addr);\n            //other code\n        }\n     //other code\n    }\n</pre>\n\nbut caller addCnxn has the similar code, but don't have the null check:\n<pre>\n     private void addCnxn(NIOServerCnxn cnxn) {\n         InetAddress addr = cnxn.getSocketAddress();\n         Set<NIOServerCnxn> set = ipMap.get(addr);\n        //other code\n      }\n</pre>\nI commit a patch to fix it: adding an null checker in addCnxn, and throws a semantics IOException rather than the ugly NPE.  I think the IOException  is ok, because the caller of addCnxn has the handler code:\n<pre>\n  private void processAcceptedConnections() {\n               //other code\n               try {\n                    addCnxn(cnxn);\n               } catch (IOException e) {\n                    // register, createConnection\n                    cleanupSelectionKey(key);\n                    fastCloseSock(accepted);\n               }\n             }\n</pre>\nMaybe i am wrong, please point out my error.\n\nAuthor: LJ1043041006 <1239497420@qq.com>\n\nReviewers: Patrick Hunt <phunt@apache.org>, Allan Lyu <fangmin@apache.org>, Michael Han <hanm@apache.org>\n\nCloses #525 from lujiefsi/ZOOKEEPER-3009",
+        "parent": "https://github.com/apache/zookeeper/commit/d6490d590725345638b5973a97e6e8d8bee67d22",
+        "repo": "zookeeper",
+        "unit_tests": [
+            "NIOServerCnxnFactoryTest.java"
+        ]
+    },
+    "zookeeper_433cf7e": {
+        "bug_id": "zookeeper_433cf7e",
+        "commit": "https://github.com/apache/zookeeper/commit/433cf7e2b660fce3c73eb011452814f7084ff196",
+        "file": [
+            {
+                "additions": 20,
+                "blob_url": "https://github.com/apache/zookeeper/blob/433cf7e2b660fce3c73eb011452814f7084ff196/zookeeper-server/src/main/java/org/apache/zookeeper/server/persistence/TxnLogToolkit.java",
+                "changes": 32,
+                "contents_url": "https://api.github.com/repos/apache/zookeeper/contents/zookeeper-server/src/main/java/org/apache/zookeeper/server/persistence/TxnLogToolkit.java?ref=433cf7e2b660fce3c73eb011452814f7084ff196",
+                "deletions": 12,
+                "filename": "zookeeper-server/src/main/java/org/apache/zookeeper/server/persistence/TxnLogToolkit.java",
+                "patch": "@@ -269,7 +269,7 @@ private void printTxn(byte[] bytes) throws IOException {\n     private void printTxn(byte[] bytes, String prefix) throws IOException {\n         TxnHeader hdr = new TxnHeader();\n         Record txn = SerializeUtils.deserializeTxn(bytes, hdr);\n-        String txnStr = getDataStrFromTxn(txn);\n+        String txnStr = getFormattedTxnStr(txn);\n         String txns = String.format(\"%s session 0x%s cxid 0x%s zxid 0x%s %s %s\",\n                 DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.LONG).format(new Date(hdr.getTime())),\n                 Long.toHexString(hdr.getClientId()),\n@@ -288,31 +288,31 @@ private void printTxn(byte[] bytes, String prefix) throws IOException {\n     }\n \n     /**\n-     * get transaction log data string with node's data as a string\n-     * @param txn\n-     * @return\n+     * get the formatted string from the txn.\n+     * @param txn transaction log data\n+     * @return the formatted string\n      */\n-    private static String getDataStrFromTxn(Record txn) {\n+    private static String getFormattedTxnStr(Record txn) throws IOException {\n         StringBuilder txnData = new StringBuilder();\n         if (txn == null) {\n             return txnData.toString();\n         }\n         if (txn instanceof CreateTxn) {\n             CreateTxn createTxn = ((CreateTxn) txn);\n-            txnData.append(createTxn.getPath() + \",\" + new String(createTxn.getData()))\n+            txnData.append(createTxn.getPath() + \",\" + checkNullToEmpty(createTxn.getData()))\n                    .append(\",\" + createTxn.getAcl() + \",\" + createTxn.getEphemeral())\n                    .append(\",\" + createTxn.getParentCVersion());\n         } else if (txn instanceof SetDataTxn) {\n             SetDataTxn setDataTxn = ((SetDataTxn) txn);\n-            txnData.append(setDataTxn.getPath() + \",\" + new String(setDataTxn.getData()))\n+            txnData.append(setDataTxn.getPath() + \",\" + checkNullToEmpty(setDataTxn.getData()))\n                    .append(\",\" + setDataTxn.getVersion());\n         } else if (txn instanceof CreateContainerTxn) {\n             CreateContainerTxn createContainerTxn = ((CreateContainerTxn) txn);\n-            txnData.append(createContainerTxn.getPath() + \",\" + new String(createContainerTxn.getData()))\n+            txnData.append(createContainerTxn.getPath() + \",\" + checkNullToEmpty(createContainerTxn.getData()))\n                    .append(\",\" + createContainerTxn.getAcl() + \",\" + createContainerTxn.getParentCVersion());\n         } else if (txn instanceof CreateTTLTxn) {\n             CreateTTLTxn createTTLTxn = ((CreateTTLTxn) txn);\n-            txnData.append(createTTLTxn.getPath() + \",\" + new String(createTTLTxn.getData()))\n+            txnData.append(createTTLTxn.getPath() + \",\" + checkNullToEmpty(createTTLTxn.getData()))\n                    .append(\",\" + createTTLTxn.getAcl() + \",\" + createTTLTxn.getParentCVersion())\n                    .append(\",\" + createTTLTxn.getTtl());\n         } else if (txn instanceof MultiTxn) {\n@@ -321,9 +321,9 @@ private static String getDataStrFromTxn(Record txn) {\n             for (int i = 0; i < txnList.size(); i++ ) {\n                 Txn t = txnList.get(i);\n                 if (i == 0) {\n-                    txnData.append(TraceFormatter.op2String(t.getType()) + \":\" + new String(t.getData()));\n+                    txnData.append(TraceFormatter.op2String(t.getType()) + \":\" + checkNullToEmpty(t.getData()));\n                 } else {\n-                    txnData.append(\";\" + TraceFormatter.op2String(t.getType()) + \":\" + new String(t.getData()));\n+                    txnData.append(\";\" + TraceFormatter.op2String(t.getType()) + \":\" + checkNullToEmpty(t.getData()));\n                 }\n             }\n         } else {\n@@ -332,7 +332,15 @@ private static String getDataStrFromTxn(Record txn) {\n \n         return txnData.toString();\n     }\n-    \n+\n+    private static String checkNullToEmpty(byte[] data) throws IOException {\n+        if (data == null || data.length == 0) {\n+            return \"\";\n+        }\n+\n+        return new String(data, \"UTF8\");\n+    }\n+\n     private void openTxnLogFile() throws FileNotFoundException {\n         txnFis = new FileInputStream(txnLogFile);\n         logStream = BinaryInputArchive.getArchive(txnFis);",
+                "raw_url": "https://github.com/apache/zookeeper/raw/433cf7e2b660fce3c73eb011452814f7084ff196/zookeeper-server/src/main/java/org/apache/zookeeper/server/persistence/TxnLogToolkit.java",
+                "sha": "e8511999c22548c03bc910835e0423f9750b9dba",
+                "status": "modified"
+            }
+        ],
+        "message": "ZOOKEEPER-3410: zkTxnLogToolkit.sh will throw the NPE and stop the process of formatting txn logs due to the data's content is null\n\n- the data can be null,but the other fileds(`acl`,`version`,`ttl`)  cannot be `null`.  I also make the `printTxn` method more safer , surrounding it with `try-catch` in case of other unexpected NPEs.\n- some test cases were included in the [JIRA](https://issues.apache.org/jira/browse/ZOOKEEPER-3410).\n- more details in the [ZOOKEEPER-3410](https://issues.apache.org/jira/browse/ZOOKEEPER-3410)\n\nAuthor: maoling <maoling199210191@sina.com>\n\nReviewers: eolivelli@apache.org, andor@apache.org\n\nCloses #975 from maoling/ZOOKEEPER-3410 and squashes the following commits:\n\n22405c636 [maoling] revert the logic about try-catch the printTxn() method\na84c37406 [maoling] set the charset:UTF8 & e.printStackTrace()\n8cc034e2e [maoling] ZOOKEEPER-3410:./zkTxnLogToolkit.sh will throw the NPE and stop the process of formatting txn logs due to the data's content is null",
+        "parent": "https://github.com/apache/zookeeper/commit/f9610cc80173342bbe9766889a1aab1bfd840d1e",
+        "repo": "zookeeper",
+        "unit_tests": [
+            "TxnLogToolkitTest.java"
+        ]
+    },
+    "zookeeper_a07a03d": {
+        "bug_id": "zookeeper_a07a03d",
+        "commit": "https://github.com/apache/zookeeper/commit/a07a03d70b56ab26f4a790ef1e9941a06b478b84",
+        "file": [
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/zookeeper/blob/a07a03d70b56ab26f4a790ef1e9941a06b478b84/src/java/Changes.txt",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/zookeeper/contents/src/java/Changes.txt?ref=a07a03d70b56ab26f4a790ef1e9941a06b478b84",
+                "deletions": 0,
+                "filename": "src/java/Changes.txt",
+                "patch": "@@ -12,3 +12,6 @@ Trunk:\n \n   ZOOKEEPER-111. Significant cleanup of existing tests. (Patrick Hunt via\n   mahadev)\n+ \n+  ZOOKEEPER-122. Fix  NPE in jute's Utils.toCSVString. (Anthony Urso via\n+  mahadev)",
+                "raw_url": "https://github.com/apache/zookeeper/raw/a07a03d70b56ab26f4a790ef1e9941a06b478b84/src/java/Changes.txt",
+                "sha": "2ab88dbc30adff3e7f169e0a288d58e7b0b2e5f6",
+                "status": "modified"
+            },
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/zookeeper/blob/a07a03d70b56ab26f4a790ef1e9941a06b478b84/src/java/main/org/apache/jute/Utils.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/zookeeper/contents/src/java/main/org/apache/jute/Utils.java?ref=a07a03d70b56ab26f4a790ef1e9941a06b478b84",
+                "deletions": 2,
+                "filename": "src/java/main/org/apache/jute/Utils.java",
+                "patch": "@@ -124,8 +124,10 @@ static String fromXMLString(String s) {\n      * @param s \n      * @return \n      */\n-    static String toCSVString(String t) {\n-        String s = t.toString();\n+    static String toCSVString(String s) {\n+        if (s == null)\n+            return \"\";\n+\n         StringBuffer sb = new StringBuffer(s.length()+1);\n         sb.append('\\'');\n         int len = s.length();",
+                "raw_url": "https://github.com/apache/zookeeper/raw/a07a03d70b56ab26f4a790ef1e9941a06b478b84/src/java/main/org/apache/jute/Utils.java",
+                "sha": "7dae86083c60f9c425457deeadf28636c582d06b",
+                "status": "modified"
+            }
+        ],
+        "message": "ZOOKEEPER-122. Fix  NPE in jute's Utils.toCSVString. (Anthony Urso via mahadev)\n\ngit-svn-id: https://svn.apache.org/repos/asf/hadoop/zookeeper/trunk@687111 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/zookeeper/commit/435bc0ff5db851d341c373bc515f6a618691e6c4",
+        "repo": "zookeeper",
+        "unit_tests": [
+            "TestUtils.java"
+        ]
+    },
+    "zookeeper_afd8535": {
+        "bug_id": "zookeeper_afd8535",
+        "commit": "https://github.com/apache/zookeeper/commit/afd85358e0e3c32c93e33081d2904ad86f1f6ecb",
+        "file": [
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/zookeeper/blob/afd85358e0e3c32c93e33081d2904ad86f1f6ecb/zookeeper/java/src/com/yahoo/zookeeper/ZooKeeper.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/zookeeper/contents/zookeeper/java/src/com/yahoo/zookeeper/ZooKeeper.java?ref=afd85358e0e3c32c93e33081d2904ad86f1f6ecb",
+                "deletions": 3,
+                "filename": "zookeeper/java/src/com/yahoo/zookeeper/ZooKeeper.java",
+                "patch": "@@ -103,7 +103,7 @@\n  * \n  */\n public class ZooKeeper {\n-    Watcher watcher;\n+    volatile Watcher watcher;\n \n     public enum States {\n         CONNECTING, ASSOCIATING, CONNECTED, CLOSED, AUTH_FAILED;\n@@ -119,16 +119,16 @@ public boolean isAlive() {\n \n     public ZooKeeper(String host, int sessionTimeout, Watcher watcher)\n             throws KeeperException, IOException {\n-        cnxn = new ClientCnxn(host, sessionTimeout, this);\n         this.watcher = watcher;\n+        cnxn = new ClientCnxn(host, sessionTimeout, this);\n     }\n \n     public ZooKeeper(String host, int sessionTimeout, Watcher watcher,\n             long sessionId, byte[] sessionPasswd) throws KeeperException,\n             IOException {\n+        this.watcher = watcher;\n         cnxn = new ClientCnxn(host, sessionTimeout, this, sessionId,\n                 sessionPasswd);\n-        this.watcher = watcher;\n     }\n \n     public long getSessionId() {",
+                "raw_url": "https://github.com/apache/zookeeper/raw/afd85358e0e3c32c93e33081d2904ad86f1f6ecb/zookeeper/java/src/com/yahoo/zookeeper/ZooKeeper.java",
+                "sha": "7c995177fe291815fabb71270a69379ff88d8f0f",
+                "status": "modified"
+            }
+        ],
+        "message": "[ 1958361 ] Patch to fix NPE upon access to watcher\n\n\ngit-svn-id: https://svn.apache.org/repos/asf/hadoop/zookeeper/trunk@670943 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/zookeeper/commit/bb10cb36bf9d8eb10f6418a6ebc9a84580f60d93",
+        "repo": "zookeeper",
+        "unit_tests": [
+            "ZooKeeperTest.java"
+        ]
+    }
+}

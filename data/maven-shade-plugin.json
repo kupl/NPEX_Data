@@ -1,0 +1,74 @@
+{
+    "maven-shade-plugin_0f7f6c6": {
+        "bug_id": "maven-shade-plugin_0f7f6c6",
+        "commit": "https://github.com/apache/maven-shade-plugin/commit/0f7f6c6d968282815183dcf4149f9aef8d2a060d",
+        "file": [
+            {
+                "additions": 13,
+                "blob_url": "https://github.com/apache/maven-shade-plugin/blob/0f7f6c6d968282815183dcf4149f9aef8d2a060d/src/main/java/org/apache/maven/plugins/shade/mojo/ShadeMojo.java",
+                "changes": 13,
+                "contents_url": "https://api.github.com/repos/apache/maven-shade-plugin/contents/src/main/java/org/apache/maven/plugins/shade/mojo/ShadeMojo.java?ref=0f7f6c6d968282815183dcf4149f9aef8d2a060d",
+                "deletions": 0,
+                "filename": "src/main/java/org/apache/maven/plugins/shade/mojo/ShadeMojo.java",
+                "patch": "@@ -239,6 +239,19 @@ public void execute()\n         Set artifactIds = new LinkedHashSet();\n         Set sourceArtifacts = new LinkedHashSet();\n \n+        if ( project.getArtifact().getFile() == null )\n+        {\n+            getLog().error( \"The project main artifact does not exist. This could have the following\" );\n+            getLog().error( \"reasons:\" );\n+            getLog().error( \"- You have invoked the goal directly from the command line. This is not\" );\n+            getLog().error( \"  supported. Please add the goal to the default lifecycle via an\" );\n+            getLog().error( \"  <execution> element in your POM and use \\\"mvn package\\\" to have it run.\" );\n+            getLog().error( \"- You have bound the goal to a lifecycle phase before \\\"package\\\". Please\" );\n+            getLog().error( \"  remove this binding from your POM such that the goal will be run in\" );\n+            getLog().error( \"  the proper phase.\" );\n+            throw new MojoExecutionException( \"Failed to create shaded artifact.\",\n+                                              new IllegalStateException( \"Project main artifact does not exist.\" ) );\n+        }\n         artifacts.add( project.getArtifact().getFile() );\n \n         if ( createSourcesJar )",
+                "raw_url": "https://github.com/apache/maven-shade-plugin/raw/0f7f6c6d968282815183dcf4149f9aef8d2a060d/src/main/java/org/apache/maven/plugins/shade/mojo/ShadeMojo.java",
+                "sha": "48f40286321e571bfbf399eb38bc1466b6f40b1c",
+                "status": "modified"
+            }
+        ],
+        "message": "[MSHADE-21] NPE when calling mvn shade:shade\n\no Made the goal fail gracefully with a user-friendly error message\n\ngit-svn-id: https://svn.apache.org/repos/asf/maven/plugins/trunk@644068 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/maven-shade-plugin/commit/ce88137e50661a9755f8788b36235191c33ad663",
+        "repo": "maven-shade-plugin",
+        "unit_tests": [
+            "ShadeMojoTest.java"
+        ]
+    },
+    "maven-shade-plugin_4c37e80": {
+        "bug_id": "maven-shade-plugin_4c37e80",
+        "commit": "https://github.com/apache/maven-shade-plugin/commit/4c37e805c6ec46c69baee645848bd2b66495e51e",
+        "file": [
+            {
+                "additions": 18,
+                "blob_url": "https://github.com/apache/maven-shade-plugin/blob/4c37e805c6ec46c69baee645848bd2b66495e51e/src/main/java/org/apache/maven/plugins/shade/mojo/ShadeMojo.java",
+                "changes": 38,
+                "contents_url": "https://api.github.com/repos/apache/maven-shade-plugin/contents/src/main/java/org/apache/maven/plugins/shade/mojo/ShadeMojo.java?ref=4c37e805c6ec46c69baee645848bd2b66495e51e",
+                "deletions": 20,
+                "filename": "src/main/java/org/apache/maven/plugins/shade/mojo/ShadeMojo.java",
+                "patch": "@@ -193,6 +193,7 @@\n      * </pre>\n      * <em>Note:</em> Support for includes exists only since version 1.4.\n      */\n+    @SuppressWarnings( \"MismatchedReadAndWriteOfArray\" )\n     @Parameter\n     private PackageRelocation[] relocations;\n \n@@ -224,6 +225,7 @@\n      * &lt;/filters&gt;\n      * </pre>\n      */\n+    @SuppressWarnings( \"MismatchedReadAndWriteOfArray\" )\n     @Parameter\n     private ArchiveFilter[] filters;\n \n@@ -539,20 +541,23 @@ else if ( !renamed )\n                 {\n                     getLog().info( \"Replacing original artifact with shaded artifact.\" );\n                     File originalArtifact = project.getArtifact().getFile();\n-                    replaceFile( originalArtifact, outputJar );\n-\n-                    if ( createSourcesJar )\n+                    if (originalArtifact != null)\n                     {\n-                        File shadedSources = shadedSourcesArtifactFile();\n+                        replaceFile( originalArtifact, outputJar );\n \n-                        replaceFile( shadedSources, sourcesJar );\n+                        if ( createSourcesJar )\n+                        {\n+                            File shadedSources = shadedSourcesArtifactFile();\n \n-                        projectHelper.attachArtifact( project, \"jar\", \"sources\", shadedSources );\n-                    }\n+                            replaceFile( shadedSources, sourcesJar );\n \n-                    if ( createDependencyReducedPom )\n-                    {\n-                        createDependencyReducedPom( artifactIds );\n+                            projectHelper.attachArtifact( project, \"jar\", \"sources\", shadedSources );\n+                        }\n+\n+                        if ( createDependencyReducedPom )\n+                        {\n+                            createDependencyReducedPom( artifactIds );\n+                        }\n                     }\n                 }\n             }\n@@ -671,10 +676,8 @@ private File resolveArtifactSources( Artifact artifact )\n             return relocators;\n         }\n \n-        for ( int i = 0; i < relocations.length; i++ )\n+        for ( PackageRelocation r : relocations )\n         {\n-            PackageRelocation r = relocations[i];\n-\n             relocators.add( new SimpleRelocator( r.getPattern(), r.getShadedPattern(), r.getIncludes(), r.getExcludes(),\n                                                  r.isRawString() ) );\n         }\n@@ -901,24 +904,19 @@ private void createDependencyReducedPom( Set<String> artifactsToRemove )\n \n                 if ( f.exists() )\n                 {\n+                    //noinspection ResultOfMethodCallIgnored\n                     f.delete();\n                 }\n \n                 Writer w = WriterFactory.newXmlWriter( f );\n \n-                String origRelativePath = null;\n                 String replaceRelativePath = null;\n                 if ( model.getParent() != null )\n                 {\n-                    origRelativePath = model.getParent().getRelativePath();\n+                    replaceRelativePath = model.getParent().getRelativePath();\n \n                 }\n-                replaceRelativePath = origRelativePath;\n \n-                if ( origRelativePath == null )\n-                {\n-                    origRelativePath = \"../pom.xml\";\n-                }\n \n                 if ( model.getParent() != null )\n                 {",
+                "raw_url": "https://github.com/apache/maven-shade-plugin/raw/4c37e805c6ec46c69baee645848bd2b66495e51e/src/main/java/org/apache/maven/plugins/shade/mojo/ShadeMojo.java",
+                "sha": "05aecd3ec31b95194091a23aa82d063beeca32fb",
+                "status": "modified"
+            }
+        ],
+        "message": "[MSHADE-127] Fixed npe\n\ngit-svn-id: https://svn.apache.org/repos/asf/maven/plugins/trunk@1482543 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/maven-shade-plugin/commit/ba6951729a5dc4e47e6a3bf96784012b20a9876b",
+        "repo": "maven-shade-plugin",
+        "unit_tests": [
+            "ShadeMojoTest.java"
+        ]
+    },
+    "maven-shade-plugin_855bc3f": {
+        "bug_id": "maven-shade-plugin_855bc3f",
+        "commit": "https://github.com/apache/maven-shade-plugin/commit/855bc3f766daf8c5254be66c6e6c90f4ef6b9645",
+        "file": [
+            {
+                "additions": 14,
+                "blob_url": "https://github.com/apache/maven-shade-plugin/blob/855bc3f766daf8c5254be66c6e6c90f4ef6b9645/src/main/java/org/apache/maven/plugins/shade/filter/MinijarFilter.java",
+                "changes": 15,
+                "contents_url": "https://api.github.com/repos/apache/maven-shade-plugin/contents/src/main/java/org/apache/maven/plugins/shade/filter/MinijarFilter.java?ref=855bc3f766daf8c5254be66c6e6c90f4ef6b9645",
+                "deletions": 1,
+                "filename": "src/main/java/org/apache/maven/plugins/shade/filter/MinijarFilter.java",
+                "patch": "@@ -31,6 +31,7 @@\n import java.io.FileInputStream;\n import java.io.IOException;\n import java.io.InputStream;\n+import java.util.Collections;\n import java.util.HashSet;\n import java.util.Iterator;\n import java.util.List;\n@@ -53,6 +54,16 @@\n \n     private int classesRemoved;\n \n+    public MinijarFilter( MavenProject project, Log log )\n+        throws IOException\n+    {\n+        this( project, log, Collections.<SimpleFilter>emptyList() );\n+    }\n+\n+    /**\n+     *\n+     * @since 1.6\n+     */\n     public MinijarFilter( MavenProject project, Log log, List<SimpleFilter> simpleFilters )\n         throws IOException\n     {\n@@ -84,7 +95,9 @@ public MinijarFilter( MavenProject project, Log log, List<SimpleFilter> simpleFi\n         removePackages( artifactUnit );\n         removable.removeAll( artifactUnit.getClazzes() );\n         removable.removeAll( artifactUnit.getTransitiveDependencies() );\n-        removeSpecificallyIncludedClasses( project, simpleFilters );\n+        removeSpecificallyIncludedClasses( project, simpleFilters == null\n+            ? Collections.<SimpleFilter>emptyList()\n+            : simpleFilters );\n     }\n \n     private void removePackages( ClazzpathUnit artifactUnit )",
+                "raw_url": "https://github.com/apache/maven-shade-plugin/raw/855bc3f766daf8c5254be66c6e6c90f4ef6b9645/src/main/java/org/apache/maven/plugins/shade/filter/MinijarFilter.java",
+                "sha": "3042ccf155557c4a714117f9e1b03e2dcc95dfe2",
+                "status": "modified"
+            }
+        ],
+        "message": "backward comp and take care of NPE\n\ngit-svn-id: https://svn.apache.org/repos/asf/maven/plugins/trunk@1300049 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/maven-shade-plugin/commit/3307c7b183b745ce449ab48b716e7f210c246b84",
+        "repo": "maven-shade-plugin",
+        "unit_tests": [
+            "MinijarFilterTest.java"
+        ]
+    }
+}

@@ -1,0 +1,290 @@
+{
+    "netbeans_0bcf9fe": {
+        "bug_id": "netbeans_0bcf9fe",
+        "commit": "https://github.com/apache/netbeans/commit/0bcf9fefe1012f1456446038f1645b3610e66b36",
+        "file": [
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/netbeans/blob/0bcf9fefe1012f1456446038f1645b3610e66b36/platform/core.network/src/org/netbeans/core/network/proxy/ProxyAutoConfig.java",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/netbeans/contents/platform/core.network/src/org/netbeans/core/network/proxy/ProxyAutoConfig.java?ref=0bcf9fefe1012f1456446038f1645b3610e66b36",
+                "deletions": 0,
+                "filename": "platform/core.network/src/org/netbeans/core/network/proxy/ProxyAutoConfig.java",
+                "patch": "@@ -138,6 +138,9 @@ public void run() {\n                 }\n             }\n         }\n+        if (evaluator == null) {\n+            return Collections.singletonList(Proxy.NO_PROXY);\n+        }\n         try {\n             return evaluator.findProxyForURL(u);\n         } catch (PacValidationException ex) {",
+                "raw_url": "https://github.com/apache/netbeans/raw/0bcf9fefe1012f1456446038f1645b3610e66b36/platform/core.network/src/org/netbeans/core/network/proxy/ProxyAutoConfig.java",
+                "sha": "992e9c1ab4911c94f894b78bf2669812ce1e8d4a",
+                "status": "modified"
+            }
+        ],
+        "message": "Fix NPE if PAC cannot be resolved, e.g. UnknownHostException if the proxy url is configured but not reachable.",
+        "parent": "https://github.com/apache/netbeans/commit/ab4e095492d8837c0237e77790f90fcefed9e954",
+        "repo": "netbeans",
+        "unit_tests": [
+            "ProxyAutoConfigTest.java"
+        ]
+    },
+    "netbeans_7fe2d37": {
+        "bug_id": "netbeans_7fe2d37",
+        "commit": "https://github.com/apache/netbeans/commit/7fe2d3774f700650f532d15118d69e572d81c74e",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/netbeans/blob/7fe2d3774f700650f532d15118d69e572d81c74e/lexer.nbbridge/nbproject/project.properties",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/netbeans/contents/lexer.nbbridge/nbproject/project.properties?ref=7fe2d3774f700650f532d15118d69e572d81c74e",
+                "deletions": 1,
+                "filename": "lexer.nbbridge/nbproject/project.properties",
+                "patch": "@@ -16,6 +16,6 @@\n # under the License.\n is.eager=true\n javac.compilerargs=-Xlint:unchecked\n-javac.source=1.6\n+javac.source=1.8\n javadoc.arch=${basedir}/arch.xml\n spec.version.base=1.35.0",
+                "raw_url": "https://github.com/apache/netbeans/raw/7fe2d3774f700650f532d15118d69e572d81c74e/lexer.nbbridge/nbproject/project.properties",
+                "sha": "40c44bdf155b96419ac60b5f090015a4593a0e82",
+                "status": "modified"
+            },
+            {
+                "additions": 37,
+                "blob_url": "https://github.com/apache/netbeans/blob/7fe2d3774f700650f532d15118d69e572d81c74e/lexer.nbbridge/src/org/netbeans/modules/lexer/nbbridge/MimeLookupLanguageProvider.java",
+                "changes": 38,
+                "contents_url": "https://api.github.com/repos/apache/netbeans/contents/lexer.nbbridge/src/org/netbeans/modules/lexer/nbbridge/MimeLookupLanguageProvider.java?ref=7fe2d3774f700650f532d15118d69e572d81c74e",
+                "deletions": 1,
+                "filename": "lexer.nbbridge/src/org/netbeans/modules/lexer/nbbridge/MimeLookupLanguageProvider.java",
+                "patch": "@@ -19,6 +19,8 @@\n \n package org.netbeans.modules.lexer.nbbridge;\n \n+import java.util.HashMap;\n+import java.util.Map;\n import org.netbeans.api.editor.mimelookup.MimeLookup;\n import org.netbeans.api.editor.mimelookup.MimePath;\n import org.netbeans.api.lexer.InputAttributes;\n@@ -28,6 +30,8 @@\n import org.netbeans.spi.lexer.LanguageEmbedding;\n import org.netbeans.spi.lexer.LanguageProvider;\n import org.openide.util.Lookup;\n+import org.openide.util.LookupEvent;\n+import org.openide.util.LookupListener;\n \n /**\n  *\n@@ -36,18 +40,50 @@\n @org.openide.util.lookup.ServiceProvider(service=org.netbeans.spi.lexer.LanguageProvider.class)\n public final class MimeLookupLanguageProvider extends LanguageProvider {\n     \n+    private final Map<String, Lookup.Result<Language>> langLkpResultsMap = \n+                  new HashMap<>();\n+    private final Map<String, Lookup.Result<LanguagesEmbeddingMap>> embeddingsLkpResultsMap = \n+                  new HashMap<>();\n+    private final String LOCK = new String(\"MimeLookupLanguageProvider.LOCK\"); //NOI18N\n+ \n     public MimeLookupLanguageProvider() {\n         super();\n     }\n \n     public Language<?> findLanguage(String mimeType) {\n         Lookup lookup = MimeLookup.getLookup(MimePath.parse(mimeType));\n+ \n+        //268649: add lookup listener for Language.class\n+        synchronized (LOCK) {\n+            Lookup.Result result = langLkpResultsMap.get(mimeType);\n+            if (result == null) {\n+                result = lookup.lookup(new Lookup.Template(Language.class));\n+                result.addLookupListener((LookupEvent evt) -> {\n+                    firePropertyChange(PROP_LANGUAGE);\n+                });\n+                langLkpResultsMap.put(mimeType, result);\n+            }\n+        } \n         return (Language<?>)lookup.lookup(Language.class);\n     }\n \n     public LanguageEmbedding<?> findLanguageEmbedding(\n     Token<?> token, LanguagePath languagePath, InputAttributes inputAttributes) {\n-        Lookup lookup = MimeLookup.getLookup(MimePath.parse(languagePath.mimePath()));\n+        String mimePath = languagePath.mimePath();\n+        Lookup lookup = MimeLookup.getLookup(MimePath.parse(mimePath));\n+        \n+        //268649: add lookup listener for LanguagesEmbeddingMap.class            \n+        synchronized (LOCK) {\n+            Lookup.Result result = embeddingsLkpResultsMap.get(mimePath);\n+            if (result == null) {\n+                result = lookup.lookup(new Lookup.Template(LanguagesEmbeddingMap.class));\n+                result.addLookupListener((LookupEvent evt) -> {\n+                    firePropertyChange(PROP_EMBEDDED_LANGUAGE);\n+                });\n+                embeddingsLkpResultsMap.put(mimePath, result);\n+            }\n+        }\n+\n         LanguagesEmbeddingMap map = lookup.lookup(LanguagesEmbeddingMap.class);\n         return map == null ? null : map.getLanguageEmbeddingForTokenName(token.id().name());\n     }",
+                "raw_url": "https://github.com/apache/netbeans/raw/7fe2d3774f700650f532d15118d69e572d81c74e/lexer.nbbridge/src/org/netbeans/modules/lexer/nbbridge/MimeLookupLanguageProvider.java",
+                "sha": "d82b1f71cdeaf21e30ba3815a156aed34998ad7e",
+                "status": "modified"
+            }
+        ],
+        "message": "#268649-NPE opening JS file in JsStructureScanner.folds",
+        "parent": "https://github.com/apache/netbeans/commit/e0ee00578ea26326b73681993c12df669c174f40",
+        "repo": "netbeans",
+        "unit_tests": [
+            "MimeLookupLanguageProviderTest.java"
+        ]
+    },
+    "netbeans_8b7f076": {
+        "bug_id": "netbeans_8b7f076",
+        "commit": "https://github.com/apache/netbeans/commit/8b7f076e1dfc363ad8ab5cc06bba4f729e9884bc",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/netbeans/blob/8b7f076e1dfc363ad8ab5cc06bba4f729e9884bc/platform/core.network/src/org/netbeans/core/network/utils/LocalAddressUtils.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/netbeans/contents/platform/core.network/src/org/netbeans/core/network/utils/LocalAddressUtils.java?ref=8b7f076e1dfc363ad8ab5cc06bba4f729e9884bc",
+                "deletions": 1,
+                "filename": "platform/core.network/src/org/netbeans/core/network/utils/LocalAddressUtils.java",
+                "patch": "@@ -521,7 +521,7 @@ public static boolean isSoftwareVirtualAdapter(NetworkInterface nif) {\n             // (above from VirtualBox source code)\n             //\n             byte[] macAddress = nif.getHardwareAddress();\n-            if (macAddress != null & macAddress.length >= 3) {\n+            if (macAddress != null && macAddress.length >= 3) {\n                 if ((macAddress[0] == 0x0A || macAddress[0] == 0x08) &&\n                         (macAddress[1] == 0x00) &&\n                         (macAddress[2] == 0x27)) {                ",
+                "raw_url": "https://github.com/apache/netbeans/raw/8b7f076e1dfc363ad8ab5cc06bba4f729e9884bc/platform/core.network/src/org/netbeans/core/network/utils/LocalAddressUtils.java",
+                "sha": "a2a57cfe1f9532700337033eea082dbb45d5370d",
+                "status": "modified"
+            }
+        ],
+        "message": "Merge pull request #1189 from lbruun/NETBEANS-1775-fix\n\n[NETBEANS-1775] Fix for NPE",
+        "parent": "https://github.com/apache/netbeans/commit/11e08db2accb068c1e16cc33c30d0e54ce1d5505",
+        "repo": "netbeans",
+        "unit_tests": [
+            "LocalAddressUtilsTest.java"
+        ]
+    },
+    "netbeans_a640484": {
+        "bug_id": "netbeans_a640484",
+        "commit": "https://github.com/apache/netbeans/commit/a640484d9e7fc5176aa137313699696eca533e4b",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/netbeans/blob/a640484d9e7fc5176aa137313699696eca533e4b/lexer.nbbridge/nbproject/project.properties",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/netbeans/contents/lexer.nbbridge/nbproject/project.properties?ref=a640484d9e7fc5176aa137313699696eca533e4b",
+                "deletions": 1,
+                "filename": "lexer.nbbridge/nbproject/project.properties",
+                "patch": "@@ -16,6 +16,6 @@\n # under the License.\n is.eager=true\n javac.compilerargs=-Xlint:unchecked\n-javac.source=1.6\n+javac.source=1.8\n javadoc.arch=${basedir}/arch.xml\n spec.version.base=1.35.0",
+                "raw_url": "https://github.com/apache/netbeans/raw/a640484d9e7fc5176aa137313699696eca533e4b/lexer.nbbridge/nbproject/project.properties",
+                "sha": "40c44bdf155b96419ac60b5f090015a4593a0e82",
+                "status": "modified"
+            },
+            {
+                "additions": 37,
+                "blob_url": "https://github.com/apache/netbeans/blob/a640484d9e7fc5176aa137313699696eca533e4b/lexer.nbbridge/src/org/netbeans/modules/lexer/nbbridge/MimeLookupLanguageProvider.java",
+                "changes": 38,
+                "contents_url": "https://api.github.com/repos/apache/netbeans/contents/lexer.nbbridge/src/org/netbeans/modules/lexer/nbbridge/MimeLookupLanguageProvider.java?ref=a640484d9e7fc5176aa137313699696eca533e4b",
+                "deletions": 1,
+                "filename": "lexer.nbbridge/src/org/netbeans/modules/lexer/nbbridge/MimeLookupLanguageProvider.java",
+                "patch": "@@ -19,6 +19,8 @@\n \n package org.netbeans.modules.lexer.nbbridge;\n \n+import java.util.HashMap;\n+import java.util.Map;\n import org.netbeans.api.editor.mimelookup.MimeLookup;\n import org.netbeans.api.editor.mimelookup.MimePath;\n import org.netbeans.api.lexer.InputAttributes;\n@@ -28,6 +30,8 @@\n import org.netbeans.spi.lexer.LanguageEmbedding;\n import org.netbeans.spi.lexer.LanguageProvider;\n import org.openide.util.Lookup;\n+import org.openide.util.LookupEvent;\n+import org.openide.util.LookupListener;\n \n /**\n  *\n@@ -36,18 +40,50 @@\n @org.openide.util.lookup.ServiceProvider(service=org.netbeans.spi.lexer.LanguageProvider.class)\n public final class MimeLookupLanguageProvider extends LanguageProvider {\n     \n+    private final Map<String, Lookup.Result<Language>> langLkpResultsMap = \n+                  new HashMap<>();\n+    private final Map<String, Lookup.Result<LanguagesEmbeddingMap>> embeddingsLkpResultsMap = \n+                  new HashMap<>();\n+    private final String LOCK = new String(\"MimeLookupLanguageProvider.LOCK\"); //NOI18N\n+ \n     public MimeLookupLanguageProvider() {\n         super();\n     }\n \n     public Language<?> findLanguage(String mimeType) {\n         Lookup lookup = MimeLookup.getLookup(MimePath.parse(mimeType));\n+ \n+        //268649: add lookup listener for Language.class\n+        synchronized (LOCK) {\n+            Lookup.Result result = langLkpResultsMap.get(mimeType);\n+            if (result == null) {\n+                result = lookup.lookup(new Lookup.Template(Language.class));\n+                result.addLookupListener((LookupEvent evt) -> {\n+                    firePropertyChange(PROP_LANGUAGE);\n+                });\n+                langLkpResultsMap.put(mimeType, result);\n+            }\n+        } \n         return (Language<?>)lookup.lookup(Language.class);\n     }\n \n     public LanguageEmbedding<?> findLanguageEmbedding(\n     Token<?> token, LanguagePath languagePath, InputAttributes inputAttributes) {\n-        Lookup lookup = MimeLookup.getLookup(MimePath.parse(languagePath.mimePath()));\n+        String mimePath = languagePath.mimePath();\n+        Lookup lookup = MimeLookup.getLookup(MimePath.parse(mimePath));\n+        \n+        //268649: add lookup listener for LanguagesEmbeddingMap.class            \n+        synchronized (LOCK) {\n+            Lookup.Result result = embeddingsLkpResultsMap.get(mimePath);\n+            if (result == null) {\n+                result = lookup.lookup(new Lookup.Template(LanguagesEmbeddingMap.class));\n+                result.addLookupListener((LookupEvent evt) -> {\n+                    firePropertyChange(PROP_EMBEDDED_LANGUAGE);\n+                });\n+                embeddingsLkpResultsMap.put(mimePath, result);\n+            }\n+        }\n+\n         LanguagesEmbeddingMap map = lookup.lookup(LanguagesEmbeddingMap.class);\n         return map == null ? null : map.getLanguageEmbeddingForTokenName(token.id().name());\n     }",
+                "raw_url": "https://github.com/apache/netbeans/raw/a640484d9e7fc5176aa137313699696eca533e4b/lexer.nbbridge/src/org/netbeans/modules/lexer/nbbridge/MimeLookupLanguageProvider.java",
+                "sha": "d82b1f71cdeaf21e30ba3815a156aed34998ad7e",
+                "status": "modified"
+            }
+        ],
+        "message": "Merge pull request #620 from rtaneja1/rtaneja/donation2_merge268649\n\n#268649-NPE at JsStructureScanner.folds while opening .js file",
+        "parent": "https://github.com/apache/netbeans/commit/dc04a3e144276f2ce83991be0a92cc2c657e97a3",
+        "repo": "netbeans",
+        "unit_tests": [
+            "MimeLookupLanguageProviderTest.java"
+        ]
+    },
+    "netbeans_b3601d6": {
+        "bug_id": "netbeans_b3601d6",
+        "commit": "https://github.com/apache/netbeans/commit/b3601d6958c12eda5031ffda5abe34ff00603a3e",
+        "file": [
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/netbeans/blob/b3601d6958c12eda5031ffda5abe34ff00603a3e/java/java.source.base/src/org/netbeans/modules/java/source/pretty/ImportAnalysis2.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/netbeans/contents/java/java.source.base/src/org/netbeans/modules/java/source/pretty/ImportAnalysis2.java?ref=b3601d6958c12eda5031ffda5abe34ff00603a3e",
+                "deletions": 2,
+                "filename": "java/java.source.base/src/org/netbeans/modules/java/source/pretty/ImportAnalysis2.java",
+                "patch": "@@ -258,7 +258,7 @@ private void addImport(ImportTree imp) {\n \n     //Note: this method should return either \"orig\" or a IdentifierTree or MemberSelectTree\n     //no other tree type is not allowed - see ImmutableTreeTranslator.translateStable(Tree)\n-    public ExpressionTree resolveImport(MemberSelectTree orig, Element element) {\n+    public ExpressionTree resolveImport(MemberSelectTree orig, final Element element) {\n         if (visibleThroughClasses == null || element == null || cs != null && cs.useFQNs()) {\n             //may happen for package clause\n             return orig;\n@@ -390,7 +390,7 @@ private boolean checkPackagesForStarImport(String pkgName, CodeStyle cs) {\n     }\n \n     private PackageElement getPackageOf(Element el) {\n-        while (el.getKind() != ElementKind.PACKAGE) el = el.getEnclosingElement();\n+        while ((el != null) && (el.getKind() != ElementKind.PACKAGE)) el = el.getEnclosingElement();\n \n         return (PackageElement) el;\n     }",
+                "raw_url": "https://github.com/apache/netbeans/raw/b3601d6958c12eda5031ffda5abe34ff00603a3e/java/java.source.base/src/org/netbeans/modules/java/source/pretty/ImportAnalysis2.java",
+                "sha": "e88ef5d79e27518dfbe38f8c7bbb7f04d54b151c",
+                "status": "modified"
+            }
+        ],
+        "message": "[NETBEANS-2980] Fix potential NPE on ImportAnalysis2.getPackage()",
+        "parent": "https://github.com/apache/netbeans/commit/18203cea4e5776d25893de172929c9b64603cab0",
+        "repo": "netbeans",
+        "unit_tests": [
+            "ImportAnalysis2Test.java"
+        ]
+    },
+    "netbeans_cc23fcf": {
+        "bug_id": "netbeans_cc23fcf",
+        "commit": "https://github.com/apache/netbeans/commit/cc23fcf0e4c9d626109237d078c942661d80f00b",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/netbeans/blob/cc23fcf0e4c9d626109237d078c942661d80f00b/platform/core.network/src/org/netbeans/core/network/utils/LocalAddressUtils.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/netbeans/contents/platform/core.network/src/org/netbeans/core/network/utils/LocalAddressUtils.java?ref=cc23fcf0e4c9d626109237d078c942661d80f00b",
+                "deletions": 1,
+                "filename": "platform/core.network/src/org/netbeans/core/network/utils/LocalAddressUtils.java",
+                "patch": "@@ -521,7 +521,7 @@ public static boolean isSoftwareVirtualAdapter(NetworkInterface nif) {\n             // (above from VirtualBox source code)\n             //\n             byte[] macAddress = nif.getHardwareAddress();\n-            if (macAddress != null & macAddress.length >= 3) {\n+            if (macAddress != null && macAddress.length >= 3) {\n                 if ((macAddress[0] == 0x0A || macAddress[0] == 0x08) &&\n                         (macAddress[1] == 0x00) &&\n                         (macAddress[2] == 0x27)) {                ",
+                "raw_url": "https://github.com/apache/netbeans/raw/cc23fcf0e4c9d626109237d078c942661d80f00b/platform/core.network/src/org/netbeans/core/network/utils/LocalAddressUtils.java",
+                "sha": "a2a57cfe1f9532700337033eea082dbb45d5370d",
+                "status": "modified"
+            }
+        ],
+        "message": "[NETBEANS-1775] Fix for NPE\n\nSimple typo: '&' should have been '&&'. This caused an NPE\nwhen NetBeans was used with a VPN connection.",
+        "parent": "https://github.com/apache/netbeans/commit/11e08db2accb068c1e16cc33c30d0e54ce1d5505",
+        "repo": "netbeans",
+        "unit_tests": [
+            "LocalAddressUtilsTest.java"
+        ]
+    },
+    "netbeans_d305cd1": {
+        "bug_id": "netbeans_d305cd1",
+        "commit": "https://github.com/apache/netbeans/commit/d305cd16e9a4ab88a71ced7e7b8622d26542b2f1",
+        "file": [
+            {
+                "additions": 211,
+                "blob_url": "https://github.com/apache/netbeans/blob/d305cd16e9a4ab88a71ced7e7b8622d26542b2f1/platform/openide.util.ui/src/org/openide/util/CachedHiDPIIcon.java",
+                "changes": 211,
+                "contents_url": "https://api.github.com/repos/apache/netbeans/contents/platform/openide.util.ui/src/org/openide/util/CachedHiDPIIcon.java?ref=d305cd16e9a4ab88a71ced7e7b8622d26542b2f1",
+                "deletions": 0,
+                "filename": "platform/openide.util.ui/src/org/openide/util/CachedHiDPIIcon.java",
+                "patch": "@@ -0,0 +1,211 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one\n+ * or more contributor license agreements.  See the NOTICE file\n+ * distributed with this work for additional information\n+ * regarding copyright ownership.  The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance\n+ * with the License.  You may obtain a copy of the License at\n+ *\n+ *   http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing,\n+ * software distributed under the License is distributed on an\n+ * \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+ * KIND, either express or implied.  See the License for the\n+ * specific language governing permissions and limitations\n+ * under the License.\n+ */\n+package org.openide.util;\n+\n+import java.awt.Component;\n+import java.awt.Graphics;\n+import java.awt.Graphics2D;\n+import java.awt.GraphicsConfiguration;\n+import java.awt.Image;\n+import java.awt.geom.AffineTransform;\n+import java.util.Iterator;\n+import java.util.LinkedHashMap;\n+import java.util.Map;\n+import java.util.Objects;\n+import javax.swing.Icon;\n+import javax.swing.ImageIcon;\n+\n+/**\n+ * Abstract base class for {@link javax.swing.Icon} implementations that need to cache scaled bitmap\n+ * representations for HiDPI displays. Bitmaps for multiple HiDPI scaling factors can be cached at\n+ * the same time, e.g. for multi-monitor setups.\n+ */\n+abstract class CachedHiDPIIcon extends ImageIcon {\n+    /**\n+     * The maximum size of the cache, as a multiple of the size of the icon at 100% scaling. For\n+     * example, storing three images at 100%, 150%, and 200% scaling, respectively, yields a total\n+     * cache size of 1.0^2 + 1.5^2 + 2^2 = 7.2.\n+     */\n+    private static final double MAX_CACHE_SIZE = 10.0;\n+    private final int width;\n+    private final int height;\n+    /**\n+     * Cache map with least-recently-used iteration order.\n+     */\n+    private final Map<CachedImageKey, Image> cache =\n+            new LinkedHashMap<CachedImageKey, Image>(16, 0.75f, true);\n+    /**\n+     * Total size of the images currently in the cache, in the same units as\n+     * {@link #MAX_CACHE_SIZE}.\n+     */\n+    private double cacheSize = 0.0;\n+\n+    /**\n+     * Constructor to be used by subclasses.\n+     */\n+    protected CachedHiDPIIcon(int width, int height) {\n+        if (width < 0) {\n+            throw new IllegalArgumentException();\n+        }\n+        if (height < 0) {\n+            throw new IllegalArgumentException();\n+        }\n+        this.width = width;\n+        this.height = height;\n+    }\n+\n+    private synchronized Image getScaledImageCached(Component c, CachedImageKey key) {\n+        Image ret = cache.get(key);\n+        if (ret != null) {\n+            return ret;\n+        }\n+        final double scale = key.getScale();\n+        final int deviceWidth = (int) Math.ceil(getIconWidth() * scale);\n+        final int deviceHeight = (int) Math.ceil(getIconHeight() * scale);\n+        final Image img =\n+                createImage(c, key.getGraphicsConfiguration(), deviceWidth, deviceHeight, scale);\n+        final double imgSize = key.getSize();\n+        if (imgSize <= MAX_CACHE_SIZE) {\n+            /* Evict least-recently-used images from the cache until we have space for the latest\n+            image. */\n+            final Iterator<CachedImageKey> iter = cache.keySet().iterator();\n+            while (cacheSize + imgSize > MAX_CACHE_SIZE && iter.hasNext()) {\n+                CachedImageKey removeKey = iter.next();\n+                iter.remove();\n+                cacheSize -= removeKey.getSize();\n+            }\n+            cache.put(key, img);\n+            cacheSize += imgSize;\n+        }\n+        return img;\n+    }\n+\n+    @Override\n+    public final void paintIcon(Component c, Graphics g0, int x, int y) {\n+        final Graphics2D g = (Graphics2D) g0;\n+        CachedImageKey key = CachedImageKey.create(g);\n+        final AffineTransform oldTransform = g.getTransform();\n+        try {\n+            g.translate(x, y);\n+            Image scaledImage = getScaledImageCached(c, key);\n+            /* Scale the image down to its logical dimensions, then draw it at the device pixel\n+            boundary. In VectorIcon, we tried to be a lot more conservative, taking great care not\n+            to draw on any device pixels that were only partially bounded by the icon (due to\n+            non-integral scaling factors, e.g. 150%). That was probably overkill; it's a lot easier\n+            to assume that partially bounded pixels are OK to draw on, since all icon bitmaps of a\n+            given scaling factor then end up being the same number of device pixels wide and tall.\n+            And we need consistent dimensions to be able keep cached images in any case. For these\n+            reasons, round the X and Y translations (which denote the position in device pixels)\n+            _down_ here.*/\n+            AffineTransform tx2 = g.getTransform();\n+            g.setTransform(new AffineTransform(1, 0, 0, 1,\n+                    (int) tx2.getTranslateX(),\n+                    (int) tx2.getTranslateY()));\n+            g.drawImage(scaledImage, 0, 0, null);\n+        } finally {\n+            g.setTransform(oldTransform);\n+        }\n+    }\n+\n+    @Override\n+    public final int getIconWidth() {\n+        return width;\n+    }\n+\n+    @Override\n+    public final int getIconHeight() {\n+        return height;\n+    }\n+\n+    /**\n+     * Create a scaled image containing the graphics of this icon. The result may be cached.\n+     *\n+     * @param c the component that was passed to {@link Icon#paintIcon(Component,Graphics,int,int)}.\n+     *        The cache will <em>not</em> be invalidated if {@code c} or its state changes, so \n+     *        subclasses should avoid depending on it if possible. This parameter exists mainly to\n+     *        ensure compatibility with existing Icon implementations that may be used as delegates.\n+     *        Future implementations might also elect to simply pass a dummy Component instance\n+     *        here.\n+     * @param graphicsConfiguration the configuration of the surface on which the image will be\n+     * painted\n+     * @param deviceWidth the required width of the image, with scaling already applied\n+     * @param deviceHeight the required height of the image, with scaling already applied\n+     * @param scale the HiDPI scaling factor detected in {@code graphicsConfiguration}\n+     */\n+    protected abstract Image createImage(Component c, GraphicsConfiguration graphicsConfiguration,\n+            int deviceWidth, int deviceHeight, double scale);\n+\n+    private static final class CachedImageKey {\n+        private final GraphicsConfiguration gconf;\n+        private final double scale;\n+\n+        public CachedImageKey(GraphicsConfiguration gconf, double scale) {\n+            Parameters.notNull(\"gconf\", gconf);\n+            if (scale <= 0.0) {\n+                throw new IllegalArgumentException();\n+            }\n+            this.gconf = gconf;\n+            this.scale = scale;\n+        }\n+\n+        public static CachedImageKey create(Graphics2D g) {\n+            final AffineTransform tx = g.getTransform();\n+            final int txType = tx.getType();\n+            final double scale;\n+            if (txType == AffineTransform.TYPE_UNIFORM_SCALE ||\n+                txType == (AffineTransform.TYPE_UNIFORM_SCALE | AffineTransform.TYPE_TRANSLATION))\n+            {\n+                scale = tx.getScaleX();\n+            } else {\n+                scale = 1.0;\n+            }\n+            return new CachedImageKey(g.getDeviceConfiguration(), scale);\n+        }\n+\n+        public double getScale() {\n+            return scale;\n+        }\n+\n+        /**\n+         * Get the size of this image as a multiple of the original image's size at 100% scaling.\n+         */\n+        public double getSize() {\n+            return Math.pow(getScale(), 2.0);\n+        }\n+\n+        public GraphicsConfiguration getGraphicsConfiguration() {\n+            return gconf;\n+        }\n+\n+        @Override\n+        public int hashCode() {\n+            return Objects.hash(gconf, scale);\n+        }\n+\n+        @Override\n+        public boolean equals(Object obj) {\n+            if (!(obj instanceof CachedImageKey)) {\n+                return false;\n+            }\n+            final CachedImageKey other = (CachedImageKey) obj;\n+            return this.gconf.equals(other.gconf) &&\n+                   this.scale == other.scale;\n+        }\n+    }\n+}",
+                "raw_url": "https://github.com/apache/netbeans/raw/d305cd16e9a4ab88a71ced7e7b8622d26542b2f1/platform/openide.util.ui/src/org/openide/util/CachedHiDPIIcon.java",
+                "sha": "ecce663bcc761bd4656eb28751121f6b48b5edea",
+                "status": "added"
+            },
+            {
+                "additions": 79,
+                "blob_url": "https://github.com/apache/netbeans/blob/d305cd16e9a4ab88a71ced7e7b8622d26542b2f1/platform/openide.util.ui/src/org/openide/util/FilteredIcon.java",
+                "changes": 79,
+                "contents_url": "https://api.github.com/repos/apache/netbeans/contents/platform/openide.util.ui/src/org/openide/util/FilteredIcon.java?ref=d305cd16e9a4ab88a71ced7e7b8622d26542b2f1",
+                "deletions": 0,
+                "filename": "platform/openide.util.ui/src/org/openide/util/FilteredIcon.java",
+                "patch": "@@ -0,0 +1,79 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one\n+ * or more contributor license agreements.  See the NOTICE file\n+ * distributed with this work for additional information\n+ * regarding copyright ownership.  The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance\n+ * with the License.  You may obtain a copy of the License at\n+ *\n+ *   http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing,\n+ * software distributed under the License is distributed on an\n+ * \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+ * KIND, either express or implied.  See the License for the\n+ * specific language governing permissions and limitations\n+ * under the License.\n+ */\n+package org.openide.util;\n+\n+import java.awt.Component;\n+import java.awt.Graphics;\n+import java.awt.Graphics2D;\n+import java.awt.GraphicsConfiguration;\n+import java.awt.Image;\n+import java.awt.Rectangle;\n+import java.awt.Toolkit;\n+import java.awt.Transparency;\n+import java.awt.image.BufferedImage;\n+import java.awt.image.FilteredImageSource;\n+import java.awt.image.RGBImageFilter;\n+import javax.swing.Icon;\n+import javax.swing.ImageIcon;\n+\n+/**\n+ * A filtered variation of a provided delegate icon. Any kind of delegate implementation can be\n+ * used. In particular, this class preserves the full fidelity of HiDPI icons, such as instances\n+ * of {@link VectorIcon}, or {@link ImageIcon} instances delegating to a\n+ * {@code java.awt.image.MultiResolutionImage} (available since Java 9 and above).\n+ *\n+ * <p>Note that state passed through the {code Component} parameter of the\n+ * {@link Icon#paintIcon(Component,Graphics,int,int)} method will only be current as of the time the\n+ * icon is initially entered into the cache.\n+ */\n+final class FilteredIcon extends CachedHiDPIIcon {\n+    private final RGBImageFilter filter;\n+    private final Icon delegate;\n+\n+    private FilteredIcon(RGBImageFilter filter, Icon delegate) {\n+        super(delegate.getIconWidth(), delegate.getIconHeight());\n+        Parameters.notNull(\"filter\", filter);\n+        Parameters.notNull(\"delegate\", delegate);\n+        this.filter = filter;\n+        this.delegate = delegate;\n+    }\n+\n+    public static Icon create(RGBImageFilter filter, Icon delegate) {\n+        return new FilteredIcon(filter, delegate);\n+    }\n+\n+    @Override\n+    protected Image createImage(\n+            Component c, GraphicsConfiguration graphicsConfiguration,\n+            int deviceWidth, int deviceHeight, double scale)\n+    {\n+        final BufferedImage img = graphicsConfiguration.createCompatibleImage(\n+                deviceWidth, deviceHeight, Transparency.TRANSLUCENT);\n+        final Graphics2D imgG = img.createGraphics();\n+        try {\n+            imgG.clip(new Rectangle(0, 0, img.getWidth(), img.getHeight()));\n+            imgG.scale(scale, scale);\n+            delegate.paintIcon(c, imgG, 0, 0);\n+        } finally {\n+            imgG.dispose();\n+        }\n+        return Toolkit.getDefaultToolkit().createImage(\n+                new FilteredImageSource(img.getSource(), filter));\n+    }\n+}",
+                "raw_url": "https://github.com/apache/netbeans/raw/d305cd16e9a4ab88a71ced7e7b8622d26542b2f1/platform/openide.util.ui/src/org/openide/util/FilteredIcon.java",
+                "sha": "94499eb8a2cc284103ffda0821cb5caaffe7217b",
+                "status": "added"
+            },
+            {
+                "additions": 18,
+                "blob_url": "https://github.com/apache/netbeans/blob/d305cd16e9a4ab88a71ced7e7b8622d26542b2f1/platform/openide.util.ui/src/org/openide/util/ImageUtilities.java",
+                "changes": 62,
+                "contents_url": "https://api.github.com/repos/apache/netbeans/contents/platform/openide.util.ui/src/org/openide/util/ImageUtilities.java?ref=d305cd16e9a4ab88a71ced7e7b8622d26542b2f1",
+                "deletions": 44,
+                "filename": "platform/openide.util.ui/src/org/openide/util/ImageUtilities.java",
+                "patch": "@@ -19,7 +19,6 @@\n \n package org.openide.util;\n \n-import java.awt.Color;\n import java.awt.Component;\n import java.awt.Graphics;\n import java.awt.HeadlessException;\n@@ -31,8 +30,6 @@\n import java.awt.image.ColorModel;\n import java.awt.image.FilteredImageSource;\n import java.awt.image.ImageObserver;\n-import java.awt.image.ImageProducer;\n-import java.awt.image.IndexColorModel;\n import java.awt.image.RGBImageFilter;\n import java.awt.image.WritableRaster;\n import java.io.IOException;\n@@ -138,6 +135,10 @@ public static final Image loadImage(String resourceID) {\n      * @return icon's Image or null if the icon cannot be loaded\n      */\n     public static final Image loadImage(String resource, boolean localized) {\n+        // Avoid a NPE that could previously occur in the isDarkLaF case only. See NETBEANS-2401.\n+        if (resource == null) {\n+            return null;\n+        }\n         Image image = null;\n         if( isDarkLaF() ) {\n             image = getIcon(addDarkSuffix(resource), localized);\n@@ -149,8 +150,7 @@ public static final Image loadImage(String resource, boolean localized) {\n             // only non _dark images need filtering\n             RGBImageFilter imageFilter = getImageIconFilter();\n             if (null != image && null != imageFilter) {\n-                image = Toolkit.getDefaultToolkit()\n-                        .createImage(new FilteredImageSource(image.getSource(), imageFilter));\n+                image = createFilteredImage(imageFilter, image);\n             }\n         }\n         return image;\n@@ -342,7 +342,10 @@ public static final Image addToolTipToImage(Image image, String text) {\n      */\n     public static Icon createDisabledIcon(Icon icon)  {\n         Parameters.notNull(\"icon\", icon);\n-        return new LazyDisabledIcon(icon2Image(icon));\n+        /* FilteredIcon's Javadoc mentions a caveat about the Component parameter that is passed to\n+        Icon.paintIcon. It's not really a problem; previous implementations had the same\n+        behavior. */\n+        return FilteredIcon.create(DisabledButtonFilter.INSTANCE, icon);\n     }\n \n     /**\n@@ -353,7 +356,14 @@ public static Icon createDisabledIcon(Icon icon)  {\n      */\n     public static Image createDisabledImage(Image image)  {\n         Parameters.notNull(\"image\", image);\n-        return LazyDisabledIcon.createDisabledImage(image);\n+        return createFilteredImage(DisabledButtonFilter.INSTANCE, image);\n+    }\n+\n+    private static Image createFilteredImage(RGBImageFilter filter, Image image) {\n+        Parameters.notNull(\"filter\", filter);\n+        Parameters.notNull(\"image\", image);\n+        return Toolkit.getDefaultToolkit().createImage(\n+                new FilteredImageSource(image.getSource(), filter));\n     }\n \n     /**\n@@ -880,44 +890,8 @@ public Object getProperty(String name, ImageObserver observer) {\n         }\n     }\n \n-    private static class LazyDisabledIcon implements Icon {\n-\n-        /** Shared instance of filter for disabled icons */\n-        private static final RGBImageFilter DISABLED_BUTTON_FILTER = new DisabledButtonFilter();\n-        private Image img;\n-        private Icon disabledIcon;\n-\n-        public LazyDisabledIcon(Image img) {\n-            assert null != img;\n-            this.img = img;\n-        }\n-\n-        public void paintIcon(Component c, Graphics g, int x, int y) {\n-            getDisabledIcon().paintIcon(c, g, x, y);\n-        }\n-\n-        public int getIconWidth() {\n-            return getDisabledIcon().getIconWidth();\n-        }\n-\n-        public int getIconHeight() {\n-            return getDisabledIcon().getIconHeight();\n-        }\n-\n-        private synchronized Icon getDisabledIcon() {\n-            if (null == disabledIcon) {\n-                disabledIcon = new ImageIcon(createDisabledImage(img));\n-            }\n-            return disabledIcon;\n-        }\n-\n-        static Image createDisabledImage(Image img) {\n-            ImageProducer prod = new FilteredImageSource(img.getSource(), DISABLED_BUTTON_FILTER);\n-            return Toolkit.getDefaultToolkit().createImage(prod);\n-        }\n-    }\n-\n     private static class DisabledButtonFilter extends RGBImageFilter {\n+        public static final RGBImageFilter INSTANCE = new DisabledButtonFilter();\n \n         DisabledButtonFilter() {\n             canFilterIndexColorModel = true;",
+                "raw_url": "https://github.com/apache/netbeans/raw/d305cd16e9a4ab88a71ced7e7b8622d26542b2f1/platform/openide.util.ui/src/org/openide/util/ImageUtilities.java",
+                "sha": "4a46b6ad2d9430b618374b25294c8101f0ea7941",
+                "status": "modified"
+            }
+        ],
+        "message": "[NETBEANS-1586] Make ImageUtilities.createDisabledIcon work with HiDPI icons\n\nIntroduced a FilteredIcon class which extends from a new CachedHiDPIIcon class.\nThe CachedHiDPIIcon class will be used again in the future; it was originally\ndesigned for an SVG-based Icon implementation, which will be contributed\nseparately in the future. It is generic enough to work with any kind of custom\nIcon implementation that needs caching.\n\nAlso make color filtering of icons for dark themes work with HiDPI icons, using\nthe same FilteredIcon class.\n\nAlso improved a null handling case in ImageUtilities.loadImage. Passing a null\nresource used to be valid before (yielding a null return value), but caused a\nNPE on dark LAFs. Since it worked in the common non-dark case, it should\narguably work in the dark case as well. This might fix NETBEANS-2401, or it\nmight just lead to an NPE elsewhere in that case.",
+        "parent": "https://github.com/apache/netbeans/commit/d7d467c342a7ab4d0759f67c276d4d75ef8fb275",
+        "repo": "netbeans",
+        "unit_tests": [
+            "ImageUtilitiesTest.java"
+        ]
+    },
+    "netbeans_d65f278": {
+        "bug_id": "netbeans_d65f278",
+        "commit": "https://github.com/apache/netbeans/commit/d65f2789d496ed57095ce9e243edb7cec2adaa32",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/netbeans/blob/d65f2789d496ed57095ce9e243edb7cec2adaa32/java.source.base/src/org/netbeans/modules/java/source/PostFlowAnalysis.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/netbeans/contents/java.source.base/src/org/netbeans/modules/java/source/PostFlowAnalysis.java?ref=d65f2789d496ed57095ce9e243edb7cec2adaa32",
+                "deletions": 1,
+                "filename": "java.source.base/src/org/netbeans/modules/java/source/PostFlowAnalysis.java",
+                "patch": "@@ -160,7 +160,7 @@ public void visitMethodDef(JCMethodDecl tree) {\n     public void visitNewClass(JCNewClass tree) {\n         super.visitNewClass(tree);\n         Symbol c = tree.constructor != null ? tree.constructor.owner : null;\n-        if (c != null && c.hasOuterInstance()) {\n+        if (c != null && c != syms.noSymbol && c.hasOuterInstance()) {\n             if (tree.encl == null && c.isLocal()) {\n                 checkThis(tree.pos(), c.type.getEnclosingType().tsym);\n             }",
+                "raw_url": "https://github.com/apache/netbeans/raw/d65f2789d496ed57095ce9e243edb7cec2adaa32/java.source.base/src/org/netbeans/modules/java/source/PostFlowAnalysis.java",
+                "sha": "edf0f313725bacc2959bf7729d5819a5ce03ab71",
+                "status": "modified"
+            }
+        ],
+        "message": "Preventing NPE.",
+        "parent": "https://github.com/apache/netbeans/commit/1c8c1e52e5abb48eb05aaff392ea630d9e04cb83",
+        "repo": "netbeans",
+        "unit_tests": [
+            "PostFlowAnalysisTest.java"
+        ]
+    },
+    "netbeans_d83c8a8": {
+        "bug_id": "netbeans_d83c8a8",
+        "commit": "https://github.com/apache/netbeans/commit/d83c8a8f47a9abad9a2174a78907e8764d06ba46",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/netbeans/blob/d83c8a8f47a9abad9a2174a78907e8764d06ba46/groovy/gradle/src/org/netbeans/modules/gradle/api/execute/GradleCommandLine.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/netbeans/contents/groovy/gradle/src/org/netbeans/modules/gradle/api/execute/GradleCommandLine.java?ref=d83c8a8f47a9abad9a2174a78907e8764d06ba46",
+                "deletions": 1,
+                "filename": "groovy/gradle/src/org/netbeans/modules/gradle/api/execute/GradleCommandLine.java",
+                "patch": "@@ -96,7 +96,7 @@\n         RECOMPILE_SCRIPTS(UNSUPPORTED, \"--recompile-scripts\"),\n         VERSION(UNSUPPORTED, \"--version\", \"-v\");\n \n-        private Set<Flag> incompatible;\n+        private Set<Flag> incompatible = Collections.emptySet();\n         private final Argument.Kind kind;\n         private final List<String> flags;\n         static {",
+                "raw_url": "https://github.com/apache/netbeans/raw/d83c8a8f47a9abad9a2174a78907e8764d06ba46/groovy/gradle/src/org/netbeans/modules/gradle/api/execute/GradleCommandLine.java",
+                "sha": "574bffec30c85688dcc0f1574cab6ec3fdc12b50",
+                "status": "modified"
+            }
+        ],
+        "message": "Trivial fix for NPE on some Gradle Action execution",
+        "parent": "https://github.com/apache/netbeans/commit/a760f722373cff71180b0a5c9843373dabb19e95",
+        "repo": "netbeans",
+        "unit_tests": [
+            "GradleCommandLineTest.java"
+        ]
+    },
+    "netbeans_eff347e": {
+        "bug_id": "netbeans_eff347e",
+        "commit": "https://github.com/apache/netbeans/commit/eff347e09da3940ce63487cdeee7a6553089a58f",
+        "file": [
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/netbeans/blob/eff347e09da3940ce63487cdeee7a6553089a58f/platform/core.network/src/org/netbeans/core/network/proxy/ProxyAutoConfig.java",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/netbeans/contents/platform/core.network/src/org/netbeans/core/network/proxy/ProxyAutoConfig.java?ref=eff347e09da3940ce63487cdeee7a6553089a58f",
+                "deletions": 0,
+                "filename": "platform/core.network/src/org/netbeans/core/network/proxy/ProxyAutoConfig.java",
+                "patch": "@@ -138,6 +138,9 @@ public void run() {\n                 }\n             }\n         }\n+        if (evaluator == null) {\n+            return Collections.singletonList(Proxy.NO_PROXY);\n+        }\n         try {\n             return evaluator.findProxyForURL(u);\n         } catch (PacValidationException ex) {",
+                "raw_url": "https://github.com/apache/netbeans/raw/eff347e09da3940ce63487cdeee7a6553089a58f/platform/core.network/src/org/netbeans/core/network/proxy/ProxyAutoConfig.java",
+                "sha": "992e9c1ab4911c94f894b78bf2669812ce1e8d4a",
+                "status": "modified"
+            }
+        ],
+        "message": "Merge pull request #1382 from akuhtz/fix-pac-npe\n\nFix NPE if PAC cannot be resolved",
+        "parent": "https://github.com/apache/netbeans/commit/7337d1eab5bfe20f59ae0b7d5b547ab6033691d8",
+        "repo": "netbeans",
+        "unit_tests": [
+            "ProxyAutoConfigTest.java"
+        ]
+    }
+}

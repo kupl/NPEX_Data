@@ -1,0 +1,62 @@
+{
+    "rocketmq_776911d": {
+        "bug_id": "rocketmq_776911d",
+        "commit": "https://github.com/apache/rocketmq/commit/776911d458d45280de3a4c0f4d6b2bd2ee98d6b2",
+        "file": [
+            {
+                "additions": 10,
+                "blob_url": "https://github.com/apache/rocketmq/blob/776911d458d45280de3a4c0f4d6b2bd2ee98d6b2/remoting/src/main/java/org/apache/rocketmq/remoting/netty/NettyRemotingClient.java",
+                "changes": 19,
+                "contents_url": "https://api.github.com/repos/apache/rocketmq/contents/remoting/src/main/java/org/apache/rocketmq/remoting/netty/NettyRemotingClient.java?ref=776911d458d45280de3a4c0f4d6b2bd2ee98d6b2",
+                "deletions": 9,
+                "filename": "remoting/src/main/java/org/apache/rocketmq/remoting/netty/NettyRemotingClient.java",
+                "patch": "@@ -73,12 +73,12 @@\n     private final Bootstrap bootstrap = new Bootstrap();\n     private final EventLoopGroup eventLoopGroupWorker;\n     private final Lock lockChannelTables = new ReentrantLock();\n-    private final ConcurrentHashMap<String /* addr */, ChannelWrapper> channelTables = new ConcurrentHashMap<String, ChannelWrapper>();\n+    private final ConcurrentHashMap<String /* addr */, ChannelWrapper> channelTables = new ConcurrentHashMap<>();\n \n     private final Timer timer = new Timer(\"ClientHouseKeepingService\", true);\n \n-    private final AtomicReference<List<String>> namesrvAddrList = new AtomicReference<List<String>>();\n-    private final AtomicReference<String> namesrvAddrChoosed = new AtomicReference<String>();\n+    private final AtomicReference<List<String>> namesrvAddrList = new AtomicReference<>();\n+    private final AtomicReference<String> namesrvAddrChoosed = new AtomicReference<>();\n     private final AtomicInteger namesrvIndex = new AtomicInteger(initValueIndex());\n     private final Lock lockNamesrvChannel = new ReentrantLock();\n \n@@ -155,7 +155,7 @@ public void initChannel(SocketChannel ch) throws Exception {\n                         new NettyEncoder(),\n                         new NettyDecoder(),\n                         new IdleStateHandler(0, 0, nettyClientConfig.getClientChannelMaxIdleTimeSeconds()),\n-                        new NettyConnetManageHandler(),\n+                        new NettyConnectManageHandler(),\n                         new NettyClientHandler());\n                 }\n             });\n@@ -527,7 +527,7 @@ public void registerProcessor(int requestCode, NettyRequestProcessor processor,\n             executorThis = this.publicExecutor;\n         }\n \n-        Pair<NettyRequestProcessor, ExecutorService> pair = new Pair<NettyRequestProcessor, ExecutorService>(processor, executorThis);\n+        Pair<NettyRequestProcessor, ExecutorService> pair = new Pair<>(processor, executorThis);\n         this.processorTable.put(requestCode, pair);\n     }\n \n@@ -596,17 +596,18 @@ protected void channelRead0(ChannelHandlerContext ctx, RemotingCommand msg) thro\n         }\n     }\n \n-    class NettyConnetManageHandler extends ChannelDuplexHandler {\n+    class NettyConnectManageHandler extends ChannelDuplexHandler {\n         @Override\n-        public void connect(ChannelHandlerContext ctx, SocketAddress remoteAddress, SocketAddress localAddress, ChannelPromise promise)\n-            throws Exception {\n+        public void connect(ChannelHandlerContext ctx, SocketAddress remoteAddress, SocketAddress localAddress,\n+            ChannelPromise promise) throws Exception {\n             final String local = localAddress == null ? \"UNKNOW\" : localAddress.toString();\n             final String remote = remoteAddress == null ? \"UNKNOW\" : remoteAddress.toString();\n             log.info(\"NETTY CLIENT PIPELINE: CONNECT  {} => {}\", local, remote);\n+\n             super.connect(ctx, remoteAddress, localAddress, promise);\n \n             if (NettyRemotingClient.this.channelEventListener != null) {\n-                NettyRemotingClient.this.putNettyEvent(new NettyEvent(NettyEventType.CONNECT, remoteAddress.toString(), ctx.channel()));\n+                NettyRemotingClient.this.putNettyEvent(new NettyEvent(NettyEventType.CONNECT, remote, ctx.channel()));\n             }\n         }\n ",
+                "raw_url": "https://github.com/apache/rocketmq/raw/776911d458d45280de3a4c0f4d6b2bd2ee98d6b2/remoting/src/main/java/org/apache/rocketmq/remoting/netty/NettyRemotingClient.java",
+                "sha": "9fdaccf7681be4fe7d1fcbea79ce4ea0cada55cb",
+                "status": "modified"
+            }
+        ],
+        "message": "[ROCKETMQ-34] Potential NPE in NettyConnetManageHandler#connect, closes apache/incubator-rocketmq#30",
+        "parent": "https://github.com/apache/rocketmq/commit/85467dfd34d8ff379d2ddfec0489d78dcba20c27",
+        "repo": "rocketmq",
+        "unit_tests": [
+            "NettyRemotingClientTest.java"
+        ]
+    },
+    "rocketmq_85467df": {
+        "bug_id": "rocketmq_85467df",
+        "commit": "https://github.com/apache/rocketmq/commit/85467dfd34d8ff379d2ddfec0489d78dcba20c27",
+        "file": [
+            {
+                "additions": 5,
+                "blob_url": "https://github.com/apache/rocketmq/blob/85467dfd34d8ff379d2ddfec0489d78dcba20c27/client/src/main/java/org/apache/rocketmq/client/impl/consumer/ConsumeMessageConcurrentlyService.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/rocketmq/contents/client/src/main/java/org/apache/rocketmq/client/impl/consumer/ConsumeMessageConcurrentlyService.java?ref=85467dfd34d8ff379d2ddfec0489d78dcba20c27",
+                "deletions": 1,
+                "filename": "client/src/main/java/org/apache/rocketmq/client/impl/consumer/ConsumeMessageConcurrentlyService.java",
+                "patch": "@@ -439,7 +439,11 @@ public void run() {\n             } else if (ConsumeConcurrentlyStatus.CONSUME_SUCCESS == status) {\n                 returnType = ConsumeReturnType.SUCCESS;\n             }\n-            consumeMessageContext.getProps().put(MixAll.CONSUME_CONTEXT_TYPE, returnType.name());\n+\n+            if (ConsumeMessageConcurrentlyService.this.defaultMQPushConsumerImpl.hasHook()) {\n+                consumeMessageContext.getProps().put(MixAll.CONSUME_CONTEXT_TYPE, returnType.name());\n+            }\n+\n             if (null == status) {\n                 log.warn(\"consumeMessage return null, Group: {} Msgs: {} MQ: {}\",\n                     ConsumeMessageConcurrentlyService.this.consumerGroup,",
+                "raw_url": "https://github.com/apache/rocketmq/raw/85467dfd34d8ff379d2ddfec0489d78dcba20c27/client/src/main/java/org/apache/rocketmq/client/impl/consumer/ConsumeMessageConcurrentlyService.java",
+                "sha": "f566ed0fcca4781d0eb7cca0b62ad059d286cc0f",
+                "status": "modified"
+            },
+            {
+                "additions": 5,
+                "blob_url": "https://github.com/apache/rocketmq/blob/85467dfd34d8ff379d2ddfec0489d78dcba20c27/client/src/main/java/org/apache/rocketmq/client/impl/consumer/ConsumeMessageOrderlyService.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/rocketmq/contents/client/src/main/java/org/apache/rocketmq/client/impl/consumer/ConsumeMessageOrderlyService.java?ref=85467dfd34d8ff379d2ddfec0489d78dcba20c27",
+                "deletions": 1,
+                "filename": "client/src/main/java/org/apache/rocketmq/client/impl/consumer/ConsumeMessageOrderlyService.java",
+                "patch": "@@ -501,7 +501,11 @@ public void run() {\n                             } else if (ConsumeOrderlyStatus.SUCCESS == status) {\n                                 returnType = ConsumeReturnType.SUCCESS;\n                             }\n-                            consumeMessageContext.getProps().put(MixAll.CONSUME_CONTEXT_TYPE, returnType.name());\n+\n+                            if (ConsumeMessageOrderlyService.this.defaultMQPushConsumerImpl.hasHook()) {\n+                                consumeMessageContext.getProps().put(MixAll.CONSUME_CONTEXT_TYPE, returnType.name());\n+                            }\n+\n                             if (null == status) {\n                                 status = ConsumeOrderlyStatus.SUSPEND_CURRENT_QUEUE_A_MOMENT;\n                             }",
+                "raw_url": "https://github.com/apache/rocketmq/raw/85467dfd34d8ff379d2ddfec0489d78dcba20c27/client/src/main/java/org/apache/rocketmq/client/impl/consumer/ConsumeMessageOrderlyService.java",
+                "sha": "1fa474caa1d256920ee7aa2ff23ef87ef1a5990a",
+                "status": "modified"
+            }
+        ],
+        "message": "Fix-35 [ROCKETMQ-35] Reslove underlying NPE in ConsumeRequest, closes apache/incubator-rocketmq#32",
+        "parent": "https://github.com/apache/rocketmq/commit/9d76ea923159ff36d462b1809104164e270fce96",
+        "repo": "rocketmq",
+        "unit_tests": [
+            "ConsumeMessageOrderlyServiceTest.java"
+        ]
+    }
+}

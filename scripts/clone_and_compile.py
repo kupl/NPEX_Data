@@ -103,7 +103,7 @@ def unittest(commit, testFile, do_commit_logfile):
     ret['fixed'] = True if test_ret.return_code is 0 else False
 
     #b) Is buggy code incorrect w.r.t. test-cases?
-    parent_commit = commit['parent'].split('/')[0]
+    parent_commit = commit['parent'].split('/')[-1]
    
     non_testing_names = [changed_file['filename'] for changed_file in commit['file'] \
         if changed_file['filename'].split('/')[-1] != testFile ]

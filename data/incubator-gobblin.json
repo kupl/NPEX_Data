@@ -1,0 +1,518 @@
+{
+    "incubator-gobblin_01a91b3": {
+        "bug_id": "incubator-gobblin_01a91b3",
+        "commit": "https://github.com/apache/incubator-gobblin/commit/01a91b30a73c7eb9cdafde17144ec92352af058b",
+        "file": [
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/01a91b30a73c7eb9cdafde17144ec92352af058b/gobblin-yarn/src/main/java/gobblin/yarn/YarnService.java",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/gobblin-yarn/src/main/java/gobblin/yarn/YarnService.java?ref=01a91b30a73c7eb9cdafde17144ec92352af058b",
+                "deletions": 1,
+                "filename": "gobblin-yarn/src/main/java/gobblin/yarn/YarnService.java",
+                "patch": "@@ -472,8 +472,9 @@ private void handleContainerCompletion(ContainerStatus containerStatus) {\n       return;\n     }\n \n+    this.helixInstanceRetryCount.putIfAbsent(completedInstanceName, new AtomicInteger(0));\n     int retryCount =\n-        this.helixInstanceRetryCount.putIfAbsent(completedInstanceName, new AtomicInteger(0)).incrementAndGet();\n+    \t this.helixInstanceRetryCount.get(completedInstanceName).incrementAndGet();\n \n     // Populate event metadata\n     Optional<ImmutableMap.Builder<String, String>> eventMetadataBuilder = Optional.absent();",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/01a91b30a73c7eb9cdafde17144ec92352af058b/gobblin-yarn/src/main/java/gobblin/yarn/YarnService.java",
+                "sha": "4c76fe69f100dab3ef2e2921aa065b67d7f7cf8e",
+                "status": "modified"
+            }
+        ],
+        "message": "Fix for #1598 (#1864): Fixed NPE when Yarn container is killed.\n\n* Issue #1598 Fixed NPE when container is killed",
+        "parent": "https://github.com/apache/incubator-gobblin/commit/1bd043a8f33e3abf3319e5b808b7ee2f60e1df92",
+        "repo": "incubator-gobblin",
+        "unit_tests": [
+            "YarnServiceTest.java"
+        ]
+    },
+    "incubator-gobblin_032b9c2": {
+        "bug_id": "incubator-gobblin_032b9c2",
+        "commit": "https://github.com/apache/incubator-gobblin/commit/032b9c2c4d43f2cb06dd54f55d51d000a749515e",
+        "file": [
+            {
+                "additions": 26,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/032b9c2c4d43f2cb06dd54f55d51d000a749515e/scheduler/src/main/java/com/linkedin/uif/scheduler/Task.java",
+                "changes": 28,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/scheduler/src/main/java/com/linkedin/uif/scheduler/Task.java?ref=032b9c2c4d43f2cb06dd54f55d51d000a749515e",
+                "deletions": 2,
+                "filename": "scheduler/src/main/java/com/linkedin/uif/scheduler/Task.java",
+                "patch": "@@ -89,11 +89,21 @@ public void run() {\n         try {\n             // Build the extractor for pulling source schema and data records\n             extractor = this.taskContext.getSource().getExtractor(this.taskState);\n+            if (extractor == null) {\n+                LOG.error(\"No extractor created for task \" + this.taskId);\n+                return;\n+            }\n+\n+            // Original source schema\n+            Object sourceSchema = extractor.getSchema();\n+            if (sourceSchema == null) {\n+                LOG.error(\"No source schema extracted for task \" + this.taskId);\n+                return;\n+            }\n+\n             // If conversion is needed on the source schema and data records\n             // before they are passed to the writer\n             boolean doConversion = !this.taskContext.getConverters().isEmpty();\n-            // Original source schema\n-            Object sourceSchema = extractor.getSchema();\n             Converter converter = null;\n             // (Possibly converted) source schema ready for the writer\n             Object schemaForWriter = sourceSchema;\n@@ -245,6 +255,13 @@ public TaskState getTaskState() {\n      * Update record-level metrics.\n      */\n     public void updateRecordMetrics() {\n+        if (this.writer == null) {\n+            LOG.error(String.format(\n+                    \"Could not update record metrics for task %s: writer was not built\",\n+                    this.taskId));\n+            return;\n+        }\n+\n         this.taskState.updateRecordMetrics(this.writer.recordsWritten());\n     }\n \n@@ -256,6 +273,13 @@ public void updateRecordMetrics() {\n      * </p>\n      */\n     public void updateByteMetrics() throws IOException {\n+        if (this.writer == null) {\n+            LOG.error(String.format(\n+                    \"Could not update byte metrics for task %s: writer was not built\",\n+                    this.taskId));\n+            return;\n+        }\n+\n         this.taskState.updateByteMetrics(this.writer.bytesWritten());\n     }\n ",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/032b9c2c4d43f2cb06dd54f55d51d000a749515e/scheduler/src/main/java/com/linkedin/uif/scheduler/Task.java",
+                "sha": "40b6a39cf2748eba520dc65b90489302e2a6620b",
+                "status": "modified"
+            },
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/032b9c2c4d43f2cb06dd54f55d51d000a749515e/test/src/main/java/com/linkedin/uif/test/TestExtractor.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/test/src/main/java/com/linkedin/uif/test/TestExtractor.java?ref=032b9c2c4d43f2cb06dd54f55d51d000a749515e",
+                "deletions": 3,
+                "filename": "test/src/main/java/com/linkedin/uif/test/TestExtractor.java",
+                "patch": "@@ -8,8 +8,8 @@\n import org.apache.avro.generic.GenericDatumReader;\n import org.apache.avro.generic.GenericRecord;\n import org.apache.avro.io.DatumReader;\n-import org.apache.commons.logging.Log;\n-import org.apache.commons.logging.LogFactory;\n+import org.slf4j.Logger;\n+import org.slf4j.LoggerFactory;\n \n import com.linkedin.uif.configuration.WorkUnitState;\n import com.linkedin.uif.source.extractor.Extractor;\n@@ -21,7 +21,7 @@\n  */\n public class TestExtractor implements Extractor<String, String> {\n \n-    private static final Log LOG = LogFactory.getLog(TestExtractor.class);\n+    private static final Logger LOG = LoggerFactory.getLogger(TestExtractor.class);\n \n     private static final String SOURCE_FILE_KEY = \"source.file\";\n ",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/032b9c2c4d43f2cb06dd54f55d51d000a749515e/test/src/main/java/com/linkedin/uif/test/TestExtractor.java",
+                "sha": "e8945d5278af613704e41af66055b3b450ff1db8",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/032b9c2c4d43f2cb06dd54f55d51d000a749515e/writer/build.gradle",
+                "changes": 1,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/writer/build.gradle?ref=032b9c2c4d43f2cb06dd54f55d51d000a749515e",
+                "deletions": 0,
+                "filename": "writer/build.gradle",
+                "patch": "@@ -12,6 +12,7 @@ dependencies {\n   compile spec.external.gson\n   compile spec.external.jacksonCore\n   compile spec.external.jacksonMapper\n+  compile spec.external.slf4j\n \n   testCompile spec.external.testng\n }",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/032b9c2c4d43f2cb06dd54f55d51d000a749515e/writer/build.gradle",
+                "sha": "1ae336785807676cff91e1f16d616dcc13ae40a8",
+                "status": "modified"
+            },
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/032b9c2c4d43f2cb06dd54f55d51d000a749515e/writer/src/main/java/com/linkedin/uif/writer/AvroHdfsDataWriter.java",
+                "changes": 9,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/writer/src/main/java/com/linkedin/uif/writer/AvroHdfsDataWriter.java?ref=032b9c2c4d43f2cb06dd54f55d51d000a749515e",
+                "deletions": 3,
+                "filename": "writer/src/main/java/com/linkedin/uif/writer/AvroHdfsDataWriter.java",
+                "patch": "@@ -4,12 +4,13 @@\n import java.net.URI;\n import java.util.concurrent.atomic.AtomicLong;\n \n+import com.google.common.base.Preconditions;\n import org.apache.avro.Schema;\n import org.apache.avro.file.DataFileWriter;\n import org.apache.avro.generic.GenericDatumWriter;\n import org.apache.avro.generic.GenericRecord;\n-import org.apache.commons.logging.Log;\n-import org.apache.commons.logging.LogFactory;\n+import org.slf4j.Logger;\n+import org.slf4j.LoggerFactory;\n import org.apache.hadoop.conf.Configuration;\n import org.apache.hadoop.fs.FSDataOutputStream;\n import org.apache.hadoop.fs.FileSystem;\n@@ -28,7 +29,7 @@\n  */\n class AvroHdfsDataWriter<S> implements DataWriter<S, GenericRecord> {\n \n-    private static final Log LOG = LogFactory.getLog(AvroHdfsDataWriter.class);\n+    private static final Logger LOG = LoggerFactory.getLogger(AvroHdfsDataWriter.class);\n \n     private final FileSystem fs;\n     private final Path stagingFile;\n@@ -53,6 +54,8 @@ public AvroHdfsDataWriter(URI uri, String stagingDir, String outputDir,\n \n     @Override\n     public void write(S sourceRecord) throws IOException {\n+        Preconditions.checkNotNull(sourceRecord);\n+\n         try {\n             this.writer.append(this.dataConverter.convert(sourceRecord));\n         } catch (DataConversionException e) {",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/032b9c2c4d43f2cb06dd54f55d51d000a749515e/writer/src/main/java/com/linkedin/uif/writer/AvroHdfsDataWriter.java",
+                "sha": "7123ec29fea6ea173974dedff9969132943f6478",
+                "status": "modified"
+            }
+        ],
+        "message": "Fixed a bug in Task and added more defense against NPE\n\nSigned-off-by: Yinan Li <ynli@linkedin.com>\n\nRB=278948\nR=nveeramr,kgoodhop,lqiao,stakiar\nA=kgoodhop",
+        "parent": "https://github.com/apache/incubator-gobblin/commit/704885afbe2e9d3a45b711d9e106d76a43e1f6a1",
+        "repo": "incubator-gobblin",
+        "unit_tests": [
+            "AvroHdfsDataWriterTest.java"
+        ]
+    },
+    "incubator-gobblin_046cbca": {
+        "bug_id": "incubator-gobblin_046cbca",
+        "commit": "https://github.com/apache/incubator-gobblin/commit/046cbca3ecafb2314a095ca9c542ac65f282f07e",
+        "file": [
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/046cbca3ecafb2314a095ca9c542ac65f282f07e/gobblin-data-management/src/main/java/gobblin/data/management/copy/CopyEntity.java",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/gobblin-data-management/src/main/java/gobblin/data/management/copy/CopyEntity.java?ref=046cbca3ecafb2314a095ca9c542ac65f282f07e",
+                "deletions": 1,
+                "filename": "gobblin-data-management/src/main/java/gobblin/data/management/copy/CopyEntity.java",
+                "patch": "@@ -137,8 +137,9 @@ public String explain() {\n     /**\n      * @return a unique string identifier for this {@link DatasetAndPartition}.\n      */\n+    @SuppressWarnings(\"deprecation\")\n     public String identifier() {\n-      return Hex.encodeHexString(DigestUtils.sha1(this.dataset.toString() + this.partition));\n+      return Hex.encodeHexString(DigestUtils.sha(this.dataset.toString() + this.partition));\n     }\n   }\n }",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/046cbca3ecafb2314a095ca9c542ac65f282f07e/gobblin-data-management/src/main/java/gobblin/data/management/copy/CopyEntity.java",
+                "sha": "e41c312ca5986c7174c7fdacf9a58cfa528daf78",
+                "status": "modified"
+            },
+            {
+                "additions": 11,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/046cbca3ecafb2314a095ca9c542ac65f282f07e/gobblin-data-management/src/main/java/gobblin/data/management/copy/hive/HiveCopyEntityHelper.java",
+                "changes": 20,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/gobblin-data-management/src/main/java/gobblin/data/management/copy/hive/HiveCopyEntityHelper.java?ref=046cbca3ecafb2314a095ca9c542ac65f282f07e",
+                "deletions": 9,
+                "filename": "gobblin-data-management/src/main/java/gobblin/data/management/copy/hive/HiveCopyEntityHelper.java",
+                "patch": "@@ -107,12 +107,12 @@\n    * If the predicate returns true, the partition will be skipped. */\n   public static final String FAST_PARTITION_SKIP_PREDICATE =\n       HiveDatasetFinder.HIVE_DATASET_PREFIX + \".copy.fast.partition.skip.predicate\";\n-  \n+\n   /** A predicate applied to non partition table before any file listing.\n    * If the predicate returns true, the table will be skipped. */\n   public static final String FAST_TABLE_SKIP_PREDICATE =\n       HiveDatasetFinder.HIVE_DATASET_PREFIX + \".copy.fast.table.skip.predicate\";\n-  \n+\n   /** Method for deleting files on deregister. One of {@link DeregisterFileDeleteMethod}. */\n   public static final String DELETE_FILES_ON_DEREGISTER =\n       HiveDatasetFinder.HIVE_DATASET_PREFIX + \".copy.deregister.fileDeleteMethod\";\n@@ -157,7 +157,7 @@\n   private final Optional<String> partitionFilter;\n   private final Optional<Predicate<PartitionCopy>> fastPartitionSkip;\n   private final Optional<Predicate<HiveCopyEntityHelper>> fastTableSkip;\n-  \n+\n   private final DeregisterFileDeleteMethod deleteMethod;\n \n   private final Optional<CommitStep> tableRegistrationStep;\n@@ -226,6 +226,7 @@\n       this.configuration = configuration;\n       this.targetFs = targetFs;\n \n+      this.targetPathHelper = new HiveTargetPathHelper(this.dataset);\n       this.hiveRegProps = new HiveRegProps(new State(this.dataset.getProperties()));\n       this.targetURI = Optional.fromNullable(this.dataset.getProperties().getProperty(TARGET_METASTORE_URI_KEY));\n       this.targetClientPool = HiveMetastoreClientPool.get(this.dataset.getProperties(), this.targetURI);\n@@ -305,15 +306,16 @@\n         if (HiveUtils.isPartitioned(this.dataset.table)) {\n           this.sourcePartitions = HiveUtils.getPartitionsMap(multiClient.getClient(source_client), this.dataset.table,\n               this.partitionFilter);\n+          // Note: this must be mutable, so we copy the map\n           this.targetPartitions =\n-              this.existingTargetTable.isPresent() ? HiveUtils.getPartitionsMap(multiClient.getClient(target_client),\n-                  this.existingTargetTable.get(), this.partitionFilter) : Maps.<List<String>, Partition> newHashMap();\n+              this.existingTargetTable.isPresent() ? Maps.newHashMap(\n+                  HiveUtils.getPartitionsMap(multiClient.getClient(target_client),\n+                      this.existingTargetTable.get(), this.partitionFilter)) : Maps.<List<String>, Partition> newHashMap();\n         } else {\n           this.sourcePartitions = Maps.newHashMap();\n           this.targetPartitions = Maps.newHashMap();\n         }\n \n-        this.targetPathHelper = new HiveTargetPathHelper(this.dataset);\n       } catch (TException te) {\n         closer.close();\n         throw new IOException(\"Failed to generate work units for table \" + dataset.table.getCompleteName(), te);\n@@ -653,7 +655,7 @@ private int addSharedSteps(List<CopyEntity> copyEntities, String fileSet, int in\n         HiveLocationDescriptor.forTable(this.dataset.table, this.dataset.fs, this.dataset.getProperties());\n     HiveLocationDescriptor desiredTargetLocation =\n         HiveLocationDescriptor.forTable(this.targetTable, this.targetFs, this.dataset.getProperties());\n-    \n+\n     Optional<HiveLocationDescriptor> existingTargetLocation = this.existingTargetTable.isPresent() ? Optional.of(\n         HiveLocationDescriptor.forTable(this.existingTargetTable.get(), this.targetFs, this.dataset.getProperties()))\n         : Optional.<HiveLocationDescriptor> absent();\n@@ -663,12 +665,12 @@ private int addSharedSteps(List<CopyEntity> copyEntities, String fileSet, int in\n       multiTimer.close();\n       return Lists.newArrayList();\n     }\n-    \n+\n     DiffPathSet diffPathSet = fullPathDiff(sourceLocation, desiredTargetLocation, existingTargetLocation,\n         Optional.<Partition> absent(), multiTimer, this);\n \n     multiTimer.nextStage(Stages.FULL_PATH_DIFF);\n-    \n+\n     // Could used to delete files for the existing snapshot\n     DeleteFileCommitStep deleteStep =\n         DeleteFileCommitStep.fromPaths(this.targetFs, diffPathSet.pathsToDelete, this.dataset.getProperties());",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/046cbca3ecafb2314a095ca9c542ac65f282f07e/gobblin-data-management/src/main/java/gobblin/data/management/copy/hive/HiveCopyEntityHelper.java",
+                "sha": "4547faa382944345152ff8f70ae51c7d262d9a03",
+                "status": "modified"
+            },
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/046cbca3ecafb2314a095ca9c542ac65f282f07e/gobblin-utility/src/main/java/gobblin/util/guid/Guid.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/gobblin-utility/src/main/java/gobblin/util/guid/Guid.java?ref=046cbca3ecafb2314a095ca9c542ac65f282f07e",
+                "deletions": 1,
+                "filename": "gobblin-utility/src/main/java/gobblin/util/guid/Guid.java",
+                "patch": "@@ -182,8 +182,10 @@ public String toString() {\n     return Hex.encodeHexString(this.sha);\n   }\n \n+  // DigestUtils.sha is deprecated for sha1, but sha1 is not available in old versions of commons codec\n+  @SuppressWarnings(\"deprecation\")\n   private static byte[] computeGuid(byte[] bytes) {\n-    return DigestUtils.sha1(bytes);\n+    return DigestUtils.sha(bytes);\n   }\n \n   static class SimpleHasGuid implements HasGuid {",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/046cbca3ecafb2314a095ca9c542ac65f282f07e/gobblin-utility/src/main/java/gobblin/util/guid/Guid.java",
+                "sha": "8b279933c4fdf89bc5338baec60a3dc481ed8d62",
+                "status": "modified"
+            }
+        ],
+        "message": "Fix NPE and mutability of a map in hive target path helper and copy helper.",
+        "parent": "https://github.com/apache/incubator-gobblin/commit/25b8059436d0bf07921976a62dc50970c88c5b6e",
+        "repo": "incubator-gobblin",
+        "unit_tests": [
+            "GuidTest.java"
+        ]
+    },
+    "incubator-gobblin_056888e": {
+        "bug_id": "incubator-gobblin_056888e",
+        "commit": "https://github.com/apache/incubator-gobblin/commit/056888e0248ab75f9d3a789c3d14622a9a426bb6",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/056888e0248ab75f9d3a789c3d14622a9a426bb6/gobblin-data-management/src/main/java/org/apache/gobblin/data/management/copy/CopyEntity.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/gobblin-data-management/src/main/java/org/apache/gobblin/data/management/copy/CopyEntity.java?ref=056888e0248ab75f9d3a789c3d14622a9a426bb6",
+                "deletions": 1,
+                "filename": "gobblin-data-management/src/main/java/org/apache/gobblin/data/management/copy/CopyEntity.java",
+                "patch": "@@ -118,7 +118,7 @@ public static CopyEntity deserialize(String serialized) {\n    */\n   public static String getSerializedWithNewPackage(String serialized) {\n     serialized = serialized.replace(\"\\\"gobblin.data.management.\", \"\\\"org.apache.gobblin.data.management.\");\n-    log.info(\"Serialized updated copy entity: \" + serialized);\n+    log.debug(\"Serialized updated copy entity: \" + serialized);\n     return serialized;\n   }\n ",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/056888e0248ab75f9d3a789c3d14622a9a426bb6/gobblin-data-management/src/main/java/org/apache/gobblin/data/management/copy/CopyEntity.java",
+                "sha": "cd4b97e9d953fe87bf268558d012128832fdb74c",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/056888e0248ab75f9d3a789c3d14622a9a426bb6/gobblin-data-management/src/main/java/org/apache/gobblin/data/management/copy/CopyableDatasetMetadata.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/gobblin-data-management/src/main/java/org/apache/gobblin/data/management/copy/CopyableDatasetMetadata.java?ref=056888e0248ab75f9d3a789c3d14622a9a426bb6",
+                "deletions": 1,
+                "filename": "gobblin-data-management/src/main/java/org/apache/gobblin/data/management/copy/CopyableDatasetMetadata.java",
+                "patch": "@@ -69,7 +69,7 @@ public static CopyableDatasetMetadata deserialize(String serialized) {\n    */\n   private static String getSerializedWithNewPackage(String serialized) {\n     serialized = serialized.replace(\"\\\"gobblin.data.management.\", \"\\\"org.apache.gobblin.data.management.\");\n-    log.info(\"Serialized updated copy entity: \" + serialized);\n+    log.debug(\"Serialized updated copy entity: \" + serialized);\n     return serialized;\n   }\n }",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/056888e0248ab75f9d3a789c3d14622a9a426bb6/gobblin-data-management/src/main/java/org/apache/gobblin/data/management/copy/CopyableDatasetMetadata.java",
+                "sha": "45b71ab8a7bb59384dfbfb9492a739204cde106e",
+                "status": "modified"
+            },
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/056888e0248ab75f9d3a789c3d14622a9a426bb6/gobblin-data-management/src/main/java/org/apache/gobblin/data/management/copy/publisher/CopyDataPublisher.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/gobblin-data-management/src/main/java/org/apache/gobblin/data/management/copy/publisher/CopyDataPublisher.java?ref=056888e0248ab75f9d3a789c3d14622a9a426bb6",
+                "deletions": 1,
+                "filename": "gobblin-data-management/src/main/java/org/apache/gobblin/data/management/copy/publisher/CopyDataPublisher.java",
+                "patch": "@@ -209,7 +209,9 @@ private void publishFileSet(CopyEntity.DatasetAndPartition datasetAndPartition,\n           // Dataset Output path is injected in each copyableFile.\n           // This can be optimized by having a dataset level equivalent class for copyable entities\n           // and storing dataset related information, e.g. dataset output path, there.\n-          if (!fileSetRoot.isPresent()) {\n+\n+          // Currently datasetOutputPath is only present for hive datasets.\n+          if (!fileSetRoot.isPresent() && copyableFile.getDatasetOutputPath() != null) {\n             fileSetRoot = Optional.of(copyableFile.getDatasetOutputPath());\n           }\n         }",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/056888e0248ab75f9d3a789c3d14622a9a426bb6/gobblin-data-management/src/main/java/org/apache/gobblin/data/management/copy/publisher/CopyDataPublisher.java",
+                "sha": "e443271fe98dbb1fb79342457d1a9f7b6b036450",
+                "status": "modified"
+            }
+        ],
+        "message": "[GOBBLIN-286] gix bug where non hive dataset publishing gives NPE\n\nCloses #2148 from\narjun4084346/fixBugNonHiveDataset",
+        "parent": "https://github.com/apache/incubator-gobblin/commit/68456c620c3a759d47bab4dff43d7b5ad6e46fdd",
+        "repo": "incubator-gobblin",
+        "unit_tests": [
+            "CopyDataPublisherTest.java"
+        ]
+    },
+    "incubator-gobblin_26b2605": {
+        "bug_id": "incubator-gobblin_26b2605",
+        "commit": "https://github.com/apache/incubator-gobblin/commit/26b2605c73a077875a7485855d07998e8965849e",
+        "file": [
+            {
+                "additions": 5,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/26b2605c73a077875a7485855d07998e8965849e/gobblin-api/src/main/java/gobblin/configuration/WorkUnitState.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/gobblin-api/src/main/java/gobblin/configuration/WorkUnitState.java?ref=26b2605c73a077875a7485855d07998e8965849e",
+                "deletions": 1,
+                "filename": "gobblin-api/src/main/java/gobblin/configuration/WorkUnitState.java",
+                "patch": "@@ -160,7 +160,11 @@ public void setActualHighWatermark(Watermark watermark) {\n    * Backoff the actual high watermark to the low watermark returned by {@link WorkUnit#getLowWatermark()}.\n    */\n   public void backoffActualHighWatermark() {\n-    setProp(ConfigurationKeys.WORK_UNIT_STATE_ACTUAL_HIGH_WATER_MARK_KEY, this.workunit.getLowWatermark().toString());\n+    JsonElement lowWatermark = this.workunit.getLowWatermark();\n+    if (lowWatermark == null) {\n+      return;\n+    }\n+    setProp(ConfigurationKeys.WORK_UNIT_STATE_ACTUAL_HIGH_WATER_MARK_KEY, lowWatermark.toString());\n   }\n \n   /**",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/26b2605c73a077875a7485855d07998e8965849e/gobblin-api/src/main/java/gobblin/configuration/WorkUnitState.java",
+                "sha": "0863d69991f9128018a9f8e2bf6c0ab0ad81ea6b",
+                "status": "modified"
+            },
+            {
+                "additions": 5,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/26b2605c73a077875a7485855d07998e8965849e/gobblin-api/src/main/java/gobblin/source/workunit/WorkUnit.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/gobblin-api/src/main/java/gobblin/source/workunit/WorkUnit.java?ref=26b2605c73a077875a7485855d07998e8965849e",
+                "deletions": 1,
+                "filename": "gobblin-api/src/main/java/gobblin/source/workunit/WorkUnit.java",
+                "patch": "@@ -113,9 +113,13 @@ public Extract getExtract() {\n   /**\n    * Get the low {@link Watermark} as a {@link JsonElement}.\n    *\n-   * @return a {@link JsonElement} representing the low {@link Watermark}.\n+   * @return a {@link JsonElement} representing the low {@link Watermark} or\n+   *         {@code null} if the low {@link Watermark} is not set.\n    */\n   public JsonElement getLowWatermark() {\n+    if (!contains(ConfigurationKeys.WATERMARK_INTERVAL_VALUE_KEY)) {\n+      return null;\n+    }\n     return JSON_PARSER.parse(getProp(ConfigurationKeys.WATERMARK_INTERVAL_VALUE_KEY)).getAsJsonObject()\n         .get(WatermarkInterval.LOW_WATERMARK_TO_JSON_KEY);\n   }",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/26b2605c73a077875a7485855d07998e8965849e/gobblin-api/src/main/java/gobblin/source/workunit/WorkUnit.java",
+                "sha": "63e2f08c76e2a0e398b1ceca15a3b348116ed86b",
+                "status": "modified"
+            },
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/26b2605c73a077875a7485855d07998e8965849e/gobblin-core/src/main/java/gobblin/writer/AvroHdfsDataWriter.java",
+                "changes": 11,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/gobblin-core/src/main/java/gobblin/writer/AvroHdfsDataWriter.java?ref=26b2605c73a077875a7485855d07998e8965849e",
+                "deletions": 5,
+                "filename": "gobblin-core/src/main/java/gobblin/writer/AvroHdfsDataWriter.java",
+                "patch": "@@ -17,7 +17,6 @@\n \n import org.apache.avro.Schema;\n import org.apache.avro.file.CodecFactory;\n-import org.apache.avro.file.DataFileConstants;\n import org.apache.avro.file.DataFileWriter;\n import org.apache.avro.generic.GenericDatumWriter;\n import org.apache.avro.generic.GenericRecord;\n@@ -167,10 +166,12 @@ public long bytesWritten() throws IOException {\n   /**\n    * Create a new {@link DataFileWriter} for writing Avro records.\n    *\n-   * @param avroFile Avro file to write to\n-   * @param bufferSize Buffer size\n-   * @param codecType Compression codec type\n-   * @param deflateLevel Deflate level\n+   * @param avroFile the Avro file to write to\n+   * @param bufferSize the Avro data writer buffer size\n+   * @param codecFactory a {@link CodecFactory} object for building the compression codec\n+   * @param replication the replication factor\n+   * @param blockSize the block size\n+   * @param permissions a {@link FsPermission} object defining the Avro file permission\n    * @throws IOException if there is something wrong creating a new {@link DataFileWriter}\n    */\n   private DataFileWriter<GenericRecord> createDatumWriter(Path avroFile, int bufferSize, CodecFactory codecFactory,",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/26b2605c73a077875a7485855d07998e8965849e/gobblin-core/src/main/java/gobblin/writer/AvroHdfsDataWriter.java",
+                "sha": "a32860724c85fb66a81f47a76c8499e7504b1592",
+                "status": "modified"
+            },
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/26b2605c73a077875a7485855d07998e8965849e/gobblin-runtime/src/main/java/gobblin/runtime/mapreduce/MRJobLauncher.java",
+                "changes": 8,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/gobblin-runtime/src/main/java/gobblin/runtime/mapreduce/MRJobLauncher.java?ref=26b2605c73a077875a7485855d07998e8965849e",
+                "deletions": 2,
+                "filename": "gobblin-runtime/src/main/java/gobblin/runtime/mapreduce/MRJobLauncher.java",
+                "patch": "@@ -164,7 +164,11 @@ public void close() throws IOException {\n         this.job.killJob();\n       }\n     } finally {\n-      super.close();\n+      try {\n+        cleanUpWorkingDirectory();\n+      } finally {\n+        super.close();\n+      }\n     }\n   }\n \n@@ -235,7 +239,7 @@ protected JobLock getJobLock() throws IOException {\n   @Override\n   protected void executeCancellation() {\n     try {\n-      if (!this.job.isComplete()) {\n+      if (this.hadoopJobSubmitted && !this.job.isComplete()) {\n         LOG.info(\"Killing the Hadoop MR job for job \" + this.jobContext.getJobId());\n         this.job.killJob();\n       }",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/26b2605c73a077875a7485855d07998e8965849e/gobblin-runtime/src/main/java/gobblin/runtime/mapreduce/MRJobLauncher.java",
+                "sha": "c28801c1c76e4ce17ab5aaffb964575b0f220707",
+                "status": "modified"
+            }
+        ],
+        "message": "Fixed a potential NPE in WorkUnit.getLowWatermark()\n\nSigned-off-by: Yinan Li <liyinan926@gmail.com>",
+        "parent": "https://github.com/apache/incubator-gobblin/commit/279439e24b7b1438b4c13423d02253eda70ebaee",
+        "repo": "incubator-gobblin",
+        "unit_tests": [
+            "MRJobLauncherTest.java"
+        ]
+    },
+    "incubator-gobblin_3523f3f": {
+        "bug_id": "incubator-gobblin_3523f3f",
+        "commit": "https://github.com/apache/incubator-gobblin/commit/3523f3f32498c41fe5ddb292b1fa216231aaf62a",
+        "file": [
+            {
+                "additions": 5,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/3523f3f32498c41fe5ddb292b1fa216231aaf62a/gobblin-api/src/main/java/gobblin/configuration/WorkUnitState.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/gobblin-api/src/main/java/gobblin/configuration/WorkUnitState.java?ref=3523f3f32498c41fe5ddb292b1fa216231aaf62a",
+                "deletions": 1,
+                "filename": "gobblin-api/src/main/java/gobblin/configuration/WorkUnitState.java",
+                "patch": "@@ -160,7 +160,11 @@ public void setActualHighWatermark(Watermark watermark) {\n    * Backoff the actual high watermark to the low watermark returned by {@link WorkUnit#getLowWatermark()}.\n    */\n   public void backoffActualHighWatermark() {\n-    setProp(ConfigurationKeys.WORK_UNIT_STATE_ACTUAL_HIGH_WATER_MARK_KEY, this.workunit.getLowWatermark().toString());\n+    JsonElement lowWatermark = this.workunit.getLowWatermark();\n+    if (lowWatermark == null) {\n+      return;\n+    }\n+    setProp(ConfigurationKeys.WORK_UNIT_STATE_ACTUAL_HIGH_WATER_MARK_KEY, lowWatermark.toString());\n   }\n \n   /**",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/3523f3f32498c41fe5ddb292b1fa216231aaf62a/gobblin-api/src/main/java/gobblin/configuration/WorkUnitState.java",
+                "sha": "0863d69991f9128018a9f8e2bf6c0ab0ad81ea6b",
+                "status": "modified"
+            },
+            {
+                "additions": 5,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/3523f3f32498c41fe5ddb292b1fa216231aaf62a/gobblin-api/src/main/java/gobblin/source/workunit/WorkUnit.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/gobblin-api/src/main/java/gobblin/source/workunit/WorkUnit.java?ref=3523f3f32498c41fe5ddb292b1fa216231aaf62a",
+                "deletions": 1,
+                "filename": "gobblin-api/src/main/java/gobblin/source/workunit/WorkUnit.java",
+                "patch": "@@ -113,9 +113,13 @@ public Extract getExtract() {\n   /**\n    * Get the low {@link Watermark} as a {@link JsonElement}.\n    *\n-   * @return a {@link JsonElement} representing the low {@link Watermark}.\n+   * @return a {@link JsonElement} representing the low {@link Watermark} or\n+   *         {@code null} if the low {@link Watermark} is not set.\n    */\n   public JsonElement getLowWatermark() {\n+    if (!contains(ConfigurationKeys.WATERMARK_INTERVAL_VALUE_KEY)) {\n+      return null;\n+    }\n     return JSON_PARSER.parse(getProp(ConfigurationKeys.WATERMARK_INTERVAL_VALUE_KEY)).getAsJsonObject()\n         .get(WatermarkInterval.LOW_WATERMARK_TO_JSON_KEY);\n   }",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/3523f3f32498c41fe5ddb292b1fa216231aaf62a/gobblin-api/src/main/java/gobblin/source/workunit/WorkUnit.java",
+                "sha": "63e2f08c76e2a0e398b1ceca15a3b348116ed86b",
+                "status": "modified"
+            },
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/3523f3f32498c41fe5ddb292b1fa216231aaf62a/gobblin-core/src/main/java/gobblin/writer/AvroHdfsDataWriter.java",
+                "changes": 11,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/gobblin-core/src/main/java/gobblin/writer/AvroHdfsDataWriter.java?ref=3523f3f32498c41fe5ddb292b1fa216231aaf62a",
+                "deletions": 5,
+                "filename": "gobblin-core/src/main/java/gobblin/writer/AvroHdfsDataWriter.java",
+                "patch": "@@ -17,7 +17,6 @@\n \n import org.apache.avro.Schema;\n import org.apache.avro.file.CodecFactory;\n-import org.apache.avro.file.DataFileConstants;\n import org.apache.avro.file.DataFileWriter;\n import org.apache.avro.generic.GenericDatumWriter;\n import org.apache.avro.generic.GenericRecord;\n@@ -167,10 +166,12 @@ public long bytesWritten() throws IOException {\n   /**\n    * Create a new {@link DataFileWriter} for writing Avro records.\n    *\n-   * @param avroFile Avro file to write to\n-   * @param bufferSize Buffer size\n-   * @param codecType Compression codec type\n-   * @param deflateLevel Deflate level\n+   * @param avroFile the Avro file to write to\n+   * @param bufferSize the Avro data writer buffer size\n+   * @param codecFactory a {@link CodecFactory} object for building the compression codec\n+   * @param replication the replication factor\n+   * @param blockSize the block size\n+   * @param permissions a {@link FsPermission} object defining the Avro file permission\n    * @throws IOException if there is something wrong creating a new {@link DataFileWriter}\n    */\n   private DataFileWriter<GenericRecord> createDatumWriter(Path avroFile, int bufferSize, CodecFactory codecFactory,",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/3523f3f32498c41fe5ddb292b1fa216231aaf62a/gobblin-core/src/main/java/gobblin/writer/AvroHdfsDataWriter.java",
+                "sha": "a32860724c85fb66a81f47a76c8499e7504b1592",
+                "status": "modified"
+            },
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/3523f3f32498c41fe5ddb292b1fa216231aaf62a/gobblin-runtime/src/main/java/gobblin/runtime/mapreduce/MRJobLauncher.java",
+                "changes": 8,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/gobblin-runtime/src/main/java/gobblin/runtime/mapreduce/MRJobLauncher.java?ref=3523f3f32498c41fe5ddb292b1fa216231aaf62a",
+                "deletions": 2,
+                "filename": "gobblin-runtime/src/main/java/gobblin/runtime/mapreduce/MRJobLauncher.java",
+                "patch": "@@ -164,7 +164,11 @@ public void close() throws IOException {\n         this.job.killJob();\n       }\n     } finally {\n-      super.close();\n+      try {\n+        cleanUpWorkingDirectory();\n+      } finally {\n+        super.close();\n+      }\n     }\n   }\n \n@@ -235,7 +239,7 @@ protected JobLock getJobLock() throws IOException {\n   @Override\n   protected void executeCancellation() {\n     try {\n-      if (!this.job.isComplete()) {\n+      if (this.hadoopJobSubmitted && !this.job.isComplete()) {\n         LOG.info(\"Killing the Hadoop MR job for job \" + this.jobContext.getJobId());\n         this.job.killJob();\n       }",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/3523f3f32498c41fe5ddb292b1fa216231aaf62a/gobblin-runtime/src/main/java/gobblin/runtime/mapreduce/MRJobLauncher.java",
+                "sha": "c28801c1c76e4ce17ab5aaffb964575b0f220707",
+                "status": "modified"
+            }
+        ],
+        "message": "Merge pull request #226 from liyinan926/master\n\nFixed a potential NPE in WorkUnit.getLowWatermark()",
+        "parent": "https://github.com/apache/incubator-gobblin/commit/5c1aa34f8079d49dce01ba8a716ce3e87e0c5e7d",
+        "repo": "incubator-gobblin",
+        "unit_tests": [
+            "MRJobLauncherTest.java"
+        ]
+    },
+    "incubator-gobblin_5fa43ef": {
+        "bug_id": "incubator-gobblin_5fa43ef",
+        "commit": "https://github.com/apache/incubator-gobblin/commit/5fa43ef6a3cb0e0e3691dec2d432365dfecfbc8b",
+        "file": [
+            {
+                "additions": 31,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/5fa43ef6a3cb0e0e3691dec2d432365dfecfbc8b/source/src/main/java/com/linkedin/uif/source/extractor/extract/jdbc/JdbcExtractor.java",
+                "changes": 61,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/source/src/main/java/com/linkedin/uif/source/extractor/extract/jdbc/JdbcExtractor.java?ref=5fa43ef6a3cb0e0e3691dec2d432365dfecfbc8b",
+                "deletions": 30,
+                "filename": "source/src/main/java/com/linkedin/uif/source/extractor/extract/jdbc/JdbcExtractor.java",
+                "patch": "@@ -26,13 +26,14 @@\n import java.util.Iterator;\n import java.util.List;\n import java.util.Map;\n+\n import org.apache.commons.lang.StringUtils;\n+\n import com.google.common.base.Joiner;\n import com.google.gson.Gson;\n import com.google.gson.JsonArray;\n import com.google.gson.JsonElement;\n import com.google.gson.JsonObject;\n-\n import com.linkedin.uif.configuration.ConfigurationKeys;\n import com.linkedin.uif.configuration.WorkUnitState;\n import com.linkedin.uif.source.extractor.DataRecordException;\n@@ -59,12 +60,12 @@\n  *\n  * @author nveeramr\n  */\n-public abstract class JdbcExtractor extends QueryBasedExtractor<JsonArray, JsonElement> implements SourceSpecificLayer<JsonArray, JsonElement>, JdbcSpecificLayer {\n+public abstract class JdbcExtractor extends QueryBasedExtractor<JsonArray, JsonElement> implements\n+    SourceSpecificLayer<JsonArray, JsonElement>, JdbcSpecificLayer {\n   private static final Gson gson = new Gson();\n   private List<String> headerRecord;\n   private boolean firstPull = true;\n-  private CommandOutput<?, ?> dataResponse = null;\n-  ;\n+  private CommandOutput<?, ?> dataResponse = null;;\n   protected String extractSql;\n   protected long sampleRecordCount;\n   protected JdbcProvider jdbcSource;\n@@ -259,8 +260,7 @@ public JdbcExtractor(WorkUnitState workUnitState) {\n   }\n \n   @Override\n-  public void extractMetadata(String schema, String entity, WorkUnit workUnit)\n-      throws SchemaException, IOException {\n+  public void extractMetadata(String schema, String entity, WorkUnit workUnit) throws SchemaException, IOException {\n     this.log.info(\"Extract metadata using JDBC\");\n     String inputQuery = workUnit.getProp(ConfigurationKeys.SOURCE_QUERYBASED_QUERY);\n     String watermarkColumn = workUnit.getProp(ConfigurationKeys.EXTRACT_DELTA_FIELDS_KEY);\n@@ -303,8 +303,9 @@ public void extractMetadata(String schema, String entity, WorkUnit workUnit)\n       }\n \n       String outputColProjection = Joiner.on(\",\").useForNull(\"null\").join(this.columnList);\n-      outputColProjection = outputColProjection.replace(derivedWatermarkColumnName,\n-          getWatermarkColumnName(watermarkColumn) + \" AS \" + derivedWatermarkColumnName);\n+      outputColProjection =\n+          outputColProjection.replace(derivedWatermarkColumnName, getWatermarkColumnName(watermarkColumn) + \" AS \"\n+              + derivedWatermarkColumnName);\n       this.setOutputColumnProjection(outputColProjection);\n       String extractQuery = this.getExtractQuery(schema, entity, inputQuery);\n \n@@ -454,9 +455,11 @@ private void buildMetadataColumnMap(JsonArray array) {\n    * @param target column name\n    */\n   private void updateDeltaFieldConfig(String srcColumnName, String tgtColumnName) {\n-    String watermarkCol = this.workUnitState.getProp(ConfigurationKeys.EXTRACT_DELTA_FIELDS_KEY);\n-    this.workUnitState\n-        .setProp(ConfigurationKeys.EXTRACT_DELTA_FIELDS_KEY, watermarkCol.replaceAll(srcColumnName, tgtColumnName));\n+    if (this.workUnitState.contains(ConfigurationKeys.EXTRACT_DELTA_FIELDS_KEY)) {\n+      String watermarkCol = this.workUnitState.getProp(ConfigurationKeys.EXTRACT_DELTA_FIELDS_KEY);\n+      this.workUnitState.setProp(ConfigurationKeys.EXTRACT_DELTA_FIELDS_KEY,\n+          watermarkCol.replaceAll(srcColumnName, tgtColumnName));\n+    }\n   }\n \n   /**\n@@ -466,9 +469,11 @@ private void updateDeltaFieldConfig(String srcColumnName, String tgtColumnName)\n    * @param target column name\n    */\n   private void updatePrimaryKeyConfig(String srcColumnName, String tgtColumnName) {\n-    String primarykey = this.workUnitState.getProp(ConfigurationKeys.EXTRACT_PRIMARY_KEY_FIELDS_KEY);\n-    this.workUnitState\n-        .setProp(ConfigurationKeys.EXTRACT_PRIMARY_KEY_FIELDS_KEY, primarykey.replaceAll(srcColumnName, tgtColumnName));\n+    if (this.workUnitState.contains(ConfigurationKeys.EXTRACT_PRIMARY_KEY_FIELDS_KEY)) {\n+      String primarykey = this.workUnitState.getProp(ConfigurationKeys.EXTRACT_PRIMARY_KEY_FIELDS_KEY);\n+      this.workUnitState.setProp(ConfigurationKeys.EXTRACT_PRIMARY_KEY_FIELDS_KEY,\n+          primarykey.replaceAll(srcColumnName, tgtColumnName));\n+    }\n   }\n \n   /**\n@@ -702,8 +707,7 @@ protected JdbcProvider createJdbcSource() {\n \n   @Override\n   public long getMaxWatermark(String schema, String entity, String watermarkColumn, List<Predicate> predicateList,\n-      String watermarkSourceFormat)\n-      throws HighWatermarkException {\n+      String watermarkSourceFormat) throws HighWatermarkException {\n     this.log.info(\"Get high watermark using JDBC\");\n     long CalculatedHighWatermark = ConfigurationKeys.DEFAULT_WATERMARK_VALUE;\n \n@@ -735,8 +739,7 @@ public long getSourceCount(String schema, String entity, WorkUnit workUnit, List\n \n   @Override\n   public Iterator<JsonElement> getRecordSet(String schema, String entity, WorkUnit workUnit,\n-      List<Predicate> predicateList)\n-      throws DataRecordException, IOException {\n+      List<Predicate> predicateList) throws DataRecordException, IOException {\n     Iterator<JsonElement> rs = null;\n     List<Command> cmds;\n     try {\n@@ -796,8 +799,7 @@ protected String getWatermarkColumnName(String waterMarkColumn) {\n   }\n \n   @Override\n-  public JsonArray getSchema(CommandOutput<?, ?> response)\n-      throws SchemaException, IOException {\n+  public JsonArray getSchema(CommandOutput<?, ?> response) throws SchemaException, IOException {\n     this.log.debug(\"Extract schema from resultset\");\n     ResultSet resultset = null;\n     Iterator<ResultSet> itr = (Iterator<ResultSet>) response.getResults().values().iterator();\n@@ -886,8 +888,7 @@ public long getHighWatermark(CommandOutput<?, ?> response, String watermarkColum\n   }\n \n   @Override\n-  public long getCount(CommandOutput<?, ?> response)\n-      throws RecordCountException {\n+  public long getCount(CommandOutput<?, ?> response) throws RecordCountException {\n     this.log.debug(\"Extract source record count from resultset\");\n     ResultSet resultset = null;\n     Iterator<ResultSet> itr = (Iterator<ResultSet>) response.getResults().values().iterator();\n@@ -910,8 +911,7 @@ public long getCount(CommandOutput<?, ?> response)\n   }\n \n   @Override\n-  public Iterator<JsonElement> getData(CommandOutput<?, ?> response)\n-      throws DataRecordException, IOException {\n+  public Iterator<JsonElement> getData(CommandOutput<?, ?> response) throws DataRecordException, IOException {\n     this.log.debug(\"Extract data records from resultset\");\n     RecordSetList<JsonElement> recordSet = this.getNewRecordSetList();\n \n@@ -998,8 +998,9 @@ private JsonObject getDefaultWatermark() {\n \n     schema.setColumnName(columnName);\n \n-    WatermarkType wmType = WatermarkType.valueOf(\n-        this.workUnitState.getProp(ConfigurationKeys.SOURCE_QUERYBASED_WATERMARK_TYPE, \"TIMESTAMP\").toUpperCase());\n+    WatermarkType wmType =\n+        WatermarkType.valueOf(this.workUnitState.getProp(ConfigurationKeys.SOURCE_QUERYBASED_WATERMARK_TYPE,\n+            \"TIMESTAMP\").toUpperCase());\n     switch (wmType) {\n       case TIMESTAMP:\n         dataType = \"timestamp\";\n@@ -1074,8 +1075,9 @@ private Schema getCustomColumnSchema(String columnName) {\n    */\n   private String toCase(String targetColumnName) {\n     String columnName = targetColumnName;\n-    ColumnNameCase caseType = ColumnNameCase.valueOf(this.workUnitState\n-        .getProp(ConfigurationKeys.SOURCE_COLUMN_NAME_CASE, ConfigurationKeys.DEFAULT_COLUMN_NAME_CASE).toUpperCase());\n+    ColumnNameCase caseType =\n+        ColumnNameCase.valueOf(this.workUnitState.getProp(ConfigurationKeys.SOURCE_COLUMN_NAME_CASE,\n+            ConfigurationKeys.DEFAULT_COLUMN_NAME_CASE).toUpperCase());\n     switch (caseType) {\n       case TOUPPER:\n         columnName = targetColumnName.toUpperCase();\n@@ -1091,8 +1093,7 @@ private String toCase(String targetColumnName) {\n   }\n \n   @Override\n-  public void closeConnection()\n-      throws Exception {\n+  public void closeConnection() throws Exception {\n     this.jdbcSource.close();\n   }\n }",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/5fa43ef6a3cb0e0e3691dec2d432365dfecfbc8b/source/src/main/java/com/linkedin/uif/source/extractor/extract/jdbc/JdbcExtractor.java",
+                "sha": "6ece1e1d150f5c48fa8609d00f46db81d5807b9a",
+                "status": "modified"
+            }
+        ],
+        "message": "Fix NPE in JDBCExtractor when delta field config is undefined",
+        "parent": "https://github.com/apache/incubator-gobblin/commit/0b0fcf595121e03ca8a4ec3bcfcb20ea11ccd563",
+        "repo": "incubator-gobblin",
+        "unit_tests": [
+            "JdbcExtractorTest.java"
+        ]
+    },
+    "incubator-gobblin_7d303c6": {
+        "bug_id": "incubator-gobblin_7d303c6",
+        "commit": "https://github.com/apache/incubator-gobblin/commit/7d303c6f421c4e171510dcb93f9cfd5dd4481e70",
+        "file": [
+            {
+                "additions": 13,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/7d303c6f421c4e171510dcb93f9cfd5dd4481e70/gobblin-runtime/src/main/java/gobblin/runtime/mapreduce/MRJobLauncher.java",
+                "changes": 24,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/gobblin-runtime/src/main/java/gobblin/runtime/mapreduce/MRJobLauncher.java?ref=7d303c6f421c4e171510dcb93f9cfd5dd4481e70",
+                "deletions": 11,
+                "filename": "gobblin-runtime/src/main/java/gobblin/runtime/mapreduce/MRJobLauncher.java",
+                "patch": "@@ -205,7 +205,7 @@ protected void runWorkUnits(List<WorkUnit> workUnits) throws Exception {\n \n       // Create a metrics set for this job run from the Hadoop counters.\n       // The metrics set is to be persisted to the metrics store later.\n-      countersToMetrics(this.job.getCounters(),\n+      countersToMetrics(Optional.fromNullable(this.job.getCounters()),\n           JobMetrics.get(jobName, this.jobProps.getProperty(ConfigurationKeys.JOB_ID_KEY)));\n     } finally {\n       cleanUpWorkingDirectory();\n@@ -465,17 +465,19 @@ private void cleanUpWorkingDirectory() {\n   /**\n    * Create a {@link gobblin.metrics.GobblinMetrics} instance for this job run from the Hadoop counters.\n    */\n-  private void countersToMetrics(Counters counters, GobblinMetrics metrics) {\n-    // Write job-level counters\n-    CounterGroup jobCounterGroup = counters.getGroup(MetricGroup.JOB.name());\n-    for (Counter jobCounter : jobCounterGroup) {\n-      metrics.getCounter(jobCounter.getName()).inc(jobCounter.getValue());\n-    }\n+  private void countersToMetrics(Optional<Counters> counters, GobblinMetrics metrics) {\n+    if (counters.isPresent()) {\n+      // Write job-level counters\n+      CounterGroup jobCounterGroup = counters.get().getGroup(MetricGroup.JOB.name());\n+      for (Counter jobCounter : jobCounterGroup) {\n+        metrics.getCounter(jobCounter.getName()).inc(jobCounter.getValue());\n+      }\n \n-    // Write task-level counters\n-    CounterGroup taskCounterGroup = counters.getGroup(MetricGroup.TASK.name());\n-    for (Counter taskCounter : taskCounterGroup) {\n-      metrics.getCounter(taskCounter.getName()).inc(taskCounter.getValue());\n+      // Write task-level counters\n+      CounterGroup taskCounterGroup = counters.get().getGroup(MetricGroup.TASK.name());\n+      for (Counter taskCounter : taskCounterGroup) {\n+        metrics.getCounter(taskCounter.getName()).inc(taskCounter.getValue());\n+      }\n     }\n   }\n ",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/7d303c6f421c4e171510dcb93f9cfd5dd4481e70/gobblin-runtime/src/main/java/gobblin/runtime/mapreduce/MRJobLauncher.java",
+                "sha": "20587b5de3a3ef3a1ddf9c91ae08ae44e291ac95",
+                "status": "modified"
+            }
+        ],
+        "message": "Fixing NPE in countersToMetrics",
+        "parent": "https://github.com/apache/incubator-gobblin/commit/0b744be0f28c5bd0ef075010e248d004f00032ff",
+        "repo": "incubator-gobblin",
+        "unit_tests": [
+            "MRJobLauncherTest.java"
+        ]
+    },
+    "incubator-gobblin_865b0a0": {
+        "bug_id": "incubator-gobblin_865b0a0",
+        "commit": "https://github.com/apache/incubator-gobblin/commit/865b0a00441b76f57c86ffda5d34b4c5dc8bd091",
+        "file": [
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/865b0a00441b76f57c86ffda5d34b4c5dc8bd091/gobblin-data-management/src/main/java/gobblin/data/management/retention/version/finder/GlobModTimeDatasetVersionFinder.java",
+                "changes": 7,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/gobblin-data-management/src/main/java/gobblin/data/management/retention/version/finder/GlobModTimeDatasetVersionFinder.java?ref=865b0a00441b76f57c86ffda5d34b4c5dc8bd091",
+                "deletions": 1,
+                "filename": "gobblin-data-management/src/main/java/gobblin/data/management/retention/version/finder/GlobModTimeDatasetVersionFinder.java",
+                "patch": "@@ -44,6 +44,11 @@ public Path globVersionPattern() {\n \n   @Override\n   public TimestampedDatasetVersion getDatasetVersion(Path pathRelativeToDatasetRoot, Path fullPath) {\n-    return new TimestampedDatasetVersion(this.realVersionFinder.getDatasetVersion(pathRelativeToDatasetRoot, fullPath));\n+    gobblin.data.management.version.TimestampedDatasetVersion timestampedDatasetVersion =\n+        this.realVersionFinder.getDatasetVersion(pathRelativeToDatasetRoot, fullPath);\n+    if (timestampedDatasetVersion != null) {\n+      return new TimestampedDatasetVersion(timestampedDatasetVersion);\n+    }\n+    return null;\n   }\n }",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/865b0a00441b76f57c86ffda5d34b4c5dc8bd091/gobblin-data-management/src/main/java/gobblin/data/management/retention/version/finder/GlobModTimeDatasetVersionFinder.java",
+                "sha": "a4dd6f3e63b6b814c821d2f8aa1814ba201e66f1",
+                "status": "modified"
+            },
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/865b0a00441b76f57c86ffda5d34b4c5dc8bd091/gobblin-data-management/src/main/java/gobblin/data/management/retention/version/finder/UnixTimestampVersionFinder.java",
+                "changes": 7,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/gobblin-data-management/src/main/java/gobblin/data/management/retention/version/finder/UnixTimestampVersionFinder.java?ref=865b0a00441b76f57c86ffda5d34b4c5dc8bd091",
+                "deletions": 1,
+                "filename": "gobblin-data-management/src/main/java/gobblin/data/management/retention/version/finder/UnixTimestampVersionFinder.java",
+                "patch": "@@ -42,7 +42,12 @@ public Path globVersionPattern() {\n \n   @Override\n   public TimestampedDatasetVersion getDatasetVersion(Path pathRelativeToDatasetRoot, Path fullPath) {\n-    return new TimestampedDatasetVersion(this.realVersionFinder.getDatasetVersion(pathRelativeToDatasetRoot, fullPath));\n+    gobblin.data.management.version.TimestampedDatasetVersion timestampedDatasetVersion =\n+        this.realVersionFinder.getDatasetVersion(pathRelativeToDatasetRoot, fullPath);\n+    if (timestampedDatasetVersion != null) {\n+      return new TimestampedDatasetVersion(timestampedDatasetVersion);\n+    }\n+    return null;\n   }\n \n   @Override",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/865b0a00441b76f57c86ffda5d34b4c5dc8bd091/gobblin-data-management/src/main/java/gobblin/data/management/retention/version/finder/UnixTimestampVersionFinder.java",
+                "sha": "c0fdd47f889488e402387203c51f4c5f4bbb2f71",
+                "status": "modified"
+            },
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/865b0a00441b76f57c86ffda5d34b4c5dc8bd091/gobblin-data-management/src/main/java/gobblin/data/management/retention/version/finder/WatermarkDatasetVersionFinder.java",
+                "changes": 7,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/gobblin-data-management/src/main/java/gobblin/data/management/retention/version/finder/WatermarkDatasetVersionFinder.java?ref=865b0a00441b76f57c86ffda5d34b4c5dc8bd091",
+                "deletions": 1,
+                "filename": "gobblin-data-management/src/main/java/gobblin/data/management/retention/version/finder/WatermarkDatasetVersionFinder.java",
+                "patch": "@@ -45,6 +45,11 @@ public Path globVersionPattern() {\n \n   @Override\n   public StringDatasetVersion getDatasetVersion(Path pathRelativeToDatasetRoot, Path fullPath) {\n-    return new StringDatasetVersion(this.realVersionFinder.getDatasetVersion(pathRelativeToDatasetRoot, fullPath));\n+    gobblin.data.management.version.StringDatasetVersion stringDatasetVersion =\n+        this.realVersionFinder.getDatasetVersion(pathRelativeToDatasetRoot, fullPath);\n+    if (stringDatasetVersion != null) {\n+      return new StringDatasetVersion(stringDatasetVersion);\n+    }\n+    return null;\n   }\n }",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/865b0a00441b76f57c86ffda5d34b4c5dc8bd091/gobblin-data-management/src/main/java/gobblin/data/management/retention/version/finder/WatermarkDatasetVersionFinder.java",
+                "sha": "5167a2cdd887d99b1cb2263e3bac620ed80caa98",
+                "status": "modified"
+            }
+        ],
+        "message": "Merge pull request #888 from ydai1124/fix\n\nFix NPE in datasetversion finder",
+        "parent": "https://github.com/apache/incubator-gobblin/commit/7c836b9554291260c503dd84db1c04e8c82163b2",
+        "repo": "incubator-gobblin",
+        "unit_tests": [
+            "WatermarkDatasetVersionFinderTest.java"
+        ]
+    },
+    "incubator-gobblin_9b08750": {
+        "bug_id": "incubator-gobblin_9b08750",
+        "commit": "https://github.com/apache/incubator-gobblin/commit/9b087509fdbce67ac1a88ba3e46681f823da525a",
+        "file": [
+            {
+                "additions": 13,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/9b087509fdbce67ac1a88ba3e46681f823da525a/gobblin-runtime/src/main/java/gobblin/runtime/mapreduce/MRJobLauncher.java",
+                "changes": 24,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/gobblin-runtime/src/main/java/gobblin/runtime/mapreduce/MRJobLauncher.java?ref=9b087509fdbce67ac1a88ba3e46681f823da525a",
+                "deletions": 11,
+                "filename": "gobblin-runtime/src/main/java/gobblin/runtime/mapreduce/MRJobLauncher.java",
+                "patch": "@@ -205,7 +205,7 @@ protected void runWorkUnits(List<WorkUnit> workUnits) throws Exception {\n \n       // Create a metrics set for this job run from the Hadoop counters.\n       // The metrics set is to be persisted to the metrics store later.\n-      countersToMetrics(this.job.getCounters(),\n+      countersToMetrics(Optional.fromNullable(this.job.getCounters()),\n           JobMetrics.get(jobName, this.jobProps.getProperty(ConfigurationKeys.JOB_ID_KEY)));\n     } finally {\n       cleanUpWorkingDirectory();\n@@ -465,17 +465,19 @@ private void cleanUpWorkingDirectory() {\n   /**\n    * Create a {@link gobblin.metrics.GobblinMetrics} instance for this job run from the Hadoop counters.\n    */\n-  private void countersToMetrics(Counters counters, GobblinMetrics metrics) {\n-    // Write job-level counters\n-    CounterGroup jobCounterGroup = counters.getGroup(MetricGroup.JOB.name());\n-    for (Counter jobCounter : jobCounterGroup) {\n-      metrics.getCounter(jobCounter.getName()).inc(jobCounter.getValue());\n-    }\n+  private void countersToMetrics(Optional<Counters> counters, GobblinMetrics metrics) {\n+    if (counters.isPresent()) {\n+      // Write job-level counters\n+      CounterGroup jobCounterGroup = counters.get().getGroup(MetricGroup.JOB.name());\n+      for (Counter jobCounter : jobCounterGroup) {\n+        metrics.getCounter(jobCounter.getName()).inc(jobCounter.getValue());\n+      }\n \n-    // Write task-level counters\n-    CounterGroup taskCounterGroup = counters.getGroup(MetricGroup.TASK.name());\n-    for (Counter taskCounter : taskCounterGroup) {\n-      metrics.getCounter(taskCounter.getName()).inc(taskCounter.getValue());\n+      // Write task-level counters\n+      CounterGroup taskCounterGroup = counters.get().getGroup(MetricGroup.TASK.name());\n+      for (Counter taskCounter : taskCounterGroup) {\n+        metrics.getCounter(taskCounter.getName()).inc(taskCounter.getValue());\n+      }\n     }\n   }\n ",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/9b087509fdbce67ac1a88ba3e46681f823da525a/gobblin-runtime/src/main/java/gobblin/runtime/mapreduce/MRJobLauncher.java",
+                "sha": "20587b5de3a3ef3a1ddf9c91ae08ae44e291ac95",
+                "status": "modified"
+            }
+        ],
+        "message": "Merge pull request #163 from sahilTakiar/countersNPE\n\nFixing NPE in countersToMetrics",
+        "parent": "https://github.com/apache/incubator-gobblin/commit/0b744be0f28c5bd0ef075010e248d004f00032ff",
+        "repo": "incubator-gobblin",
+        "unit_tests": [
+            "MRJobLauncherTest.java"
+        ]
+    },
+    "incubator-gobblin_c1c94c2": {
+        "bug_id": "incubator-gobblin_c1c94c2",
+        "commit": "https://github.com/apache/incubator-gobblin/commit/c1c94c2e1383f8acd13756a02533c71afb14b362",
+        "file": [
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/c1c94c2e1383f8acd13756a02533c71afb14b362/gobblin-data-management/src/main/java/gobblin/data/management/retention/version/finder/GlobModTimeDatasetVersionFinder.java",
+                "changes": 7,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/gobblin-data-management/src/main/java/gobblin/data/management/retention/version/finder/GlobModTimeDatasetVersionFinder.java?ref=c1c94c2e1383f8acd13756a02533c71afb14b362",
+                "deletions": 1,
+                "filename": "gobblin-data-management/src/main/java/gobblin/data/management/retention/version/finder/GlobModTimeDatasetVersionFinder.java",
+                "patch": "@@ -44,6 +44,11 @@ public Path globVersionPattern() {\n \n   @Override\n   public TimestampedDatasetVersion getDatasetVersion(Path pathRelativeToDatasetRoot, Path fullPath) {\n-    return new TimestampedDatasetVersion(this.realVersionFinder.getDatasetVersion(pathRelativeToDatasetRoot, fullPath));\n+    gobblin.data.management.version.TimestampedDatasetVersion timestampedDatasetVersion =\n+        this.realVersionFinder.getDatasetVersion(pathRelativeToDatasetRoot, fullPath);\n+    if (timestampedDatasetVersion != null) {\n+      return new TimestampedDatasetVersion(timestampedDatasetVersion);\n+    }\n+    return null;\n   }\n }",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/c1c94c2e1383f8acd13756a02533c71afb14b362/gobblin-data-management/src/main/java/gobblin/data/management/retention/version/finder/GlobModTimeDatasetVersionFinder.java",
+                "sha": "a4dd6f3e63b6b814c821d2f8aa1814ba201e66f1",
+                "status": "modified"
+            },
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/c1c94c2e1383f8acd13756a02533c71afb14b362/gobblin-data-management/src/main/java/gobblin/data/management/retention/version/finder/UnixTimestampVersionFinder.java",
+                "changes": 7,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/gobblin-data-management/src/main/java/gobblin/data/management/retention/version/finder/UnixTimestampVersionFinder.java?ref=c1c94c2e1383f8acd13756a02533c71afb14b362",
+                "deletions": 1,
+                "filename": "gobblin-data-management/src/main/java/gobblin/data/management/retention/version/finder/UnixTimestampVersionFinder.java",
+                "patch": "@@ -42,7 +42,12 @@ public Path globVersionPattern() {\n \n   @Override\n   public TimestampedDatasetVersion getDatasetVersion(Path pathRelativeToDatasetRoot, Path fullPath) {\n-    return new TimestampedDatasetVersion(this.realVersionFinder.getDatasetVersion(pathRelativeToDatasetRoot, fullPath));\n+    gobblin.data.management.version.TimestampedDatasetVersion timestampedDatasetVersion =\n+        this.realVersionFinder.getDatasetVersion(pathRelativeToDatasetRoot, fullPath);\n+    if (timestampedDatasetVersion != null) {\n+      return new TimestampedDatasetVersion(timestampedDatasetVersion);\n+    }\n+    return null;\n   }\n \n   @Override",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/c1c94c2e1383f8acd13756a02533c71afb14b362/gobblin-data-management/src/main/java/gobblin/data/management/retention/version/finder/UnixTimestampVersionFinder.java",
+                "sha": "c0fdd47f889488e402387203c51f4c5f4bbb2f71",
+                "status": "modified"
+            },
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/c1c94c2e1383f8acd13756a02533c71afb14b362/gobblin-data-management/src/main/java/gobblin/data/management/retention/version/finder/WatermarkDatasetVersionFinder.java",
+                "changes": 7,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/gobblin-data-management/src/main/java/gobblin/data/management/retention/version/finder/WatermarkDatasetVersionFinder.java?ref=c1c94c2e1383f8acd13756a02533c71afb14b362",
+                "deletions": 1,
+                "filename": "gobblin-data-management/src/main/java/gobblin/data/management/retention/version/finder/WatermarkDatasetVersionFinder.java",
+                "patch": "@@ -45,6 +45,11 @@ public Path globVersionPattern() {\n \n   @Override\n   public StringDatasetVersion getDatasetVersion(Path pathRelativeToDatasetRoot, Path fullPath) {\n-    return new StringDatasetVersion(this.realVersionFinder.getDatasetVersion(pathRelativeToDatasetRoot, fullPath));\n+    gobblin.data.management.version.StringDatasetVersion stringDatasetVersion =\n+        this.realVersionFinder.getDatasetVersion(pathRelativeToDatasetRoot, fullPath);\n+    if (stringDatasetVersion != null) {\n+      return new StringDatasetVersion(stringDatasetVersion);\n+    }\n+    return null;\n   }\n }",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/c1c94c2e1383f8acd13756a02533c71afb14b362/gobblin-data-management/src/main/java/gobblin/data/management/retention/version/finder/WatermarkDatasetVersionFinder.java",
+                "sha": "5167a2cdd887d99b1cb2263e3bac620ed80caa98",
+                "status": "modified"
+            }
+        ],
+        "message": "Fix NPE",
+        "parent": "https://github.com/apache/incubator-gobblin/commit/23b7008349cb2aa208b778a46270937354100850",
+        "repo": "incubator-gobblin",
+        "unit_tests": [
+            "WatermarkDatasetVersionFinderTest.java"
+        ]
+    },
+    "incubator-gobblin_fe7dc7c": {
+        "bug_id": "incubator-gobblin_fe7dc7c",
+        "commit": "https://github.com/apache/incubator-gobblin/commit/fe7dc7c35eebc3a4faee9987ecccaae3511118c5",
+        "file": [
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/fe7dc7c35eebc3a4faee9987ecccaae3511118c5/gobblin-data-management/src/main/java/gobblin/data/management/copy/CopyEntity.java",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/gobblin-data-management/src/main/java/gobblin/data/management/copy/CopyEntity.java?ref=fe7dc7c35eebc3a4faee9987ecccaae3511118c5",
+                "deletions": 1,
+                "filename": "gobblin-data-management/src/main/java/gobblin/data/management/copy/CopyEntity.java",
+                "patch": "@@ -137,8 +137,9 @@ public String explain() {\n     /**\n      * @return a unique string identifier for this {@link DatasetAndPartition}.\n      */\n+    @SuppressWarnings(\"deprecation\")\n     public String identifier() {\n-      return Hex.encodeHexString(DigestUtils.sha1(this.dataset.toString() + this.partition));\n+      return Hex.encodeHexString(DigestUtils.sha(this.dataset.toString() + this.partition));\n     }\n   }\n }",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/fe7dc7c35eebc3a4faee9987ecccaae3511118c5/gobblin-data-management/src/main/java/gobblin/data/management/copy/CopyEntity.java",
+                "sha": "e41c312ca5986c7174c7fdacf9a58cfa528daf78",
+                "status": "modified"
+            },
+            {
+                "additions": 11,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/fe7dc7c35eebc3a4faee9987ecccaae3511118c5/gobblin-data-management/src/main/java/gobblin/data/management/copy/hive/HiveCopyEntityHelper.java",
+                "changes": 20,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/gobblin-data-management/src/main/java/gobblin/data/management/copy/hive/HiveCopyEntityHelper.java?ref=fe7dc7c35eebc3a4faee9987ecccaae3511118c5",
+                "deletions": 9,
+                "filename": "gobblin-data-management/src/main/java/gobblin/data/management/copy/hive/HiveCopyEntityHelper.java",
+                "patch": "@@ -107,12 +107,12 @@\n    * If the predicate returns true, the partition will be skipped. */\n   public static final String FAST_PARTITION_SKIP_PREDICATE =\n       HiveDatasetFinder.HIVE_DATASET_PREFIX + \".copy.fast.partition.skip.predicate\";\n-  \n+\n   /** A predicate applied to non partition table before any file listing.\n    * If the predicate returns true, the table will be skipped. */\n   public static final String FAST_TABLE_SKIP_PREDICATE =\n       HiveDatasetFinder.HIVE_DATASET_PREFIX + \".copy.fast.table.skip.predicate\";\n-  \n+\n   /** Method for deleting files on deregister. One of {@link DeregisterFileDeleteMethod}. */\n   public static final String DELETE_FILES_ON_DEREGISTER =\n       HiveDatasetFinder.HIVE_DATASET_PREFIX + \".copy.deregister.fileDeleteMethod\";\n@@ -157,7 +157,7 @@\n   private final Optional<String> partitionFilter;\n   private final Optional<Predicate<PartitionCopy>> fastPartitionSkip;\n   private final Optional<Predicate<HiveCopyEntityHelper>> fastTableSkip;\n-  \n+\n   private final DeregisterFileDeleteMethod deleteMethod;\n \n   private final Optional<CommitStep> tableRegistrationStep;\n@@ -226,6 +226,7 @@\n       this.configuration = configuration;\n       this.targetFs = targetFs;\n \n+      this.targetPathHelper = new HiveTargetPathHelper(this.dataset);\n       this.hiveRegProps = new HiveRegProps(new State(this.dataset.getProperties()));\n       this.targetURI = Optional.fromNullable(this.dataset.getProperties().getProperty(TARGET_METASTORE_URI_KEY));\n       this.targetClientPool = HiveMetastoreClientPool.get(this.dataset.getProperties(), this.targetURI);\n@@ -305,15 +306,16 @@\n         if (HiveUtils.isPartitioned(this.dataset.table)) {\n           this.sourcePartitions = HiveUtils.getPartitionsMap(multiClient.getClient(source_client), this.dataset.table,\n               this.partitionFilter);\n+          // Note: this must be mutable, so we copy the map\n           this.targetPartitions =\n-              this.existingTargetTable.isPresent() ? HiveUtils.getPartitionsMap(multiClient.getClient(target_client),\n-                  this.existingTargetTable.get(), this.partitionFilter) : Maps.<List<String>, Partition> newHashMap();\n+              this.existingTargetTable.isPresent() ? Maps.newHashMap(\n+                  HiveUtils.getPartitionsMap(multiClient.getClient(target_client),\n+                      this.existingTargetTable.get(), this.partitionFilter)) : Maps.<List<String>, Partition> newHashMap();\n         } else {\n           this.sourcePartitions = Maps.newHashMap();\n           this.targetPartitions = Maps.newHashMap();\n         }\n \n-        this.targetPathHelper = new HiveTargetPathHelper(this.dataset);\n       } catch (TException te) {\n         closer.close();\n         throw new IOException(\"Failed to generate work units for table \" + dataset.table.getCompleteName(), te);\n@@ -653,7 +655,7 @@ private int addSharedSteps(List<CopyEntity> copyEntities, String fileSet, int in\n         HiveLocationDescriptor.forTable(this.dataset.table, this.dataset.fs, this.dataset.getProperties());\n     HiveLocationDescriptor desiredTargetLocation =\n         HiveLocationDescriptor.forTable(this.targetTable, this.targetFs, this.dataset.getProperties());\n-    \n+\n     Optional<HiveLocationDescriptor> existingTargetLocation = this.existingTargetTable.isPresent() ? Optional.of(\n         HiveLocationDescriptor.forTable(this.existingTargetTable.get(), this.targetFs, this.dataset.getProperties()))\n         : Optional.<HiveLocationDescriptor> absent();\n@@ -663,12 +665,12 @@ private int addSharedSteps(List<CopyEntity> copyEntities, String fileSet, int in\n       multiTimer.close();\n       return Lists.newArrayList();\n     }\n-    \n+\n     DiffPathSet diffPathSet = fullPathDiff(sourceLocation, desiredTargetLocation, existingTargetLocation,\n         Optional.<Partition> absent(), multiTimer, this);\n \n     multiTimer.nextStage(Stages.FULL_PATH_DIFF);\n-    \n+\n     // Could used to delete files for the existing snapshot\n     DeleteFileCommitStep deleteStep =\n         DeleteFileCommitStep.fromPaths(this.targetFs, diffPathSet.pathsToDelete, this.dataset.getProperties());",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/fe7dc7c35eebc3a4faee9987ecccaae3511118c5/gobblin-data-management/src/main/java/gobblin/data/management/copy/hive/HiveCopyEntityHelper.java",
+                "sha": "4547faa382944345152ff8f70ae51c7d262d9a03",
+                "status": "modified"
+            },
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/incubator-gobblin/blob/fe7dc7c35eebc3a4faee9987ecccaae3511118c5/gobblin-utility/src/main/java/gobblin/util/guid/Guid.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/incubator-gobblin/contents/gobblin-utility/src/main/java/gobblin/util/guid/Guid.java?ref=fe7dc7c35eebc3a4faee9987ecccaae3511118c5",
+                "deletions": 1,
+                "filename": "gobblin-utility/src/main/java/gobblin/util/guid/Guid.java",
+                "patch": "@@ -182,8 +182,10 @@ public String toString() {\n     return Hex.encodeHexString(this.sha);\n   }\n \n+  // DigestUtils.sha is deprecated for sha1, but sha1 is not available in old versions of commons codec\n+  @SuppressWarnings(\"deprecation\")\n   private static byte[] computeGuid(byte[] bytes) {\n-    return DigestUtils.sha1(bytes);\n+    return DigestUtils.sha(bytes);\n   }\n \n   static class SimpleHasGuid implements HasGuid {",
+                "raw_url": "https://github.com/apache/incubator-gobblin/raw/fe7dc7c35eebc3a4faee9987ecccaae3511118c5/gobblin-utility/src/main/java/gobblin/util/guid/Guid.java",
+                "sha": "8b279933c4fdf89bc5338baec60a3dc481ed8d62",
+                "status": "modified"
+            }
+        ],
+        "message": "Merge pull request #1019 from ibuenros/target-path-fix\n\nFix NPE and mutability of a map in hive target path helper and copy h\u2026",
+        "parent": "https://github.com/apache/incubator-gobblin/commit/25b8059436d0bf07921976a62dc50970c88c5b6e",
+        "repo": "incubator-gobblin",
+        "unit_tests": [
+            "GuidTest.java"
+        ]
+    }
+}

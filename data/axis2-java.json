@@ -1,0 +1,1292 @@
+{
+    "axis2-java_087b358": {
+        "bug_id": "axis2-java_087b358",
+        "commit": "https://github.com/apache/axis2-java/commit/087b35801615d613f017ce5345cf78acdf7428a6",
+        "file": [
+            {
+                "additions": 25,
+                "blob_url": "https://github.com/apache/axis2-java/blob/087b35801615d613f017ce5345cf78acdf7428a6/modules/addressing/src/org/apache/axis2/handlers/addressing/AddressingOutHandler.java",
+                "changes": 52,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/addressing/src/org/apache/axis2/handlers/addressing/AddressingOutHandler.java?ref=087b35801615d613f017ce5345cf78acdf7428a6",
+                "deletions": 27,
+                "filename": "modules/addressing/src/org/apache/axis2/handlers/addressing/AddressingOutHandler.java",
+                "patch": "@@ -39,11 +39,9 @@\n public class AddressingOutHandler extends AddressingHandler {\n \n \n-    OMNamespace addressingNamespaceObject;\n-    String addressingNamespace;\n-\n-\n     public void invoke(MessageContext msgContext) throws AxisFault {\n+        OMNamespace addressingNamespaceObject = null;\n+        String addressingNamespace = null;\n \n         Object addressingVersionFromCurrentMsgCtxt = msgContext.getProperty(WS_ADDRESSING_VERSION);\n         if (addressingVersionFromCurrentMsgCtxt != null) {\n@@ -87,28 +85,28 @@ public void invoke(MessageContext msgContext) throws AxisFault {\n \n         // processing WSA To\n         EndpointReference epr = messageContextOptions.getTo();\n-        if (epr != null && !isAddressingHeaderAlreadyAvailable(WSA_TO, envelope)) {\n+        if (epr != null && !isAddressingHeaderAlreadyAvailable(WSA_TO, envelope, addressingNamespaceObject)) {\n \n             String address = epr.getAddress();\n             if (!\"\".equals(address) && address != null) {\n                 SOAPHeaderBlock toHeaderBlock = envelope.addHeaderBlock(WSA_TO, addressingNamespaceObject);\n                 toHeaderBlock.setText(address);\n             }\n \n-            processReferenceInformation(epr.getAllReferenceParameters(), soapHeader );\n-            processReferenceInformation(epr.getAllReferenceProperties(), soapHeader);\n+            processReferenceInformation(epr.getAllReferenceParameters(), soapHeader, addressingNamespaceObject);\n+            processReferenceInformation(epr.getAllReferenceProperties(), soapHeader, addressingNamespaceObject);\n \n-            addToHeader(epr, soapHeader);\n+            addToHeader(epr, soapHeader, addressingNamespaceObject, addressingNamespace);\n         }\n \n         // processing WSA Action\n         String action = messageContextOptions.getAction();\n-        if (action != null && !isAddressingHeaderAlreadyAvailable(WSA_ACTION, envelope)) {\n-            processStringInfo(action, WSA_ACTION, envelope);\n+        if (action != null && !isAddressingHeaderAlreadyAvailable(WSA_ACTION, envelope, addressingNamespaceObject)) {\n+            processStringInfo(action, WSA_ACTION, envelope, addressingNamespaceObject);\n         }\n \n         // processing WSA replyTo\n-        if (!isAddressingHeaderAlreadyAvailable(WSA_REPLY_TO, envelope)) {\n+        if (!isAddressingHeaderAlreadyAvailable(WSA_REPLY_TO, envelope, addressingNamespaceObject)) {\n             epr = messageContextOptions.getReplyTo();\n             if (epr == null) {//optional\n                 // setting anonymous URI. Defaulting to Final.\n@@ -124,33 +122,33 @@ public void invoke(MessageContext msgContext) throws AxisFault {\n                 epr.addReferenceParameter(new QName(Constants.AXIS2_NAMESPACE_URI,\n                         Constants.SERVICE_GROUP_ID, Constants.AXIS2_NAMESPACE_PREFIX), serviceGroupContextId);\n             }\n-            addToSOAPHeader(epr, AddressingConstants.WSA_REPLY_TO, envelope);\n+            addToSOAPHeader(epr, AddressingConstants.WSA_REPLY_TO, envelope, addressingNamespaceObject, addressingNamespace);\n         }\n \n         epr = messageContextOptions.getFrom();\n         if (epr != null) {//optional\n-            addToSOAPHeader(epr, AddressingConstants.WSA_FROM, envelope);\n+            addToSOAPHeader(epr, AddressingConstants.WSA_FROM, envelope, addressingNamespaceObject, addressingNamespace);\n         }\n \n         epr = messageContextOptions.getFaultTo();\n         if (epr != null) {//optional\n-            addToSOAPHeader(epr, AddressingConstants.WSA_FAULT_TO, envelope);\n+            addToSOAPHeader(epr, AddressingConstants.WSA_FAULT_TO, envelope, addressingNamespaceObject, addressingNamespace);\n         }\n \n         String messageID = messageContextOptions.getMessageId();\n-        if (messageID != null && !isAddressingHeaderAlreadyAvailable(WSA_MESSAGE_ID, envelope)) {//optional\n-            processStringInfo(messageID, WSA_MESSAGE_ID, envelope);\n+        if (messageID != null && !isAddressingHeaderAlreadyAvailable(WSA_MESSAGE_ID, envelope, addressingNamespaceObject)) {//optional\n+            processStringInfo(messageID, WSA_MESSAGE_ID, envelope, addressingNamespaceObject);\n         }\n \n-        if (!isAddressingHeaderAlreadyAvailable(WSA_RELATES_TO, envelope)) {\n+        if (!isAddressingHeaderAlreadyAvailable(WSA_RELATES_TO, envelope, addressingNamespaceObject)) {\n             RelatesTo relatesTo = messageContextOptions.getRelatesTo();\n             OMElement relatesToHeader = null;\n \n             if (relatesTo != null) {\n                 relatesToHeader =\n                         processStringInfo(relatesTo.getValue(),\n                                 WSA_RELATES_TO,\n-                                envelope);\n+                                envelope, addressingNamespaceObject);\n             }\n \n             if (relatesToHeader != null)\n@@ -173,7 +171,7 @@ public void invoke(MessageContext msgContext) throws AxisFault {\n \n     private OMElement processStringInfo(String value,\n                                         String type,\n-                                        SOAPEnvelope soapEnvelope) {\n+                                        SOAPEnvelope soapEnvelope, OMNamespace addressingNamespaceObject) {\n         if (!\"\".equals(value) && value != null) {\n             SOAPHeaderBlock soapHeaderBlock =\n                     soapEnvelope.addHeaderBlock(type, addressingNamespaceObject);\n@@ -186,8 +184,8 @@ private OMElement processStringInfo(String value,\n \n     protected void addToSOAPHeader(EndpointReference epr,\n                                    String type,\n-                                   SOAPEnvelope envelope) {\n-        if (epr == null || isAddressingHeaderAlreadyAvailable(type, envelope)) {\n+                                   SOAPEnvelope envelope, OMNamespace addressingNamespaceObject, String addressingNamespace) {\n+        if (epr == null || isAddressingHeaderAlreadyAvailable(type, envelope, addressingNamespaceObject)) {\n             return;\n         }\n \n@@ -204,7 +202,7 @@ protected void addToSOAPHeader(EndpointReference epr,\n             addressElement.setText(address);\n         }\n \n-        addToHeader(epr, soapHeaderBlock);\n+        addToHeader(epr, soapHeaderBlock, addressingNamespaceObject, addressingNamespace);\n \n \n         Map referenceParameters = epr.getAllReferenceParameters();\n@@ -214,7 +212,7 @@ protected void addToSOAPHeader(EndpointReference epr,\n                             EPR_REFERENCE_PARAMETERS,\n                             addressingNamespaceObject);\n             soapHeaderBlock.addChild(reference);\n-            processReferenceInformation(referenceParameters, reference);\n+            processReferenceInformation(referenceParameters, reference, addressingNamespaceObject);\n \n         }\n \n@@ -226,14 +224,14 @@ protected void addToSOAPHeader(EndpointReference epr,\n                                 Submission.EPR_REFERENCE_PROPERTIES,\n                                 addressingNamespaceObject);\n                 envelope.getHeader().addChild(reference);\n-                processReferenceInformation(referenceParameters, reference);\n+                processReferenceInformation(referenceParameters, reference, addressingNamespaceObject);\n             }\n \n         }\n \n     }\n \n-    private void addToHeader(EndpointReference epr, OMElement parentElement) {\n+    private void addToHeader(EndpointReference epr, OMElement parentElement, OMNamespace addressingNamespaceObject, String addressingNamespace) {\n \n         if (addressingNamespace.equals(Submission.WSA_NAMESPACE)) {\n             QName portType = epr.getPortType();\n@@ -273,7 +271,7 @@ private void addToHeader(EndpointReference epr, OMElement parentElement) {\n      *\n      * @param referenceInformation\n      */\n-    private void processReferenceInformation(Map referenceInformation, OMElement parent) {\n+    private void processReferenceInformation(Map referenceInformation, OMElement parent, OMNamespace addressingNamespaceObject) {\n         if (referenceInformation != null && parent != null) {\n             Iterator iterator = referenceInformation.keySet().iterator();\n             while (iterator.hasNext()) {\n@@ -290,7 +288,7 @@ private void processReferenceInformation(Map referenceInformation, OMElement par\n         }\n     }\n \n-    private boolean isAddressingHeaderAlreadyAvailable(String name, SOAPEnvelope envelope) {\n+    private boolean isAddressingHeaderAlreadyAvailable(String name, SOAPEnvelope envelope, OMNamespace addressingNamespaceObject) {\n         boolean isAvail = envelope.getFirstChildWithName(new QName(addressingNamespaceObject.getName(), name, addressingNamespaceObject.getPrefix())) != null;\n         if(!isAvail && envelope.getHeader() != null){\n             // check in headers too",
+                "raw_url": "https://github.com/apache/axis2-java/raw/087b35801615d613f017ce5345cf78acdf7428a6/modules/addressing/src/org/apache/axis2/handlers/addressing/AddressingOutHandler.java",
+                "sha": "211f2a4f42aa267a71ad77dfc7e55c249584f4e0",
+                "status": "modified"
+            }
+        ],
+        "message": "setting the instance variables to null at the end of invoke causes NPE in ThreadingTest. Basically it means that the instance variables are shared across threads (which is a bad thing!). So passing them around as parameters for now (need to check with Eran)\n\n\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@359138 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/36d77f32a0deced070519f4d8ae5cf8cc24d15d2",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "AddressingOutHandlerTest.java"
+        ]
+    },
+    "axis2-java_0fec8cb": {
+        "bug_id": "axis2-java_0fec8cb",
+        "commit": "https://github.com/apache/axis2-java/commit/0fec8cb1ad5ae4cc27e77acab5b20f33c2e12a6a",
+        "file": [
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/axis2-java/blob/0fec8cb1ad5ae4cc27e77acab5b20f33c2e12a6a/modules/kernel/src/org/apache/axis2/util/MessageContextBuilder.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/util/MessageContextBuilder.java?ref=0fec8cb1ad5ae4cc27e77acab5b20f33c2e12a6a",
+                "deletions": 2,
+                "filename": "modules/kernel/src/org/apache/axis2/util/MessageContextBuilder.java",
+                "patch": "@@ -232,8 +232,10 @@ private static void setupCorrectTransportOut(MessageContext context) throws Axis\n                         }\n                         context.setTransportOut(transportOut);\n                     }\n-                    context.getOperationContext().setProperty(\n-                            Constants.DIFFERENT_EPR, Constants.VALUE_TRUE);\n+                    if(context.getOperationContext()!=null){\n+                        context.getOperationContext().setProperty(\n+                                Constants.DIFFERENT_EPR, Constants.VALUE_TRUE);\n+                    }\n                 }\n             }\n         } catch (URISyntaxException urise) {",
+                "raw_url": "https://github.com/apache/axis2-java/raw/0fec8cb1ad5ae4cc27e77acab5b20f33c2e12a6a/modules/kernel/src/org/apache/axis2/util/MessageContextBuilder.java",
+                "sha": "3c6e70c0f7c151e7f61df83c738fe2b253c1edf8",
+                "status": "modified"
+            }
+        ],
+        "message": "Prevent unlikely NPE\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@478898 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/3e7e77df751b04e730ea39edbfa08296e91df54a",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "MessageContextBuilderTest.java"
+        ]
+    },
+    "axis2-java_12129ec": {
+        "bug_id": "axis2-java_12129ec",
+        "commit": "https://github.com/apache/axis2-java/commit/12129ec863ebe442e882b8507892eb8be21593a1",
+        "file": [
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/axis2-java/blob/12129ec863ebe442e882b8507892eb8be21593a1/modules/metadata/src/org/apache/axis2/jaxws/description/impl/OperationDescriptionImpl.java",
+                "changes": 10,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/metadata/src/org/apache/axis2/jaxws/description/impl/OperationDescriptionImpl.java?ref=12129ec863ebe442e882b8507892eb8be21593a1",
+                "deletions": 4,
+                "filename": "modules/metadata/src/org/apache/axis2/jaxws/description/impl/OperationDescriptionImpl.java",
+                "patch": "@@ -628,10 +628,12 @@ public OperationDescription getSyncOperation() {\n                 //searching for opDesc of sync operation.\n                 OperationDescription[] ods = null;\n                 ods = eid.getOperationForJavaMethod(webMethodAnnoName);\n-                for (OperationDescription od : ods) {\n-                    if (od.getJavaMethodName().equals(webMethodAnnoName)) {\n-                        opDesc = od;\n-                        break;\n+                if (ods != null) {\n+                    for (OperationDescription od : ods) {\n+                        if (od.getJavaMethodName().equals(webMethodAnnoName)) {\n+                            opDesc = od;\n+                            break;\n+                        }\n                     }\n                 }\n             }",
+                "raw_url": "https://github.com/apache/axis2-java/raw/12129ec863ebe442e882b8507892eb8be21593a1/modules/metadata/src/org/apache/axis2/jaxws/description/impl/OperationDescriptionImpl.java",
+                "sha": "d4e9b3cef28b8052aeef1ae23456d8f02e1f8e6b",
+                "status": "modified"
+            }
+        ],
+        "message": "AXIS2-2538\nFix contributed by Roy Wood.  Add NPE guard.\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@534196 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/2a3ea5556a4ef615d9bad32991b5ccc0c8940743",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "OperationDescriptionImplTests.java"
+        ]
+    },
+    "axis2-java_2886594": {
+        "bug_id": "axis2-java_2886594",
+        "commit": "https://github.com/apache/axis2-java/commit/2886594a1bfde18ec5ba0c39408e9790e710d28d",
+        "file": [
+            {
+                "additions": 29,
+                "blob_url": "https://github.com/apache/axis2-java/blob/2886594a1bfde18ec5ba0c39408e9790e710d28d/modules/metadata/src/org/apache/axis2/jaxws/description/impl/ServiceDescriptionImpl.java",
+                "changes": 35,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/metadata/src/org/apache/axis2/jaxws/description/impl/ServiceDescriptionImpl.java?ref=2886594a1bfde18ec5ba0c39408e9790e710d28d",
+                "deletions": 6,
+                "filename": "modules/metadata/src/org/apache/axis2/jaxws/description/impl/ServiceDescriptionImpl.java",
+                "patch": "@@ -316,10 +316,13 @@ EndpointDescription updateEndpointDescription(Class sei, QName portQName,\n \n     private Class getEndpointSEI(QName portQName) {\n         Class endpointSEI = null;\n-        EndpointInterfaceDescription endpointInterfaceDesc =\n-                getEndpointDescription(portQName).getEndpointInterfaceDescription();\n-        if (endpointInterfaceDesc != null) {\n-            endpointSEI = endpointInterfaceDesc.getSEIClass();\n+        EndpointDescription endpointDesc = getEndpointDescription(portQName);\n+        if (endpointDesc != null) {\n+            EndpointInterfaceDescription endpointInterfaceDesc = \n+                endpointDesc.getEndpointInterfaceDescription();\n+            if (endpointInterfaceDesc != null ) {\n+                endpointSEI = endpointInterfaceDesc.getSEIClass();\n+            }\n         }\n         return endpointSEI;\n     }\n@@ -546,8 +549,28 @@ ClientConfigurationFactory getClientConfigurationFactory() {\n     * @see org.apache.axis2.jaxws.description.ServiceDescription#getServiceClient(javax.xml.namespace.QName)\n     */\n     public ServiceClient getServiceClient(QName portQName) {\n-        // TODO: RAS if no portQName found\n-        return getEndpointDescription(portQName).getServiceClient();\n+        ServiceClient returnServiceClient = null;\n+        if (!DescriptionUtils.isEmpty(portQName)) {\n+            EndpointDescription endpointDesc = getEndpointDescription(portQName);\n+            if (endpointDesc != null) {\n+                returnServiceClient = endpointDesc.getServiceClient();\n+            }\n+            else {\n+                // Couldn't find Endpoint Description for port QName\n+                if (log.isDebugEnabled()) {\n+                    log.debug(\"Could not find portQName: \" + portQName \n+                            + \" under ServiceDescription: \" + toString());\n+                }\n+            }\n+        }\n+        else {\n+            // PortQName is empty\n+            if (log.isDebugEnabled()) {\n+                log.debug(\"PortQName agrument is invalid; it can not be null or an empty string: \" + portQName);\n+            }\n+        }\n+        \n+        return returnServiceClient;\n     }\n \n     /* (non-Javadoc)",
+                "raw_url": "https://github.com/apache/axis2-java/raw/2886594a1bfde18ec5ba0c39408e9790e710d28d/modules/metadata/src/org/apache/axis2/jaxws/description/impl/ServiceDescriptionImpl.java",
+                "sha": "1cf652259d391f4a59014d2d4ea89ed4590890ca",
+                "status": "modified"
+            }
+        ],
+        "message": "Add a few NPE guards\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@527551 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/9393d572ed4ffb5c9ca7f6ee42c51955e4da95d5",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "ServiceDescriptionImplTests.java"
+        ]
+    },
+    "axis2-java_2c24d64": {
+        "bug_id": "axis2-java_2c24d64",
+        "commit": "https://github.com/apache/axis2-java/commit/2c24d643ef82b7bac17fbe8e0826fdcff48ca56b",
+        "file": [
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/axis2-java/blob/2c24d643ef82b7bac17fbe8e0826fdcff48ca56b/modules/codegen/src/org/apache/axis2/wsdl/codegen/emitter/AxisServiceBasedMultiLanguageEmitter.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/codegen/src/org/apache/axis2/wsdl/codegen/emitter/AxisServiceBasedMultiLanguageEmitter.java?ref=2c24d643ef82b7bac17fbe8e0826fdcff48ca56b",
+                "deletions": 0,
+                "filename": "modules/codegen/src/org/apache/axis2/wsdl/codegen/emitter/AxisServiceBasedMultiLanguageEmitter.java",
+                "patch": "@@ -1781,6 +1781,10 @@ protected Element getOutputElement(Document doc, AxisOperation operation, List h\n                 paramElement = doc.createElement(\"param\");\n                 msg = (AxisMessage) faultMessages.get(i);\n \n+                if(msg.getElementQName() == null) {\n+                    throw new RuntimeException(\"Element QName is null for \" + msg.getName() + \"!\");\n+                }\n+\n                 //as for the name of a fault, we generate an exception\n                 addAttribute(doc, \"name\",\n                         (String) fullyQualifiedFaultClassNameMap.get(msg.getElementQName()),",
+                "raw_url": "https://github.com/apache/axis2-java/raw/2c24d643ef82b7bac17fbe8e0826fdcff48ca56b/modules/codegen/src/org/apache/axis2/wsdl/codegen/emitter/AxisServiceBasedMultiLanguageEmitter.java",
+                "sha": "d4f93d481036039d417de94b6cc334bd277587b3",
+                "status": "modified"
+            },
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/axis2-java/blob/2c24d643ef82b7bac17fbe8e0826fdcff48ca56b/modules/kernel/src/org/apache/axis2/description/AxisService2OM.java",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/description/AxisService2OM.java?ref=2c24d643ef82b7bac17fbe8e0826fdcff48ca56b",
+                "deletions": 0,
+                "filename": "modules/kernel/src/org/apache/axis2/description/AxisService2OM.java",
+                "patch": "@@ -256,6 +256,9 @@ private void generateHeaderMessages(AxisMessage axismessage, OMFactory fac,\n                     wsdl);\r\n             messageElement.addChild(messagePart);\r\n             messagePart.addAttribute(ATTRIBUTE_NAME, header.part(), null);\r\n+            if(header.getElement()==null){\r\n+                throw new RuntimeException(ELEMENT_ATTRIBUTE_NAME + \" is null for \" +  header.getMessage());\r\n+            }\r\n             messagePart.addAttribute(ELEMENT_ATTRIBUTE_NAME, getPrefix(header\r\n                     .getElement().getNamespaceURI())\r\n                     + \":\" + header.getElement().getLocalPart(), null);\r",
+                "raw_url": "https://github.com/apache/axis2-java/raw/2c24d643ef82b7bac17fbe8e0826fdcff48ca56b/modules/kernel/src/org/apache/axis2/description/AxisService2OM.java",
+                "sha": "09719acd9ca10d85d8246c57a5f6b0f9f8dfbe8f",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/axis2-java/blob/2c24d643ef82b7bac17fbe8e0826fdcff48ca56b/modules/kernel/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java?ref=2c24d643ef82b7bac17fbe8e0826fdcff48ca56b",
+                "deletions": 1,
+                "filename": "modules/kernel/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java",
+                "patch": "@@ -600,7 +600,7 @@ private void processPartsList(List bindingPartsList, Message wsdl4jMessage, Axis\n             if (wsdl4jMessagePart.getElementName() == null) {\n                 //this cannot be done - we need to have a\n                 //element reference\n-                throw new WSDLProcessingException(\"Element reference missing!\");\n+                throw new WSDLProcessingException(\"Element reference missing for \" + bindingPartsList.get(0) + \"!\" );\n             }\n             inMessage.setElementQName(wsdl4jMessagePart.getElementName());\n ",
+                "raw_url": "https://github.com/apache/axis2-java/raw/2c24d643ef82b7bac17fbe8e0826fdcff48ca56b/modules/kernel/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java",
+                "sha": "45632b325aa305dd2341be6f495a484c3181ab3f",
+                "status": "modified"
+            }
+        ],
+        "message": "prevent NPE's and add context info in exception\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@437065 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/9e4fdaf900acd6982eac99a6b42b735d3d645de3",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "WSDL11ToAxisServiceBuilderTest.java"
+        ]
+    },
+    "axis2-java_3d46ade": {
+        "bug_id": "axis2-java_3d46ade",
+        "commit": "https://github.com/apache/axis2-java/commit/3d46ade6f2246c8e3f32fe7076672fa00b392d63",
+        "file": [
+            {
+                "additions": 26,
+                "blob_url": "https://github.com/apache/axis2-java/blob/3d46ade6f2246c8e3f32fe7076672fa00b392d63/modules/jaxbri/src/org/apache/axis2/jaxbri/CodeGenerationUtility.java",
+                "changes": 26,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/jaxbri/src/org/apache/axis2/jaxbri/CodeGenerationUtility.java?ref=3d46ade6f2246c8e3f32fe7076672fa00b392d63",
+                "deletions": 0,
+                "filename": "modules/jaxbri/src/org/apache/axis2/jaxbri/CodeGenerationUtility.java",
+                "patch": "@@ -18,6 +18,7 @@\n \n import com.sun.codemodel.JCodeModel;\n import com.sun.codemodel.writer.FileCodeWriter;\n+import com.sun.tools.xjc.api.ErrorListener;\n import com.sun.tools.xjc.api.Mapping;\n import com.sun.tools.xjc.api.S2JJAXBModel;\n import com.sun.tools.xjc.api.SchemaCompiler;\n@@ -28,9 +29,12 @@\n import org.apache.axis2.wsdl.databinding.DefaultTypeMapper;\n import org.apache.axis2.wsdl.databinding.JavaTypeMapper;\n import org.apache.axis2.wsdl.databinding.TypeMapper;\n+import org.apache.commons.logging.Log;\n+import org.apache.commons.logging.LogFactory;\n import org.apache.ws.commons.schema.XmlSchema;\n import org.w3c.dom.Element;\n import org.xml.sax.InputSource;\n+import org.xml.sax.SAXParseException;\n \n import javax.xml.namespace.QName;\n import java.io.ByteArrayOutputStream;\n@@ -43,6 +47,7 @@\n import java.util.Vector;\n \n public class CodeGenerationUtility {\n+    private static final Log log = LogFactory.getLog(CodeGenerationUtility.class);\n \n     /**\n      * @param additionalSchemas\n@@ -96,11 +101,32 @@ public static TypeMapper processSchemas(List schemas,\n                 }\n                 sc.setDefaultPackageName(pkg);\n \n+                sc.setErrorListener(new ErrorListener(){\n+                    public void error(SAXParseException saxParseException) {\n+                        log.error(saxParseException.getMessage(), saxParseException);\n+                    }\n+\n+                    public void fatalError(SAXParseException saxParseException) {\n+                        log.error(saxParseException.getMessage(), saxParseException);\n+                    }\n+\n+                    public void warning(SAXParseException saxParseException) {\n+                        log.warn(saxParseException.getMessage(), saxParseException);\n+                    }\n+\n+                    public void info(SAXParseException saxParseException) {\n+                        log.info(saxParseException.getMessage(), saxParseException);\n+                    }\n+                });\n                 sc.parseSchema((InputSource)xmlObjectsVector.elementAt(i));\n \n                 // Bind the XML\n                 S2JJAXBModel jaxbModel = sc.bind();\n \n+                if(jaxbModel == null){\n+                    throw new RuntimeException(\"Unable to generate code using jaxbri\");\n+                }\n+\n                 // Emit the code artifacts\n                 JCodeModel codeModel = jaxbModel.generateCode(null, null);\n                 FileCodeWriter writer = new FileCodeWriter(outputDir);",
+                "raw_url": "https://github.com/apache/axis2-java/raw/3d46ade6f2246c8e3f32fe7076672fa00b392d63/modules/jaxbri/src/org/apache/axis2/jaxbri/CodeGenerationUtility.java",
+                "sha": "b035987b53e0c96475d61080f913d84ea38486af",
+                "status": "modified"
+            }
+        ],
+        "message": "don't throw NPE, set the error listener for logging all the problems\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@534960 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/f0608aaaa40c7d713cd229bfeb028f99d6cc2b1c",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "CodeGenerationUtilityTest.java"
+        ]
+    },
+    "axis2-java_48b6908": {
+        "bug_id": "axis2-java_48b6908",
+        "commit": "https://github.com/apache/axis2-java/commit/48b69085b046bdb5499486494cfa485ac6cdb135",
+        "file": [
+            {
+                "additions": 7,
+                "blob_url": "https://github.com/apache/axis2-java/blob/48b69085b046bdb5499486494cfa485ac6cdb135/modules/core/src/org/apache/axis2/transport/http/HTTPWorker.java",
+                "changes": 8,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/core/src/org/apache/axis2/transport/http/HTTPWorker.java?ref=48b69085b046bdb5499486494cfa485ac6cdb135",
+                "deletions": 1,
+                "filename": "modules/core/src/org/apache/axis2/transport/http/HTTPWorker.java",
+                "patch": "@@ -20,6 +20,7 @@\n import org.apache.axis2.Constants;\n import org.apache.axis2.context.ConfigurationContext;\n import org.apache.axis2.context.MessageContext;\n+import org.apache.axis2.context.OperationContext;\n import org.apache.axis2.description.Parameter;\n import org.apache.axis2.description.TransportOutDescription;\n import org.apache.axis2.engine.AxisConfiguration;\n@@ -149,7 +150,12 @@ public boolean processRequest(final SimpleHttpServerConnection conn, final Simpl\n                         configurationContext);\n             }\n \n-            Object contextWritten = msgContext.getOperationContext().getProperty(Constants.RESPONSE_WRITTEN);\n+            OperationContext operationContext = msgContext.getOperationContext();\n+            \n+            Object contextWritten = null;\n+            if (operationContext!=null)\n+            \tcontextWritten = operationContext.getProperty(Constants.RESPONSE_WRITTEN);\n+            \n             if (contextWritten != null &&\n                     Constants.VALUE_TRUE.equals(contextWritten)) {\n                 response.setStatusLine(",
+                "raw_url": "https://github.com/apache/axis2-java/raw/48b69085b046bdb5499486494cfa485ac6cdb135/modules/core/src/org/apache/axis2/transport/http/HTTPWorker.java",
+                "sha": "fdbaceee802fbddb56484fb10c3d12f2ea241725",
+                "status": "modified"
+            }
+        ],
+        "message": "A small bug fix to avoid possible NPE.\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@329729 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/4c7744669f3fde83e30483543fb47be879b1e1d4",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "HTTPWorkerTest.java"
+        ]
+    },
+    "axis2-java_4af84cd": {
+        "bug_id": "axis2-java_4af84cd",
+        "commit": "https://github.com/apache/axis2-java/commit/4af84cd6e377b5480abb1e2608cc76b6e20fcd23",
+        "file": [
+            {
+                "additions": 7,
+                "blob_url": "https://github.com/apache/axis2-java/blob/4af84cd6e377b5480abb1e2608cc76b6e20fcd23/modules/core/src/org/apache/axis2/util/SchemaUtil.java",
+                "changes": 14,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/core/src/org/apache/axis2/util/SchemaUtil.java?ref=4af84cd6e377b5480abb1e2608cc76b6e20fcd23",
+                "deletions": 7,
+                "filename": "modules/core/src/org/apache/axis2/util/SchemaUtil.java",
+                "patch": "@@ -15,23 +15,23 @@\n  */\n package org.apache.axis2.util;\n \n+import org.apache.axiom.om.OMElement;\n+import org.apache.axiom.soap.SOAPBody;\n import org.apache.axiom.soap.SOAPEnvelope;\n import org.apache.axiom.soap.SOAPFactory;\n-import org.apache.axiom.soap.SOAPBody;\n-import org.apache.axiom.om.OMElement;\n-import org.apache.axis2.context.MessageContext;\n import org.apache.axis2.AxisFault;\n import org.apache.axis2.HTTPConstants;\n-import org.apache.ws.commons.schema.XmlSchemaElement;\n-import org.apache.ws.commons.schema.XmlSchemaType;\n+import org.apache.axis2.context.MessageContext;\n import org.apache.ws.commons.schema.XmlSchemaComplexType;\n+import org.apache.ws.commons.schema.XmlSchemaElement;\n import org.apache.ws.commons.schema.XmlSchemaParticle;\n import org.apache.ws.commons.schema.XmlSchemaSequence;\n+import org.apache.ws.commons.schema.XmlSchemaType;\n \n import javax.servlet.http.HttpServletRequest;\n import javax.xml.namespace.QName;\n-import java.util.Map;\n import java.util.Iterator;\n+import java.util.Map;\n \n /**\n  * \n@@ -102,7 +102,7 @@ public static SOAPEnvelope handleMediaTypeURLEncoded(MessageContext msgCtxt,\n                             XmlSchemaElement innerElement = (XmlSchemaElement) iterator.next();\n                             String name = innerElement.getName();\n                             String[] parameterValuesArray = (String[]) parameterMap.get(name);\n-                            if (parameterValuesArray.length > 0 &&\n+                            if (parameterValuesArray != null &&\n                                 !\"\".equals(parameterValuesArray[0]) && parameterValuesArray[0] != null)\n                             {\n                                 soapFactory.createOMElement(name, null,",
+                "raw_url": "https://github.com/apache/axis2-java/raw/4af84cd6e377b5480abb1e2608cc76b6e20fcd23/modules/core/src/org/apache/axis2/util/SchemaUtil.java",
+                "sha": "2fd1f7f4e23421fe6fd679ae2a0156398bb94e06",
+                "status": "modified"
+            }
+        ],
+        "message": "- Fixing http://issues.apache.org/jira/browse/AXIS2-786. Removing a possible NPE.\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@412056 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/8b098bcb2155cfc189e0c28ea26851d1fad8cf9b",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "SchemaUtilTest.java"
+        ]
+    },
+    "axis2-java_4d16974": {
+        "bug_id": "axis2-java_4d16974",
+        "commit": "https://github.com/apache/axis2-java/commit/4d169745c639f40aa6f5e1f5ed610139bb84c7a9",
+        "file": [
+            {
+                "additions": 8,
+                "blob_url": "https://github.com/apache/axis2-java/blob/4d169745c639f40aa6f5e1f5ed610139bb84c7a9/modules/core/src/org/apache/axis2/engine/AddressingBasedDispatcher.java",
+                "changes": 12,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/core/src/org/apache/axis2/engine/AddressingBasedDispatcher.java?ref=4d169745c639f40aa6f5e1f5ed610139bb84c7a9",
+                "deletions": 4,
+                "filename": "modules/core/src/org/apache/axis2/engine/AddressingBasedDispatcher.java",
+                "patch": "@@ -38,9 +38,9 @@\n  */\n public class AddressingBasedDispatcher extends AbstractDispatcher implements AddressingConstants {\n \n-\tprivate static final long serialVersionUID = 8294130617631587374L;\n-\t\n-\t/**\n+    private static final long serialVersionUID = 8294130617631587374L;\n+\n+    /**\n      * Field NAME\n      */\n     public static final QName NAME = new QName(\"http://ws.apache.org/axis2/\",\n@@ -64,6 +64,7 @@ public AxisOperation findOperation(AxisService service, MessageContext messageCo\n     // TODO this logic needed to be improved, as the Dispatching is almost guaranteed to fail\n     public AxisService findService(MessageContext messageContext) throws AxisFault {\n         EndpointReference toEPR = messageContext.getTo();\n+\n         AxisService service = null;\n \n         if (toEPR != null) {\n@@ -76,8 +77,11 @@ public AxisService findService(MessageContext messageContext) throws AxisFault {\n                 return null;\n             }\n \n-            QName serviceName = new QName(address);\n+            QName serviceName;\n             String[] values = Utils.parseRequestURLForServiceAndOperation(address);\n+            if (values == null) {\n+                return null;\n+            }\n \n             log.debug(\"Checking for Service using toEPR : \" + values[0]);\n ",
+                "raw_url": "https://github.com/apache/axis2-java/raw/4d169745c639f40aa6f5e1f5ed610139bb84c7a9/modules/core/src/org/apache/axis2/engine/AddressingBasedDispatcher.java",
+                "sha": "b5b5d19b646e6b56e9f89f397f722743dc658ac2",
+                "status": "modified"
+            },
+            {
+                "additions": 10,
+                "blob_url": "https://github.com/apache/axis2-java/blob/4d169745c639f40aa6f5e1f5ed610139bb84c7a9/modules/core/src/org/apache/axis2/transport/http/HTTPTransportUtils.java",
+                "changes": 16,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/core/src/org/apache/axis2/transport/http/HTTPTransportUtils.java?ref=4d169745c639f40aa6f5e1f5ed610139bb84c7a9",
+                "deletions": 6,
+                "filename": "modules/core/src/org/apache/axis2/transport/http/HTTPTransportUtils.java",
+                "patch": "@@ -62,6 +62,10 @@ public static boolean checkEnvelopeForOptimise(SOAPEnvelope envelope) {\n     public static SOAPEnvelope createEnvelopeFromGetRequest(String requestUrl, Map map) {\n         String[] values = Utils.parseRequestURLForServiceAndOperation(requestUrl);\n \n+        if (values == null) {\n+            return new SOAP11Factory().getDefaultEnvelope();\n+        }\n+\n         if ((values[1] != null) && (values[0] != null)) {\n             String operation = values[1];\n             SOAPFactory soapFactory = new SOAP11Factory();\n@@ -94,13 +98,13 @@ public static boolean doWriteMTOM(MessageContext msgContext) {\n         if (msgContext.getParameter(Constants.Configuration.ENABLE_MTOM) != null) {\n             enableMTOM = Constants.VALUE_TRUE.equals(\n                     msgContext.getParameter(Constants.Configuration.ENABLE_MTOM).getValue());\n-        } \n-        \n+        }\n+\n         if (msgContext.getProperty(Constants.Configuration.ENABLE_MTOM) != null) {\n             enableMTOM = Constants.VALUE_TRUE.equals(\n                     msgContext.getProperty(Constants.Configuration.ENABLE_MTOM));\n         }\n-        \n+\n         boolean forceMIME =\n                 Constants.VALUE_TRUE.equals(msgContext.getProperty(Constants.Configuration.FORCE_MIME));\n \n@@ -109,10 +113,10 @@ public static boolean doWriteMTOM(MessageContext msgContext) {\n         }\n \n         // If MTOM is explicitly disabled, no need to check the envelope\n-        if(!enableMTOM) {\n+        if (!enableMTOM) {\n             return false;\n         }\n-        \n+\n         boolean envelopeContainsOptimise =\n                 HTTPTransportUtils.checkEnvelopeForOptimise(msgContext.getEnvelope());\n \n@@ -246,7 +250,7 @@ public static void processHTTPPostRequest(MessageContext msgContext, InputStream\n             }\n \n             String charsetEncoding = builder.getDocument().getCharsetEncoding();\n-        \n+\n             if ((charsetEncoding != null) && !\"\".equals(charsetEncoding)\n                     && ! charsetEncoding.equalsIgnoreCase((String) msgContext.getProperty(\n                     MessageContext.CHARACTER_SET_ENCODING))) {",
+                "raw_url": "https://github.com/apache/axis2-java/raw/4d169745c639f40aa6f5e1f5ed610139bb84c7a9/modules/core/src/org/apache/axis2/transport/http/HTTPTransportUtils.java",
+                "sha": "aff0fc1e7eeaf8a1bf872a489bedbf8866dd05bc",
+                "status": "modified"
+            },
+            {
+                "additions": 8,
+                "blob_url": "https://github.com/apache/axis2-java/blob/4d169745c639f40aa6f5e1f5ed610139bb84c7a9/modules/core/src/org/apache/axis2/util/Utils.java",
+                "changes": 13,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/core/src/org/apache/axis2/util/Utils.java?ref=4d169745c639f40aa6f5e1f5ed610139bb84c7a9",
+                "deletions": 5,
+                "filename": "modules/core/src/org/apache/axis2/util/Utils.java",
+                "patch": "@@ -162,6 +162,9 @@ private static ServiceContext fillServiceContextAndServiceGroupContext(AxisServi\n      *         the path after the first element. all ? parameters are discarded.\n      */\n     public static String[] parseRequestURLForServiceAndOperation(String path) {\n+        if (path == null) {\n+            return null;\n+        }\n         String[] values = new String[2];\n \n         // TODO. This is kind of brittle. Any service with the name /services would cause fun.\n@@ -201,10 +204,10 @@ public static ConfigurationContext getNewConfigurationContext(String repositry)\n         }\n         File axis2xml = new File(file, \"axis.xml\");\n         String axis2xmlString = null;\n-        if(axis2xml.exists()){\n+        if (axis2xml.exists()) {\n             axis2xmlString = axis2xml.getName();\n         }\n-        return ConfigurationContextFactory.createConfigurationContextFromFileSystem(file.getAbsolutePath(),axis2xmlString);\n+        return ConfigurationContextFactory.createConfigurationContextFromFileSystem(file.getAbsolutePath(), axis2xmlString);\n     }\n \n     public static String getParameterValue(Parameter param) {\n@@ -243,9 +246,9 @@ public static String getModuleVersion(String moduleName) {\n \n \n     public static QName getModuleName(String name, String versionID) {\n-        String moduleName ;\n-        if(versionID!=null && !versionID.equals(\"\")){\n-           moduleName = name + \"-\" + versionID;\n+        String moduleName;\n+        if (versionID != null && !versionID.equals(\"\")) {\n+            moduleName = name + \"-\" + versionID;\n         } else {\n             moduleName = name;\n         }",
+                "raw_url": "https://github.com/apache/axis2-java/raw/4d169745c639f40aa6f5e1f5ed610139bb84c7a9/modules/core/src/org/apache/axis2/util/Utils.java",
+                "sha": "998f8debcdd401876d32e765aacf8a9b4508cd22",
+                "status": "modified"
+            }
+        ],
+        "message": "Preventing (some more) NPE.\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@372100 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/7d0072fe502499a380e7b1cb310a8b3a912cc734",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "UtilsTest.java",
+            "TestUtils.java"
+        ]
+    },
+    "axis2-java_4ebe016": {
+        "bug_id": "axis2-java_4ebe016",
+        "commit": "https://github.com/apache/axis2-java/commit/4ebe016853eec6627de32ff182e3d1d9d4c9d7a4",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/axis2-java/blob/4ebe016853eec6627de32ff182e3d1d9d4c9d7a4/modules/kernel/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java?ref=4ebe016853eec6627de32ff182e3d1d9d4c9d7a4",
+                "deletions": 1,
+                "filename": "modules/kernel/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java",
+                "patch": "@@ -674,7 +674,7 @@ private void AddQNameReference(AxisMessage outMessage,\n                                 (QName) resolvedRpcWrappedElementMap.get(\n                                         wsdl4jOperation.getName() + WRAPPED_OUTPUTNAME_SUFFIX));\n \n-                    } else {\n+                    } else if(wsdl4jMessage != null){\n                         //pick the first part from the list and take that as the relevant part\n                         //it is somewhat questionable whether the first part gets picked\n                         //but we'll have to take a chance here",
+                "raw_url": "https://github.com/apache/axis2-java/raw/4ebe016853eec6627de32ff182e3d1d9d4c9d7a4/modules/kernel/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java",
+                "sha": "80feef11ac88dd2fd98ff01b298a0f7adb5aa179",
+                "status": "modified"
+            }
+        ],
+        "message": "prevent NPE\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@448920 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/9037e5cef394b07137112ad5a9a18a60be69fa27",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "WSDL11ToAxisServiceBuilderTest.java"
+        ]
+    },
+    "axis2-java_514688c": {
+        "bug_id": "axis2-java_514688c",
+        "commit": "https://github.com/apache/axis2-java/commit/514688c57cfd3e28e6ddbf520efc62c23c17fab2",
+        "file": [
+            {
+                "additions": 12,
+                "blob_url": "https://github.com/apache/axis2-java/blob/514688c57cfd3e28e6ddbf520efc62c23c17fab2/modules/kernel/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java",
+                "changes": 18,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java?ref=514688c57cfd3e28e6ddbf520efc62c23c17fab2",
+                "deletions": 6,
+                "filename": "modules/kernel/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java",
+                "patch": "@@ -534,13 +534,19 @@ private void processBinding(Binding binding, Definition dif)\n     private Operation findOperation(PortType portType, BindingOperation wsdl4jBindingOperation) {\n         Operation op = wsdl4jBindingOperation\n                 .getOperation();\n-        String input = op.getInput().getName();\n-        String output = op.getOutput().getName();\n-        if(\":none\".equals(input)) {\n-            input = null;\n+        String input = null;\n+        if(op != null && op.getInput() != null) {\n+            input = op.getInput().getName();\n+            if(\":none\".equals(input)) {\n+                input = null;\n+            }\n         }\n-        if(\":none\".equals(output)) {\n-            output = null;\n+        String output = null;\n+        if(op != null && op.getOutput() != null) {\n+            output = op.getOutput().getName();\n+            if(\":none\".equals(output)) {\n+                output = null;\n+            }\n         }\n         Operation op2 = portType.getOperation(op.getName(), input, output);\n         return ((op2 == null) ? op : op2);",
+                "raw_url": "https://github.com/apache/axis2-java/raw/514688c57cfd3e28e6ddbf520efc62c23c17fab2/modules/kernel/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java",
+                "sha": "614a26868bf8ba1ff655797b5ff53eed64e663f5",
+                "status": "modified"
+            }
+        ],
+        "message": "more checks to prevent NPE\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/branches/java/1_1@467538 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/6044fb7078e098b01838f6114c2ff7dd479e09c0",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "WSDL11ToAxisServiceBuilderTest.java"
+        ]
+    },
+    "axis2-java_5151e4e": {
+        "bug_id": "axis2-java_5151e4e",
+        "commit": "https://github.com/apache/axis2-java/commit/5151e4e1791c718614bd18ffe961ab3f13bef76e",
+        "file": [
+            {
+                "additions": 5,
+                "blob_url": "https://github.com/apache/axis2-java/blob/5151e4e1791c718614bd18ffe961ab3f13bef76e/modules/kernel/src/org/apache/axis2/dispatchers/SOAPMessageBodyBasedDispatcher.java",
+                "changes": 7,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/dispatchers/SOAPMessageBodyBasedDispatcher.java?ref=5151e4e1791c718614bd18ffe961ab3f13bef76e",
+                "deletions": 2,
+                "filename": "modules/kernel/src/org/apache/axis2/dispatchers/SOAPMessageBodyBasedDispatcher.java",
+                "patch": "@@ -57,8 +57,11 @@ public AxisOperation findOperation(AxisService service, MessageContext messageCo\n         AxisOperation axisOperation = null;\n         if (localName != null){\n            OMNamespace ns = messageContext.getEnvelope().getSOAPBodyFirstElementNS();\n-           QName qName = new QName(ns.getNamespaceURI(), localName);\n-           axisOperation = service.getOperationByMessageElementQName(qName);\n+           QName qName = null;\n+           if (ns != null) {\n+               qName = new QName(ns.getNamespaceURI(), localName);\n+               axisOperation = service.getOperationByMessageElementQName(qName);\n+           }\n \n            // this is required for services uses the RPC message receiver\n            if (axisOperation == null){",
+                "raw_url": "https://github.com/apache/axis2-java/raw/5151e4e1791c718614bd18ffe961ab3f13bef76e/modules/kernel/src/org/apache/axis2/dispatchers/SOAPMessageBodyBasedDispatcher.java",
+                "sha": "0c75700b47ced07f0b6e9d7412db1b8640308f28",
+                "status": "modified"
+            },
+            {
+                "additions": 5,
+                "blob_url": "https://github.com/apache/axis2-java/blob/5151e4e1791c718614bd18ffe961ab3f13bef76e/modules/kernel/src/org/apache/axis2/dispatchers/SOAPMessageBodyBasedOperationDispatcher.java",
+                "changes": 7,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/dispatchers/SOAPMessageBodyBasedOperationDispatcher.java?ref=5151e4e1791c718614bd18ffe961ab3f13bef76e",
+                "deletions": 2,
+                "filename": "modules/kernel/src/org/apache/axis2/dispatchers/SOAPMessageBodyBasedOperationDispatcher.java",
+                "patch": "@@ -52,9 +52,12 @@ public AxisOperation findOperation(AxisService service, MessageContext messageCo\n \n         if (axisOperation == null) {\n             OMNamespace ns = messageContext.getEnvelope().getSOAPBodyFirstElementNS();\n-            QName qName = new QName(ns.getNamespaceURI(), localPart);\n-            axisOperation = service.getOperationByMessageElementQName(qName);\n+            if (ns != null) {\n+                QName qName = new QName(ns.getNamespaceURI(), localPart);\n+                axisOperation = service.getOperationByMessageElementQName(qName);\n+            }\n             if (axisOperation == null) {\n+                QName qName = new QName(localPart);\n                 axisOperation = service.getOperation(qName);\n             }\n         }",
+                "raw_url": "https://github.com/apache/axis2-java/raw/5151e4e1791c718614bd18ffe961ab3f13bef76e/modules/kernel/src/org/apache/axis2/dispatchers/SOAPMessageBodyBasedOperationDispatcher.java",
+                "sha": "d764e52fb2fc84a880b95d0aa0d7d8a5935cb9b8",
+                "status": "modified"
+            }
+        ],
+        "message": "Quick fix to avoid NPE.\n\nIf the namespace is not available, then this is an unqualified element and may not have an OMNamespaceImpl.\nIn such cases, the operation lookup strategy should be used.  \n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@636127 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/e95ff3db8bffb2cc359b9e6e59b5b5a3908108f2",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "SOAPMessageBodyBasedOperationDispatcherTest.java"
+        ]
+    },
+    "axis2-java_6deb3c0": {
+        "bug_id": "axis2-java_6deb3c0",
+        "commit": "https://github.com/apache/axis2-java/commit/6deb3c0556a7d10a63bd41bba465cfe5e2f9d72c",
+        "file": [
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/axis2-java/blob/6deb3c0556a7d10a63bd41bba465cfe5e2f9d72c/modules/kernel/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java?ref=6deb3c0556a7d10a63bd41bba465cfe5e2f9d72c",
+                "deletions": 0,
+                "filename": "modules/kernel/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java",
+                "patch": "@@ -505,6 +505,9 @@ private void processBinding(\n                     Object faultMapKey = faultKeys.next();\n                     BindingFault bindingFault = (BindingFault) bindingFaultsMap.get(faultMapKey);\n                     Fault wsdl4jFault = wsdl4jOperation.getFault(bindingFault.getName());\n+                    if(wsdl4jFault == null) {\n+                        throw new AxisFault(\"fault \\\"\" + bindingFault.getName() + \"\\\" not found in the Operation \" + wsdl4jOperation.getName());\n+                    }\n                     AxisMessage faultMessage = findFaultMessage(wsdl4jFault.getMessage().getQName().getLocalPart(), operation.getFaultMessages());\n \n                     AddQNameReference(faultMessage, wsdl4jFault.getMessage());",
+                "raw_url": "https://github.com/apache/axis2-java/raw/6deb3c0556a7d10a63bd41bba465cfe5e2f9d72c/modules/kernel/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java",
+                "sha": "dc3497b452a2877d8005e84f727e583073f01e54",
+                "status": "modified"
+            }
+        ],
+        "message": "Prevent NPE and throw a better exception\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@451361 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/79f729b56b1da706cbe38b85c935baaea91cbc1a",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "WSDL11ToAxisServiceBuilderTest.java"
+        ]
+    },
+    "axis2-java_72bb2e1": {
+        "bug_id": "axis2-java_72bb2e1",
+        "commit": "https://github.com/apache/axis2-java/commit/72bb2e1b98f4f8663690f7da5efc3b3f5aa4046b",
+        "file": [
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/axis2-java/blob/72bb2e1b98f4f8663690f7da5efc3b3f5aa4046b/modules/kernel/src/org/apache/axis2/util/SchemaUtil.java",
+                "changes": 7,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/util/SchemaUtil.java?ref=72bb2e1b98f4f8663690f7da5efc3b3f5aa4046b",
+                "deletions": 3,
+                "filename": "modules/kernel/src/org/apache/axis2/util/SchemaUtil.java",
+                "patch": "@@ -134,14 +134,15 @@ public static SOAPEnvelope handleMediaTypeURLEncoded(MessageContext msgCtxt,\n                         while (iterator.hasNext()) {\n                             XmlSchemaElement innerElement = (XmlSchemaElement) iterator.next();\n                             QName qName = innerElement.getQName();\n-                            String[] parameterValuesArray = (String[]) parameterMap.get(qName.getLocalPart());\n+                            String name = qName != null ? qName.getLocalPart() : innerElement.getName();\n+                            String[] parameterValuesArray = (String[]) parameterMap.get(name);\n                             if (parameterValuesArray != null &&\n                                 !\"\".equals(parameterValuesArray[0]) && parameterValuesArray[0] != null)\n                             {\n-                                OMNamespace ns = (qName.getNamespaceURI() == null || qName.getNamespaceURI().length() == 0) ?\n+                                OMNamespace ns = (qName == null || qName.getNamespaceURI() == null || qName.getNamespaceURI().length() == 0) ?\n                                         null :\n                                         soapFactory.createOMNamespace(qName.getNamespaceURI(), null);\n-                                soapFactory.createOMElement(qName.getLocalPart(), ns,\n+                                soapFactory.createOMElement(name, ns,\n                                                             bodyFirstChild).setText(parameterValuesArray[0]);\n                             } else {\n                                 throw new AxisFault(\"Required element \" + qName +",
+                "raw_url": "https://github.com/apache/axis2-java/raw/72bb2e1b98f4f8663690f7da5efc3b3f5aa4046b/modules/kernel/src/org/apache/axis2/util/SchemaUtil.java",
+                "sha": "68920bd83104c5c6acf9815c79744f8cea7f8f2f",
+                "status": "modified"
+            }
+        ],
+        "message": "testing yesterdays change with aar in  AXIS2-1687. add more checks to prevent NPE\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/branches/java/1_1@474024 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/48adc8e2e0b4761ad8528dd8a4ec96e4d76ec98b",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "SchemaUtilTest.java"
+        ]
+    },
+    "axis2-java_74218c1": {
+        "bug_id": "axis2-java_74218c1",
+        "commit": "https://github.com/apache/axis2-java/commit/74218c139b57257a13e808ccca496f7e805d198d",
+        "file": [
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/axis2-java/blob/74218c139b57257a13e808ccca496f7e805d198d/modules/core/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java",
+                "changes": 5,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/core/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java?ref=74218c139b57257a13e808ccca496f7e805d198d",
+                "deletions": 1,
+                "filename": "modules/core/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java",
+                "patch": "@@ -1088,7 +1088,7 @@ private Definition readInTheWSDLFile(InputStream in) throws WSDLException {\n      */\r\n     private void copyExtensibleElements(List wsdl4jExtensibleElements,\r\n                                         Definition wsdl4jDefinition, AxisDescription description,\r\n-                                        String originOfExtensibilityElements) {\r\n+                                        String originOfExtensibilityElements) throws AxisFault {\r\n         Iterator iterator = wsdl4jExtensibleElements.iterator();\r\n         while (iterator.hasNext()) {\r\n             ExtensibilityElement wsdl4jElement = (ExtensibilityElement) iterator\r\n@@ -1200,6 +1200,9 @@ private void copyExtensibleElements(List wsdl4jExtensibleElements,\n                     //find the relevant schema part from the messages\r\n                     Message msg = wsdl4jDefinition.getMessage(soapHeader\r\n                             .getMessage());\r\n+                    if(msg == null) {\r\n+                        throw new AxisFault(\"message \" + soapHeader.getMessage() + \" not found in the WSDL \");\r\n+                    }\r\n                     Part msgPart = msg.getPart(soapHeader.getPart());\r\n                     headerMessage.setElement(msgPart.getElementName());\r\n                 }\r",
+                "raw_url": "https://github.com/apache/axis2-java/raw/74218c139b57257a13e808ccca496f7e805d198d/modules/core/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java",
+                "sha": "a25a11334af12734e4efc619477163dff546a8f2",
+                "status": "modified"
+            }
+        ],
+        "message": "prevent NPE if the wsdl:message is missing, throw an exception instead with the qname of the missing message\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@421416 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/d04c6c48575910ebb5fbd95caeb3117d5deff8fc",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "WSDL11ToAxisServiceBuilderTest.java"
+        ]
+    },
+    "axis2-java_751a126": {
+        "bug_id": "axis2-java_751a126",
+        "commit": "https://github.com/apache/axis2-java/commit/751a126fe364d9c65def1f90caf5f08798f9a268",
+        "file": [
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/axis2-java/blob/751a126fe364d9c65def1f90caf5f08798f9a268/modules/kernel/src/org/apache/axis2/context/MessageContext.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/context/MessageContext.java?ref=751a126fe364d9c65def1f90caf5f08798f9a268",
+                "deletions": 0,
+                "filename": "modules/kernel/src/org/apache/axis2/context/MessageContext.java",
+                "patch": "@@ -1149,6 +1149,10 @@ public boolean isEngaged(QName moduleName) {\n      * @return boolean\n      */\n     public boolean isHeaderPresent() {\n+        // If there's no envelope there can't be a header.\n+        if(this.envelope == null){\n+            return false;\n+        }\n         OMElement node = this.envelope.getFirstElement();\n         if (node == null) {\n             return false;",
+                "raw_url": "https://github.com/apache/axis2-java/raw/751a126fe364d9c65def1f90caf5f08798f9a268/modules/kernel/src/org/apache/axis2/context/MessageContext.java",
+                "sha": "d740a7850c2d8df58226382862967080e38a76f2",
+                "status": "modified"
+            }
+        ],
+        "message": "Prevent NPE from isHeaderPresent if no envelope associated\nwith the MessageContext. (e.g. if the server 500's with no\nenvelope).\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@478120 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/1ec166a3cd485982b404b928413c3bd5b38eb2e2",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "MessageContextTest.java",
+            "MessageContextTests.java"
+        ]
+    },
+    "axis2-java_76831e0": {
+        "bug_id": "axis2-java_76831e0",
+        "commit": "https://github.com/apache/axis2-java/commit/76831e0a5c6250b85eeb888c7bad336b8029eacf",
+        "file": [
+            {
+                "additions": 13,
+                "blob_url": "https://github.com/apache/axis2-java/blob/76831e0a5c6250b85eeb888c7bad336b8029eacf/modules/addressing/src/org/apache/axis2/handlers/addressing/AddressingValidationHandler.java",
+                "changes": 23,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/addressing/src/org/apache/axis2/handlers/addressing/AddressingValidationHandler.java?ref=76831e0a5c6250b85eeb888c7bad336b8029eacf",
+                "deletions": 10,
+                "filename": "modules/addressing/src/org/apache/axis2/handlers/addressing/AddressingValidationHandler.java",
+                "patch": "@@ -148,16 +148,19 @@ private void checkMessageIDHeader(MessageContext msgContext) throws AxisFault {\n         }\n \n         AxisOperation axisOperation = msgContext.getAxisOperation();\n-        String mep = axisOperation.getMessageExchangePattern();\n-        int mepConstant = Utils.getAxisSpecifMEPConstant(mep);\n-\n-        if (mepConstant == WSDLConstants.MEP_CONSTANT_IN_OUT ||\n-                mepConstant == WSDLConstants.MEP_CONSTANT_IN_OPTIONAL_OUT ||\n-                mepConstant == WSDLConstants.MEP_CONSTANT_ROBUST_IN_ONLY) {\n-            String messageId = msgContext.getOptions().getMessageId();\n-            if (messageId == null || \"\".equals(messageId)) {\n-                AddressingFaultsHelper\n-                        .triggerMessageAddressingRequiredFault(msgContext, WSA_MESSAGE_ID);\n+        \n+        if (axisOperation != null) {\n+            String mep = axisOperation.getMessageExchangePattern();\n+            int mepConstant = Utils.getAxisSpecifMEPConstant(mep);\n+            \n+            if (mepConstant == WSDLConstants.MEP_CONSTANT_IN_OUT ||\n+                    mepConstant == WSDLConstants.MEP_CONSTANT_IN_OPTIONAL_OUT ||\n+                    mepConstant == WSDLConstants.MEP_CONSTANT_ROBUST_IN_ONLY) {\n+                String messageId = msgContext.getOptions().getMessageId();\n+                if (messageId == null || \"\".equals(messageId)) {\n+                    AddressingFaultsHelper\n+                    .triggerMessageAddressingRequiredFault(msgContext, WSA_MESSAGE_ID);\n+                }\n             }\n         }\n     }",
+                "raw_url": "https://github.com/apache/axis2-java/raw/76831e0a5c6250b85eeb888c7bad336b8029eacf/modules/addressing/src/org/apache/axis2/handlers/addressing/AddressingValidationHandler.java",
+                "sha": "8b624cd9442fc2ba0d8774b8cd828f404878c772",
+                "status": "modified"
+            }
+        ],
+        "message": "Change to AddressingValidationHandler to remove potential NPE.\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@686051 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/7c78199888b11e644600096dfd5d6071402aa3cf",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "AddressingValidationHandlerTest.java"
+        ]
+    },
+    "axis2-java_7a18327": {
+        "bug_id": "axis2-java_7a18327",
+        "commit": "https://github.com/apache/axis2-java/commit/7a183273a0678ba9185c0916623fc8e3edf54e40",
+        "file": [
+            {
+                "additions": 11,
+                "blob_url": "https://github.com/apache/axis2-java/blob/7a183273a0678ba9185c0916623fc8e3edf54e40/modules/metadata/src/org/apache/axis2/jaxws/description/impl/OperationDescriptionImpl.java",
+                "changes": 19,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/metadata/src/org/apache/axis2/jaxws/description/impl/OperationDescriptionImpl.java?ref=7a183273a0678ba9185c0916623fc8e3edf54e40",
+                "deletions": 8,
+                "filename": "modules/metadata/src/org/apache/axis2/jaxws/description/impl/OperationDescriptionImpl.java",
+                "patch": "@@ -534,6 +534,10 @@ private void setFaultActions(AxisOperation newAxisOperation,\n                     log.debug(\"Default faultAction = \"+faultAction);\n                 }\n                 \n+                if (log.isDebugEnabled()) {\n+                    log.debug(\"Default faultAction = \"+faultAction);\n+                }\n+                \n                 newAxisOperation.addFaultAction(faultDesc.getExceptionClassName(),  faultAction);\n                 newAxisOperation.setFaultMessages(faultMessage);\n             }\n@@ -563,19 +567,18 @@ else if(faultAction.className() != null) {\n                     }\n                     FaultDescription faultDesc = resolveFaultByExceptionName(className);\n                     if (faultDesc != null)  {\n-                        \n                         String faultActionString = faultAction.value();\n                         if (log.isDebugEnabled()) {\n-                            log.debug(\"SANDERKA: faultAction value = \"+faultActionString);\n+                            log.debug(\"faultAction value = \"+faultActionString);\n                         }\n-                        \n-                        if (faultActionString.equals(\"\")) {\n+\n+                        if (faultActionString == null || faultActionString.equals(\"\")) {\n                             faultActionString = \n                                 WSDL11ActionHelper.getFaultActionFromStringInformation( targetNS, \n-                                                portTypeName, \n-                                                operationName, \n-                                                className.substring((className.lastIndexOf('.'))+1));\n-                            \n+                                        portTypeName, \n+                                        operationName, \n+                                        className.substring((className.lastIndexOf('.'))+1));\n+\n                             if (log.isDebugEnabled()) {\n                                 log.debug(\"New faultAction value = \"+faultActionString);\n                             }",
+                "raw_url": "https://github.com/apache/axis2-java/raw/7a183273a0678ba9185c0916623fc8e3edf54e40/modules/metadata/src/org/apache/axis2/jaxws/description/impl/OperationDescriptionImpl.java",
+                "sha": "aaeeaa6c71561f06ee1995f08be442184f490ecf",
+                "status": "modified"
+            }
+        ],
+        "message": "AXIS2-4839\nContributor: Brian De Pradine\nCommitter: Rich Scheuerle\n\nI changed Brian's commit slightly to remove the possibility of an NPE.\n\ngit-svn-id: https://svn.apache.org/repos/asf/axis/axis2/java/core/trunk@1005887 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/9af08cbb5853c2f22e7df38a8bc5c77d87a344af",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "OperationDescriptionImplTests.java"
+        ]
+    },
+    "axis2-java_7b55451": {
+        "bug_id": "axis2-java_7b55451",
+        "commit": "https://github.com/apache/axis2-java/commit/7b554517db6455e5157c10625832303766859b4a",
+        "file": [
+            {
+                "additions": 5,
+                "blob_url": "https://github.com/apache/axis2-java/blob/7b554517db6455e5157c10625832303766859b4a/modules/metadata/src/org/apache/axis2/jaxws/description/impl/ServiceDescriptionImpl.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/metadata/src/org/apache/axis2/jaxws/description/impl/ServiceDescriptionImpl.java?ref=7b554517db6455e5157c10625832303766859b4a",
+                "deletions": 1,
+                "filename": "modules/metadata/src/org/apache/axis2/jaxws/description/impl/ServiceDescriptionImpl.java",
+                "patch": "@@ -807,7 +807,11 @@ private URL getWSDLURL(String wsdlLocation) {\n         // Look for the WSDL file as follows:\n         // 1) As a resource on the classpath\n \n-        URL url = composite.getClassLoader().getResource(wsdlLocation);\n+        ClassLoader loader = composite.getClassLoader();\n+        URL url = null;\n+        if (loader != null) {\n+            url = loader.getResource(wsdlLocation);\n+        }\n \n         // 2) As a fully specified URL\n         if (url == null) {",
+                "raw_url": "https://github.com/apache/axis2-java/raw/7b554517db6455e5157c10625832303766859b4a/modules/metadata/src/org/apache/axis2/jaxws/description/impl/ServiceDescriptionImpl.java",
+                "sha": "28639e161c34d52996d1a4c5f9aafb56041955fb",
+                "status": "modified"
+            }
+        ],
+        "message": "Fix a build break in JDK1.6, add some defensive code for NPE\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@613916 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/0136cd217ac5974812d73718c163ab2d86ca783d",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "ServiceDescriptionImplTests.java"
+        ]
+    },
+    "axis2-java_9037e5c": {
+        "bug_id": "axis2-java_9037e5c",
+        "commit": "https://github.com/apache/axis2-java/commit/9037e5cef394b07137112ad5a9a18a60be69fa27",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/axis2-java/blob/9037e5cef394b07137112ad5a9a18a60be69fa27/modules/kernel/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java?ref=9037e5cef394b07137112ad5a9a18a60be69fa27",
+                "deletions": 1,
+                "filename": "modules/kernel/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java",
+                "patch": "@@ -562,7 +562,7 @@ private void AddQNameReference(AxisMessage inMessage,\n                         //the list and add it - the name for this is just the\n                         inMessage.setElementQName((QName) resolvedRpcWrappedElementMap.get(wsdl4jOperation.getName()));\n \n-                    } else {\n+                    } else if(wsdl4jMessage != null) {\n                         //pick the first part from the list and take that as the relevant part\n                         //it is somewhat questionnable whether the first part gets picked\n                         //but we'll have to take a chance here",
+                "raw_url": "https://github.com/apache/axis2-java/raw/9037e5cef394b07137112ad5a9a18a60be69fa27/modules/kernel/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java",
+                "sha": "775259daf770a5ea544e9f0c546832b717dd1421",
+                "status": "modified"
+            }
+        ],
+        "message": "prevent NPE\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@448919 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/d1da1158c24cde3b63960399f1cd1c579926bbaa",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "WSDL11ToAxisServiceBuilderTest.java"
+        ]
+    },
+    "axis2-java_908410f": {
+        "bug_id": "axis2-java_908410f",
+        "commit": "https://github.com/apache/axis2-java/commit/908410fb6b15169f4bfb909296363af4531c82ff",
+        "file": [
+            {
+                "additions": 26,
+                "blob_url": "https://github.com/apache/axis2-java/blob/908410fb6b15169f4bfb909296363af4531c82ff/modules/metadata/src/org/apache/axis2/jaxws/description/impl/ServiceDescriptionImpl.java",
+                "changes": 32,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/metadata/src/org/apache/axis2/jaxws/description/impl/ServiceDescriptionImpl.java?ref=908410fb6b15169f4bfb909296363af4531c82ff",
+                "deletions": 6,
+                "filename": "modules/metadata/src/org/apache/axis2/jaxws/description/impl/ServiceDescriptionImpl.java",
+                "patch": "@@ -515,13 +515,24 @@ private void setupWsdlDefinition() {\n                         getDBCMap().get(composite.getWebServiceAnnot().endpointInterface());\n \n                 try {\n-                    if (seic.getWsdlDefinition() != null) {\n-                        //set the sdimpl from the SEI composite\n+                    if (seic == null) {\n+                        if (log.isDebugEnabled()) {\n+                            log.debug(\"The SEI class \" + composite.getWebServiceAnnot().endpointInterface() + \" was not found.\");\n+                        }\n+                    }\n+                    if (seic != null && seic.getWsdlDefinition() != null) {\n+                        // set the wsdl def from the SEI composite\n+                        if (log.isDebugEnabled()) {\n+                            log.debug(\"Get the wsdl definition from the SEI composite.\");\n+                        }\n                         this.wsdlURL = seic.getWsdlURL();\n                         this.wsdlWrapper =\n                                 new WSDL4JWrapper(seic.getWsdlURL(), seic.getWsdlDefinition());\n                     } else if (composite.getWsdlDefinition() != null) {\n-                        //set the sdimpl from the impl. class composite\n+                        //set the wsdl def from the impl. class composite\n+                        if (log.isDebugEnabled()) {\n+                            log.debug(\"Get the wsdl definition from the impl class composite.\");\n+                        }\n                         this.wsdlURL = composite.getWsdlURL();\n                         this.wsdlWrapper = new WSDL4JWrapper(composite.getWsdlURL(),\n                                                              composite.getWsdlDefinition());\n@@ -531,20 +542,29 @@ private void setupWsdlDefinition() {\n                     \tif(seic != null\n                     \t\t\t&&\n                     \t\t\tseic.getWebServiceAnnot() != null) {\n-                    \t\twsdlLocation = seic.getWebServiceAnnot().wsdlLocation();\n+                    \t    if (log.isDebugEnabled()) {\n+                    \t        log.debug(\"Get the wsdl location from the SEI composite.\");\n+                    \t    }\n+                    \t    wsdlLocation = seic.getWebServiceAnnot().wsdlLocation();\n                     \t}\n                     \t\n                     \t// now check the impl\n                     \tif(wsdlLocation == null\n                     \t        ||\n                     \t        \"\".equals(wsdlLocation)) {\n-                    \t\twsdlLocation = composite.getWebServiceAnnot().wsdlLocation();\n+                    \t    if (log.isDebugEnabled()) {\n+                    \t        log.debug(\"Get the wsdl location from the impl class composite.\");\n+                            }\n+                    \t    wsdlLocation = composite.getWebServiceAnnot().wsdlLocation();\n                     \t}\n                     \t\n                     \tif(wsdlLocation != null\n                     \t        &&\n                     \t        !\"\".equals(wsdlLocation)) {\n-                    \t\tsetWSDLDefinitionOnDBC(wsdlLocation);\n+                    \t    if (log.isDebugEnabled()) {\n+                    \t        log.debug(\"wsdl location =\" + wsdlLocation);\n+                    \t    }\n+                    \t    setWSDLDefinitionOnDBC(wsdlLocation);\n                     \t}\n                     }\n                 } catch (WSDLException e) {",
+                "raw_url": "https://github.com/apache/axis2-java/raw/908410fb6b15169f4bfb909296363af4531c82ff/modules/metadata/src/org/apache/axis2/jaxws/description/impl/ServiceDescriptionImpl.java",
+                "sha": "7d0bff268d8f55948f13d082c2bcec34164df72f",
+                "status": "modified"
+            }
+        ],
+        "message": "AXIS2-3432\nContributor:Rich Scheuerle\nAvoid NPE and added trace to ServiceDescriptionImpl\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@610433 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/c5e53f7fd7efd503949c3caf65a0802c0712cef6",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "ServiceDescriptionImplTests.java"
+        ]
+    },
+    "axis2-java_9ae93af": {
+        "bug_id": "axis2-java_9ae93af",
+        "commit": "https://github.com/apache/axis2-java/commit/9ae93af64811be7f1cb1b890d811a3daa8d2f82f",
+        "file": [
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/axis2-java/blob/9ae93af64811be7f1cb1b890d811a3daa8d2f82f/modules/core/src/org/apache/axis2/client/ServiceClient.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/core/src/org/apache/axis2/client/ServiceClient.java?ref=9ae93af64811be7f1cb1b890d811a3daa8d2f82f",
+                "deletions": 0,
+                "filename": "modules/core/src/org/apache/axis2/client/ServiceClient.java",
+                "patch": "@@ -156,6 +156,10 @@ public ServiceClient(ConfigurationContext configContext, URL wsdlURL,\n             // already\n             if (this.axisConfig.getService(this.axisService.getName()) == null) {\n                 this.axisConfig.addService(this.axisService);\n+            } else {\n+                throw new AxisFault(Messages.getMessage(\n+                        \"twoservicecannothavesamename\",\n+                        this.axisService.getName()));\n             }\n             ServiceGroupContext sgc = new ServiceGroupContext(this.configContext,\n                     (AxisServiceGroup) this.axisService.getParent());",
+                "raw_url": "https://github.com/apache/axis2-java/raw/9ae93af64811be7f1cb1b890d811a3daa8d2f82f/modules/core/src/org/apache/axis2/client/ServiceClient.java",
+                "sha": "b7b89e297aae7b16cc3cb67f4148c68b9e3a677a",
+                "status": "modified"
+            }
+        ],
+        "message": "Fix for AXIS2-566 - Multiple ServiceClients using the same configurationContext causes NPE\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@394725 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/bc5a128df7367d53131bc48dfd252dc6121e3da8",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "ServiceClientTest.java"
+        ]
+    },
+    "axis2-java_9cf0dfa": {
+        "bug_id": "axis2-java_9cf0dfa",
+        "commit": "https://github.com/apache/axis2-java/commit/9cf0dfa7b14e98934e0be2e97aea1e5f90ad25c1",
+        "file": [
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/axis2-java/blob/9cf0dfa7b14e98934e0be2e97aea1e5f90ad25c1/modules/kernel/src/org/apache/axis2/description/java2wsdl/DefaultSchemaGenerator.java",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/description/java2wsdl/DefaultSchemaGenerator.java?ref=9cf0dfa7b14e98934e0be2e97aea1e5f90ad25c1",
+                "deletions": 0,
+                "filename": "modules/kernel/src/org/apache/axis2/description/java2wsdl/DefaultSchemaGenerator.java",
+                "patch": "@@ -680,6 +680,9 @@ private QName generateSchemaForType(XmlSchemaSequence sequence, JClass type, Str\n     }\n \n     protected boolean isDataHandler(JClass clazz){\n+        if(clazz == null ){\n+            return false;\n+        }\n         String classType = clazz.getQualifiedName();\n         if(\"java.lang.Object\".equals(classType)){\n             return false;",
+                "raw_url": "https://github.com/apache/axis2-java/raw/9cf0dfa7b14e98934e0be2e97aea1e5f90ad25c1/modules/kernel/src/org/apache/axis2/description/java2wsdl/DefaultSchemaGenerator.java",
+                "sha": "2118f140296df344e0fbcd389cdd3d4da069512a",
+                "status": "modified"
+            }
+        ],
+        "message": "oops NPE\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@564548 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/be28633de628865dbfc15e179f7c7e79fec2d063",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "DefaultSchemaGeneratorTest.java"
+        ]
+    },
+    "axis2-java_9d1003e": {
+        "bug_id": "axis2-java_9d1003e",
+        "commit": "https://github.com/apache/axis2-java/commit/9d1003e0b860c6ed0f0db4c9c8eac954758e06e5",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/axis2-java/blob/9d1003e0b860c6ed0f0db4c9c8eac954758e06e5/modules/common/src/org/apache/axis2/i18n/resource.properties",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/common/src/org/apache/axis2/i18n/resource.properties?ref=9d1003e0b860c6ed0f0db4c9c8eac954758e06e5",
+                "deletions": 1,
+                "filename": "modules/common/src/org/apache/axis2/i18n/resource.properties",
+                "patch": "@@ -26,7 +26,7 @@ nowhereToSendError=No where to send the error, the return response path is missi\n errorwhileProcessingFault=Error occured while processing fault, previous error is given in the stack trace\r\n unSupportedMEP=Unsupported MEP {0}\r\n mepClientSupportOnly=This MEP client supports only {0} , and Axis operations supplied supports {1}\r\n-inputstreamNull=Input stream is null while reading for incomming message\r\n+inputstreamNull=Input stream is null while reading for incoming message\r\n unknownTransport=Unknown transport {0}\r\n paramIsNotSpecified={0} parameter is not specified\r\n groovyNoanswer=No answer received from groovy side!!!!\r",
+                "raw_url": "https://github.com/apache/axis2-java/raw/9d1003e0b860c6ed0f0db4c9c8eac954758e06e5/modules/common/src/org/apache/axis2/i18n/resource.properties",
+                "sha": "829292a53744d915467cfa7bf6a1a5325680c2b0",
+                "status": "modified"
+            },
+            {
+                "additions": 8,
+                "blob_url": "https://github.com/apache/axis2-java/blob/9d1003e0b860c6ed0f0db4c9c8eac954758e06e5/modules/core/src/org/apache/axis2/transport/http/CommonsHTTPTransportSender.java",
+                "changes": 27,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/core/src/org/apache/axis2/transport/http/CommonsHTTPTransportSender.java?ref=9d1003e0b860c6ed0f0db4c9c8eac954758e06e5",
+                "deletions": 19,
+                "filename": "modules/core/src/org/apache/axis2/transport/http/CommonsHTTPTransportSender.java",
+                "patch": "@@ -525,34 +525,23 @@ private void transportConfigurationPOST(\n         } else if (postMethod.getStatusCode() == HttpStatus.SC_ACCEPTED) {\n             return;\n         } else if (postMethod.getStatusCode() == HttpStatus.SC_INTERNAL_SERVER_ERROR) {\n-\n             Header contenttypeHheader = postMethod.getResponseHeader(\n                     HTTPConstants.HEADER_CONTENT_TYPE);\n \n-            String value = contenttypeHheader.getValue();\n-            if (value != null) {\n+            if (contenttypeHheader != null) {\n+                String value = contenttypeHheader.getValue();\n                 if (value.indexOf(SOAP11Constants.SOAP_11_CONTENT_TYPE) >= 0 ||\n                         value.indexOf(SOAP12Constants.SOAP_12_CONTENT_TYPE) >= 0) {\n                     processResponse(postMethod, msgContext);\n-                } else {\n-                    /**\n-                     * if the content type is  text/html;charset=utf-8\n-                     */\n-                    throw new AxisFault(\n-                            Messages.getMessage(\n-                                    \"transportError\",\n-                                    String.valueOf(postMethod.getStatusCode()),\n-                                    postMethod.getResponseBodyAsString()));\n+                    return;\n                 }\n             }\n-        } else {\n-            throw new AxisFault(\n-                    Messages.getMessage(\n-                            \"transportError\",\n-                            String.valueOf(postMethod.getStatusCode()),\n-                            postMethod.getResponseBodyAsString()));\n         }\n-\n+        throw new AxisFault(\n+                Messages.getMessage(\n+                        \"transportError\",\n+                        String.valueOf(postMethod.getStatusCode()),\n+                        postMethod.getResponseBodyAsString()));\n     }\n \n     /**",
+                "raw_url": "https://github.com/apache/axis2-java/raw/9d1003e0b860c6ed0f0db4c9c8eac954758e06e5/modules/core/src/org/apache/axis2/transport/http/CommonsHTTPTransportSender.java",
+                "sha": "b481910ca7ce080934e39cff511a71d54eeda3eb",
+                "status": "modified"
+            }
+        ],
+        "message": "- Prevent NPE when content-type is absent\n- Fix a typo \n\n\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@328964 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/9d33820c1dcbf866c4d1c5ba3c6b43e22f8ddcb7",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "CommonsHTTPTransportSenderTest.java"
+        ]
+    },
+    "axis2-java_a052b48": {
+        "bug_id": "axis2-java_a052b48",
+        "commit": "https://github.com/apache/axis2-java/commit/a052b4894604c812605e35d4020188f8210f0474",
+        "file": [
+            {
+                "additions": 47,
+                "blob_url": "https://github.com/apache/axis2-java/blob/a052b4894604c812605e35d4020188f8210f0474/modules/kernel/src/org/apache/axis2/addressing/AddressingHelper.java",
+                "changes": 87,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/addressing/AddressingHelper.java?ref=a052b4894604c812605e35d4020188f8210f0474",
+                "deletions": 40,
+                "filename": "modules/kernel/src/org/apache/axis2/addressing/AddressingHelper.java",
+                "patch": "@@ -24,117 +24,124 @@\n import org.apache.commons.logging.LogFactory;\r\n \r\n public class AddressingHelper {\r\n-    \r\n+\r\n     private static final Log log = LogFactory.getLog(AddressingHelper.class);\r\n-    \r\n+\r\n     /**\r\n      * Returns true if the ReplyTo address does not match one of the supported\r\n      * anonymous urls. If the ReplyTo is not set, anonymous is assumed, per the Final\r\n-     * spec. The AddressingInHandler should have set the ReplyTo to non-null in the \r\n+     * spec. The AddressingInHandler should have set the ReplyTo to non-null in the\r\n      * 2004/08 case to ensure the different semantics. (per AXIS2-885)\r\n-     * \r\n+     *\r\n      * @param messageContext\r\n      * @return\r\n      */\r\n-    public static boolean isReplyRedirected(MessageContext messageContext){\r\n+    public static boolean isReplyRedirected(MessageContext messageContext) {\r\n         EndpointReference replyTo = messageContext.getReplyTo();\r\n-        if(replyTo == null){\r\n-            if(log.isDebugEnabled()){\r\n+        if (replyTo == null) {\r\n+            if (log.isDebugEnabled()) {\r\n                 log.debug(\"isReplyRedirected: ReplyTo is null. Returning false\");\r\n             }\r\n             return false;\r\n-        }else{\r\n+        } else {\r\n             return !replyTo.hasAnonymousAddress();\r\n         }\r\n     }\r\n-    \r\n+\r\n     /**\r\n      * Returns true if the FaultTo address does not match one of the supported\r\n      * anonymous urls. If the FaultTo is not set, the ReplyTo is checked per the\r\n-     * spec. \r\n-     * @see isReplyRedirected\r\n+     * spec.\r\n+     *\r\n      * @param messageContext\r\n      * @return\r\n+     * @see isReplyRedirected\r\n      */\r\n-    public static boolean isFaultRedirected(MessageContext messageContext){\r\n+    public static boolean isFaultRedirected(MessageContext messageContext) {\r\n         EndpointReference faultTo = messageContext.getFaultTo();\r\n-        if(faultTo == null){\r\n-            if(log.isDebugEnabled()){\r\n+        if (faultTo == null) {\r\n+            if (log.isDebugEnabled()) {\r\n                 log.debug(\"isReplyRedirected: FaultTo is null. Returning isReplyRedirected\");\r\n             }\r\n             return isReplyRedirected(messageContext);\r\n-        }else{\r\n-            return !faultTo.hasAnonymousAddress(); \r\n+        } else {\r\n+            return !faultTo.hasAnonymousAddress();\r\n         }\r\n     }\r\n-    \r\n+\r\n     /**\r\n      * Extract the Parameter repreesnting the Anonymous flag from the AxisOperation\r\n      * and return the String value. Return the default of \"optional\" if not specified.\r\n+     *\r\n      * @param axisOperation\r\n      * @return\r\n      */\r\n-    public static String getAnonymousParameterValue(AxisOperation axisOperation){\r\n-        String value = Utils.getParameterValue(axisOperation.getParameter(AddressingConstants.WSAW_ANONYMOUS_PARAMETER_NAME));\r\n-        if(log.isDebugEnabled()){\r\n-            log.debug(\"getAnonymousParameterValue: value: '\"+value+\"'\");\r\n+    public static String getAnonymousParameterValue(AxisOperation axisOperation) {\r\n+        String value = \"\";\r\n+        if (axisOperation != null) {\r\n+            value = Utils.getParameterValue(axisOperation.getParameter(AddressingConstants.WSAW_ANONYMOUS_PARAMETER_NAME));\r\n+            if (log.isDebugEnabled()) {\r\n+                log.debug(\"getAnonymousParameterValue: value: '\" + value + \"'\");\r\n+            }\r\n         }\r\n-        if(value == null || \"\".equals(value.trim())){\r\n+\r\n+        if (value == null || \"\".equals(value.trim())) {\r\n             value = \"optional\";\r\n         }\r\n         return value.trim();\r\n     }\r\n-    \r\n+\r\n     /**\r\n      * Set the value of an existing unlocked Parameter representing Anonymous or add a new one if one\r\n      * does not exist. If a locked Parameter of the same name already exists the method will trace and\r\n      * return.\r\n+     *\r\n      * @param axisOperation\r\n      * @param value\r\n      */\r\n-    public static void setAnonymousParameterValue(AxisOperation axisOperation, String value){\r\n-        if(value == null){\r\n-            if(log.isDebugEnabled()){\r\n+    public static void setAnonymousParameterValue(AxisOperation axisOperation, String value) {\r\n+        if (value == null) {\r\n+            if (log.isDebugEnabled()) {\r\n                 log.debug(\"setAnonymousParameterValue: value passed in is null. return\");\r\n             }\r\n             return;\r\n         }\r\n-        \r\n+\r\n         Parameter param = axisOperation.getParameter(AddressingConstants.WSAW_ANONYMOUS_PARAMETER_NAME);\r\n         // If an existing parameter exists\r\n-        if(param !=null){\r\n-            if(log.isDebugEnabled()){\r\n+        if (param != null) {\r\n+            if (log.isDebugEnabled()) {\r\n                 log.debug(\"setAnonymousParameterValue: Parameter already exists\");\r\n             }\r\n             // and is not locked\r\n-            if(!param.isLocked()){\r\n-                if(log.isDebugEnabled()){\r\n-                    log.debug(\"setAnonymousParameterValue: Parameter not locked. Setting value: \"+value);\r\n+            if (!param.isLocked()) {\r\n+                if (log.isDebugEnabled()) {\r\n+                    log.debug(\"setAnonymousParameterValue: Parameter not locked. Setting value: \" + value);\r\n                 }\r\n                 // set the value\r\n                 param.setValue(value);\r\n             }\r\n-        }else{\r\n+        } else {\r\n             // otherwise, if no Parameter exists\r\n-            if(log.isDebugEnabled()){\r\n+            if (log.isDebugEnabled()) {\r\n                 log.debug(\"setAnonymousParameterValue: Parameter does not exist\");\r\n             }\r\n             // Create new Parameter with correct name/value\r\n             param = new Parameter();\r\n             param.setName(AddressingConstants.WSAW_ANONYMOUS_PARAMETER_NAME);\r\n             param.setValue(value);\r\n-            try{\r\n-                if(log.isDebugEnabled()){\r\n-                    log.debug(\"setAnonymousParameterValue: Adding parameter with value: \"+value);\r\n+            try {\r\n+                if (log.isDebugEnabled()) {\r\n+                    log.debug(\"setAnonymousParameterValue: Adding parameter with value: \" + value);\r\n                 }\r\n                 // and add it to the AxisOperation object\r\n                 axisOperation.addParameter(param);\r\n-            }catch(AxisFault af){\r\n+            } catch (AxisFault af) {\r\n                 // This should not happen. AxisFault is only ever thrown when a locked Parameter\r\n                 // of the same name already exists and this should be dealt with by the outer\r\n                 // if statement.\r\n-                if(log.isDebugEnabled()){\r\n-                    log.debug(\"setAnonymousParameterValue: addParameter failed: \"+af.getMessage());\r\n+                if (log.isDebugEnabled()) {\r\n+                    log.debug(\"setAnonymousParameterValue: addParameter failed: \" + af.getMessage());\r\n                 }\r\n             }\r\n         }\r",
+                "raw_url": "https://github.com/apache/axis2-java/raw/a052b4894604c812605e35d4020188f8210f0474/modules/kernel/src/org/apache/axis2/addressing/AddressingHelper.java",
+                "sha": "e7212c97f4a1634ab4d2668f4cfa3b0dceb0ff18",
+                "status": "modified"
+            }
+        ],
+        "message": "Fixing a possible NPE.\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@442311 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/c813da232b97ab742ef07e0f4acc1c25dcd70617",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "AddressingHelperTest.java"
+        ]
+    },
+    "axis2-java_a44fabc": {
+        "bug_id": "axis2-java_a44fabc",
+        "commit": "https://github.com/apache/axis2-java/commit/a44fabc66c95010a56b9b30d21e5437051dbe8b1",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/axis2-java/blob/a44fabc66c95010a56b9b30d21e5437051dbe8b1/modules/metadata/src/org/apache/axis2/jaxws/util/WSToolingUtils.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/metadata/src/org/apache/axis2/jaxws/util/WSToolingUtils.java?ref=a44fabc66c95010a56b9b30d21e5437051dbe8b1",
+                "deletions": 1,
+                "filename": "modules/metadata/src/org/apache/axis2/jaxws/util/WSToolingUtils.java",
+                "patch": "@@ -71,7 +71,7 @@ public static String getWsGenVersion() throws ClassNotFoundException, IOExceptio\n                 if (log.isDebugEnabled()) {\r\n                     log.debug(\"Exception thrown from getWsGenVersion: \" + e2.getMessage(), e2);\r\n                 }\r\n-                throw (ClassNotFoundException) e2.getException();\r\n+                throw (ClassNotFoundException) e2;\r\n             }\r\n         }\r\n \r",
+                "raw_url": "https://github.com/apache/axis2-java/raw/a44fabc66c95010a56b9b30d21e5437051dbe8b1/modules/metadata/src/org/apache/axis2/jaxws/util/WSToolingUtils.java",
+                "sha": "f686ac2bd623dea4842b24b1bda2f3c7eed49b7e",
+                "status": "modified"
+            }
+        ],
+        "message": "Fix NPE if tooling classes can't be found.\n\ngit-svn-id: https://svn.apache.org/repos/asf/axis/axis2/java/core/trunk@1000664 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/d2e93a5c8b99443c71a8e1544e1b0e85625549b6",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "WSToolingUtilsTests.java"
+        ]
+    },
+    "axis2-java_a5e753a": {
+        "bug_id": "axis2-java_a5e753a",
+        "commit": "https://github.com/apache/axis2-java/commit/a5e753a2a123ff1d781640746b90a4cbdf97d89a",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/axis2-java/blob/a5e753a2a123ff1d781640746b90a4cbdf97d89a/modules/codegen/src/org/apache/axis2/rpc/receivers/RPCMessageReceiver.java",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/codegen/src/org/apache/axis2/rpc/receivers/RPCMessageReceiver.java?ref=a5e753a2a123ff1d781640746b90a4cbdf97d89a",
+                "deletions": 2,
+                "filename": "modules/codegen/src/org/apache/axis2/rpc/receivers/RPCMessageReceiver.java",
+                "patch": "@@ -33,7 +33,6 @@\n import org.apache.axis2.engine.DependencyManager;\r\n import org.apache.axis2.receivers.AbstractInOutSyncMessageReceiver;\r\n import org.apache.axis2.wsdl.WSDLConstants;\r\n-import org.apache.axis2.wsdl.util.CommandLineOptionConstants;\r\n import org.apache.commons.logging.Log;\r\n import org.apache.commons.logging.LogFactory;\r\n \r\n@@ -137,7 +136,7 @@ public void invokeBusinessLogic(MessageContext inMessage, MessageContext outMess\n \r\n         } catch (Exception e) {\r\n             String msg = \"Exception occurred while trying to invoke service method \" +\r\n-                         method.getName();\r\n+                    inMessage.getAxisOperation().getName().getLocalPart();\r\n             log.error(msg, e);\r\n             throw new AxisFault(msg, e);\r\n         }\r",
+                "raw_url": "https://github.com/apache/axis2-java/raw/a5e753a2a123ff1d781640746b90a4cbdf97d89a/modules/codegen/src/org/apache/axis2/rpc/receivers/RPCMessageReceiver.java",
+                "sha": "5f4d7f9584ba4b81b7cdf8d8a292a8e17926fc03",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/axis2-java/blob/a5e753a2a123ff1d781640746b90a4cbdf97d89a/modules/core/src/org/apache/axis2/engine/AxisConfiguration.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/core/src/org/apache/axis2/engine/AxisConfiguration.java?ref=a5e753a2a123ff1d781640746b90a4cbdf97d89a",
+                "deletions": 1,
+                "filename": "modules/core/src/org/apache/axis2/engine/AxisConfiguration.java",
+                "patch": "@@ -319,9 +319,9 @@ public void engageModule(String moduleName, String versionID) throws AxisFault {\n     }\n \n     private void engageModule(AxisModule module) throws AxisFault {\n-        QName moduleQName = module.getName();\n         boolean isEngagable;\n         if (module != null) {\n+            QName moduleQName = module.getName();\n             for (Iterator iterator = engagedModules.iterator(); iterator.hasNext();) {\n                 QName qName = (QName) iterator.next();\n ",
+                "raw_url": "https://github.com/apache/axis2-java/raw/a5e753a2a123ff1d781640746b90a4cbdf97d89a/modules/core/src/org/apache/axis2/engine/AxisConfiguration.java",
+                "sha": "af4ffac53ccfdd05fad79cec0534c2cf0d7e87fa",
+                "status": "modified"
+            },
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/axis2-java/blob/a5e753a2a123ff1d781640746b90a4cbdf97d89a/modules/core/src/org/apache/axis2/util/Utils.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/core/src/org/apache/axis2/util/Utils.java?ref=a5e753a2a123ff1d781640746b90a4cbdf97d89a",
+                "deletions": 0,
+                "filename": "modules/core/src/org/apache/axis2/util/Utils.java",
+                "patch": "@@ -296,6 +296,8 @@ public static boolean checkVersion(QName deployingModuleName,\n                 } else {\n                     return false;\n                 }\n+            } else if (module2version == null) {\n+                return false;\n             }\n         }\n         return true;",
+                "raw_url": "https://github.com/apache/axis2-java/raw/a5e753a2a123ff1d781640746b90a4cbdf97d89a/modules/core/src/org/apache/axis2/util/Utils.java",
+                "sha": "5d9140ff4b9e670af990d91eeb0d5bef6268f1f3",
+                "status": "modified"
+            }
+        ],
+        "message": "-small fix in module engagement after removing exception when trying to engage already engaged module\n-Fixing NPE RPCMessageReceiver\n-\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@408569 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/eb19a1d450a4232282c7813e65135cbb8252a87c",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "UtilsTest.java",
+            "TestUtils.java"
+        ]
+    },
+    "axis2-java_a93aa05": {
+        "bug_id": "axis2-java_a93aa05",
+        "commit": "https://github.com/apache/axis2-java/commit/a93aa05c78221254ba9f18b0307920b1be9422d5",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/axis2-java/blob/a93aa05c78221254ba9f18b0307920b1be9422d5/modules/adb-codegen/src/org/apache/axis2/schema/SchemaCompiler.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/adb-codegen/src/org/apache/axis2/schema/SchemaCompiler.java?ref=a93aa05c78221254ba9f18b0307920b1be9422d5",
+                "deletions": 1,
+                "filename": "modules/adb-codegen/src/org/apache/axis2/schema/SchemaCompiler.java",
+                "patch": "@@ -1375,7 +1375,7 @@ public void processAttribute(XmlSchemaAttribute att, BeanWriterMetaInfoHolder me\n                 \t\tObject type = baseSchemaTypeMap.get(attrTypeName);\r\n                 \t\tif (type == null) {\r\n                 \t\t\tXmlSchemaSimpleType simpleType = attribute.getSchemaType();\r\n-                            if(simpleType.getContent() instanceof XmlSchemaSimpleTypeRestriction) {\r\n+                            if(simpleType != null && simpleType.getContent() instanceof XmlSchemaSimpleTypeRestriction) {\r\n                                 XmlSchemaSimpleTypeRestriction restriction = (XmlSchemaSimpleTypeRestriction) simpleType.getContent();\r\n                                 QName baseTypeName = restriction.getBaseTypeName();\r\n                                 type = baseSchemaTypeMap.get(baseTypeName);\r",
+                "raw_url": "https://github.com/apache/axis2-java/raw/a93aa05c78221254ba9f18b0307920b1be9422d5/modules/adb-codegen/src/org/apache/axis2/schema/SchemaCompiler.java",
+                "sha": "d0c37d1290e2e4225e90c67367123a494215a100",
+                "status": "modified"
+            }
+        ],
+        "message": "Prevent NPE\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@451681 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/a350561b0a8b0f4e8fb29bbc335197cd806d97e5",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "SchemaCompilerTest.java"
+        ]
+    },
+    "axis2-java_bb33c5c": {
+        "bug_id": "axis2-java_bb33c5c",
+        "commit": "https://github.com/apache/axis2-java/commit/bb33c5c0615a0bb7f250561a021cee2e2378592d",
+        "file": [
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/axis2-java/blob/bb33c5c0615a0bb7f250561a021cee2e2378592d/modules/kernel/src/org/apache/axis2/description/java2wsdl/DefaultSchemaGenerator.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/description/java2wsdl/DefaultSchemaGenerator.java?ref=bb33c5c0615a0bb7f250561a021cee2e2378592d",
+                "deletions": 1,
+                "filename": "modules/kernel/src/org/apache/axis2/description/java2wsdl/DefaultSchemaGenerator.java",
+                "patch": "@@ -1005,7 +1005,9 @@ protected String getParameterName(Annotation[][] parameterAnnotation,\n             }\n         }\n         if (parameterName == null || \"\".equals(parameterName)) {\n-            parameterName = parameterNames[j];\n+            if(parameterNames != null && parameterNames.length > j) {\n+                parameterName = parameterNames[j];\n+            }\n             if (parameterName == null || \"\".equals(parameterName)) {\n                 parameterName = \"args\" + j;\n             }",
+                "raw_url": "https://github.com/apache/axis2-java/raw/bb33c5c0615a0bb7f250561a021cee2e2378592d/modules/kernel/src/org/apache/axis2/description/java2wsdl/DefaultSchemaGenerator.java",
+                "sha": "d6d7165207eafda03253fff2762a3f506ce0bcd7",
+                "status": "modified"
+            }
+        ],
+        "message": "Prevent NPE - contribution from Louis A. Amodeo\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@653919 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/474f579e7b939f2b6ed16e63557aabcc3c47fc92",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "DefaultSchemaGeneratorTest.java"
+        ]
+    },
+    "axis2-java_c1b61d6": {
+        "bug_id": "axis2-java_c1b61d6",
+        "commit": "https://github.com/apache/axis2-java/commit/c1b61d63cf81978775cdc2606c9e7ed2b9d6a9d3",
+        "file": [
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/axis2-java/blob/c1b61d63cf81978775cdc2606c9e7ed2b9d6a9d3/modules/core/src/org/apache/axis2/client/ServiceClient.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/core/src/org/apache/axis2/client/ServiceClient.java?ref=c1b61d63cf81978775cdc2606c9e7ed2b9d6a9d3",
+                "deletions": 0,
+                "filename": "modules/core/src/org/apache/axis2/client/ServiceClient.java",
+                "patch": "@@ -187,6 +187,8 @@ private void initializeTransports(ConfigurationContext configContext) throws Axi\n                         createConfigurationContextFromFileSystem(null, null);\n                 trsManager = new ListenerManager();\n                 trsManager.init(this.configContext);\n+            } else {\n+                this.configContext = ListenerManager.defaultConfigurationContext;\n             }\n         }\n     }",
+                "raw_url": "https://github.com/apache/axis2-java/raw/c1b61d63cf81978775cdc2606c9e7ed2b9d6a9d3/modules/core/src/org/apache/axis2/client/ServiceClient.java",
+                "sha": "852f3899c92735c2ddaa43d0f2c1b46bef45c997",
+                "status": "modified"
+            }
+        ],
+        "message": "-fixing NPE in Sc\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@407764 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/8fbad22f29cbed1a1bbf0ceb0c63032a1cce93e6",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "ServiceClientTest.java"
+        ]
+    },
+    "axis2-java_c710b95": {
+        "bug_id": "axis2-java_c710b95",
+        "commit": "https://github.com/apache/axis2-java/commit/c710b95cc5dacf33612b02f59fe3b161442973f7",
+        "file": [
+            {
+                "additions": 49,
+                "blob_url": "https://github.com/apache/axis2-java/blob/c710b95cc5dacf33612b02f59fe3b161442973f7/modules/kernel/src/org/apache/axis2/util/MessageContextBuilder.java",
+                "changes": 50,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/util/MessageContextBuilder.java?ref=c710b95cc5dacf33612b02f59fe3b161442973f7",
+                "deletions": 1,
+                "filename": "modules/kernel/src/org/apache/axis2/util/MessageContextBuilder.java",
+                "patch": "@@ -518,7 +518,13 @@ private static SOAPEnvelope createFaultEnvelope(MessageContext context, Throwabl\n             if (context.isSOAP11()) {\n                 fault.getCode().setText(soapFaultCode);\n             } else {\n-                fault.getCode().getValue().setText(soapFaultCode);\n+                SOAPFaultValue value = fault.getCode().getValue();\n+                if(log.isDebugEnabled()){\n+                    log.debug(\"soapFaultCode originally was set to : \" + soapFaultCode);\n+                }\n+                OMNamespace namespace = value.getNamespace();\n+                soapFaultCode = switchNamespacePrefix(soapFaultCode, namespace);\n+                value.setText(soapFaultCode);\n             }\n         }\n         \n@@ -639,7 +645,49 @@ private static SOAPEnvelope createFaultEnvelope(MessageContext context, Throwabl\n \n         return envelope;\n     }\n+    \n+    /**\n+     * Switch the namespace prefix in the soap fault code. It should match the prefix used\n+     * by the outgoing soap envelope.\n+     * \n+     * @param soapFaultCode\n+     * @param namespace\n+     * @return\n+     */\n+    public static String switchNamespacePrefix(String soapFaultCode, OMNamespace namespace) {\n+        if(soapFaultCode != null && \n+                soapFaultCode.endsWith(\":\" + SOAPConstants.FAULT_CODE_VERSION_MISMATCH)) {\n+            String prefix = namespace.getPrefix();\n+            if(log.isDebugEnabled()){\n+                log.debug(\"prefix being used in the outgoing soap envelope is : \" + prefix);\n+            }\n+            // The following methods set the prefix of the incoming soap envelope in soapFaultCode \n+            //    validateSOAPVersion method in BuilderUtil or \n+            //    identifySOAPVersion method in StAXSOAPModelBuilder \n+            // But the outgoing envelope may have a different prefix, if it does then\n+            // we need to strip the prefix set by those methods and add the\n+            // correct one.\n+            if (!soapFaultCode.startsWith(prefix + \":\")) {\n+                if(log.isDebugEnabled()){\n+                    log.debug(\"stripping old prefix and adding the new one - \" + prefix);\n+                }\n+                // Strip the orginal prefix \n+                int index = soapFaultCode.indexOf(':') + 1;\n+                soapFaultCode = soapFaultCode.substring(index);\n+                // Use the correct prefix for the outgoing soap envelope namespace \n+                soapFaultCode = prefix + \":\" + soapFaultCode;\n+            }\n+        }\n+        if(log.isDebugEnabled()){\n+                    log.debug(\"soapFaultCode is being set to : \" + soapFaultCode);\n+        }\n+        return soapFaultCode;\n+    }\n+\n \n+    \n+    \n+    \n     /**\n      * By the time the exception comes here it can be wrapped by so many levels. This will crip down\n      * to the root cause and get the initial error depending on the property",
+                "raw_url": "https://github.com/apache/axis2-java/raw/c710b95cc5dacf33612b02f59fe3b161442973f7/modules/kernel/src/org/apache/axis2/util/MessageContextBuilder.java",
+                "sha": "5f01081f0ad899dbb908db4382bf4076d8976bff",
+                "status": "modified"
+            }
+        ],
+        "message": "Fix NPE that occurs when Operation parameter is null for Soap12 faults\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@813872 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/874443e5d498c4f93f6186a28c2508030d758579",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "MessageContextBuilderTest.java"
+        ]
+    },
+    "axis2-java_cf78546": {
+        "bug_id": "axis2-java_cf78546",
+        "commit": "https://github.com/apache/axis2-java/commit/cf78546215f4cfb29fa53446050240a9a5bd1e18",
+        "file": [
+            {
+                "additions": 10,
+                "blob_url": "https://github.com/apache/axis2-java/blob/cf78546215f4cfb29fa53446050240a9a5bd1e18/modules/kernel/src/org/apache/axis2/context/MessageContext.java",
+                "changes": 14,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/context/MessageContext.java?ref=cf78546215f4cfb29fa53446050240a9a5bd1e18",
+                "deletions": 4,
+                "filename": "modules/kernel/src/org/apache/axis2/context/MessageContext.java",
+                "patch": "@@ -1579,7 +1579,7 @@ public Policy getEffectivePolicy() {\n         // If AxisBindingMessage is not set, try to find the binding message from the AxisService\n         if (bindingMessage == null) {\n         \tbindingMessage = findBindingMessage();\n-        } \n+        }\n         \n         if (bindingMessage != null) {\n             return bindingMessage.getEffectivePolicy();\n@@ -1592,15 +1592,21 @@ public Policy getEffectivePolicy() {\n     }\n  \n     private AxisBindingMessage findBindingMessage() {\n-    \tif (axisService != null) {\n+    \tif (axisService != null && axisOperation != null ) {\n \t\t\tif (axisService.getEndpointName() != null) {\n \t\t\t\tAxisEndpoint axisEndpoint = axisService\n \t\t\t\t\t\t.getEndpoint(axisService.getEndpointName());\n \t\t\t\tif (axisEndpoint != null) {\n \t\t\t\t\tAxisBinding axisBinding = axisEndpoint.getBinding();\n-\t\t\t\t\tAxisBindingOperation axisBindingOperation = (AxisBindingOperation) axisBinding\n+                    AxisBindingOperation axisBindingOperation = (AxisBindingOperation) axisBinding\n \t\t\t\t\t\t\t.getChild(axisOperation.getName());\n-\t\t\t\t\tString direction = axisMessage.getDirection();\n+\n+                    //If Binding Operation is not found, just return null\n+                    if (axisBindingOperation == null) {\n+                       return null;\n+                    }\n+\n+                    String direction = axisMessage.getDirection();\n \t\t\t\t\tAxisBindingMessage axisBindingMessage = null;\n \t\t\t\t\tif (WSDLConstants.WSDL_MESSAGE_DIRECTION_IN\n \t\t\t\t\t\t\t.equals(direction)",
+                "raw_url": "https://github.com/apache/axis2-java/raw/cf78546215f4cfb29fa53446050240a9a5bd1e18/modules/kernel/src/org/apache/axis2/context/MessageContext.java",
+                "sha": "be9e6e675de13b60a92123b9ce42fe89f7ed5ef3",
+                "status": "modified"
+            }
+        ],
+        "message": "AXIS2-4114 check for possible NPE which caused a problem in rampart build\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@725307 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/25fae37067d61c389cadba203d8eed88ae5d23f8",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "MessageContextTest.java",
+            "MessageContextTests.java"
+        ]
+    },
+    "axis2-java_cfa571c": {
+        "bug_id": "axis2-java_cfa571c",
+        "commit": "https://github.com/apache/axis2-java/commit/cfa571cc9f6e9e66d18184294c66d36ab6fc425a",
+        "file": [
+            {
+                "additions": 8,
+                "blob_url": "https://github.com/apache/axis2-java/blob/cfa571cc9f6e9e66d18184294c66d36ab6fc425a/modules/metadata/src/org/apache/axis2/jaxws/description/impl/ServiceDescriptionImpl.java",
+                "changes": 9,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/metadata/src/org/apache/axis2/jaxws/description/impl/ServiceDescriptionImpl.java?ref=cfa571cc9f6e9e66d18184294c66d36ab6fc425a",
+                "deletions": 1,
+                "filename": "modules/metadata/src/org/apache/axis2/jaxws/description/impl/ServiceDescriptionImpl.java",
+                "patch": "@@ -781,7 +781,14 @@ private void validateProviderInterfaces() {\n         } else {\n             // We are in MESSAGE mode\n             // Conformance: JAXWS Spec.- Sec. 4.3 (javax.activation.DataSource)\n-            String bindingType = composite.getBindingTypeAnnot().value();\n+            \n+            // REVIEW: Should the provider interface validation be moved to post-construction validation, \n+            // since it seems that the logic to understand the default values for binding type \n+            // (see comment below) should be left to the creation of the Description objects.\n+            String bindingType = null;\n+            if (composite.getBindingTypeAnnot() != null ) {\n+                bindingType = composite.getBindingTypeAnnot().value();\n+            }\n \n             Iterator<String> iter = composite.getInterfacesList().iterator();\n ",
+                "raw_url": "https://github.com/apache/axis2-java/raw/cfa571cc9f6e9e66d18184294c66d36ab6fc425a/modules/metadata/src/org/apache/axis2/jaxws/description/impl/ServiceDescriptionImpl.java",
+                "sha": "f16661ebe1928190287dd09e17acba98f1daee17",
+                "status": "modified"
+            }
+        ],
+        "message": "Fix NPE in provider validation logic when binding type annotation not specified.\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@508546 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/fc2352f41c1ca391afcdb8eee84074aca4c6d10e",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "ServiceDescriptionImplTests.java"
+        ]
+    },
+    "axis2-java_d32707c": {
+        "bug_id": "axis2-java_d32707c",
+        "commit": "https://github.com/apache/axis2-java/commit/d32707ce694291465d87a4c24c78666384120fa7",
+        "file": [
+            {
+                "additions": 21,
+                "blob_url": "https://github.com/apache/axis2-java/blob/d32707ce694291465d87a4c24c78666384120fa7/modules/kernel/src/org/apache/axis2/context/ConfigurationContextFactory.java",
+                "changes": 26,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/context/ConfigurationContextFactory.java?ref=d32707ce694291465d87a4c24c78666384120fa7",
+                "deletions": 5,
+                "filename": "modules/kernel/src/org/apache/axis2/context/ConfigurationContextFactory.java",
+                "patch": "@@ -18,10 +18,7 @@\n \n import org.apache.axis2.AxisFault;\n import org.apache.axis2.Constants;\n-import org.apache.axis2.deployment.DeploymentEngine;\n-import org.apache.axis2.deployment.DeploymentException;\n-import org.apache.axis2.deployment.FileSystemConfigurator;\n-import org.apache.axis2.deployment.URLBasedAxisConfigurator;\n+import org.apache.axis2.deployment.*;\n import org.apache.axis2.deployment.util.Utils;\n import org.apache.axis2.description.AxisModule;\n import org.apache.axis2.description.AxisServiceGroup;\n@@ -41,6 +38,10 @@\n import java.util.Collection;\n import java.util.HashMap;\n import java.util.Iterator;\n+import java.io.InputStream;\n+import java.io.FileInputStream;\n+import java.io.FileNotFoundException;\n+import java.io.IOException;\n \n public class ConfigurationContextFactory {\n \n@@ -251,11 +252,26 @@ public static void initTransportSenders(ConfigurationContext configContext) {\n     }\n \n     /**\n-     * Gets the default configuration context by using the file system based AxisConfiguration.\n+     * creates an empty configuration context.\n      *\n      * @return Returns ConfigurationContext.\n      */\n     public static ConfigurationContext createEmptyConfigurationContext() {\n         return new ConfigurationContext(new AxisConfiguration());\n     }\n+\n+    /**\n+     * Gets the default configuration context by using Axis2.xml in the classpath\n+     *\n+     * @return Returns ConfigurationContext.\n+     */\n+    public static ConfigurationContext createDefaultConfigurationContext() throws Exception {\n+        ClassLoader cl = Thread.currentThread().getContextClassLoader();\n+        InputStream in = cl.getResourceAsStream(DeploymentConstants.AXIS2_CONFIGURATION_RESOURCE);\n+\n+        AxisConfiguration axisConfig = new AxisConfiguration();\n+        AxisConfigBuilder builder = new AxisConfigBuilder(in, axisConfig);\n+        builder.populateConfig();\n+        return new ConfigurationContext(axisConfig);\n+    }\n }",
+                "raw_url": "https://github.com/apache/axis2-java/raw/d32707ce694291465d87a4c24c78666384120fa7/modules/kernel/src/org/apache/axis2/context/ConfigurationContextFactory.java",
+                "sha": "269458b6107669e921668f04176ba96c297be7a5",
+                "status": "modified"
+            },
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/axis2-java/blob/d32707ce694291465d87a4c24c78666384120fa7/modules/kernel/src/org/apache/axis2/util/MessageContextBuilder.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/util/MessageContextBuilder.java?ref=d32707ce694291465d87a4c24c78666384120fa7",
+                "deletions": 1,
+                "filename": "modules/kernel/src/org/apache/axis2/util/MessageContextBuilder.java",
+                "patch": "@@ -426,7 +426,9 @@ private static SOAPEnvelope createFaultEnvelope(MessageContext context, Throwabl\n             sendStacktraceDetailsWithFaults = JavaUtils.isTrue(flagFromContext);\n         }else{\n             Parameter param = context.getParameter(Constants.Configuration.SEND_STACKTRACE_DETAILS_WITH_FAULTS);\n-            sendStacktraceDetailsWithFaults = JavaUtils.isTrue(param.getValue());    \n+            if(param != null) {\n+                sendStacktraceDetailsWithFaults = JavaUtils.isTrue(param.getValue());    \n+            }\n         }\n \n         Object faultDetail = context.getProperty(SOAP12Constants.SOAP_FAULT_DETAIL_LOCAL_NAME);",
+                "raw_url": "https://github.com/apache/axis2-java/raw/d32707ce694291465d87a4c24c78666384120fa7/modules/kernel/src/org/apache/axis2/util/MessageContextBuilder.java",
+                "sha": "c28092b40bcc6c59e6ec808281639d80e67a54a6",
+                "status": "modified"
+            }
+        ],
+        "message": "we need another method in ConfigurationContextFactory that actually picks up the default axis2.xml and processes it. Prevent NPE in MessageContext Builder.\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@496437 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/b5383ace4d077b5be129c95395e315ca23a4122a",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "MessageContextBuilderTest.java"
+        ]
+    },
+    "axis2-java_d3bb06c": {
+        "bug_id": "axis2-java_d3bb06c",
+        "commit": "https://github.com/apache/axis2-java/commit/d3bb06ce799dd867a1bdd42c36f9d36861dd52d6",
+        "file": [
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/axis2-java/blob/d3bb06ce799dd867a1bdd42c36f9d36861dd52d6/modules/kernel/src/org/apache/axis2/client/ServiceClient.java",
+                "changes": 5,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/client/ServiceClient.java?ref=d3bb06ce799dd867a1bdd42c36f9d36861dd52d6",
+                "deletions": 1,
+                "filename": "modules/kernel/src/org/apache/axis2/client/ServiceClient.java",
+                "patch": "@@ -857,7 +857,10 @@ public void cleanupTransport() throws AxisFault {\n                     lastOperationContext\n                             .getMessageContext(WSDLConstants.MESSAGE_LABEL_OUT_VALUE);\n             if (outMessageContext != null) {\n-                outMessageContext.getTransportOut().getSender().cleanup(outMessageContext);\n+                if (outMessageContext.getTransportOut() != null &&\n+                        outMessageContext.getTransportOut().getSender() != null) {\n+                    outMessageContext.getTransportOut().getSender().cleanup(outMessageContext);\n+                }\n             }\n         }\n     }",
+                "raw_url": "https://github.com/apache/axis2-java/raw/d3bb06ce799dd867a1bdd42c36f9d36861dd52d6/modules/kernel/src/org/apache/axis2/client/ServiceClient.java",
+                "sha": "9eb84cd37a9d8cc3cfc8903ed76ec99ba5f4fee1",
+                "status": "modified"
+            }
+        ],
+        "message": "Simple NPE avoidance check\n\ngit-svn-id: https://svn.apache.org/repos/asf/axis/axis2/java/core/trunk@983407 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/94f71c83a0d9618e93771862ad7ff8ec7b512908",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "ServiceClientTest.java"
+        ]
+    },
+    "axis2-java_d756468": {
+        "bug_id": "axis2-java_d756468",
+        "commit": "https://github.com/apache/axis2-java/commit/d756468435ce120e95561424efa75179c5bbb089",
+        "file": [
+            {
+                "additions": 5,
+                "blob_url": "https://github.com/apache/axis2-java/blob/d756468435ce120e95561424efa75179c5bbb089/modules/kernel/src/org/apache/axis2/util/MessageContextBuilder.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/util/MessageContextBuilder.java?ref=d756468435ce120e95561424efa75179c5bbb089",
+                "deletions": 1,
+                "filename": "modules/kernel/src/org/apache/axis2/util/MessageContextBuilder.java",
+                "patch": "@@ -37,6 +37,7 @@\n import org.apache.axiom.soap.SOAPHeader;\n import org.apache.axiom.soap.SOAPHeaderBlock;\n import org.apache.axiom.soap.SOAPProcessingException;\n+import org.apache.axiom.soap.SOAPFaultNode;\n import org.apache.axis2.AxisFault;\n import org.apache.axis2.Constants;\n import org.apache.axis2.addressing.AddressingConstants;\n@@ -569,7 +570,10 @@ private static SOAPEnvelope createFaultEnvelope(MessageContext context, Throwabl\n \n         Object faultNode = context.getProperty(SOAP12Constants.SOAP_FAULT_NODE_LOCAL_NAME);\n         if (faultNode != null) {\n-            fault.getNode().setText((String) faultNode);\n+            SOAPFaultNode soapFaultNode = fault.getNode();\n+            if(soapFaultNode != null) {\n+                soapFaultNode.setText((String) faultNode);\n+            }\n         } else if (axisFault != null) {\n             if (axisFault.getFaultNodeElement() != null) {\n                 fault.setNode(axisFault.getFaultNodeElement());",
+                "raw_url": "https://github.com/apache/axis2-java/raw/d756468435ce120e95561424efa75179c5bbb089/modules/kernel/src/org/apache/axis2/util/MessageContextBuilder.java",
+                "sha": "c4521a5366e348b72771fc56377f92557c82b566",
+                "status": "modified"
+            }
+        ],
+        "message": "Fix for AXIS2-3602 - NPE in MessageContextBuilder.createFaultEnvelope and SOAP12Constants.SOAP_FAULT_NODE_LOCAL_NAME property set in message context (prevent NPE)\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@642592 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/7e4cfae3ab77a34ff6192ac307486b520a593bb6",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "MessageContextBuilderTest.java"
+        ]
+    },
+    "axis2-java_d80825a": {
+        "bug_id": "axis2-java_d80825a",
+        "commit": "https://github.com/apache/axis2-java/commit/d80825a908624199d987575f8180c86401dca17b",
+        "file": [
+            {
+                "additions": 5,
+                "blob_url": "https://github.com/apache/axis2-java/blob/d80825a908624199d987575f8180c86401dca17b/modules/kernel/src/org/apache/axis2/transport/http/util/RESTUtil.java",
+                "changes": 8,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/transport/http/util/RESTUtil.java?ref=d80825a908624199d987575f8180c86401dca17b",
+                "deletions": 3,
+                "filename": "modules/kernel/src/org/apache/axis2/transport/http/util/RESTUtil.java",
+                "patch": "@@ -223,9 +223,11 @@ private void dispatchAndVerify(MessageContext msgContext) throws AxisFault {\n             if ((axisOperation = msgContext.getAxisOperation()) != null) {\n                 AxisEndpoint axisEndpoint =\n                         (AxisEndpoint) msgContext.getProperty(WSDL2Constants.ENDPOINT_LOCAL_NAME);\n-                AxisBindingOperation axisBindingOperation = (AxisBindingOperation) axisEndpoint\n-                        .getBinding().getChild(axisOperation.getName());\n-                msgContext.setProperty(Constants.AXIS_BINDING_OPERATION, axisBindingOperation);\n+                if (axisEndpoint != null) {\n+                    AxisBindingOperation axisBindingOperation = (AxisBindingOperation) axisEndpoint\n+                            .getBinding().getChild(axisOperation.getName());\n+                    msgContext.setProperty(Constants.AXIS_BINDING_OPERATION, axisBindingOperation);\n+                }\n                 msgContext.setAxisOperation(axisOperation);\n             }\n ",
+                "raw_url": "https://github.com/apache/axis2-java/raw/d80825a908624199d987575f8180c86401dca17b/modules/kernel/src/org/apache/axis2/transport/http/util/RESTUtil.java",
+                "sha": "2caf95c48d06b0e4d87dc05eb74696b308b9f3a3",
+                "status": "modified"
+            },
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/axis2-java/blob/d80825a908624199d987575f8180c86401dca17b/modules/kernel/src/org/apache/axis2/util/SchemaUtil.java",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/util/SchemaUtil.java?ref=d80825a908624199d987575f8180c86401dca17b",
+                "deletions": 1,
+                "filename": "modules/kernel/src/org/apache/axis2/util/SchemaUtil.java",
+                "patch": "@@ -442,7 +442,8 @@ private static Map getParameterMap(HttpServletRequest request, String queryParam\n             }\n         }\n \n-        if (request.getContentType().indexOf(HTTPConstants.MEDIA_TYPE_MULTIPART_FORM_DATA) > -1) {\n+        String contentType = request.getContentType();\n+        if (contentType != null && contentType.indexOf(HTTPConstants.MEDIA_TYPE_MULTIPART_FORM_DATA) > -1) {\n             ServletRequestContext servletRequestContext = new ServletRequestContext(request);\n             try {\n                 List items = parseRequest(servletRequestContext);",
+                "raw_url": "https://github.com/apache/axis2-java/raw/d80825a908624199d987575f8180c86401dca17b/modules/kernel/src/org/apache/axis2/util/SchemaUtil.java",
+                "sha": "d88ed4fd5e8c8406dd4fcfffa305103b97b91b12",
+                "status": "modified"
+            }
+        ],
+        "message": "Fixing NPE in RestUtil\n\n\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@503607 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/89dd911bb1d5ce71a173a62086157d452ef369f7",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "SchemaUtilTest.java"
+        ]
+    },
+    "axis2-java_e0979a0": {
+        "bug_id": "axis2-java_e0979a0",
+        "commit": "https://github.com/apache/axis2-java/commit/e0979a09ba93cbb2fa261f94a9112d9eff47234f",
+        "file": [
+            {
+                "additions": 56,
+                "blob_url": "https://github.com/apache/axis2-java/blob/e0979a09ba93cbb2fa261f94a9112d9eff47234f/modules/kernel/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java",
+                "changes": 99,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java?ref=e0979a09ba93cbb2fa261f94a9112d9eff47234f",
+                "deletions": 43,
+                "filename": "modules/kernel/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java",
+                "patch": "@@ -305,7 +305,7 @@ private Map populateSchemaMap(Types wsdl4jTypes) {\n      */\n     private Binding findBinding(Definition dif) throws AxisFault {\n         Map services = dif.getServices();\n-        Service service;\n+        Service service = null;\n         Binding binding = null;\n         Port port = null;\n         if (serviceName != null) {\n@@ -318,39 +318,48 @@ private Binding findBinding(Definition dif) throws AxisFault {\n             if (services.size() > 0) {\n                 //pick the first service - we don't really have a choice here\n                 service = (Service) services.values().toArray()[0];\n+            } \n+        }\n+        if (service != null) {\n+            copyExtensibleElements(service.getExtensibilityElements(), dif,\n+                    axisService, SERVICE);\n+            if (portName != null) {\n+                port = service.getPort(portName);\n+                if (port == null) {\n+                    throw new AxisFault(\"No port found for the given name :\"\n+                            + portName);\n+                }\n             } else {\n-                throw new AxisFault(\"No service element found in the WSDL\");\n+                Map ports = service.getPorts();\n+                if (ports != null && ports.size() > 0) {\n+                    //pick the port with the SOAP address as the default port\n+                    port = findSOAPPort(ports);\n+                    if (port == null) {\n+                        //a SOAP port was not found - log a warning\n+                        // and use the first port in the list\n+                        log.info(\"A SOAP port was not found - \" +\n+                                \"picking a random port!\");\n+                        port = (Port) ports.values().toArray()[0];\n+                    }\n+                }\n             }\n-        }\n-        copyExtensibleElements(service.getExtensibilityElements(), dif,\n-                axisService, SERVICE);\n-        if (portName != null) {\n-            port = service.getPort(portName);\n-            if (port == null) {\n-                throw new AxisFault(\"No port found for the given name :\"\n-                        + portName);\n+    \n+            axisService.setName(service.getQName().getLocalPart());\n+    \n+            if (port != null) {\n+                copyExtensibleElements(port.getExtensibilityElements(), dif,\n+                        axisService, PORT);\n+                binding = port.getBinding();\n             }\n         } else {\n-            Map ports = service.getPorts();\n-            if (ports != null && ports.size() > 0) {\n-                //pick the port with the SOAP address as the default port\n-                port = findSOAPPort(ports);\n-                if (port == null) {\n-                    //a SOAP port was not found - log a warning\n-                    // and use the first port in the list\n-                    log.info(\"A SOAP port was not found - \" +\n-                            \"picking a random port!\");\n-                    port = (Port) ports.values().toArray()[0];\n-                }\n+            log.info(\"A service element was not found - \" +\n+                    \"picking a random binding!\");\n+            Collection bindings = dif.getBindings().values();\n+            if (bindings == null || bindings.isEmpty()) {\n+                throw new AxisFault(\"No bindings found in wsdl\");\n             }\n-        }\n-\n-        axisService.setName(service.getQName().getLocalPart());\n-\n-        if (port != null) {\n-            copyExtensibleElements(port.getExtensibilityElements(), dif,\n-                    axisService, PORT);\n-            binding = port.getBinding();\n+            binding = (Binding) bindings.iterator().next();\n+            axisService.setName(binding.getQName().getLocalPart() + \"Service\");\n         }\n         return binding;\n     }\n@@ -597,10 +606,12 @@ private void processPartsList(List bindingPartsList, Message wsdl4jMessage, Axis\n             if (wsdl4jMessagePart == null) {\n                 throw new WSDLProcessingException(\"Missing part named \\\"\" + bindingPartsList.get(0) + \"\\\"\");\n             }\n-            if (wsdl4jMessagePart.getElementName() == null) {\n-                //this cannot be done - we need to have a\n-                //element reference\n-                throw new WSDLProcessingException(\"Element reference missing for \" + bindingPartsList.get(0) + \"!\" );\n+            QName name = wsdl4jMessagePart.getElementName();\n+            if (name == null) {\n+                name = wsdl4jMessagePart.getTypeName(); \n+            }\n+            if (name == null) {\n+                throw new WSDLProcessingException(\"Element reference / Type name  missing for \" + bindingPartsList.get(0) + \"!\" );\n             }\n             inMessage.setElementQName(wsdl4jMessagePart.getElementName());\n \n@@ -1363,17 +1374,19 @@ private void processImports(Definition wsdl4JDefinition) {\n                             wsdl4jDefinition.getNamespaces().putAll(namespaces);\n                             //copy types\n                             Types t = importedDef.getTypes();\n-                            List typesList = t.getExtensibilityElements();\n-                            for (int j = 0; j < typesList.size(); j++) {\n-                                Types types = wsdl4JDefinition.getTypes();\n-                                if (types == null) {\n-                                    types = wsdl4JDefinition.createTypes();\n-                                    wsdl4JDefinition.setTypes(types);\n+                            if(t != null){\n+                                List typesList = t.getExtensibilityElements();\n+                                for (int j = 0; j < typesList.size(); j++) {\n+                                    Types types = wsdl4JDefinition.getTypes();\n+                                    if (types == null) {\n+                                        types = wsdl4JDefinition.createTypes();\n+                                        wsdl4JDefinition.setTypes(types);\n+                                    }\n+                                    types\n+                                            .addExtensibilityElement((ExtensibilityElement) typesList\n+                                                    .get(j));\n+    \n                                 }\n-                                types\n-                                        .addExtensibilityElement((ExtensibilityElement) typesList\n-                                                .get(j));\n-\n                             }\n \n                             //add messages",
+                "raw_url": "https://github.com/apache/axis2-java/raw/e0979a09ba93cbb2fa261f94a9112d9eff47234f/modules/kernel/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java",
+                "sha": "f4fa2e278a2cc4ca85883d8e129f45cb5d617425",
+                "status": "modified"
+            }
+        ],
+        "message": "- Prevent NPE if types section is missing\n- if getElementName is null try getTypeName \n- if the service section is missing, pick the first binding and make up a name for the service as well\n\n\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@438600 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/7bef7f94834e739142abece920744f3ebf8502fd",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "WSDL11ToAxisServiceBuilderTest.java"
+        ]
+    },
+    "axis2-java_e2d282b": {
+        "bug_id": "axis2-java_e2d282b",
+        "commit": "https://github.com/apache/axis2-java/commit/e2d282bf136a29afdd89533060787fbec8a89c91",
+        "file": [
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/axis2-java/blob/e2d282bf136a29afdd89533060787fbec8a89c91/modules/kernel/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java?ref=e2d282bf136a29afdd89533060787fbec8a89c91",
+                "deletions": 0,
+                "filename": "modules/kernel/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java",
+                "patch": "@@ -1551,6 +1551,10 @@ private void copyExtensibleElements(List wsdl4jExtensibleElements,\n                         throw new AxisFault(\"message \" + soapHeader.getMessage() + \" not found in the WSDL \");\r\n                     }\r\n                     Part msgPart = msg.getPart(soapHeader.getPart());\r\n+                    if (msgPart == null) {\r\n+                        //todo i18n this\r\n+                        throw new AxisFault(\"message part \" + soapHeader.getPart() + \" not found in the WSDL \");\r\n+                    }\r\n                     headerMessage.setElement(msgPart.getElementName());\r\n                 }\r\n                 headerMessage.setMessage(soapHeader.getMessage());\r",
+                "raw_url": "https://github.com/apache/axis2-java/raw/e2d282bf136a29afdd89533060787fbec8a89c91/modules/kernel/src/org/apache/axis2/description/WSDL11ToAxisServiceBuilder.java",
+                "sha": "908c697887b7d77fd204cff048a65cd0dd797232",
+                "status": "modified"
+            }
+        ],
+        "message": "Prevent NPE if the message part is not found.\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@431629 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/fc3986691860dae1eff7c8e8842dcfcbf3c4904d",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "WSDL11ToAxisServiceBuilderTest.java"
+        ]
+    },
+    "axis2-java_edd1496": {
+        "bug_id": "axis2-java_edd1496",
+        "commit": "https://github.com/apache/axis2-java/commit/edd14969ac5439bbe34b773757cc62dac84e7b76",
+        "file": [
+            {
+                "additions": 14,
+                "blob_url": "https://github.com/apache/axis2-java/blob/edd14969ac5439bbe34b773757cc62dac84e7b76/modules/jaxws/src/org/apache/axis2/jaxws/marshaller/impl/alt/Attachment.java",
+                "changes": 15,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/jaxws/src/org/apache/axis2/jaxws/marshaller/impl/alt/Attachment.java?ref=edd14969ac5439bbe34b773757cc62dac84e7b76",
+                "deletions": 1,
+                "filename": "modules/jaxws/src/org/apache/axis2/jaxws/marshaller/impl/alt/Attachment.java",
+                "patch": "@@ -95,7 +95,15 @@ public Attachment(Object sigValue, Class sigClass, AttachmentDescription aDesc,\n      */\r\n     public DataHandler getDataHandler() {\r\n         if (dh == null) {\r\n-            dh = createDataHandler(sigValue, sigClass, aDesc.getMimeTypes(), getContentID());\r\n+        \t//if null DH was specified explicitly, return it, don't create something else.\r\n+            if (sigValue == null) {\r\n+                // Create a contentID and null DataHandler\r\n+                getContentID(); // Force setting of content id\r\n+                dh = (DataHandler) null;\r\n+            } else {\r\n+                // Normal case: create a DataHandler from the sigValue object\r\n+                dh = createDataHandler(sigValue, sigClass, aDesc.getMimeTypes(), getContentID());\r\n+            }\r\n         }\r\n         return dh;\r\n     }\r\n@@ -123,6 +131,11 @@ private static DataHandler createDataHandler(Object value, Class cls, String[] m\n         DataHandler dh = null;\r\n         if (cls.isAssignableFrom(DataHandler.class)) {\r\n             dh = (DataHandler) value;\r\n+            if(dh == null)  \r\n+            {\r\n+                return dh; //return if DataHandler is null\r\n+            }\r\n+\r\n             try {\r\n                 Object content = dh.getContent();\r\n                 // If the content is a Source, convert to a String due to \r",
+                "raw_url": "https://github.com/apache/axis2-java/raw/edd14969ac5439bbe34b773757cc62dac84e7b76/modules/jaxws/src/org/apache/axis2/jaxws/marshaller/impl/alt/Attachment.java",
+                "sha": "c20866d76e5f924200d8e3815df7e28cd1fbe1ea",
+                "status": "modified"
+            },
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/axis2-java/blob/edd14969ac5439bbe34b773757cc62dac84e7b76/modules/jaxws/src/org/apache/axis2/jaxws/message/impl/MessageImpl.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/jaxws/src/org/apache/axis2/jaxws/message/impl/MessageImpl.java?ref=edd14969ac5439bbe34b773757cc62dac84e7b76",
+                "deletions": 0,
+                "filename": "modules/jaxws/src/org/apache/axis2/jaxws/message/impl/MessageImpl.java",
+                "patch": "@@ -443,6 +443,10 @@ public Object getValue(Object context, BlockFactory blockFactory) throws WebServ\n      * @see org.apache.axis2.jaxws.message.Message#getDataHandler(java.lang.String)\n      */\n     public DataHandler getDataHandler(String cid) {\n+        // if null DH was specified explicitly, just return\n+        if(cid == null) {\n+            return (DataHandler) null;\n+        }\n         String bcid = getBlobCID(cid);\n         return attachments.getDataHandler(bcid);\n     }",
+                "raw_url": "https://github.com/apache/axis2-java/raw/edd14969ac5439bbe34b773757cc62dac84e7b76/modules/jaxws/src/org/apache/axis2/jaxws/message/impl/MessageImpl.java",
+                "sha": "341ee07d1ea8ea4872e9bcee57ee35a260e55dcf",
+                "status": "modified"
+            }
+        ],
+        "message": "AXIS2-3963\nContributor:Samuel Isokpunwu and Bruce Tiffany\nPrevent NPE if null data handlers are used.\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@683622 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/c90f7478ea43831dd776cf5ce7f4f9bf98b3f62b",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "MessageImplTest.java"
+        ]
+    },
+    "axis2-java_f6f126a": {
+        "bug_id": "axis2-java_f6f126a",
+        "commit": "https://github.com/apache/axis2-java/commit/f6f126aab3c7caf42c4fd87ba68d492f171ec489",
+        "file": [
+            {
+                "additions": 10,
+                "blob_url": "https://github.com/apache/axis2-java/blob/f6f126aab3c7caf42c4fd87ba68d492f171ec489/modules/addressing/src/org/apache/axis2/handlers/addressing/AddressingInHandler.java",
+                "changes": 21,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/addressing/src/org/apache/axis2/handlers/addressing/AddressingInHandler.java?ref=f6f126aab3c7caf42c4fd87ba68d492f171ec489",
+                "deletions": 11,
+                "filename": "modules/addressing/src/org/apache/axis2/handlers/addressing/AddressingInHandler.java",
+                "patch": "@@ -29,7 +29,6 @@\n import org.apache.axis2.client.Options;\n import org.apache.axis2.context.MessageContext;\n import org.apache.axis2.handlers.AbstractHandler;\n-import org.apache.axis2.util.JavaUtils;\n import org.apache.axis2.util.LoggingControl;\n import org.apache.commons.logging.Log;\n import org.apache.commons.logging.LogFactory;\n@@ -47,7 +46,7 @@\n \n     public InvocationResponse invoke(MessageContext msgContext) throws AxisFault {\n         // if another handler has already processed the addressing headers, do not do anything here.\n-        if (JavaUtils.isTrueExplicitly(msgContext.getProperty(IS_ADDR_INFO_ALREADY_PROCESSED))) {\n+        if (msgContext.isPropertyTrue(IS_ADDR_INFO_ALREADY_PROCESSED)) {\n             if (LoggingControl.debugLoggingAllowed && log.isDebugEnabled()) {\n                 log.debug(\n                         \"Another handler has processed the addressing headers. Nothing to do here.\");\n@@ -154,19 +153,19 @@ protected Options extractAddressingInformation(SOAPHeader header, MessageContext\n             SOAPHeaderBlock soapHeaderBlock = (SOAPHeaderBlock)addressingHeadersIt2.next();\n             if (!SOAP12Constants.SOAP_ROLE_NONE.equals(soapHeaderBlock.getRole())) {\n                 if (WSA_ACTION.equals(soapHeaderBlock.getLocalName()) && !ignoreAction) {\n-                    extractActionInformation(soapHeaderBlock, namespace, messageContext);\n+                    extractActionInformation(soapHeaderBlock, messageContext);\n                 } else if (WSA_TO.equals(soapHeaderBlock.getLocalName()) && !ignoreTo) {\n                     extractToEPRInformation(soapHeaderBlock, messageContextOptions, header,\n                                             namespace);\n                 } else\n                 if (WSA_MESSAGE_ID.equals(soapHeaderBlock.getLocalName()) && !ignoreMessageID) {\n-                    extractMessageIDInformation(soapHeaderBlock, namespace, messageContext);\n+                    extractMessageIDInformation(soapHeaderBlock, messageContext);\n                 } else if (WSA_REPLY_TO.equals(soapHeaderBlock.getLocalName()) && !ignoreReplyTo) {\n                     extractReplyToEPRInformation(soapHeaderBlock, namespace, messageContext);\n                 } else if (WSA_FAULT_TO.equals(soapHeaderBlock.getLocalName()) && !ignoreFaultTo) {\n                     extractFaultToEPRInformation(soapHeaderBlock, namespace, messageContext);\n                 } else if (WSA_RELATES_TO.equals(soapHeaderBlock.getLocalName())) {\n-                    extractRelatesToInformation(soapHeaderBlock, namespace, messageContextOptions);\n+                    extractRelatesToInformation(soapHeaderBlock, messageContextOptions);\n                 } else if (WSA_FROM.equals(soapHeaderBlock.getLocalName()) && !ignoreFrom) {\n                     extractFromEPRInformation(soapHeaderBlock, namespace, messageContext);\n                 }\n@@ -223,7 +222,6 @@ protected abstract void extractToEprReferenceParameters(EndpointReference toEPR,\n \n \n     private void extractRelatesToInformation(SOAPHeaderBlock soapHeaderBlock,\n-                                             String addressingNamespace,\n                                              Options messageContextOptions) {\n         String address = soapHeaderBlock.getText();\n \n@@ -334,7 +332,7 @@ private void extractToEPRInformation(SOAPHeaderBlock soapHeaderBlock,\n     //soapaction. We compare that action to the WS-Addressing action, and if they are\n     //different we throw a fault.\n     private void extractActionInformation(SOAPHeaderBlock soapHeaderBlock,\n-                                          String addressingNamespace, MessageContext messageContext)\n+                                          MessageContext messageContext)\n             throws AxisFault {\n         Options messageContextOptions = messageContext.getOptions();\n         String soapAction = messageContextOptions.getAction();\n@@ -373,7 +371,6 @@ private void extractActionInformation(SOAPHeaderBlock soapHeaderBlock,\n     }\n \n     private void extractMessageIDInformation(SOAPHeaderBlock soapHeaderBlock,\n-                                             String addressingNamespace,\n                                              MessageContext messageContext) throws AxisFault {\n         messageContext.getOptions().setMessageId(soapHeaderBlock.getText());\n \n@@ -388,9 +385,11 @@ private void extractMessageIDInformation(SOAPHeaderBlock soapHeaderBlock,\n     /**\n      * Given the soap header block, this should extract the information within EPR.\n      *\n-     * @param headerBlock\n-     * @param epr\n-     * @param addressingNamespace\n+     * @param headerBlock a SOAP header which is of type EndpointReference\n+     * @param epr the EndpointReference to fill in with the extracted data\n+     * @param addressingNamespace the WSA namespace URI\n+     * @param messageContext the active MessageContext\n+     * @throws AxisFault if there is a problem\n      */\n     private void extractEPRInformation(SOAPHeaderBlock headerBlock, EndpointReference epr,\n                                        String addressingNamespace, MessageContext messageContext)",
+                "raw_url": "https://github.com/apache/axis2-java/raw/f6f126aab3c7caf42c4fd87ba68d492f171ec489/modules/addressing/src/org/apache/axis2/handlers/addressing/AddressingInHandler.java",
+                "sha": "6648ba9fda756d86eef677b57134ef7419e17b13",
+                "status": "modified"
+            },
+            {
+                "additions": 8,
+                "blob_url": "https://github.com/apache/axis2-java/blob/f6f126aab3c7caf42c4fd87ba68d492f171ec489/modules/addressing/src/org/apache/axis2/handlers/addressing/AddressingOutHandler.java",
+                "changes": 19,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/addressing/src/org/apache/axis2/handlers/addressing/AddressingOutHandler.java?ref=f6f126aab3c7caf42c4fd87ba68d492f171ec489",
+                "deletions": 11,
+                "filename": "modules/addressing/src/org/apache/axis2/handlers/addressing/AddressingOutHandler.java",
+                "patch": "@@ -69,7 +69,7 @@ public void init(HandlerDescription arg0) {\n \n     public InvocationResponse invoke(MessageContext msgContext) throws AxisFault {\n         // it should be able to disable addressing by some one.\n-        if (Utils.isExplicitlyTrue(msgContext, DISABLE_ADDRESSING_FOR_OUT_MESSAGES)) {\n+        if (msgContext.isPropertyTrue(DISABLE_ADDRESSING_FOR_OUT_MESSAGES)) {\n             if (log.isTraceEnabled()) {\n                 log.trace(msgContext.getLogIDString() +\n                         \" Addressing is disabled. Not adding WS-Addressing headers.\");\n@@ -87,21 +87,18 @@ public InvocationResponse invoke(MessageContext msgContext) throws AxisFault {\n                 Submission.WSA_NAMESPACE.equals(addressingVersionFromCurrentMsgCtxt);\n \n         // Determine whether to include optional addressing headers in the output.\n-        boolean includeOptionalHeaders = this.includeOptionalHeaders;\n-        Object includeHeadersPropery = msgContext.getProperty(INCLUDE_OPTIONAL_HEADERS);\n-        if (includeHeadersPropery != null) {\n-            includeOptionalHeaders = JavaUtils.isTrueExplicitly(includeHeadersPropery);\n-        }\n+        boolean includeOptionalHeaders = this.includeOptionalHeaders ||\n+                                            msgContext.isPropertyTrue(INCLUDE_OPTIONAL_HEADERS);\n \n         // Determine if a MustUnderstand attribute will be added to all headers in the\n         // addressing namespace.\n         boolean addMustUnderstandAttribute =\n-                Utils.isExplicitlyTrue(msgContext, ADD_MUST_UNDERSTAND_TO_ADDRESSING_HEADERS);\n+                msgContext.isPropertyTrue(ADD_MUST_UNDERSTAND_TO_ADDRESSING_HEADERS);\n \n         // what if there are addressing headers already in the message. Do you replace that or not?\n         // Lets have a parameter to control that. The default behavior is you won't replace addressing\n         // headers if there are any (this was the case so far).\n-        boolean replaceHeaders = Utils.isExplicitlyTrue(msgContext, REPLACE_ADDRESSING_HEADERS);\n+        boolean replaceHeaders = msgContext.isPropertyTrue(REPLACE_ADDRESSING_HEADERS);\n \n         WSAHeaderWriter writer = new WSAHeaderWriter(msgContext, isSubmissionNamespace,\n                                                      addMustUnderstandAttribute, replaceHeaders,\n@@ -251,8 +248,8 @@ private void processWSAAction() throws AxisFault {\n                                 \" processWSAAction: No action to add to header\");\n                     }\n                     // Fault unless validation has been explictily turned off\n-                    if (!Utils.isExplicitlyTrue(messageContext,\n-                                                AddressingConstants.DISABLE_OUTBOUND_ADDRESSING_VALIDATION))\n+                    if (!messageContext.isPropertyTrue(\n+                            AddressingConstants.DISABLE_OUTBOUND_ADDRESSING_VALIDATION))\n                     {\n                         throw new AxisFault(AddressingMessages.getMessage(\"outboundNoAction\"));\n                     }\n@@ -457,7 +454,7 @@ private void addToSOAPHeader(EndpointReference epr, String headerName) throws Ax\n         /**\n          * This will add reference parameters and/or reference properties in to the message\n          *\n-         * @param referenceInformation\n+         * @param referenceInformation a Map from QName -> OMElement\n          * @param parent               is the element to which the referenceparameters should be\n          *                             attached\n          */",
+                "raw_url": "https://github.com/apache/axis2-java/raw/f6f126aab3c7caf42c4fd87ba68d492f171ec489/modules/addressing/src/org/apache/axis2/handlers/addressing/AddressingOutHandler.java",
+                "sha": "4cd4f9b2c1d1d0eb4304678136f4fda41250b819",
+                "status": "modified"
+            },
+            {
+                "additions": 24,
+                "blob_url": "https://github.com/apache/axis2-java/blob/f6f126aab3c7caf42c4fd87ba68d492f171ec489/modules/kernel/src/org/apache/axis2/context/MessageContext.java",
+                "changes": 25,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/context/MessageContext.java?ref=f6f126aab3c7caf42c4fd87ba68d492f171ec489",
+                "deletions": 1,
+                "filename": "modules/kernel/src/org/apache/axis2/context/MessageContext.java",
+                "patch": "@@ -18,7 +18,6 @@\n \n import org.apache.axiom.attachments.Attachments;\n import org.apache.axiom.om.OMOutputFormat;\n-import org.apache.axiom.om.OMException;\n import org.apache.axiom.om.impl.MTOMConstants;\n import org.apache.axiom.om.impl.builder.StAXBuilder;\n import org.apache.axiom.om.util.StAXUtils;\n@@ -49,6 +48,7 @@\n import org.apache.axis2.util.MetaDataEntry;\n import org.apache.axis2.util.ObjectStateUtils;\n import org.apache.axis2.util.SelfManagedDataHolder;\n+import org.apache.axis2.util.JavaUtils;\n import org.apache.commons.logging.Log;\n import org.apache.commons.logging.LogFactory;\n import org.apache.neethi.Policy;\n@@ -949,6 +949,29 @@ public Object getProperty(String name) {\n         return null;\n     }\n \n+    /**\n+     * Check if a given property is true.  Will return false if the property\n+     * does not exist or is not an explicit \"true\" value.\n+     *\n+     * @param name name of the property to check\n+     * @return true if the property exists and is Boolean.TRUE, \"true\", 1, etc.\n+     */\n+    public boolean isPropertyTrue(String name) {\n+        return isPropertyTrue(name, false);\n+    }\n+\n+    /**\n+     * Check if a given property is true.  Will return the passed default if the property\n+     * does not exist.\n+     *\n+     * @param name name of the property to check\n+     * @param defaultVal the default value if the property doesn't exist\n+     * @return true if the property exists and is Boolean.TRUE, \"true\", 1, etc.\n+     */\n+    public boolean isPropertyTrue(String name, boolean defaultVal) {\n+        return JavaUtils.isTrueExplicitly(getProperty(name), defaultVal);\n+    }\n+    \n     /**\n      * Retrieves all property values. The order of search is as follows: search in\n      * my own options and then look in my context hierarchy. Since its possible",
+                "raw_url": "https://github.com/apache/axis2-java/raw/f6f126aab3c7caf42c4fd87ba68d492f171ec489/modules/kernel/src/org/apache/axis2/context/MessageContext.java",
+                "sha": "dc10f6e890d3646538612bd4445f410f58a1d411",
+                "status": "modified"
+            },
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/axis2-java/blob/f6f126aab3c7caf42c4fd87ba68d492f171ec489/modules/kernel/src/org/apache/axis2/transport/TransportUtils.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/transport/TransportUtils.java?ref=f6f126aab3c7caf42c4fd87ba68d492f171ec489",
+                "deletions": 2,
+                "filename": "modules/kernel/src/org/apache/axis2/transport/TransportUtils.java",
+                "patch": "@@ -114,8 +114,8 @@ public static SOAPEnvelope createSOAPMessage(MessageContext msgContext, InputStr\n                     if (msgContext.getSoapAction() == null) {\n                         type = HTTPConstants.MEDIA_TYPE_APPLICATION_XML;\n                     }\n-                } else if (msgContext.isDoingREST() && !JavaUtils.isTrueExplicitly(\n-                        msgContext.getProperty(Constants.Configuration.SOAP_RESPONSE_MEP))) {\n+                } else if (msgContext.isDoingREST() &&\n+                        !msgContext.isPropertyTrue(Constants.Configuration.SOAP_RESPONSE_MEP)) {\n                     type = HTTPConstants.MEDIA_TYPE_APPLICATION_XML;\n                 }\n             }",
+                "raw_url": "https://github.com/apache/axis2-java/raw/f6f126aab3c7caf42c4fd87ba68d492f171ec489/modules/kernel/src/org/apache/axis2/transport/TransportUtils.java",
+                "sha": "07fc404d4ef141b7ec1cdf0371926811fcf1664c",
+                "status": "modified"
+            },
+            {
+                "additions": 26,
+                "blob_url": "https://github.com/apache/axis2-java/blob/f6f126aab3c7caf42c4fd87ba68d492f171ec489/modules/kernel/src/org/apache/axis2/transport/http/AbstractHTTPSender.java",
+                "changes": 40,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/transport/http/AbstractHTTPSender.java?ref=f6f126aab3c7caf42c4fd87ba68d492f171ec489",
+                "deletions": 14,
+                "filename": "modules/kernel/src/org/apache/axis2/transport/http/AbstractHTTPSender.java",
+                "patch": "@@ -102,11 +102,13 @@ public void setHttpVersion(String version) throws AxisFault {\n     }\n \n     /**\n-     * Helper method to Proxy and NTLM authentication\n+     * Helper method for Proxy and NTLM authentication\n      *\n-     * @param client\n-     * @param proxySetting\n-     * @param config\n+     * @param client HttpClient in which to place proxy config\n+     * @param proxySetting TransportOutDescription\n+     * @param config HostConfiguraiton in which to place proxy config\n+     * @param msgCtx the active MessageContext\n+     * @throws AxisFault in case of problems\n      */\n     protected void configProxyAuthentication(HttpClient client,\n                                              TransportOutDescription proxySetting,\n@@ -204,8 +206,9 @@ protected void configProxyAuthentication(HttpClient client,\n     /**\n      * Collect the HTTP header information and set them in the message context\n      *\n-     * @param method\n-     * @param msgContext\n+     * @param method HttpMethodBase from which to get information\n+     * @param msgContext the MessageContext in which to place the information... OR NOT!\n+     * @throws AxisFault if problems occur\n      */\n     protected void obtainHTTPHeaderInformation(HttpMethodBase method,\n                                                MessageContext msgContext) throws AxisFault {\n@@ -236,13 +239,15 @@ protected void obtainHTTPHeaderInformation(HttpMethodBase method,\n                         .setProperty(Constants.Configuration.CHARACTER_SET_ENCODING, charSetEnc);\n             } else {\n \n-                //Transport details will be stored in a HashMap so that anybody interested can retriece them\n+                // Transport details will be stored in a HashMap so that anybody interested can\n+                // retrieve them\n                 HashMap transportInfoMap = new HashMap();\n                 transportInfoMap.put(Constants.Configuration.CONTENT_TYPE, contentType);\n                 transportInfoMap.put(Constants.Configuration.CHARACTER_SET_ENCODING, charSetEnc);\n \n                 //the HashMap is stored in the outgoing message.\n-                msgContext.setProperty(Constants.Configuration.TRANSPORT_INFO_MAP, transportInfoMap);\n+                msgContext.setProperty(Constants.Configuration.TRANSPORT_INFO_MAP,\n+                                       transportInfoMap);\n             }\n         }\n \n@@ -305,10 +310,16 @@ protected void processResponse(HttpMethodBase httpMethod,\n     }\n \n     public abstract void send(MessageContext msgContext, URL url, String soapActionString)\n-            throws AxisFault, IOException;\n+            throws IOException;\n \n     /**\n      * getting host configuration to support standard http/s, proxy and NTLM support\n+     *\n+     * @param client active HttpClient\n+     * @param msgCtx active MessageContext\n+     * @param targetURL the target URL\n+     * @return a HostConfiguration set up with proxy information\n+     * @throws AxisFault if problems occur\n      */\n     protected HostConfiguration getHostConfiguration(HttpClient client,\n                                                      MessageContext msgCtx,\n@@ -334,7 +345,8 @@ protected HostConfiguration getHostConfiguration(HttpClient client,\n         HostConfiguration config = new HostConfiguration();\n \n         // one might need to set his own socket factory. Let's allow that case as well.\n-        Protocol protocolHandler = (Protocol) msgCtx.getOptions().getProperty(HTTPConstants.CUSTOM_PROTOCOL_HANDLER);\n+        Protocol protocolHandler =\n+                (Protocol)msgCtx.getOptions().getProperty(HTTPConstants.CUSTOM_PROTOCOL_HANDLER);\n \n         // setting the real host configuration\n         // I assume the 90% case, or even 99% case will be no protocol handler case. \n@@ -442,9 +454,9 @@ protected void setAuthenticationInfo(HttpClient agent,\n     /**\n      * This is used to get the dynamically set time out values from the\n      * message context. If the values are not available or invalid then\n-     * teh default values or the values set by teh configuration will be used\n+     * the default values or the values set by the configuration will be used\n      *\n-     * @param msgContext\n+     * @param msgContext the active MessageContext\n      */\n     protected void getTimeoutValues(MessageContext msgContext) {\n         try {\n@@ -555,12 +567,12 @@ protected void executeMethod(HttpClient httpClient, MessageContext msgContext, U\n         addCustomHeaders(method, msgContext);\n \n         // add compression headers if needed\n-        if (Utils.isExplicitlyTrue(msgContext, HTTPConstants.MC_ACCEPT_GZIP)) {\n+        if (msgContext.isPropertyTrue(HTTPConstants.MC_ACCEPT_GZIP)) {\n             method.addRequestHeader(HTTPConstants.HEADER_ACCEPT_ENCODING,\n                     HTTPConstants.COMPRESSION_GZIP);\n         }\n \n-        if (Utils.isExplicitlyTrue(msgContext, HTTPConstants.MC_GZIP_REQUEST)) {\n+        if (msgContext.isPropertyTrue(HTTPConstants.MC_GZIP_REQUEST)) {\n             method.addRequestHeader(HTTPConstants.HEADER_CONTENT_ENCODING,\n                     HTTPConstants.COMPRESSION_GZIP);\n         }",
+                "raw_url": "https://github.com/apache/axis2-java/raw/f6f126aab3c7caf42c4fd87ba68d492f171ec489/modules/kernel/src/org/apache/axis2/transport/http/AbstractHTTPSender.java",
+                "sha": "6461c8b824768d87335880422abf788a0b828909",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/axis2-java/blob/f6f126aab3c7caf42c4fd87ba68d492f171ec489/modules/kernel/src/org/apache/axis2/transport/http/AxisRequestEntity.java",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/transport/http/AxisRequestEntity.java?ref=f6f126aab3c7caf42c4fd87ba68d492f171ec489",
+                "deletions": 2,
+                "filename": "modules/kernel/src/org/apache/axis2/transport/http/AxisRequestEntity.java",
+                "patch": "@@ -74,8 +74,7 @@ public boolean isRepeatable() {\n     }\n \n     public void writeRequest(OutputStream outStream) throws IOException {\n-        Object gzip = messageContext.getOptions().getProperty(\n-                HTTPConstants.MC_GZIP_REQUEST);\n+        Object gzip = messageContext.getOptions().getProperty(HTTPConstants.MC_GZIP_REQUEST);\n         if (gzip != null && JavaUtils.isTrueExplicitly(gzip) && chunked) {\n             outStream = new GZIPOutputStream(outStream);\n         }",
+                "raw_url": "https://github.com/apache/axis2-java/raw/f6f126aab3c7caf42c4fd87ba68d492f171ec489/modules/kernel/src/org/apache/axis2/transport/http/AxisRequestEntity.java",
+                "sha": "b6593e4785612a3e7b943156424e816b23b23785",
+                "status": "modified"
+            },
+            {
+                "additions": 9,
+                "blob_url": "https://github.com/apache/axis2-java/blob/f6f126aab3c7caf42c4fd87ba68d492f171ec489/modules/kernel/src/org/apache/axis2/transport/http/CommonsHTTPTransportSender.java",
+                "changes": 16,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/transport/http/CommonsHTTPTransportSender.java?ref=f6f126aab3c7caf42c4fd87ba68d492f171ec489",
+                "deletions": 7,
+                "filename": "modules/kernel/src/org/apache/axis2/transport/http/CommonsHTTPTransportSender.java",
+                "patch": "@@ -36,7 +36,6 @@\n import org.apache.commons.logging.Log;\n import org.apache.commons.logging.LogFactory;\n \n-import javax.xml.namespace.QName;\n import javax.xml.stream.FactoryConfigurationError;\n import javax.xml.stream.XMLStreamException;\n import java.io.IOException;\n@@ -50,7 +49,6 @@\n public class CommonsHTTPTransportSender extends AbstractHandler implements\n         TransportSender {\n \n-\n     protected static final String PROXY_HOST_NAME = \"proxy_host\";\n \n     protected static final String PROXY_PORT = \"proxy_port\";\n@@ -240,8 +238,10 @@ private void sendUsingOutputStream(MessageContext msgContext,\n         OutTransportInfo transportInfo = (OutTransportInfo) msgContext\n                 .getProperty(Constants.OUT_TRANSPORT_INFO);\n \n+        if (transportInfo == null) throw new AxisFault(\"No transport info in MessageContext\");\n+\n         ServletBasedOutTransportInfo servletBasedOutTransportInfo = null;\n-        if (transportInfo != null && transportInfo instanceof ServletBasedOutTransportInfo) {\n+        if (transportInfo instanceof ServletBasedOutTransportInfo) {\n             servletBasedOutTransportInfo =\n                     (ServletBasedOutTransportInfo) transportInfo;\n             List customHheaders = (List) msgContext.getProperty(HTTPConstants.HTTP_HEADERS);\n@@ -259,15 +259,17 @@ private void sendUsingOutputStream(MessageContext msgContext,\n \n         format.setAutoCloseWriter(true);\n \n-        MessageFormatter messageFormatter = TransportUtils\n-                .getMessageFormatter(msgContext);\n+        MessageFormatter messageFormatter = TransportUtils.getMessageFormatter(msgContext);\n+        if (messageFormatter == null) throw new AxisFault(\"No MessageFormatter in MessageContext\");\n+\n         transportInfo.setContentType(\n                 messageFormatter.getContentType(msgContext, format, findSOAPAction(msgContext)));\n \n         Object gzip = msgContext.getOptions().getProperty(HTTPConstants.MC_GZIP_RESPONSE);\n         if (gzip != null && JavaUtils.isTrueExplicitly(gzip)) {\n-            servletBasedOutTransportInfo.addHeader(HTTPConstants.HEADER_CONTENT_ENCODING,\n-                                                   HTTPConstants.COMPRESSION_GZIP);\n+            if (servletBasedOutTransportInfo != null)\n+                servletBasedOutTransportInfo.addHeader(HTTPConstants.HEADER_CONTENT_ENCODING,\n+                                                       HTTPConstants.COMPRESSION_GZIP);\n             try {\n                 out = new GZIPOutputStream(out);\n                 out.write(messageFormatter.getBytes(msgContext, format));",
+                "raw_url": "https://github.com/apache/axis2-java/raw/f6f126aab3c7caf42c4fd87ba68d492f171ec489/modules/kernel/src/org/apache/axis2/transport/http/CommonsHTTPTransportSender.java",
+                "sha": "4b180f04b345cac06c980a2126013618172a5eac",
+                "status": "modified"
+            },
+            {
+                "additions": 7,
+                "blob_url": "https://github.com/apache/axis2-java/blob/f6f126aab3c7caf42c4fd87ba68d492f171ec489/modules/kernel/src/org/apache/axis2/transport/http/HTTPSender.java",
+                "changes": 19,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/transport/http/HTTPSender.java?ref=f6f126aab3c7caf42c4fd87ba68d492f171ec489",
+                "deletions": 12,
+                "filename": "modules/kernel/src/org/apache/axis2/transport/http/HTTPSender.java",
+                "patch": "@@ -17,23 +17,18 @@\n package org.apache.axis2.transport.http;\n \n \n-import org.apache.axiom.soap.SOAP11Constants;\n-import org.apache.axiom.soap.SOAP12Constants;\n import org.apache.axis2.AxisFault;\n import org.apache.axis2.Constants;\n-import org.apache.axis2.util.JavaUtils;\n import org.apache.axis2.context.MessageContext;\n import org.apache.axis2.i18n.Messages;\n import org.apache.axis2.transport.MessageFormatter;\n import org.apache.axis2.transport.TransportUtils;\n import org.apache.commons.httpclient.Header;\n import org.apache.commons.httpclient.HttpClient;\n+import org.apache.commons.httpclient.HttpMethod;\n import org.apache.commons.httpclient.HttpMethodBase;\n import org.apache.commons.httpclient.HttpStatus;\n import org.apache.commons.httpclient.HttpVersion;\n-import org.apache.commons.httpclient.URI;\n-import org.apache.commons.httpclient.URIException;\n-import org.apache.commons.httpclient.HttpMethod;\n import org.apache.commons.httpclient.methods.DeleteMethod;\n import org.apache.commons.httpclient.methods.GetMethod;\n import org.apache.commons.httpclient.methods.PostMethod;\n@@ -42,15 +37,14 @@\n import org.apache.commons.logging.LogFactory;\n \n import java.io.IOException;\n-import java.net.MalformedURLException;\n import java.net.URL;\n \n public class HTTPSender extends AbstractHTTPSender {\n \n     private static final Log log = LogFactory.getLog(HTTPSender.class);\n \n     public void send(MessageContext msgContext, URL url, String soapActionString)\n-            throws MalformedURLException, AxisFault, IOException {\n+            throws IOException {\n \n         // execute the HtttpMethodBase - a connection manager can be given for\n         // handle multiple\n@@ -113,8 +107,7 @@ private void sendViaGet(MessageContext msgContext, URL url, String soapActiionSt\n     }\n \n     private void cleanup(MessageContext msgContext, HttpMethod method) {\n-        Object autoClose = msgContext.getOptions().getProperty(HTTPConstants.AUTO_RELEASE_CONNECTION);\n-        if (autoClose != null && JavaUtils.isTrueExplicitly(autoClose)) {\n+        if (msgContext.isPropertyTrue(HTTPConstants.AUTO_RELEASE_CONNECTION)) {\n             method.releaseConnection();\n         }\n     }\n@@ -159,12 +152,14 @@ private void sendViaPost(MessageContext msgContext, URL url,\n \n         HttpClient httpClient = getHttpClient(msgContext);\n \n+/*  What's up with this, it never gets used anywhere?? --Glen\n         String charEncoding =\n                 (String) msgContext.getProperty(Constants.Configuration.CHARACTER_SET_ENCODING);\n \n         if (charEncoding == null) {\n             charEncoding = MessageContext.DEFAULT_CHAR_SET_ENCODING;\n         }\n+*/\n \n         PostMethod postMethod = new PostMethod();\n         MessageFormatter messageFormatter =\n@@ -212,14 +207,14 @@ private void sendViaPut(MessageContext msgContext, URL url,\n \n         HttpClient httpClient = getHttpClient(msgContext);\n \n+/*  Same deal - this value never gets used, why is it here? --Glen\n         String charEncoding =\n                 (String) msgContext.getProperty(Constants.Configuration.CHARACTER_SET_ENCODING);\n \n         if (charEncoding == null) {\n             charEncoding = MessageContext.DEFAULT_CHAR_SET_ENCODING;\n         }\n-\n-        // TODO - Do something with charEncoding???\n+*/\n \n         PutMethod putMethod = new PutMethod();\n         MessageFormatter messageFormatter =",
+                "raw_url": "https://github.com/apache/axis2-java/raw/f6f126aab3c7caf42c4fd87ba68d492f171ec489/modules/kernel/src/org/apache/axis2/transport/http/HTTPSender.java",
+                "sha": "439177d1e5acd027986a283701819dde370cda8d",
+                "status": "modified"
+            },
+            {
+                "additions": 7,
+                "blob_url": "https://github.com/apache/axis2-java/blob/f6f126aab3c7caf42c4fd87ba68d492f171ec489/modules/kernel/src/org/apache/axis2/util/Utils.java",
+                "changes": 7,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/kernel/src/org/apache/axis2/util/Utils.java?ref=f6f126aab3c7caf42c4fd87ba68d492f171ec489",
+                "deletions": 0,
+                "filename": "modules/kernel/src/org/apache/axis2/util/Utils.java",
+                "patch": "@@ -342,6 +342,13 @@ public static boolean isLatest(String moduleVersion, String currentDefaultVersio\n         }\n     }\n \n+    /**\n+     * Check if a MessageContext property is true.\n+     * @param messageContext the MessageContext\n+     * @param propertyName the property name\n+     * @return true if the property is Boolean.TRUE, \"true\", 1, etc. or false otherwise\n+     * @deprecated please use MessageContext.isTrue(propertyName) instead\n+     */\n     public static boolean isExplicitlyTrue(MessageContext messageContext, String propertyName) {\n         Object flag = messageContext.getProperty(propertyName);\n         return JavaUtils.isTrueExplicitly(flag);",
+                "raw_url": "https://github.com/apache/axis2-java/raw/f6f126aab3c7caf42c4fd87ba68d492f171ec489/modules/kernel/src/org/apache/axis2/util/Utils.java",
+                "sha": "cc5b50b0c7f2223ab880c30dc623a788031086c7",
+                "status": "modified"
+            }
+        ],
+        "message": "* Add MessageContext.isPropertyTrue() method, to avoid people needing to use other classes, do their own null checks, etc.  Deprecate Utils.isExplicitlyTrue(). Refactor a bunch of stuff to use the new method.\n\n* Clean up / improve JavaDoc in various places\n\n* Remove unused namespace args from methods in AddressingInHandler\n\n* Fix some potential NPEs in CommonsHTTPTransportSender\n\n* Comment unused code in HTTPSender\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@537322 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/20a354adf9548de709905e084449e2be752b647a",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "UtilsTest.java",
+            "TestUtils.java"
+        ]
+    },
+    "axis2-java_f74c3e5": {
+        "bug_id": "axis2-java_f74c3e5",
+        "commit": "https://github.com/apache/axis2-java/commit/f74c3e5b19c5975d22414a07fba9a986fb7a8e04",
+        "file": [
+            {
+                "additions": 13,
+                "blob_url": "https://github.com/apache/axis2-java/blob/f74c3e5b19c5975d22414a07fba9a986fb7a8e04/modules/adb/src/org/apache/axis2/databinding/utils/BeanUtil.java",
+                "changes": 20,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/adb/src/org/apache/axis2/databinding/utils/BeanUtil.java?ref=f74c3e5b19c5975d22414a07fba9a986fb7a8e04",
+                "deletions": 7,
+                "filename": "modules/adb/src/org/apache/axis2/databinding/utils/BeanUtil.java",
+                "patch": "@@ -49,7 +49,7 @@\n      * @param beanName\r\n      */\r\n     public static XMLStreamReader getPullParser(Object beanObject, QName beanName) {\r\n-        try {\r\n+\t\ttry {\r\n             JamServiceFactory factory = JamServiceFactory.getInstance();\r\n             JamServiceParams jam_service_parms = factory.createServiceParams();\r\n             jam_service_parms.addClassLoader(beanObject.getClass().getClassLoader());\r\n@@ -88,15 +88,15 @@ public static XMLStreamReader getPullParser(Object beanObject, QName beanName) {\n                     Object value = propDesc.getReadMethod().invoke(beanObject,\r\n                             (Object[]) null);\r\n                     object.add(propDesc.getName());\r\n-                    object.add(value.toString());\r\n+                    object.add(value == null ? null : value.toString());\r\n                 } else if (ptype.isArray()) {\r\n                     Object value [] = (Object[]) propDesc.getReadMethod().invoke(beanObject,\r\n                             (Object[]) null);\r\n                     if (SimpleTypeMapper.isSimpleType(ptype.getComponentType())) {\r\n                         for (int j = 0; j < value.length; j++) {\r\n                             Object o = value[j];\r\n                             object.add(propDesc.getName());\r\n-                            object.add(o.toString());\r\n+                            object.add(o == null ? null :o.toString());\r\n                         }\r\n                     } else {\r\n                         for (int j = 0; j < value.length; j++) {\r\n@@ -134,9 +134,15 @@ public static XMLStreamReader getPullParser(Object beanObject, QName beanName) {\n                 }\r\n             }\r\n             return new ADBXMLStreamReaderImpl(beanName, object.toArray(), null);\r\n-        } catch (Exception e) {\r\n-            return null;\r\n-        }\r\n+\t\t} catch (java.io.IOException e){\r\n+\t\t\tthrow new RuntimeException(e);\r\n+\t\t} catch (java.beans.IntrospectionException e){\r\n+\t\t\tthrow new RuntimeException(e);\r\n+\t\t} catch (java.lang.reflect.InvocationTargetException e){\r\n+\t\t\tthrow new RuntimeException(e);\r\n+\t\t} catch (java.lang.IllegalAccessException e){\r\n+\t\t\tthrow new RuntimeException(e);\r\n+\t\t}\r\n     }\r\n \r\n     /**\r\n@@ -455,7 +461,7 @@ public static OMElement getOMElement(QName opName, Object [] args, String partNa\n                     Object o = array[j];\r\n                     if (SimpleTypeMapper.isSimpleType(o)) {\r\n                         objects.add(\"item\" + argCount);\r\n-                        objects.add(o.toString());\r\n+                        objects.add(o == null ? null : o.toString());\r\n                     } else {\r\n                         objects.add(new QName(\"item\" + argCount));\r\n                         if (o instanceof OMElement) {\r",
+                "raw_url": "https://github.com/apache/axis2-java/raw/f74c3e5b19c5975d22414a07fba9a986fb7a8e04/modules/adb/src/org/apache/axis2/databinding/utils/BeanUtil.java",
+                "sha": "2f47239661da75b0b48ab8ba5af91a32611f9332",
+                "status": "modified"
+            }
+        ],
+        "message": "- *PLEASE* don't catch all exceptions and return null\n- Adding check for NPE's.\n\n\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@407889 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/14131036fe99b0a9908bf594f3f248da089b2b3e",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "BeanUtilTest.java"
+        ]
+    },
+    "axis2-java_f91aea2": {
+        "bug_id": "axis2-java_f91aea2",
+        "commit": "https://github.com/apache/axis2-java/commit/f91aea26c54d90ea247dd70042e1dff6ddd426e8",
+        "file": [
+            {
+                "additions": 8,
+                "blob_url": "https://github.com/apache/axis2-java/blob/f91aea26c54d90ea247dd70042e1dff6ddd426e8/modules/scripting/src/org/apache/axis2/scripting/ScriptModule.java",
+                "changes": 14,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/scripting/src/org/apache/axis2/scripting/ScriptModule.java?ref=f91aea26c54d90ea247dd70042e1dff6ddd426e8",
+                "deletions": 6,
+                "filename": "modules/scripting/src/org/apache/axis2/scripting/ScriptModule.java",
+                "patch": "@@ -57,12 +57,14 @@ public void init(ConfigurationContext configContext, AxisModule module) throws A\n         log.debug(\"script services init\");\n \n         AxisConfiguration axisConfig = configContext.getAxisConfiguration();\n-\n-        File scriptServicesDirectory = getScriptServicesDirectory(axisConfig);\n-        ScriptDeploymentEngine deploymentEngine = new ScriptDeploymentEngine(axisConfig);\n-        deploymentEngine.loadRepository(scriptServicesDirectory);\n-        deploymentEngine.loadServices();\n-\n+        if(axisConfig.getRepository() == null) {\n+            log.error(\"AxisConfiguration getRepository returns null, cannot deploy scripts\");\n+        } else {\n+            File scriptServicesDirectory = getScriptServicesDirectory(axisConfig);\n+            ScriptDeploymentEngine deploymentEngine = new ScriptDeploymentEngine(axisConfig);\n+            deploymentEngine.loadRepository(scriptServicesDirectory);\n+            deploymentEngine.loadServices();\n+        }\n         log.info(\"script module activated\");\n     }\n ",
+                "raw_url": "https://github.com/apache/axis2-java/raw/f91aea26c54d90ea247dd70042e1dff6ddd426e8/modules/scripting/src/org/apache/axis2/scripting/ScriptModule.java",
+                "sha": "f61feb070af470eb1065a4d7d60daadae82e739a",
+                "status": "modified"
+            }
+        ],
+        "message": "Handle embedded/unexploded war scenarios better, avoid NPE and log ERROR\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@563212 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/59b1b5a7b30432935534968422c7dacb5c9ea35d",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "ScriptModuleTest.java"
+        ]
+    },
+    "axis2-java_fbde875": {
+        "bug_id": "axis2-java_fbde875",
+        "commit": "https://github.com/apache/axis2-java/commit/fbde87551e4ee516e506f0b5d871cff95dda98d7",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/axis2-java/blob/fbde87551e4ee516e506f0b5d871cff95dda98d7/modules/adb-codegen/test/org/apache/axis2/schema/populate/Util.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/axis2-java/contents/modules/adb-codegen/test/org/apache/axis2/schema/populate/Util.java?ref=fbde87551e4ee516e506f0b5d871cff95dda98d7",
+                "deletions": 1,
+                "filename": "modules/adb-codegen/test/org/apache/axis2/schema/populate/Util.java",
+                "patch": "@@ -5,7 +5,7 @@ public static Class getFactory(Class clazz)  {\n         Class[] declaredClasse = clazz.getDeclaredClasses();\r\n         for (int i = 0; i < declaredClasse.length; i++) {\r\n             Class aClass = declaredClasse[i];\r\n-            if(aClass != null && aClass.getCanonicalName().endsWith(\"Factory\")){\r\n+            if(aClass != null && aClass.getName().endsWith(\"Factory\")){\r\n                 return aClass;\r\n             }\r\n         }\r",
+                "raw_url": "https://github.com/apache/axis2-java/raw/fbde87551e4ee516e506f0b5d871cff95dda98d7/modules/adb-codegen/test/org/apache/axis2/schema/populate/Util.java",
+                "sha": "5f82bb323830fbe624a0ab7e4f9c7d5f44707b0f",
+                "status": "modified"
+            }
+        ],
+        "message": "try getName as getCanonicalName causes an NPE\n\ngit-svn-id: https://svn.apache.org/repos/asf/webservices/axis2/trunk/java@648745 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/axis2-java/commit/199da53faaef36c65a98070e20ec7de8d6608131",
+        "repo": "axis2-java",
+        "unit_tests": [
+            "UtilTest.java",
+            "TestUtil.java"
+        ]
+    }
+}

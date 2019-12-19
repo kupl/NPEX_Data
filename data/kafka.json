@@ -1,0 +1,206 @@
+{
+    "kafka_0a7f2bf": {
+        "bug_id": "kafka_0a7f2bf",
+        "commit": "https://github.com/apache/kafka/commit/0a7f2bf335e426b12f717ec7f6d51779d56fe59b",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/kafka/blob/0a7f2bf335e426b12f717ec7f6d51779d56fe59b/clients/src/main/java/org/apache/kafka/common/record/MemoryRecords.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/kafka/contents/clients/src/main/java/org/apache/kafka/common/record/MemoryRecords.java?ref=0a7f2bf335e426b12f717ec7f6d51779d56fe59b",
+                "deletions": 1,
+                "filename": "clients/src/main/java/org/apache/kafka/common/record/MemoryRecords.java",
+                "patch": "@@ -145,7 +145,7 @@ public int sizeInBytes() {\n         if (writable) {\n             return compressor.buffer().position();\n         } else {\n-            return compressor.buffer().limit();\n+            return buffer.limit();\n         }\n     }\n ",
+                "raw_url": "https://github.com/apache/kafka/raw/0a7f2bf335e426b12f717ec7f6d51779d56fe59b/clients/src/main/java/org/apache/kafka/common/record/MemoryRecords.java",
+                "sha": "971f0a2131259babdfde7947149a50102f60ccc5",
+                "status": "modified"
+            }
+        ],
+        "message": "MINOR: MemoryRecords.sizeInBytes throws NPE when non-writable.\n\nI just noticed that `MemoryRecords.sizeInBytes` throws NPE when MemoryRecords is non-writable. `compressor` is explicitly set to null when `writable` is false (L56) at the construction time, for instance when `MemoryRecords.readableRecords` is used.\n\nguozhangwang Could you take a look when you have time?\n\nAuthor: David Jacot <david.jacot@gmail.com>\n\nReviewers: Guozhang Wang\n\nCloses #786 from dajac/kafka-npe",
+        "parent": "https://github.com/apache/kafka/commit/b1d325b3c09cd95d69a66fac4a3760f57d3062c9",
+        "repo": "kafka",
+        "unit_tests": [
+            "MemoryRecordsTest.java"
+        ]
+    },
+    "kafka_14314e3": {
+        "bug_id": "kafka_14314e3",
+        "commit": "https://github.com/apache/kafka/commit/14314e3d687b4c7b77750d27a085b803c934e3e9",
+        "file": [
+            {
+                "additions": 25,
+                "blob_url": "https://github.com/apache/kafka/blob/14314e3d687b4c7b77750d27a085b803c934e3e9/streams/src/main/java/org/apache/kafka/streams/state/internals/InMemorySessionStore.java",
+                "changes": 25,
+                "contents_url": "https://api.github.com/repos/apache/kafka/contents/streams/src/main/java/org/apache/kafka/streams/state/internals/InMemorySessionStore.java?ref=14314e3d687b4c7b77750d27a085b803c934e3e9",
+                "deletions": 0,
+                "filename": "streams/src/main/java/org/apache/kafka/streams/state/internals/InMemorySessionStore.java",
+                "patch": "@@ -23,6 +23,7 @@\n import java.util.Map;\n import java.util.Map.Entry;\n import java.util.NoSuchElementException;\n+import java.util.Objects;\n import java.util.Set;\n import java.util.concurrent.ConcurrentHashMap;\n import java.util.concurrent.ConcurrentNavigableMap;\n@@ -134,6 +135,8 @@ public void remove(final Windowed<Bytes> sessionKey) {\n     public byte[] fetchSession(final Bytes key, final long startTime, final long endTime) {\n         removeExpiredSegments();\n \n+        Objects.requireNonNull(key, \"key cannot be null\");\n+\n         // Only need to search if the record hasn't expired yet\n         if (endTime > observedStreamTime - retentionPeriod) {\n             final ConcurrentNavigableMap<Bytes, ConcurrentNavigableMap<Long, byte[]>> keyMap = endTimeMap.get(endTime);\n@@ -152,6 +155,8 @@ public void remove(final Windowed<Bytes> sessionKey) {\n     public KeyValueIterator<Windowed<Bytes>, byte[]> findSessions(final Bytes key,\n                                                                   final long earliestSessionEndTime,\n                                                                   final long latestSessionStartTime) {\n+        Objects.requireNonNull(key, \"key cannot be null\");\n+\n         removeExpiredSegments();\n \n         return registerNewIterator(key,\n@@ -166,6 +171,9 @@ public void remove(final Windowed<Bytes> sessionKey) {\n                                                                   final Bytes keyTo,\n                                                                   final long earliestSessionEndTime,\n                                                                   final long latestSessionStartTime) {\n+        Objects.requireNonNull(keyFrom, \"from key cannot be null\");\n+        Objects.requireNonNull(keyTo, \"to key cannot be null\");\n+\n         removeExpiredSegments();\n \n         if (keyFrom.compareTo(keyTo) > 0) {\n@@ -183,15 +191,23 @@ public void remove(final Windowed<Bytes> sessionKey) {\n \n     @Override\n     public KeyValueIterator<Windowed<Bytes>, byte[]> fetch(final Bytes key) {\n+\n+        Objects.requireNonNull(key, \"key cannot be null\");\n+\n         removeExpiredSegments();\n \n         return registerNewIterator(key, key, Long.MAX_VALUE, endTimeMap.entrySet().iterator());\n     }\n \n     @Override\n     public KeyValueIterator<Windowed<Bytes>, byte[]> fetch(final Bytes from, final Bytes to) {\n+\n+        Objects.requireNonNull(from, \"from key cannot be null\");\n+        Objects.requireNonNull(to, \"to key cannot be null\");\n+\n         removeExpiredSegments();\n \n+\n         return registerNewIterator(from, to, Long.MAX_VALUE, endTimeMap.entrySet().iterator());\n     }\n \n@@ -212,6 +228,13 @@ public void flush() {\n \n     @Override\n     public void close() {\n+        if (openIterators.size() != 0) {\n+            LOG.warn(\"Closing {} open iterators for store {}\", openIterators.size(), name);\n+            for (final InMemorySessionStoreIterator it : openIterators) {\n+                it.close();\n+            }\n+        }\n+\n         endTimeMap.clear();\n         openIterators.clear();\n         open = false;\n@@ -303,6 +326,8 @@ public boolean hasNext() {\n \n         @Override\n         public void close() {\n+            next = null;\n+            recordIterator = null;\n             callback.deregisterIterator(this);\n         }\n ",
+                "raw_url": "https://github.com/apache/kafka/raw/14314e3d687b4c7b77750d27a085b803c934e3e9/streams/src/main/java/org/apache/kafka/streams/state/internals/InMemorySessionStore.java",
+                "sha": "f3b85657278dc19df103049bf5143681bfb63f50",
+                "status": "modified"
+            },
+            {
+                "additions": 55,
+                "blob_url": "https://github.com/apache/kafka/blob/14314e3d687b4c7b77750d27a085b803c934e3e9/streams/src/main/java/org/apache/kafka/streams/state/internals/InMemoryWindowStore.java",
+                "changes": 70,
+                "contents_url": "https://api.github.com/repos/apache/kafka/contents/streams/src/main/java/org/apache/kafka/streams/state/internals/InMemoryWindowStore.java?ref=14314e3d687b4c7b77750d27a085b803c934e3e9",
+                "deletions": 15,
+                "filename": "streams/src/main/java/org/apache/kafka/streams/state/internals/InMemoryWindowStore.java",
+                "patch": "@@ -18,6 +18,7 @@\n \n import java.nio.ByteBuffer;\n import java.util.Iterator;\n+import java.util.Objects;\n import java.util.Set;\n import java.util.concurrent.ConcurrentHashMap;\n import java.util.concurrent.ConcurrentNavigableMap;\n@@ -135,6 +136,9 @@ public void put(final Bytes key, final byte[] value, final long windowStartTimes\n             } else {\n                 segmentMap.computeIfPresent(windowStartTimestamp, (t, kvMap) -> {\n                     kvMap.remove(keyBytes);\n+                    if (kvMap.isEmpty()) {\n+                        segmentMap.remove(windowStartTimestamp);\n+                    }\n                     return kvMap;\n                 });\n             }\n@@ -143,6 +147,9 @@ public void put(final Bytes key, final byte[] value, final long windowStartTimes\n \n     @Override\n     public byte[] fetch(final Bytes key, final long windowStartTimestamp) {\n+\n+        Objects.requireNonNull(key, \"key cannot be null\");\n+\n         removeExpiredSegments();\n \n         if (windowStartTimestamp <= observedStreamTime - retentionPeriod) {\n@@ -160,6 +167,9 @@ public void put(final Bytes key, final byte[] value, final long windowStartTimes\n     @Deprecated\n     @Override\n     public WindowStoreIterator<byte[]> fetch(final Bytes key, final long timeFrom, final long timeTo) {\n+\n+        Objects.requireNonNull(key, \"key cannot be null\");\n+\n         removeExpiredSegments();\n \n         // add one b/c records expire exactly retentionPeriod ms after created\n@@ -179,6 +189,9 @@ public void put(final Bytes key, final byte[] value, final long windowStartTimes\n                                                            final Bytes to,\n                                                            final long timeFrom,\n                                                            final long timeTo) {\n+        Objects.requireNonNull(from, \"from key cannot be null\");\n+        Objects.requireNonNull(to, \"to key cannot be null\");\n+\n         removeExpiredSegments();\n \n         if (from.compareTo(to) > 0) {\n@@ -242,6 +255,13 @@ public void flush() {\n \n     @Override\n     public void close() {\n+        if (openIterators.size() != 0) {\n+            LOG.warn(\"Closing {} open iterators for store {}\", openIterators.size(), name);\n+            for (final InMemoryWindowStoreIteratorWrapper it : openIterators) {\n+                it.close();\n+            }\n+        }\n+        \n         segmentMap.clear();\n         open = false;\n     }\n@@ -281,7 +301,7 @@ private WrappedInMemoryWindowStoreIterator registerNewWindowStoreIterator(final\n         final Bytes keyTo = retainDuplicates ? wrapForDups(key, Integer.MAX_VALUE) : key;\n \n         final WrappedInMemoryWindowStoreIterator iterator =\n-            new WrappedInMemoryWindowStoreIterator(keyFrom, keyTo, segmentIterator, openIterators::remove);\n+            new WrappedInMemoryWindowStoreIterator(keyFrom, keyTo, segmentIterator, openIterators::remove, retainDuplicates);\n \n         openIterators.add(iterator);\n         return iterator;\n@@ -319,15 +339,18 @@ private WrappedWindowedKeyValueIterator registerNewWindowedKeyValueIterator(fina\n         private final boolean allKeys;\n         private final Bytes keyFrom;\n         private final Bytes keyTo;\n+        private final boolean retainDuplicates;\n         private final ClosingCallback callback;\n \n         InMemoryWindowStoreIteratorWrapper(final Bytes keyFrom,\n                                            final Bytes keyTo,\n                                            final Iterator<Map.Entry<Long, ConcurrentNavigableMap<Bytes, byte[]>>> segmentIterator,\n-                                           final ClosingCallback callback) {\n+                                           final ClosingCallback callback,\n+                                           final boolean retainDuplicates) {\n             this.keyFrom = keyFrom;\n             this.keyTo = keyTo;\n             allKeys = (keyFrom == null) && (keyTo == null);\n+            this.retainDuplicates = retainDuplicates;\n \n             this.segmentIterator = segmentIterator;\n             this.callback = callback;\n@@ -343,15 +366,26 @@ public boolean hasNext() {\n             }\n \n             next = getNext();\n-            return next != null;\n-        }\n+            if (next == null) {\n+                return false;\n+            }\n \n-        public void remove() {\n-            throw new UnsupportedOperationException(\n-                \"remove() is not supported in \" + getClass().getName());\n+            if (allKeys || !retainDuplicates) {\n+                return true;\n+            }\n+\n+            final Bytes key = getKey(next.key);\n+            if (key.compareTo(getKey(keyFrom)) >= 0 && key.compareTo(getKey(keyTo)) <= 0) {\n+                return true;\n+            } else {\n+                next = null;\n+                return hasNext();\n+            }\n         }\n \n         public void close() {\n+            next = null;\n+            recordIterator = null;\n             callback.deregisterIterator(this);\n         }\n \n@@ -395,8 +429,9 @@ Long minTime() {\n         WrappedInMemoryWindowStoreIterator(final Bytes keyFrom,\n                                            final Bytes keyTo,\n                                            final Iterator<Map.Entry<Long, ConcurrentNavigableMap<Bytes, byte[]>>> segmentIterator,\n-                                           final ClosingCallback callback)  {\n-            super(keyFrom, keyTo, segmentIterator, callback);\n+                                           final ClosingCallback callback,\n+                                           final boolean retainDuplicates)  {\n+            super(keyFrom, keyTo, segmentIterator, callback, retainDuplicates);\n         }\n \n         @Override\n@@ -419,13 +454,12 @@ public Long peekNextKey() {\n         }\n \n         public static WrappedInMemoryWindowStoreIterator emptyIterator() {\n-            return new WrappedInMemoryWindowStoreIterator(null, null, null, it -> { });\n+            return new WrappedInMemoryWindowStoreIterator(null, null, null, it -> { }, false);\n         }\n     }\n \n     private static class WrappedWindowedKeyValueIterator extends InMemoryWindowStoreIteratorWrapper implements KeyValueIterator<Windowed<Bytes>, byte[]> {\n \n-        private final boolean retainDuplicates;\n         private final long windowSize;\n \n         WrappedWindowedKeyValueIterator(final Bytes keyFrom,\n@@ -434,8 +468,7 @@ public static WrappedInMemoryWindowStoreIterator emptyIterator() {\n                                         final ClosingCallback callback,\n                                         final boolean retainDuplicates,\n                                         final long windowSize) {\n-            super(keyFrom, keyTo, segmentIterator, callback);\n-            this.retainDuplicates = retainDuplicates;\n+            super(keyFrom, keyTo, segmentIterator, callback, retainDuplicates);\n             this.windowSize = windowSize;\n         }\n \n@@ -457,8 +490,15 @@ public static WrappedInMemoryWindowStoreIterator emptyIterator() {\n         }\n \n         private Windowed<Bytes> getWindowedKey() {\n-            final Bytes key = retainDuplicates ? getKey(super.next.key) : super.next.key;\n-            final TimeWindow timeWindow = new TimeWindow(super.currentTime, super.currentTime + windowSize);\n+            final Bytes key = super.retainDuplicates ? getKey(super.next.key) : super.next.key;\n+            long endTime = super.currentTime + windowSize;\n+\n+            if (endTime < 0) {\n+                LOG.warn(\"Warning: window end time was truncated to Long.MAX\");\n+                endTime = Long.MAX_VALUE;\n+            }\n+\n+            final TimeWindow timeWindow = new TimeWindow(super.currentTime, endTime);\n             return new Windowed<>(key, timeWindow);\n         }\n     }",
+                "raw_url": "https://github.com/apache/kafka/raw/14314e3d687b4c7b77750d27a085b803c934e3e9/streams/src/main/java/org/apache/kafka/streams/state/internals/InMemoryWindowStore.java",
+                "sha": "8063410212eb679e8557e5f1a04a37a1efc5add8",
+                "status": "modified"
+            },
+            {
+                "additions": 11,
+                "blob_url": "https://github.com/apache/kafka/blob/14314e3d687b4c7b77750d27a085b803c934e3e9/streams/src/main/java/org/apache/kafka/streams/state/internals/WindowKeySchema.java",
+                "changes": 13,
+                "contents_url": "https://api.github.com/repos/apache/kafka/contents/streams/src/main/java/org/apache/kafka/streams/state/internals/WindowKeySchema.java?ref=14314e3d687b4c7b77750d27a085b803c934e3e9",
+                "deletions": 2,
+                "filename": "streams/src/main/java/org/apache/kafka/streams/state/internals/WindowKeySchema.java",
+                "patch": "@@ -26,9 +26,13 @@\n \n import java.nio.ByteBuffer;\n import java.util.List;\n+import org.slf4j.Logger;\n+import org.slf4j.LoggerFactory;\n \n public class WindowKeySchema implements RocksDBSegmentedBytesStore.KeySchema {\n \n+    private static final Logger LOG = LoggerFactory.getLogger(WindowKeySchema.class);\n+\n     private static final int SEQNUM_SIZE = 4;\n     private static final int TIMESTAMP_SIZE = 8;\n     private static final int SUFFIX_SIZE = TIMESTAMP_SIZE + SEQNUM_SIZE;\n@@ -99,8 +103,13 @@ public HasNextCondition hasNextCondition(final Bytes binaryKeyFrom,\n      */\n     static TimeWindow timeWindowForSize(final long startMs,\n                                         final long windowSize) {\n-        final long endMs = startMs + windowSize;\n-        return new TimeWindow(startMs, endMs < 0 ? Long.MAX_VALUE : endMs);\n+        long endMs = startMs + windowSize;\n+\n+        if (endMs < 0) {\n+            LOG.warn(\"Warning: window end time was truncated to Long.MAX\");\n+            endMs = Long.MAX_VALUE;\n+        }\n+        return new TimeWindow(startMs, endMs);\n     }\n \n     // for pipe serdes",
+                "raw_url": "https://github.com/apache/kafka/raw/14314e3d687b4c7b77750d27a085b803c934e3e9/streams/src/main/java/org/apache/kafka/streams/state/internals/WindowKeySchema.java",
+                "sha": "9218ccf0a7752d6084c1e80fc9cb3971b3a9357b",
+                "status": "modified"
+            }
+        ],
+        "message": "[HOT FIX] in-memory store behavior should match rocksDB (#6657)\n\nWhile working on consolidating the various store unit tests I uncovered some minor \"bugs\" in the in-memory stores (inconsistencies with the behavior as established by the RocksDB stores).\r\n\r\nopen iterators should be properly closed in the case the store is closed\r\nfetch/findSessions should always throw NPE if key is null\r\nwindow end time should be truncated at Long.MAX_VALUE rather than throw exception\r\n(Verified in-memory stores pass all applicable rocksDB tests now, unified unit tests coming in another PR)\r\n\r\nReviewers: Guozhang Wang <wangguoz@gmail.com>, Bill Bejeck <bbejeck@gmail.com>",
+        "parent": "https://github.com/apache/kafka/commit/a1b1e088b98763818e933dce335b580d02916640",
+        "repo": "kafka",
+        "unit_tests": [
+            "WindowKeySchemaTest.java"
+        ]
+    },
+    "kafka_40432e3": {
+        "bug_id": "kafka_40432e3",
+        "commit": "https://github.com/apache/kafka/commit/40432e31f7c5b0e0992a51621dc8b1c0e3d3103f",
+        "file": [
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/kafka/blob/40432e31f7c5b0e0992a51621dc8b1c0e3d3103f/streams/src/main/java/org/apache/kafka/streams/processor/internals/TaskManager.java",
+                "changes": 5,
+                "contents_url": "https://api.github.com/repos/apache/kafka/contents/streams/src/main/java/org/apache/kafka/streams/processor/internals/TaskManager.java?ref=40432e31f7c5b0e0992a51621dc8b1c0e3d3103f",
+                "deletions": 3,
+                "filename": "streams/src/main/java/org/apache/kafka/streams/processor/internals/TaskManager.java",
+                "patch": "@@ -112,7 +112,7 @@ void createTasks(final Collection<TopicPartition> assignment) {\n     }\n \n     private void addStreamTasks(final Collection<TopicPartition> assignment) {\n-        if (assignedActiveTasks.isEmpty()) {\n+        if (assignedActiveTasks == null || assignedActiveTasks.isEmpty()) {\n             return;\n         }\n         final Map<TaskId, Set<TopicPartition>> newTasks = new HashMap<>();\n@@ -151,8 +151,7 @@ private void addStreamTasks(final Collection<TopicPartition> assignment) {\n     }\n \n     private void addStandbyTasks() {\n-        final Map<TaskId, Set<TopicPartition>> assignedStandbyTasks = this.assignedStandbyTasks;\n-        if (assignedStandbyTasks.isEmpty()) {\n+        if (assignedStandbyTasks == null || assignedStandbyTasks.isEmpty()) {\n             return;\n         }\n         log.debug(\"Adding assigned standby tasks {}\", assignedStandbyTasks);",
+                "raw_url": "https://github.com/apache/kafka/raw/40432e31f7c5b0e0992a51621dc8b1c0e3d3103f/streams/src/main/java/org/apache/kafka/streams/processor/internals/TaskManager.java",
+                "sha": "a7fa1fa96706c2486777dc1f8f0463b80d643b8b",
+                "status": "modified"
+            }
+        ],
+        "message": "MONIR: Check for NULL in case of version probing (#7275)\n\nIn case of version probing we would skip the logic for setting cluster / assigned tasks; since these values are initialized as null they are vulnerable to NPE when code changes.\r\n\r\nReviewers: A. Sophie Blee-Goldman <sophie@confluent.io>, Bill Bejeck <bill@confluent.io>",
+        "parent": "https://github.com/apache/kafka/commit/d18d6b033e09515adff19225f8ec6845ca34c23b",
+        "repo": "kafka",
+        "unit_tests": [
+            "TaskManagerTest.java"
+        ]
+    },
+    "kafka_6352a30": {
+        "bug_id": "kafka_6352a30",
+        "commit": "https://github.com/apache/kafka/commit/6352a30f46f2da11a8dc3e58912d0a2db8284c35",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/kafka/blob/6352a30f46f2da11a8dc3e58912d0a2db8284c35/streams/src/main/java/org/apache/kafka/streams/processor/internals/StreamThread.java",
+                "changes": 1,
+                "contents_url": "https://api.github.com/repos/apache/kafka/contents/streams/src/main/java/org/apache/kafka/streams/processor/internals/StreamThread.java?ref=6352a30f46f2da11a8dc3e58912d0a2db8284c35",
+                "deletions": 0,
+                "filename": "streams/src/main/java/org/apache/kafka/streams/processor/internals/StreamThread.java",
+                "patch": "@@ -682,6 +682,7 @@ private void removeStandbyTasks() {\n \n         standbyTasks.clear();\n         standbyTasksByPartition.clear();\n+        standbyRecords.clear();\n     }\n \n     private void ensureCopartitioning(Collection<Set<String>> copartitionGroups) {",
+                "raw_url": "https://github.com/apache/kafka/raw/6352a30f46f2da11a8dc3e58912d0a2db8284c35/streams/src/main/java/org/apache/kafka/streams/processor/internals/StreamThread.java",
+                "sha": "d51974a51f15924007620545c5dadf4149ff4b96",
+                "status": "modified"
+            }
+        ],
+        "message": "HOTFIX: Fix NPE after standby task reassignment\n\nBuffered records of change logs must be cleared upon reassignment of standby tasks.\n\nAuthor: Yasuhiro Matsuda <yasuhiro@confluent.io>\n\nReviewers: Ewen Cheslack-Postava <ewen@confluent.io>\n\nCloses #889 from ymatsuda/hotfix",
+        "parent": "https://github.com/apache/kafka/commit/9f5a1f87667c23db557a712d51c45541372f3c5d",
+        "repo": "kafka",
+        "unit_tests": [
+            "StreamThreadTest.java"
+        ]
+    },
+    "kafka_7b16b47": {
+        "bug_id": "kafka_7b16b47",
+        "commit": "https://github.com/apache/kafka/commit/7b16b4731666ff321fbe46828d526872ff5f56d7",
+        "file": [
+            {
+                "additions": 15,
+                "blob_url": "https://github.com/apache/kafka/blob/7b16b4731666ff321fbe46828d526872ff5f56d7/clients/src/main/java/org/apache/kafka/clients/consumer/internals/AbstractCoordinator.java",
+                "changes": 32,
+                "contents_url": "https://api.github.com/repos/apache/kafka/contents/clients/src/main/java/org/apache/kafka/clients/consumer/internals/AbstractCoordinator.java?ref=7b16b4731666ff321fbe46828d526872ff5f56d7",
+                "deletions": 17,
+                "filename": "clients/src/main/java/org/apache/kafka/clients/consumer/internals/AbstractCoordinator.java",
+                "patch": "@@ -206,24 +206,16 @@ public synchronized void ensureCoordinatorReady() {\n         }\n     }\n \n-    protected RequestFuture<Void> lookupCoordinator() {\n-        if (findCoordinatorFuture == null) {\n+    protected synchronized RequestFuture<Void> lookupCoordinator() {\n+        if (findCoordinatorFuture == null)\n             findCoordinatorFuture = sendGroupCoordinatorRequest();\n-            findCoordinatorFuture.addListener(new RequestFutureListener<Void>() {\n-                @Override\n-                public void onSuccess(Void value) {\n-                    findCoordinatorFuture = null;\n-                }\n-\n-                @Override\n-                public void onFailure(RuntimeException e) {\n-                    findCoordinatorFuture = null;\n-                }\n-            });\n-        }\n         return findCoordinatorFuture;\n     }\n \n+    private synchronized void clearFindCoordinatorFuture() {\n+        findCoordinatorFuture = null;\n+    }\n+\n     /**\n      * Check whether the group should be rejoined (e.g. if metadata changes)\n      * @return true if it should, false otherwise\n@@ -532,6 +524,7 @@ public void onSuccess(ClientResponse resp, RequestFuture<Void> future) {\n             // for the coordinator in the underlying network client layer\n             // TODO: this needs to be better handled in KAFKA-1935\n             Errors error = Errors.forCode(groupCoordinatorResponse.errorCode());\n+            clearFindCoordinatorFuture();\n             if (error == Errors.NONE) {\n                 synchronized (AbstractCoordinator.this) {\n                     AbstractCoordinator.this.coordinator = new Node(\n@@ -550,6 +543,12 @@ public void onSuccess(ClientResponse resp, RequestFuture<Void> future) {\n                 future.raise(error);\n             }\n         }\n+\n+        @Override\n+        public void onFailure(RuntimeException e, RequestFuture<Void> future) {\n+            clearFindCoordinatorFuture();\n+            super.onFailure(e, future);\n+        }\n     }\n \n     /**\n@@ -820,7 +819,6 @@ private RuntimeException failureCause() {\n         @Override\n         public void run() {\n             try {\n-                RequestFuture findCoordinatorFuture = null;\n \n                 while (true) {\n                     synchronized (AbstractCoordinator.this) {\n@@ -843,8 +841,8 @@ public void run() {\n                         long now = time.milliseconds();\n \n                         if (coordinatorUnknown()) {\n-                            if (findCoordinatorFuture == null || findCoordinatorFuture.isDone())\n-                                findCoordinatorFuture = lookupCoordinator();\n+                            if (findCoordinatorFuture == null)\n+                                lookupCoordinator();\n                             else\n                                 AbstractCoordinator.this.wait(retryBackoffMs);\n                         } else if (heartbeat.sessionTimeoutExpired(now)) {",
+                "raw_url": "https://github.com/apache/kafka/raw/7b16b4731666ff321fbe46828d526872ff5f56d7/clients/src/main/java/org/apache/kafka/clients/consumer/internals/AbstractCoordinator.java",
+                "sha": "f2e15ca6f943dfca017b4dce72ee221a85f55ee4",
+                "status": "modified"
+            }
+        ],
+        "message": "KAFKA-4066; Fix NPE in consumer due to multi-threaded updates\n\nAuthor: Rajini Sivaram <rajinisivaram@googlemail.com>\n\nReviewers: Jason Gustafson <jason@confluent.io>, Ismael Juma <ismael@juma.me.uk>\n\nCloses #1763 from rajinisivaram/KAFKA-4066",
+        "parent": "https://github.com/apache/kafka/commit/6ed3e6b1cb8a73b1f5f78926ccb247a8953a554c",
+        "repo": "kafka",
+        "unit_tests": [
+            "AbstractCoordinatorTest.java"
+        ]
+    },
+    "kafka_80d78f8": {
+        "bug_id": "kafka_80d78f8",
+        "commit": "https://github.com/apache/kafka/commit/80d78f81470f109dc6d221f755b039c7332bb93b",
+        "file": [
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/kafka/blob/80d78f81470f109dc6d221f755b039c7332bb93b/streams/src/main/java/org/apache/kafka/streams/state/internals/RocksDBWindowStore.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/kafka/contents/streams/src/main/java/org/apache/kafka/streams/state/internals/RocksDBWindowStore.java?ref=80d78f81470f109dc6d221f755b039c7332bb93b",
+                "deletions": 2,
+                "filename": "streams/src/main/java/org/apache/kafka/streams/state/internals/RocksDBWindowStore.java",
+                "patch": "@@ -245,7 +245,7 @@ public void close() {\n     public void put(K key, V value) {\n         byte[] rawKey = putAndReturnInternalKey(key, value, USE_CURRENT_TIMESTAMP);\n \n-        if (loggingEnabled) {\n+        if (rawKey != null && loggingEnabled) {\n             changeLogger.add(rawKey);\n             changeLogger.maybeLogChange(this.getter);\n         }\n@@ -255,7 +255,7 @@ public void put(K key, V value) {\n     public void put(K key, V value, long timestamp) {\n         byte[] rawKey = putAndReturnInternalKey(key, value, timestamp);\n \n-        if (loggingEnabled) {\n+        if (rawKey != null && loggingEnabled) {\n             changeLogger.add(rawKey);\n             changeLogger.maybeLogChange(this.getter);\n         }",
+                "raw_url": "https://github.com/apache/kafka/raw/80d78f81470f109dc6d221f755b039c7332bb93b/streams/src/main/java/org/apache/kafka/streams/state/internals/RocksDBWindowStore.java",
+                "sha": "9851c0489b8864932d975e81656758ce4a2dd985",
+                "status": "modified"
+            }
+        ],
+        "message": "HOTFIX: fix NPE in changelogger\n\nFix NPE in StoreChangeLogger caused by a record out of window retention period.\nguozhangwang\n\nAuthor: Yasuhiro Matsuda <yasuhiro@confluent.io>\n\nReviewers: Guozhang Wang <wangguoz@gmail.com>\n\nCloses #1124 from ymatsuda/logger_npe",
+        "parent": "https://github.com/apache/kafka/commit/d4d5920ed40736d21f056188efa8a86c93e22506",
+        "repo": "kafka",
+        "unit_tests": [
+            "RocksDBWindowStoreTest.java"
+        ]
+    },
+    "kafka_e32dcb9": {
+        "bug_id": "kafka_e32dcb9",
+        "commit": "https://github.com/apache/kafka/commit/e32dcb9a669bc354cc97cb45f14f0dbad9657693",
+        "file": [
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/kafka/blob/e32dcb9a669bc354cc97cb45f14f0dbad9657693/streams/src/main/java/org/apache/kafka/streams/state/internals/CachingKeyValueStore.java",
+                "changes": 5,
+                "contents_url": "https://api.github.com/repos/apache/kafka/contents/streams/src/main/java/org/apache/kafka/streams/state/internals/CachingKeyValueStore.java?ref=e32dcb9a669bc354cc97cb45f14f0dbad9657693",
+                "deletions": 1,
+                "filename": "streams/src/main/java/org/apache/kafka/streams/state/internals/CachingKeyValueStore.java",
+                "patch": "@@ -163,7 +163,10 @@ public boolean isOpen() {\n     }\n \n     private byte[] getInternal(final Bytes key) {\n-        final LRUCacheEntry entry = cache.get(cacheName, key);\n+        LRUCacheEntry entry = null;\n+        if (cache != null) {\n+            entry = cache.get(cacheName, key);\n+        }\n         if (entry == null) {\n             final byte[] rawValue = underlying.get(key);\n             if (rawValue == null) {",
+                "raw_url": "https://github.com/apache/kafka/raw/e32dcb9a669bc354cc97cb45f14f0dbad9657693/streams/src/main/java/org/apache/kafka/streams/state/internals/CachingKeyValueStore.java",
+                "sha": "16684e39c1ac2e83bbe126678688c43478093986",
+                "status": "modified"
+            },
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/kafka/blob/e32dcb9a669bc354cc97cb45f14f0dbad9657693/streams/src/main/java/org/apache/kafka/streams/state/internals/CachingWindowStore.java",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/kafka/contents/streams/src/main/java/org/apache/kafka/streams/state/internals/CachingWindowStore.java?ref=e32dcb9a669bc354cc97cb45f14f0dbad9657693",
+                "deletions": 0,
+                "filename": "streams/src/main/java/org/apache/kafka/streams/state/internals/CachingWindowStore.java",
+                "patch": "@@ -160,6 +160,9 @@ public synchronized void put(final Bytes key, final byte[] value, final long tim\n         validateStoreOpen();\n         final Bytes bytesKey = WindowKeySchema.toStoreKeyBinary(key, timestamp, 0);\n         final Bytes cacheKey = cacheFunction.cacheKey(bytesKey);\n+        if (cache == null) {\n+            return underlying.fetch(key, timestamp);\n+        }\n         final LRUCacheEntry entry = cache.get(name, cacheKey);\n         if (entry == null) {\n             return underlying.fetch(key, timestamp);",
+                "raw_url": "https://github.com/apache/kafka/raw/e32dcb9a669bc354cc97cb45f14f0dbad9657693/streams/src/main/java/org/apache/kafka/streams/state/internals/CachingWindowStore.java",
+                "sha": "1d0455b2b6f164f7c2f7739e90b2fa269b8694ff",
+                "status": "modified"
+            }
+        ],
+        "message": "KAFKA-6878: NPE when querying global state store not in READY state (#4978)\n\nCheck whether cache is null before retrieving from cache.\r\n\r\nReviewers: Guozhang Wang <guozhang@confluent.io>, Bill Bejeck <bill@confluent.io>",
+        "parent": "https://github.com/apache/kafka/commit/5ca9ed5ede4f03cdef54cdbce70be3fdf052157d",
+        "repo": "kafka",
+        "unit_tests": [
+            "CachingWindowStoreTest.java"
+        ]
+    }
+}

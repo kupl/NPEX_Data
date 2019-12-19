@@ -1,0 +1,62 @@
+{
+    "incubator-ambari_dfb7f03": {
+        "bug_id": "incubator-ambari_dfb7f03",
+        "commit": "https://github.com/apache/incubator-ambari/commit/dfb7f03927aee48e81597a1dad0b270067c68563",
+        "file": [
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/incubator-ambari/blob/dfb7f03927aee48e81597a1dad0b270067c68563/AMBARI-666-CHANGES.txt",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/incubator-ambari/contents/AMBARI-666-CHANGES.txt?ref=dfb7f03927aee48e81597a1dad0b270067c68563",
+                "deletions": 0,
+                "filename": "AMBARI-666-CHANGES.txt",
+                "patch": "@@ -12,6 +12,9 @@ AMBARI-666 branch (unreleased changes)\n \n   NEW FEATURES\n \n+  AMBARI-801. Fix heartbeat message from the agent which is causing NPE at the\n+  server. (mahadev)\n+\n   AMBARI-778. Ensure data flows across all steps in installer wizard.\n   (Jaimin Jetly via yusaku)\n ",
+                "raw_url": "https://github.com/apache/incubator-ambari/raw/dfb7f03927aee48e81597a1dad0b270067c68563/AMBARI-666-CHANGES.txt",
+                "sha": "4ccfd6238b92c5c35bcdc33f8f48d5c23cce5d7d",
+                "status": "modified"
+            },
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/incubator-ambari/blob/dfb7f03927aee48e81597a1dad0b270067c68563/ambari-agent/src/main/python/ambari_agent/Controller.py",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/incubator-ambari/contents/ambari-agent/src/main/python/ambari_agent/Controller.py?ref=dfb7f03927aee48e81597a1dad0b270067c68563",
+                "deletions": 1,
+                "filename": "ambari-agent/src/main/python/ambari_agent/Controller.py",
+                "patch": "@@ -107,7 +107,8 @@ def heartbeatWithServer(self):\n       try:\n         if retry==False:\n           data = json.dumps(self.heartbeat.build(id))\n-\n+          pass\n+        logger.info(\"Sending HeartBeat \" + pprint.pformat(data))\n         req = urllib2.Request(self.heartbeatUrl, data, {'Content-Type': 'application/json'})\n         \n         logger.info(data)",
+                "raw_url": "https://github.com/apache/incubator-ambari/raw/dfb7f03927aee48e81597a1dad0b270067c68563/ambari-agent/src/main/python/ambari_agent/Controller.py",
+                "sha": "445399cc7340282bfaf8737dc207bf23cf892e3a",
+                "status": "modified"
+            },
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/incubator-ambari/blob/dfb7f03927aee48e81597a1dad0b270067c68563/ambari-agent/src/main/python/ambari_agent/Heartbeat.py",
+                "changes": 8,
+                "contents_url": "https://api.github.com/repos/apache/incubator-ambari/contents/ambari-agent/src/main/python/ambari_agent/Heartbeat.py?ref=dfb7f03927aee48e81597a1dad0b270067c68563",
+                "deletions": 2,
+                "filename": "ambari-agent/src/main/python/ambari_agent/Heartbeat.py",
+                "patch": "@@ -39,11 +39,15 @@ def build(self, id='-1'):\n     timestamp = int(time.time()*1000)\n     queueResult = self.actionQueue.result()\n     installedRoleStates = serverStatus.build()\n+    nodeStatus = { \"status\" : \"HEALTHY\",\n+                   \"cause\" : \"NONE\"}\n+    \n     heartbeat = { 'responseId'        : int(id),\n                   'timestamp'         : timestamp,\n                   'hostname'          : socket.gethostname(),\n-                  'reports'           : self.reports,\n-                  'componentStatus'   : self.componentStatus\n+                 # 'reports'           : self.reports,\n+                 # 'componentStatus'   : self.componentStatus,\n+                  'nodeStatus'        : nodeStatus\n                 }\n   \n     ",
+                "raw_url": "https://github.com/apache/incubator-ambari/raw/dfb7f03927aee48e81597a1dad0b270067c68563/ambari-agent/src/main/python/ambari_agent/Heartbeat.py",
+                "sha": "e9215f766fa187c951ee8b0e9937cf8debc83bf6",
+                "status": "modified"
+            },
+            {
+                "additions": 7,
+                "blob_url": "https://github.com/apache/incubator-ambari/blob/dfb7f03927aee48e81597a1dad0b270067c68563/ambari-server/src/main/java/org/apache/ambari/server/actionmanager/ActionManager.java",
+                "changes": 8,
+                "contents_url": "https://api.github.com/repos/apache/incubator-ambari/contents/ambari-server/src/main/java/org/apache/ambari/server/actionmanager/ActionManager.java?ref=dfb7f03927aee48e81597a1dad0b270067c68563",
+                "deletions": 1,
+                "filename": "ambari-server/src/main/java/org/apache/ambari/server/actionmanager/ActionManager.java",
+                "patch": "@@ -21,8 +21,13 @@\n \n import org.apache.ambari.server.agent.ActionQueue;\n import org.apache.ambari.server.agent.CommandReport;\n+import org.apache.ambari.server.agent.rest.AgentResource;\n import org.apache.ambari.server.state.live.Clusters;\n import org.apache.ambari.server.utils.StageUtils;\n+import org.apache.commons.logging.Log;\n+import org.apache.commons.logging.LogFactory;\n+import org.slf4j.Logger;\n+import org.slf4j.LoggerFactory;\n \n import com.google.inject.Inject;\n import com.google.inject.Singleton;\n@@ -38,7 +43,8 @@\n   private final ActionDBAccessor db;\n   private final ActionQueue actionQueue;\n   private final Clusters fsm;\n-\n+  private static Logger LOG = LoggerFactory.getLogger(ActionManager.class);\n+  \n   @Inject\n   public ActionManager(@Named(\"schedulerSleeptime\") long schedulerSleepTime,\n       @Named(\"actionTimeout\") long actionTimeout,",
+                "raw_url": "https://github.com/apache/incubator-ambari/raw/dfb7f03927aee48e81597a1dad0b270067c68563/ambari-server/src/main/java/org/apache/ambari/server/actionmanager/ActionManager.java",
+                "sha": "baa3df8fe89260b0fd093c6416863b726f005cad",
+                "status": "modified"
+            }
+        ],
+        "message": "AMBARI-801. Fix heartbeat message from the agent which is causing NPE at the server. (mahadev)\n\ngit-svn-id: https://svn.apache.org/repos/asf/incubator/ambari/branches/AMBARI-666@1393810 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/incubator-ambari/commit/ff66974b8912a037662212052cbd05b96c11f6e3",
+        "repo": "incubator-ambari",
+        "unit_tests": [
+            "TestActionManager.java"
+        ]
+    }
+}
