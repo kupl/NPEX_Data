@@ -19,11 +19,34 @@ repo_dict = {}
 starttime = time.strftime("%m%d_%I%M", time.localtime())
 logfile = open("logs/%s.log" % starttime, 'w')
 
+def has_outdated_urls():
+    urls = ['nexus.codehaus.org', 'vm094.oxylos.org']
+    for url in urls:
+        if not (EasyProcess('grep %s pom.xml' % url).call().stdout is ''):
+            return True
+    return False
+
+def get_test_command(testClass, project):
+    if os.path.isfile('pom.xml'):
+        return 'mvn clean test -Dtest=%s -DfailIfNoTests=false' % testClass if project == 'src' \
+        else 'mvn clean test -Dtest=%s --pl %s -amd -DfailIfNoTests=false' % (testClass, project) 
+    elif os.path.isfile('maven.xml'):
+        return 'maven clean test -Dtest=%s -DfailIfNoTests=false' % testClass
+    else:
+        return None
+
+
+def get_compile_command():
+    if os.path.isfile('pom.xml'):
+        return 'mvn clean install -DskipTests'
+    elif os.path.isfile('maven.xml'):
+        return 'maven clean install -DskipTests'
+    else:
+        return None 
+
 ## Load repo data into a repo_dict
-def load_repository_data(datadir): 
-    repo_file = open("repo_with_commits.txt", 'r')
-    for repo in repo_file.readlines():
-        repo = repo.split('\n')[0]
+def load_repository_data(repos): 
+    for repo in repos:
         repo_data_file = open("data/%s.json" % repo, 'r')
         repo_json = json.loads(repo_data_file.read())
         repo_data_file.close()
@@ -60,7 +83,7 @@ def find_test_classes(commit):
 
 
 ## make a directory for repo. and iterate commits until succeed count reaches limit
-def do_repo(repo, limit=16, dir=ROOT_DIR):
+def do_repo(repo, limit=100, dir=ROOT_DIR):
     os.chdir(dir) 
     repo_path = os.path.abspath("benchmarks/%s" % repo)
     os.makedirs(repo_path, exist_ok=True)
@@ -72,14 +95,16 @@ def do_repo(repo, limit=16, dir=ROOT_DIR):
         if limit == 0: return
 
         if (do_commit(commits[bug_id], repo_path) == True):
+            limit = limit + 16
+        else:
             limit = limit - 1
         logfile.flush()
 
 
-def unittest(commit, testFile, do_commit_logfile):
+def unittest(commit, testFile):
     #TODO: we only consider a single class to test.
     ret = {}
-    ret['buggy_class'] = ' ' 
+    ret['buggy_class'] = None 
     
     #a) Is fixed code correct w.r.t. test-cases?
         #TODO: we do not consider package.class, but class only.
@@ -88,15 +113,19 @@ def unittest(commit, testFile, do_commit_logfile):
     # Testcase exists for latest version, but not for this version.
     if testFilename is '':
         logfile.writelines(" - no testfile found for %s\n" % commit['bug_id'])
-        do_commit_logfile.writelines(" - no testfile found for %s\n" % commit['bug_id'])
         ret['fixed'] = False
         ret['buggy'] = False
         ret['buggy_class'] = None
         return ret
-    project = testFilename.split('/')[1]
+    
+    test_cmd = get_test_command(testClass, testFilename.split('/')[1])
+    if test_cmd is None:
+        logfile.writelines(" - not maven project\n")
+        ret['fixed'] = False
+        ret['buggy'] = False
+        ret['buggy_class'] = None
+        return ret
 
-    test_cmd = 'mvn clean test -Dtest=%s -DfailIfNoTests=false' % testClass if project == 'src' \
-        else 'mvn clean test -Dtest=%s --pl %s -amd -DfailIfNoTests=false' % (testClass, project) 
     logfile.writelines(" - test command: %s\n" % test_cmd)
     
     test_ret = EasyProcess(test_cmd).call()
@@ -107,10 +136,6 @@ def unittest(commit, testFile, do_commit_logfile):
    
     non_testing_names = [changed_file['filename'] for changed_file in commit['file'] \
         if changed_file['filename'].split('/')[-1] != testFile ]
-    # print('filtering %s ...' % non_testing_names)
-    # non_testing_names = list(filter(lambda name: name.split('/')[-1] != testFile, non_testing_names))
-    # print('filtered by %s: %s' % (testFile, non_testing_names))
-
     checkout_cmd = 'git checkout %s -- %s' % (parent_commit, ' '.join(non_testing_names))
     logfile.writelines(" - git checkout command for buggy version: %s\n" % checkout_cmd)
     checkout_ret = EasyProcess(checkout_cmd).call()
@@ -142,26 +167,32 @@ def do_commit(commit, dir):
     os.makedirs(commit_id, exist_ok=True)
     os.chdir(commit_id)
     ret_checkout = EasyProcess(git_checkout_command).call()
-    
-    do_commit_logfile = open("commands.log", 'w') 
-    do_commit_logfile.writelines("%s\n" % git_clone_command) 
-    do_commit_logfile.writelines("%s\n" % git_checkout_command) 
+  
+    # Do not log in the repository. Some repos require no additional files in the repo.
+    if os.path.isfile('commands.log'):
+        os.system('rm commands.log')
 
-    ## 3. build repo if unit-test exists
-    compile_option = 'clean install -DskipTests'
+    ## 2. build repo if unit-test exists
+    compile_cmd = get_compile_command()
+    if compile_cmd is None:
+        logfile.writelines("# %s IS NOT MAVEN PROJECT\n" % commit['bug_id'])
+        return False
+    elif not find_test_classes(commit):
+        logfile.writelines("# %s HAS NO TESTCASE \n" % commit['bug_id'])
+        return False
+    elif has_outdated_urls(): 
+        logfile.writelines("# %s HAS OUTDATED URLS \n" % commit['bug_id'])
+        return False
 
-    do_commit_logfile.writelines('mvn %s\n' % compile_option)
-    ret_compile = EasyProcess('mvn %s' % compile_option).call()
+    ret_compile = EasyProcess(compile_cmd).call()
 
-    #4. Testing
+    ## 3. Testing
     status = ""
     for test in unittests:
-        do_commit_logfile.writelines("## TO TEST: %s\n" % test)
-        ret = unittest(commit, test, do_commit_logfile)
+        ret = unittest(commit, test)
         status = "Bug: %s, Compiled: %d, Fixed: %s, Buggy: %s, BuggyClass: %s\n" \
           % (commit['bug_id'], ret_compile.return_code, ret['fixed'], ret['buggy'], ret['buggy_class'])
 
-        do_commit_logfile.writelines(status)
         if (ret['fixed'] & (not ret['buggy'])):
             logfile.writelines(status)
             return True
@@ -174,18 +205,26 @@ def do_commit(commit, dir):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--n_cpus", type=int, default=16, help="specify # of threads to use")
+    parser.add_argument("--repo", type=str, default=None, help="specify a repository to test, default: all repository")
     args = parser.parse_args()
     n_cpus = args.n_cpus
-    
+    repo = args.repo
+
     os.chdir(ROOT_DIR)
     datadir = '%s/data' % ROOT_DIR
-    load_repository_data(datadir)
+
+    repos = []
+    if repo is None:
+        repo_file = open("repo_with_pom.txt", 'r')
+        repos = [repo.split('\n')[0] for repo in repo_file.readlines()]
+        repo_file.close()
+    else:
+        repos = [repo]
+    load_repository_data(repos)
 
     p = Pool(16)
     args = [[k] for k in sorted(repo_dict, key=lambda k: repo_dict[k]['n_commits'], reverse=True)]
-
     p.starmap(do_repo, args)
-
 
 
 
