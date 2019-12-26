@@ -41,7 +41,6 @@ def find_unit_tests(commit):
         classname = filename.split('/')[-1].split('.')[0]
         
         filenames_to_find = test_filenames(classname)
-        unit_tests = []
         for test_filename in filenames_to_find:
             find_cmd = 'find . -name ' + test_filename
             ret = EasyProcess(find_cmd).call()
