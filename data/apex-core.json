@@ -71,6 +71,42 @@
             "StreamingContainerManagerTest.java"
         ]
     },
+    "apex-core_7459993": {
+        "bug_id": "apex-core_7459993",
+        "commit": "https://github.com/apache/apex-core/commit/7459993cb82f057c679ac261e5517af810da9d09",
+        "file": [
+            {
+                "additions": 23,
+                "blob_url": "https://github.com/apache/apex-core/blob/7459993cb82f057c679ac261e5517af810da9d09/engine/src/main/java/com/datatorrent/stram/engine/StreamingContainer.java",
+                "changes": 24,
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/datatorrent/stram/engine/StreamingContainer.java?ref=7459993cb82f057c679ac261e5517af810da9d09",
+                "deletions": 1,
+                "filename": "engine/src/main/java/com/datatorrent/stram/engine/StreamingContainer.java",
+                "patch": "@@ -41,6 +41,7 @@\n import com.datatorrent.bufferserver.storage.DiskStorage;\n import com.datatorrent.bufferserver.util.Codec;\n import com.datatorrent.common.util.ScheduledThreadPoolExecutor;\n+import com.datatorrent.common.util.Slice;\n import com.datatorrent.netlet.DefaultEventLoop;\n import com.datatorrent.stram.ComponentContextPair;\n import com.datatorrent.stram.RecoverableRpcProxy;\n@@ -1115,7 +1116,7 @@ private void deployInputStreams(List<OperatorDeployInfo> operatorList, HashMap<S\n                * generally speaking we do not have partitions on the inline streams so the control should not\n                * come here but if it comes, then we are ready to handle it using the partition aware streams.\n                */\n-              PartitionAwareSink<Object> pas = new PartitionAwareSink<Object>((StreamCodec<Object>)streamCodec, nidi.partitionKeys, nidi.partitionMask, stream);\n+              PartitionAwareSink<Object> pas = new PartitionAwareSink<Object>(streamCodec == null ? nonSerializingStreamCodec : (StreamCodec<Object>) streamCodec, nidi.partitionKeys, nidi.partitionMask, stream);\n               ((Stream.MultiSinkCapableStream)pair.component).setSink(sinkIdentifier, pas);\n             }\n \n@@ -1515,5 +1516,26 @@ private void handleChangeLoggersRequest(StramToNodeChangeLoggersRequest request)\n     DTLoggerFactory.getInstance().changeLoggersLevel(request.getTargetChanges());\n   }\n \n+  private final StreamCodec<Object> nonSerializingStreamCodec = new StreamCodec<Object>()\n+  {\n+    @Override\n+    public Object fromByteArray(Slice fragment)\n+    {\n+      return null;\n+    }\n+\n+    @Override\n+    public Slice toByteArray(Object o)\n+    {\n+      return null;\n+    }\n+\n+    @Override\n+    public int getPartition(Object o)\n+    {\n+      return o.hashCode();\n+    }\n+  };\n+\n   private static final Logger logger = LoggerFactory.getLogger(StreamingContainer.class);\n }",
+                "raw_url": "https://github.com/apache/apex-core/raw/7459993cb82f057c679ac261e5517af810da9d09/engine/src/main/java/com/datatorrent/stram/engine/StreamingContainer.java",
+                "sha": "9b0f581522ad864991d5390aa85f6d7752b0bb20",
+                "status": "modified"
+            },
+            {
+                "additions": 36,
+                "blob_url": "https://github.com/apache/apex-core/blob/7459993cb82f057c679ac261e5517af810da9d09/engine/src/test/java/com/datatorrent/stram/StreamingContainerManagerTest.java",
+                "changes": 36,
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/test/java/com/datatorrent/stram/StreamingContainerManagerTest.java?ref=7459993cb82f057c679ac261e5517af810da9d09",
+                "deletions": 0,
+                "filename": "engine/src/test/java/com/datatorrent/stram/StreamingContainerManagerTest.java",
+                "patch": "@@ -44,13 +44,15 @@\n import com.datatorrent.stram.engine.DefaultUnifier;\n import com.datatorrent.stram.engine.GenericTestOperator;\n import com.datatorrent.stram.engine.TestGeneratorInputOperator;\n+import com.datatorrent.stram.plan.TestPlanContext;\n import com.datatorrent.stram.plan.logical.LogicalPlan;\n import com.datatorrent.stram.plan.logical.LogicalPlan.OperatorMeta;\n import com.datatorrent.stram.plan.physical.OperatorStatus.PortStatus;\n import com.datatorrent.stram.plan.physical.PTContainer;\n import com.datatorrent.stram.plan.physical.PTOperator;\n import com.datatorrent.stram.plan.physical.PhysicalPlan;\n import com.datatorrent.stram.plan.physical.PhysicalPlanTest;\n+import com.datatorrent.stram.support.StramTestSupport;\n import com.datatorrent.stram.support.StramTestSupport.MemoryStorageAgent;\n import com.datatorrent.stram.support.StramTestSupport.TestMeta;\n import com.datatorrent.stram.tuple.Tuple;\n@@ -686,4 +688,38 @@ public void testValidInputOperatorDeployInfoType()\n     OperatorDeployInfo o1DeployInfo = getDeployInfo(scm.getContainerAgent(containerId)).get(0);\n     Assert.assertEquals(\"type \" + o1DeployInfo, OperatorDeployInfo.OperatorType.INPUT, o1DeployInfo.type);\n   }\n+\n+\n+  private void testDownStreamPartition(Locality locality) throws Exception\n+  {\n+    LogicalPlan dag = new LogicalPlan();\n+    TestGeneratorInputOperator o1 = dag.addOperator(\"o1\", TestGeneratorInputOperator.class);\n+    GenericTestOperator o2 = dag.addOperator(\"o2\", GenericTestOperator.class);\n+    dag.setAttribute(o2, OperatorContext.PARTITIONER, new StatelessPartitioner<GenericTestOperator>(2));\n+    dag.addStream(\"o1Output1\", o1.outport, o2.inport1).setLocality(locality);\n+\n+    int maxContainers = 5;\n+    dag.setAttribute(LogicalPlan.CONTAINERS_MAX_COUNT, maxContainers);\n+    dag.setAttribute(OperatorContext.STORAGE_AGENT, new StramTestSupport.MemoryStorageAgent());\n+    dag.validate();\n+    PhysicalPlan plan = new PhysicalPlan(dag, new TestPlanContext());\n+    Assert.assertEquals(\"number of containers\", 1, plan.getContainers().size());\n+\n+    PTContainer container1 = plan.getContainers().get(0);\n+    Assert.assertEquals(\"number operators \" + container1, 3, container1.getOperators().size());\n+    StramLocalCluster slc = new StramLocalCluster(dag);\n+    slc.run(5000);\n+  }\n+\n+  @Test\n+  public void testOIODownstreamPartition() throws Exception\n+  {\n+    testDownStreamPartition(Locality.THREAD_LOCAL);\n+  }\n+\n+  @Test\n+  public void testContainerLocalDownstreamPartition() throws Exception\n+  {\n+    testDownStreamPartition(Locality.CONTAINER_LOCAL);\n+  }\n }",
+                "raw_url": "https://github.com/apache/apex-core/raw/7459993cb82f057c679ac261e5517af810da9d09/engine/src/test/java/com/datatorrent/stram/StreamingContainerManagerTest.java",
+                "sha": "d4b04ba0846dcd743d0f00631b145d12fa5df5f2",
+                "status": "modified"
+            }
+        ],
+        "message": "SPOI-3752 #comment Fixed NPE due to null streamcodec by setting non serializing streamcodec",
+        "parent": "https://github.com/apache/apex-core/commit/4d1a5d4324e7ab5d7dab5a09b4840d03ed80ff41",
+        "repo": "apex-core",
+        "unit_tests": [
+            "StreamingContainerTest.java"
+        ]
+    },
     "apex-core_7bbb4cf": {
         "bug_id": "apex-core_7bbb4cf",
         "commit": "https://github.com/apache/apex-core/commit/7bbb4cfd2af6d5c5c99c58222c44a848bc6534b2",
@@ -119,6 +155,42 @@
             "StramWebServicesTest.java"
         ]
     },
+    "apex-core_bd67f3d": {
+        "bug_id": "apex-core_bd67f3d",
+        "commit": "https://github.com/apache/apex-core/commit/bd67f3d11ca688c2cfc3d985166ab766edcf8fee",
+        "file": [
+            {
+                "additions": 23,
+                "blob_url": "https://github.com/apache/apex-core/blob/bd67f3d11ca688c2cfc3d985166ab766edcf8fee/engine/src/main/java/com/datatorrent/stram/engine/StreamingContainer.java",
+                "changes": 24,
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/datatorrent/stram/engine/StreamingContainer.java?ref=bd67f3d11ca688c2cfc3d985166ab766edcf8fee",
+                "deletions": 1,
+                "filename": "engine/src/main/java/com/datatorrent/stram/engine/StreamingContainer.java",
+                "patch": "@@ -41,6 +41,7 @@\n import com.datatorrent.bufferserver.storage.DiskStorage;\n import com.datatorrent.bufferserver.util.Codec;\n import com.datatorrent.common.util.ScheduledThreadPoolExecutor;\n+import com.datatorrent.common.util.Slice;\n import com.datatorrent.netlet.DefaultEventLoop;\n import com.datatorrent.stram.ComponentContextPair;\n import com.datatorrent.stram.RecoverableRpcProxy;\n@@ -1114,7 +1115,7 @@ private void deployInputStreams(List<OperatorDeployInfo> operatorList, HashMap<S\n                * generally speaking we do not have partitions on the inline streams so the control should not\n                * come here but if it comes, then we are ready to handle it using the partition aware streams.\n                */\n-              PartitionAwareSink<Object> pas = new PartitionAwareSink<Object>((StreamCodec<Object>)streamCodec, nidi.partitionKeys, nidi.partitionMask, stream);\n+              PartitionAwareSink<Object> pas = new PartitionAwareSink<Object>(streamCodec == null ? nonSerializingStreamCodec : (StreamCodec<Object>) streamCodec, nidi.partitionKeys, nidi.partitionMask, stream);\n               ((Stream.MultiSinkCapableStream)pair.component).setSink(sinkIdentifier, pas);\n             }\n \n@@ -1514,5 +1515,26 @@ private void handleChangeLoggersRequest(StramToNodeChangeLoggersRequest request)\n     DTLoggerFactory.getInstance().changeLoggersLevel(request.getTargetChanges());\n   }\n \n+  private final StreamCodec<Object> nonSerializingStreamCodec = new StreamCodec<Object>()\n+  {\n+    @Override\n+    public Object fromByteArray(Slice fragment)\n+    {\n+      return null;\n+    }\n+\n+    @Override\n+    public Slice toByteArray(Object o)\n+    {\n+      return null;\n+    }\n+\n+    @Override\n+    public int getPartition(Object o)\n+    {\n+      return o.hashCode();\n+    }\n+  };\n+\n   private static final Logger logger = LoggerFactory.getLogger(StreamingContainer.class);\n }",
+                "raw_url": "https://github.com/apache/apex-core/raw/bd67f3d11ca688c2cfc3d985166ab766edcf8fee/engine/src/main/java/com/datatorrent/stram/engine/StreamingContainer.java",
+                "sha": "f60bd222d8141a9b49c2cd69e6f3c175359000cc",
+                "status": "modified"
+            },
+            {
+                "additions": 36,
+                "blob_url": "https://github.com/apache/apex-core/blob/bd67f3d11ca688c2cfc3d985166ab766edcf8fee/engine/src/test/java/com/datatorrent/stram/StreamingContainerManagerTest.java",
+                "changes": 36,
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/test/java/com/datatorrent/stram/StreamingContainerManagerTest.java?ref=bd67f3d11ca688c2cfc3d985166ab766edcf8fee",
+                "deletions": 0,
+                "filename": "engine/src/test/java/com/datatorrent/stram/StreamingContainerManagerTest.java",
+                "patch": "@@ -27,13 +27,15 @@\n import com.datatorrent.stram.engine.DefaultUnifier;\n import com.datatorrent.stram.engine.GenericTestOperator;\n import com.datatorrent.stram.engine.TestGeneratorInputOperator;\n+import com.datatorrent.stram.plan.TestPlanContext;\n import com.datatorrent.stram.plan.logical.LogicalPlan;\n import com.datatorrent.stram.plan.logical.LogicalPlan.OperatorMeta;\n import com.datatorrent.stram.plan.physical.OperatorStatus.PortStatus;\n import com.datatorrent.stram.plan.physical.PTContainer;\n import com.datatorrent.stram.plan.physical.PTOperator;\n import com.datatorrent.stram.plan.physical.PhysicalPlan;\n import com.datatorrent.stram.plan.physical.PhysicalPlanTest;\n+import com.datatorrent.stram.support.StramTestSupport;\n import com.datatorrent.stram.support.StramTestSupport.MemoryStorageAgent;\n import com.datatorrent.stram.support.StramTestSupport.TestMeta;\n import com.datatorrent.stram.tuple.Tuple;\n@@ -678,4 +680,38 @@ public void testValidInputOperatorDeployInfoType()\n     OperatorDeployInfo o1DeployInfo = getDeployInfo(scm.getContainerAgent(containerId)).get(0);\n     Assert.assertEquals(\"type \" + o1DeployInfo, OperatorDeployInfo.OperatorType.INPUT, o1DeployInfo.type);\n   }\n+\n+\n+  private void testDownStreamPartition(Locality locality) throws Exception\n+  {\n+    LogicalPlan dag = new LogicalPlan();\n+    TestGeneratorInputOperator o1 = dag.addOperator(\"o1\", TestGeneratorInputOperator.class);\n+    GenericTestOperator o2 = dag.addOperator(\"o2\", GenericTestOperator.class);\n+    dag.setAttribute(o2, OperatorContext.PARTITIONER, new StatelessPartitioner<GenericTestOperator>(2));\n+    dag.addStream(\"o1Output1\", o1.outport, o2.inport1).setLocality(locality);\n+\n+    int maxContainers = 5;\n+    dag.setAttribute(LogicalPlan.CONTAINERS_MAX_COUNT, maxContainers);\n+    dag.setAttribute(OperatorContext.STORAGE_AGENT, new StramTestSupport.MemoryStorageAgent());\n+    dag.validate();\n+    PhysicalPlan plan = new PhysicalPlan(dag, new TestPlanContext());\n+    Assert.assertEquals(\"number of containers\", 1, plan.getContainers().size());\n+\n+    PTContainer container1 = plan.getContainers().get(0);\n+    Assert.assertEquals(\"number operators \" + container1, 3, container1.getOperators().size());\n+    StramLocalCluster slc = new StramLocalCluster(dag);\n+    slc.run(5000);\n+  }\n+\n+  @Test\n+  public void testOIODownstreamPartition() throws Exception\n+  {\n+    testDownStreamPartition(Locality.THREAD_LOCAL);\n+  }\n+\n+  @Test\n+  public void testContainerLocalDownstreamPartition() throws Exception\n+  {\n+    testDownStreamPartition(Locality.CONTAINER_LOCAL);\n+  }\n }",
+                "raw_url": "https://github.com/apache/apex-core/raw/bd67f3d11ca688c2cfc3d985166ab766edcf8fee/engine/src/test/java/com/datatorrent/stram/StreamingContainerManagerTest.java",
+                "sha": "bc9a42bd5b636f3defb78b7eb4b9a757f4947582",
+                "status": "modified"
+            }
+        ],
+        "message": "SPOI-3752 #comment Fixed NPE due to null streamcodec by setting non serializing streamcodec",
+        "parent": "https://github.com/apache/apex-core/commit/bee52bd61700e2ea49da6541ddf628de2bac83d0",
+        "repo": "apex-core",
+        "unit_tests": [
+            "StreamingContainerTest.java"
+        ]
+    },
     "apex-core_c6b3a92": {
         "bug_id": "apex-core_c6b3a92",
         "commit": "https://github.com/apache/apex-core/commit/c6b3a925a408e767796230ff54055fd2d9f19480",
@@ -141,6 +213,66 @@
         "repo": "apex-core",
         "unit_tests": [
             "StreamingContainerManagerTest.java"
+        ]
+    },
+    "apex-core_f92d4ee": {
+        "bug_id": "apex-core_f92d4ee",
+        "commit": "https://github.com/apache/apex-core/commit/f92d4ee4e3717cdba545013020551f4f558bb156",
+        "file": [
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/apex-core/blob/f92d4ee4e3717cdba545013020551f4f558bb156/engine/src/main/java/com/malhartech/dag/AbstractNode.java",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/malhartech/dag/AbstractNode.java?ref=f92d4ee4e3717cdba545013020551f4f558bb156",
+                "deletions": 1,
+                "filename": "engine/src/main/java/com/malhartech/dag/AbstractNode.java",
+                "patch": "@@ -317,6 +317,7 @@ final public void activate(NodeContext ctx)\n     long currentWindowId = 0;\n     alive = true;\n \n+    logger.debug(\"activating \" + this);\n     do {\n       shouldWait = true;\n \n@@ -439,7 +440,7 @@ else if (t.getWindowId() == currentWindowId) {\n                  * We need to make sure that the END_STREAM comes outside of the window.\n                  */\n                 totalQueues--;\n-                activeQueues.remove(activePort);\n+                inputs.remove(activePort.id);\n                 if (totalQueues == 0) {\n                   alive = false;\n                 }",
+                "raw_url": "https://github.com/apache/apex-core/raw/f92d4ee4e3717cdba545013020551f4f558bb156/engine/src/main/java/com/malhartech/dag/AbstractNode.java",
+                "sha": "1ae63a892ff3658cf9e25109dfe324080e833354",
+                "status": "modified"
+            },
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/apex-core/blob/f92d4ee4e3717cdba545013020551f4f558bb156/engine/src/main/java/com/malhartech/lib/io/HttpOutputNode.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/malhartech/lib/io/HttpOutputNode.java?ref=f92d4ee4e3717cdba545013020551f4f558bb156",
+                "deletions": 1,
+                "filename": "engine/src/main/java/com/malhartech/lib/io/HttpOutputNode.java",
+                "patch": "@@ -60,8 +60,10 @@ public void setup(NodeConfiguration config)  {\n \n   @Override\n   public void teardown() {\n+    if (wsClient != null) {\n+      wsClient.destroy();\n+    }\n     super.teardown();\n-    wsClient.destroy();\n   }\n \n   @Override",
+                "raw_url": "https://github.com/apache/apex-core/raw/f92d4ee4e3717cdba545013020551f4f558bb156/engine/src/main/java/com/malhartech/lib/io/HttpOutputNode.java",
+                "sha": "eb99c3ef998a553c64edad86187d32bb7fe25f53",
+                "status": "modified"
+            },
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/apex-core/blob/f92d4ee4e3717cdba545013020551f4f558bb156/engine/src/main/java/com/malhartech/stram/StramLocalCluster.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/malhartech/stram/StramLocalCluster.java?ref=f92d4ee4e3717cdba545013020551f4f558bb156",
+                "deletions": 1,
+                "filename": "engine/src/main/java/com/malhartech/stram/StramLocalCluster.java",
+                "patch": "@@ -116,7 +116,9 @@ public StramToNodeRequest processPartioningDetails() {\n     public LocalStramChild(String containerId, StreamingNodeUmbilicalProtocol umbilical, WindowGenerator wgen)\n     {\n       super(containerId, new Configuration(), umbilical);\n-      super.addWindowGenerator(containerId, wgen);\n+      if (wgen != null) {\n+        super.addWindowGenerator(containerId, wgen);\n+      }\n     }\n \n     @Override",
+                "raw_url": "https://github.com/apache/apex-core/raw/f92d4ee4e3717cdba545013020551f4f558bb156/engine/src/main/java/com/malhartech/stram/StramLocalCluster.java",
+                "sha": "add6a11e778c14869629d02f0a87478cd41e075c",
+                "status": "modified"
+            },
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/apex-core/blob/f92d4ee4e3717cdba545013020551f4f558bb156/engine/src/test/resources/clusterTest.tplg.properties",
+                "changes": 5,
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/test/resources/clusterTest.tplg.properties?ref=f92d4ee4e3717cdba545013020551f4f558bb156",
+                "deletions": 1,
+                "filename": "engine/src/test/resources/clusterTest.tplg.properties",
+                "patch": "@@ -12,10 +12,13 @@ stram.node.node2.template=nt1\n stram.node.inputNode.classname=com.malhartech.stram.NumberGeneratorInputAdapter\n stram.node.inputNode.maxTuples=10\n \n+stram.node.httpOut.classname=com.malhartech.lib.io.HttpOutputNode\n+stram.node.httpOut.resourceUrl=http://localhost:9999/resourcecontext\n+\n stram.stream.input1.source=inputNode.outputPort\n stram.stream.input1.sinks=node1.input1\n stram.stream.input1.template=streamtempl1\n \n stram.stream.n1n2.source=node1.output1\n-stram.stream.n1n2.sinks=node2.input1\n+stram.stream.n1n2.sinks=node2.input1,httpOut.input\n stram.stream.n1n2.template=streamtempl1",
+                "raw_url": "https://github.com/apache/apex-core/raw/f92d4ee4e3717cdba545013020551f4f558bb156/engine/src/test/resources/clusterTest.tplg.properties",
+                "sha": "00e7fcaa3e6d0f9925460d2d5074afebecba4d64",
+                "status": "modified"
+            }
+        ],
+        "message": "fix npe in local mode and concurrent modification in AbstractNode",
+        "parent": "https://github.com/apache/apex-core/commit/17d1b57292de7743d9b66a6a46fd8af9ad53d12b",
+        "repo": "apex-core",
+        "unit_tests": [
+            "StramLocalClusterTest.java"
         ]
     }
 }

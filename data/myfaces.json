@@ -155,6 +155,42 @@
             "ErrorPageWriterTest.java"
         ]
     },
+    "myfaces_603ae25": {
+        "bug_id": "myfaces_603ae25",
+        "commit": "https://github.com/apache/myfaces/commit/603ae2579510db74b48ce649501bbeddf6c16b88",
+        "file": [
+            {
+                "additions": 39,
+                "blob_url": "https://github.com/apache/myfaces/blob/603ae2579510db74b48ce649501bbeddf6c16b88/api/src/main/java/javax/faces/component/UIComponent.java",
+                "changes": 62,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/api/src/main/java/javax/faces/component/UIComponent.java?ref=603ae2579510db74b48ce649501bbeddf6c16b88",
+                "deletions": 23,
+                "filename": "api/src/main/java/javax/faces/component/UIComponent.java",
+                "patch": "@@ -15,6 +15,7 @@\n  */\n package javax.faces.component;\n \n+import javax.el.ELException;\n import javax.el.ValueExpression;\n import javax.faces.FacesException;\n import javax.faces.context.FacesContext;\n@@ -62,31 +63,47 @@ public ValueExpression getValueExpression(String name) {\n     public abstract void setValueBinding(java.lang.String name,\n                                          javax.faces.el.ValueBinding binding);\n \n-    public void setValueExpression(String name, ValueExpression binding) {\n-        if (name == null) throw new NullPointerException(\"name\");\n-        if (name.equals(\"id\")) throw new IllegalArgumentException(\"Can't set a ValueExpression for the 'id' property.\");\n-        if (name.equals(\"parent\")) throw new IllegalArgumentException(\"Can't set a ValueExpression for the 'parent' property.\");\n-        \n-        if(binding == null) {\n-            this.getAttributes().remove(name);\n-        }\n+    public void setValueExpression(String name, ValueExpression expression)\n+    {\n+        if (name == null)\n+            throw new NullPointerException(\"name\");\n+        if (name.equals(\"id\"))\n+            throw new IllegalArgumentException(\"Can't set a ValueExpression for the 'id' property.\");\n+        if (name.equals(\"parent\"))\n+            throw new IllegalArgumentException(\"Can't set a ValueExpression for the 'parent' property.\");\n         \n-        if (binding.isLiteralText()) {\n-            try {\n-                Object value = binding.getValue(getFacesContext().getELContext());\n-                this.getAttributes().put(name, value);\n-                return;\n-            } catch (Exception e) {\n-                throw new FacesException(e);\n+        if (expression == null)\n+        {\n+            if (bindings != null)\n+            {\n+                bindings.remove(name);\n+                if(bindings.isEmpty())\n+                    bindings = null;\n             }\n-            \n         }\n-        \n-        if (bindings == null) {\n-            bindings = new HashMap<String, ValueExpression>();\n+        else\n+        {\n+            if (expression.isLiteralText())\n+            {\n+                try\n+                {\n+                    Object value = expression.getValue(getFacesContext().getELContext());\n+                    getAttributes().put(name, value);\n+                    return;\n+                }\n+                catch (ELException e)\n+                {\n+                    throw new FacesException(e);\n+                }\n+            }\n+\n+            if (bindings == null)\n+            {\n+                bindings = new HashMap<String, ValueExpression>();\n+            }\n+\n+            bindings.put(name, expression);\n         }\n-        \n-        bindings.put(name, binding);\n     }\n     \n     /**\n@@ -209,8 +226,7 @@ public void encodeAll(javax.faces.context.FacesContext context) throws java.io.I\n \t\t\t\t\titer.next().encodeAll(context);;\n \t\t\t\t}\n     \t\t}\n-    \t\t\n-    \t\tthis.encodeEnd(context);\n+            this.encodeEnd(context);\n     \t}\n     }\n ",
+                "raw_url": "https://github.com/apache/myfaces/raw/603ae2579510db74b48ce649501bbeddf6c16b88/api/src/main/java/javax/faces/component/UIComponent.java",
+                "sha": "2d443b4123742c7dcdddc29ba39d3a594cddd9e1",
+                "status": "modified"
+            },
+            {
+                "additions": 391,
+                "blob_url": "https://github.com/apache/myfaces/blob/603ae2579510db74b48ce649501bbeddf6c16b88/api/src/test/java/javax/faces/component/UIComponentTest.java",
+                "changes": 391,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/api/src/test/java/javax/faces/component/UIComponentTest.java?ref=603ae2579510db74b48ce649501bbeddf6c16b88",
+                "deletions": 0,
+                "filename": "api/src/test/java/javax/faces/component/UIComponentTest.java",
+                "patch": "@@ -0,0 +1,391 @@\n+/*\n+ * Copyright 2007 The Apache Software Foundation.\n+ *\n+ * Licensed under the Apache License, Version 2.0 (the \"License\");\n+ * you may not use this file except in compliance with the License.\n+ * You may obtain a copy of the License at\n+ *\n+ *      http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing, software\n+ * distributed under the License is distributed on an \"AS IS\" BASIS,\n+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n+ * See the License for the specific language governing permissions and\n+ * limitations under the License.\n+ */\n+package javax.faces.component;\n+\n+import static org.apache.myfaces.Assert.*;\n+import static org.easymock.EasyMock.*;\n+\n+import java.lang.reflect.Method;\n+import java.util.ArrayList;\n+import java.util.Collection;\n+import java.util.Collections;\n+import java.util.HashMap;\n+import java.util.List;\n+import java.util.Map;\n+\n+import javax.el.ELContext;\n+import javax.el.ELException;\n+import javax.el.ValueExpression;\n+import javax.faces.FacesException;\n+import javax.faces.context.FacesContext;\n+\n+import junit.framework.Test;\n+import junit.framework.TestCase;\n+import junit.framework.TestSuite;\n+\n+import org.apache.myfaces.TestRunner;\n+import org.easymock.classextension.EasyMock;\n+import org.easymock.classextension.IMocksControl;\n+\n+/**\n+ * @author Mathias Broekelmann (latest modification by $Author$)\n+ * @version $Revision$ $Date$\n+ */\n+public class UIComponentTest extends TestCase\n+{\n+    public static Test suite()\n+    {\n+        TestSuite suite = new TestSuite(UIComponentTest.class.getName());\n+        suite.addTestSuite(BasicUIComponentTest.class);\n+        suite.addTestSuite(EncodeAllTest.class);\n+        suite.addTestSuite(ValueExpressionUIComponentTest.class);\n+        suite.addTestSuite(InvokeOnComponentTest.class);\n+        return suite;\n+    }\n+\n+    /**\n+     * @author Mathias Broekelmann (latest modification by $Author$)\n+     * @version $Revision$ $Date$\n+     */\n+    public static class UIComponentTestBase extends TestCase\n+    {\n+        protected IMocksControl _mocksControl;\n+        protected FacesContext _facesContext;\n+\n+        @Override\n+        protected void setUp() throws Exception\n+        {\n+            _mocksControl = EasyMock.createControl();\n+            _facesContext = _mocksControl.createMock(FacesContext.class);\n+        }\n+    }\n+\n+    /**\n+     * Tests for\n+     * {@link javax.faces.component.UIComponent#invokeOnComponent(javax.faces.context.FacesContext, java.lang.String, javax.faces.component.ContextCallback)}.\n+     */\n+    public static class InvokeOnComponentTest extends UIComponentTestBase\n+    {\n+        private UIComponent _testimpl;\n+        private ContextCallback _contextCallback;\n+\n+        @Override\n+        protected void setUp() throws Exception\n+        {\n+            super.setUp();\n+            Collection<Method> mockedMethods = new ArrayList<Method>();\n+            Class<UIComponent> clazz = UIComponent.class;\n+            mockedMethods.add(clazz.getDeclaredMethod(\"getClientId\", new Class[] { FacesContext.class }));\n+            mockedMethods.add(clazz.getDeclaredMethod(\"getFacetsAndChildren\", null));\n+\n+            _testimpl = _mocksControl.createMock(clazz, mockedMethods.toArray(new Method[mockedMethods.size()]));\n+            _contextCallback = _mocksControl.createMock(ContextCallback.class);\n+            _mocksControl.checkOrder(true);\n+        }\n+\n+        public void testInvokeOnComponentWithSameClientId() throws Exception\n+        {\n+            expect(_testimpl.getClientId(same(_facesContext))).andReturn(\"xxxId\");\n+            _contextCallback.invokeContextCallback(same(_facesContext), same(_testimpl));\n+            _mocksControl.replay();\n+            assertTrue(_testimpl.invokeOnComponent(_facesContext, \"xxxId\", _contextCallback));\n+            _mocksControl.verify();\n+        }\n+\n+        public void testInvokeOnComponentAndNotFindComponentWithClientId() throws Exception\n+        {\n+            expect(_testimpl.getClientId(same(_facesContext))).andReturn(\"xxxId\");\n+            expect(_testimpl.getFacetsAndChildren()).andReturn(Collections.EMPTY_LIST.iterator());\n+            _mocksControl.replay();\n+            assertFalse(_testimpl.invokeOnComponent(_facesContext, \"xxId\", _contextCallback));\n+            _mocksControl.verify();\n+        }\n+\n+        public void testInvokeOnComponentOnChild() throws Exception\n+        {\n+            expect(_testimpl.getClientId(same(_facesContext))).andReturn(\"xxxId\");\n+            String childId = \"childId\";\n+            UIComponent child = _mocksControl.createMock(UIComponent.class);\n+            expect(_testimpl.getFacetsAndChildren()).andReturn(Collections.singletonList(child).iterator());\n+            expect(child.invokeOnComponent(same(_facesContext), eq(childId), same(_contextCallback))).andReturn(true);\n+            _mocksControl.replay();\n+            assertTrue(_testimpl.invokeOnComponent(_facesContext, \"childId\", _contextCallback));\n+            _mocksControl.verify();\n+        }\n+\n+        public void testInvokeOnComponentExceptions() throws Exception\n+        {\n+            assertException(NullPointerException.class, new TestRunner()\n+            {\n+                public void run() throws Throwable\n+                {\n+                    _testimpl.invokeOnComponent(null, \"xxx\", _contextCallback);\n+                }\n+            });\n+            assertException(NullPointerException.class, new TestRunner()\n+            {\n+                public void run() throws Throwable\n+                {\n+                    _testimpl.invokeOnComponent(_facesContext, null, _contextCallback);\n+                }\n+            });\n+            assertException(NullPointerException.class, new TestRunner()\n+            {\n+                public void run() throws Throwable\n+                {\n+                    _testimpl.invokeOnComponent(_facesContext, \"xxx\", null);\n+                }\n+            });\n+        }\n+    }\n+\n+    /**\n+     * Tests for {@link javax.faces.component.UIComponent#encodeAll(javax.faces.context.FacesContext)}.\n+     */\n+    public static class EncodeAllTest extends UIComponentTestBase\n+    {\n+        private UIComponent _testimpl;\n+\n+        @Override\n+        protected void setUp() throws Exception\n+        {\n+            super.setUp();\n+            Collection<Method> mockedMethods = new ArrayList<Method>();\n+            Class<UIComponent> clazz = UIComponent.class;\n+            mockedMethods.add(clazz.getDeclaredMethod(\"isRendered\", null));\n+            mockedMethods.add(clazz.getDeclaredMethod(\"encodeBegin\", new Class[] { FacesContext.class }));\n+            mockedMethods.add(clazz.getDeclaredMethod(\"getRendersChildren\", null));\n+            mockedMethods.add(clazz.getDeclaredMethod(\"encodeChildren\", new Class[] { FacesContext.class }));\n+            mockedMethods.add(clazz.getDeclaredMethod(\"getChildren\", null));\n+            mockedMethods.add(clazz.getDeclaredMethod(\"encodeEnd\", new Class[] { FacesContext.class }));\n+\n+            _testimpl = _mocksControl.createMock(clazz, mockedMethods.toArray(new Method[mockedMethods.size()]));\n+            _mocksControl.checkOrder(true);\n+        }\n+\n+        public void testEncodeAllNullContext() throws Exception\n+        {\n+            assertException(NullPointerException.class, new TestRunner()\n+            {\n+                public void run() throws Throwable\n+                {\n+                    _testimpl.encodeAll(null);\n+                }\n+            });\n+        }\n+\n+        public void testEncodeAllNotRendered() throws Exception\n+        {\n+            expect(_testimpl.isRendered()).andReturn(false);\n+            _mocksControl.replay();\n+            _testimpl.encodeAll(_facesContext);\n+            _mocksControl.verify();\n+        }\n+\n+        public void testEncodeAllRenderesChildren() throws Exception\n+        {\n+            expect(_testimpl.isRendered()).andReturn(true);\n+            _testimpl.encodeBegin(same(_facesContext));\n+            expect(_testimpl.getRendersChildren()).andReturn(true);\n+            _testimpl.encodeChildren(same(_facesContext));\n+            _testimpl.encodeEnd(same(_facesContext));\n+            _mocksControl.replay();\n+            _testimpl.encodeAll(_facesContext);\n+            _mocksControl.verify();\n+        }\n+\n+        public void testEncodeAllNotRenderesChildren() throws Exception\n+        {\n+            expect(_testimpl.isRendered()).andReturn(true);\n+            _testimpl.encodeBegin(same(_facesContext));\n+            expect(_testimpl.getRendersChildren()).andReturn(false);\n+\n+            List<UIComponent> childs = new ArrayList<UIComponent>();\n+            UIComponent testChild = _mocksControl.createMock(UIComponent.class);\n+            childs.add(testChild);\n+            expect(_testimpl.getChildren()).andReturn(childs);\n+            testChild.encodeAll(same(_facesContext));\n+\n+            _testimpl.encodeEnd(same(_facesContext));\n+            _mocksControl.replay();\n+            _testimpl.encodeAll(_facesContext);\n+            _mocksControl.verify();\n+        }\n+    }\n+\n+    /**\n+     * Test for {@link javax.faces.component.UIComponent#getValueExpression(java.lang.String)}. and\n+     * {@link javax.faces.component.UIComponent#setValueExpression(java.lang.String, javax.el.ValueExpression)}.\n+     */\n+    public static class ValueExpressionUIComponentTest extends UIComponentTestBase\n+    {\n+        private UIComponent _testimpl;\n+        private ValueExpression _expression;\n+        private ELContext _elContext;\n+\n+        @Override\n+        protected void setUp() throws Exception\n+        {\n+            super.setUp();\n+            Collection<Method> mockedMethods = new ArrayList<Method>();\n+            Class<UIComponent> clazz = UIComponent.class;\n+            mockedMethods.add(clazz.getDeclaredMethod(\"getAttributes\", null));\n+            mockedMethods.add(clazz.getDeclaredMethod(\"getFacesContext\", null));\n+\n+            _testimpl = _mocksControl.createMock(clazz, mockedMethods.toArray(new Method[mockedMethods.size()]));\n+            _expression = _mocksControl.createMock(ValueExpression.class);\n+            _elContext = _mocksControl.createMock(ELContext.class);\n+            _mocksControl.checkOrder(true);\n+        }\n+\n+        public void testSetValueExpressionArguments() throws Exception\n+        {\n+            assertException(NullPointerException.class, new SetValueExpressionTestRunner(_testimpl, null, _expression));\n+            assertException(IllegalArgumentException.class, new SetValueExpressionTestRunner(_testimpl, \"id\",\n+                    _expression));\n+            assertException(IllegalArgumentException.class, new SetValueExpressionTestRunner(_testimpl, \"parent\",\n+                    _expression));\n+        }\n+\n+        public void testSetValueExpression() throws Exception\n+        {\n+            expect(_expression.isLiteralText()).andReturn(false);\n+            _mocksControl.replay();\n+            _testimpl.setValueExpression(\"xxx\", _expression);\n+            _mocksControl.verify();\n+            assertEquals(_expression, _testimpl.getValueExpression(\"xxx\"));\n+            _testimpl.setValueExpression(\"xxx\", null);\n+            _mocksControl.verify();\n+            assertNull(_testimpl.getValueExpression(\"xxx\"));\n+            assertNull(_testimpl.bindings);\n+        }\n+\n+        public void testSetValueExpressionWithExceptionOnGetValue() throws Exception\n+        {\n+            assertSetValueExpressionWithExceptionOnGetValue(FacesException.class, new ELException());\n+        }\n+\n+        private void assertSetValueExpressionWithExceptionOnGetValue(Class<? extends Throwable> expected,\n+                Throwable fired)\n+        {\n+            expect(_expression.isLiteralText()).andReturn(true);\n+            expect(_testimpl.getFacesContext()).andReturn(_facesContext);\n+            expect(_facesContext.getELContext()).andReturn(_elContext);\n+            expect(_expression.getValue(eq(_elContext))).andThrow(fired);\n+            Map map = new HashMap();\n+            expect(_testimpl.getAttributes()).andReturn(map);\n+            _mocksControl.replay();\n+            assertException(expected, new TestRunner()\n+            {\n+                public void run() throws Throwable\n+                {\n+                    _testimpl.setValueExpression(\"xxx\", _expression);\n+                }\n+            });\n+            _mocksControl.reset();\n+        }\n+\n+        public void testSetValueExpressionWithLiteralText() throws Exception\n+        {\n+            expect(_expression.isLiteralText()).andReturn(true);\n+            expect(_testimpl.getFacesContext()).andReturn(_facesContext);\n+            expect(_facesContext.getELContext()).andReturn(_elContext);\n+            expect(_expression.getValue(eq(_elContext))).andReturn(\"abc\");\n+            Map map = new HashMap();\n+            expect(_testimpl.getAttributes()).andReturn(map);\n+            _mocksControl.replay();\n+            _testimpl.setValueExpression(\"xxx\", _expression);\n+            assertEquals(\"abc\", map.get(\"xxx\"));\n+            _mocksControl.verify();\n+            assertNull(_testimpl.getValueExpression(\"xxx\"));\n+        }\n+    }\n+\n+    public static class BasicUIComponentTest extends UIComponentTestBase\n+    {\n+        /**\n+         * Test method for {@link javax.faces.component.UIComponent#getFacetCount()}.\n+         */\n+        public void testGetFacetCount() throws Exception\n+        {\n+            UIComponent component = _mocksControl.createMock(UIComponent.class, new Method[] { UIComponent.class\n+                    .getDeclaredMethod(\"getFacets\", null) });\n+            Map<String, UIComponent> map = new HashMap<String, UIComponent>();\n+            map.put(\"xxx1\", new UIInput());\n+            map.put(\"xxx2\", new UIInput());\n+            map.put(\"xxx3\", new UIInput());\n+            expect(component.getFacets()).andReturn(map);\n+            _mocksControl.replay();\n+            assertEquals(3, component.getFacetCount());\n+            _mocksControl.verify();\n+\n+            _mocksControl.reset();\n+            expect(component.getFacets()).andReturn(null);\n+            _mocksControl.replay();\n+            assertEquals(0, component.getFacetCount());\n+            _mocksControl.verify();\n+        }\n+\n+        /**\n+         * Test method for\n+         * {@link javax.faces.component.UIComponent#getContainerClientId(javax.faces.context.FacesContext)}.\n+         * \n+         * @throws Exception\n+         */\n+        public void testGetContainerClientId() throws Exception\n+        {\n+            Collection<Method> mockedMethods = new ArrayList<Method>();\n+            Class<UIComponent> clazz = UIComponent.class;\n+            mockedMethods.add(clazz.getDeclaredMethod(\"getClientId\", new Class[] { FacesContext.class }));\n+            final UIComponent testimpl = _mocksControl.createMock(clazz, mockedMethods.toArray(new Method[mockedMethods\n+                    .size()]));\n+            _mocksControl.checkOrder(true);\n+\n+            assertException(NullPointerException.class, new TestRunner()\n+            {\n+                public void run() throws Throwable\n+                {\n+                    testimpl.getContainerClientId(null);\n+                }\n+            });\n+\n+            expect(testimpl.getClientId(same(_facesContext))).andReturn(\"xyz\");\n+            _mocksControl.replay();\n+            assertEquals(\"xyz\", testimpl.getContainerClientId(_facesContext));\n+            _mocksControl.verify();\n+        }\n+    }\n+\n+    private static class SetValueExpressionTestRunner implements TestRunner\n+    {\n+        private final String _name;\n+        private final ValueExpression _expression;\n+        private final UIComponent _component;\n+\n+        public SetValueExpressionTestRunner(UIComponent component, String name, ValueExpression expression)\n+        {\n+            _component = component;\n+            _name = name;\n+            _expression = expression;\n+        }\n+\n+        public void run() throws Throwable\n+        {\n+            _component.setValueExpression(_name, _expression);\n+        }\n+\n+    }\n+}",
+                "raw_url": "https://github.com/apache/myfaces/raw/603ae2579510db74b48ce649501bbeddf6c16b88/api/src/test/java/javax/faces/component/UIComponentTest.java",
+                "sha": "a8a0099d522d8c17f08412fb861733c642abcbef",
+                "status": "added"
+            }
+        ],
+        "message": "fixed NPE setValueExpression\n+Tests for UIComponent implementation",
+        "parent": "https://github.com/apache/myfaces/commit/9224d6401c3ba612d21fc82106eea1a9ba3f43d4",
+        "repo": "myfaces",
+        "unit_tests": [
+            "UIComponentTest.java"
+        ]
+    },
     "myfaces_7599580": {
         "bug_id": "myfaces_7599580",
         "commit": "https://github.com/apache/myfaces/commit/75995807f8c55cede8399655ebfe8d0701c4054d",
@@ -177,6 +213,174 @@
         "repo": "myfaces",
         "unit_tests": [
             "UIInputTest.java"
+        ]
+    },
+    "myfaces_930a697": {
+        "bug_id": "myfaces_930a697",
+        "commit": "https://github.com/apache/myfaces/commit/930a697cb00581702b772079725fa36a5419d45f",
+        "file": [
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/myfaces/blob/930a697cb00581702b772079725fa36a5419d45f/impl/src/main/java/org/apache/myfaces/lifecycle/ApplyRequestValuesExecutor.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/impl/src/main/java/org/apache/myfaces/lifecycle/ApplyRequestValuesExecutor.java?ref=930a697cb00581702b772079725fa36a5419d45f",
+                "deletions": 0,
+                "filename": "impl/src/main/java/org/apache/myfaces/lifecycle/ApplyRequestValuesExecutor.java",
+                "patch": "@@ -31,6 +31,10 @@\n {\n     public boolean execute(FacesContext facesContext)\n     {\n+        if (facesContext.getViewRoot() == null)\n+        {\n+            throw new ViewNotFoundException(\"A view is required to execute \"+facesContext.getCurrentPhaseId());\n+        }\n         facesContext.getViewRoot().processDecodes(facesContext);\n         return false;\n     }",
+                "raw_url": "https://github.com/apache/myfaces/raw/930a697cb00581702b772079725fa36a5419d45f/impl/src/main/java/org/apache/myfaces/lifecycle/ApplyRequestValuesExecutor.java",
+                "sha": "a82190efad5d03ca24214e4513e5151f0307fc0f",
+                "status": "modified"
+            },
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/myfaces/blob/930a697cb00581702b772079725fa36a5419d45f/impl/src/main/java/org/apache/myfaces/lifecycle/InvokeApplicationExecutor.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/impl/src/main/java/org/apache/myfaces/lifecycle/InvokeApplicationExecutor.java?ref=930a697cb00581702b772079725fa36a5419d45f",
+                "deletions": 0,
+                "filename": "impl/src/main/java/org/apache/myfaces/lifecycle/InvokeApplicationExecutor.java",
+                "patch": "@@ -31,6 +31,10 @@\n {\n     public boolean execute(FacesContext facesContext)\n     {\n+        if (facesContext.getViewRoot() == null)\n+        {\n+            throw new ViewNotFoundException(\"A view is required to execute \"+facesContext.getCurrentPhaseId());\n+        }\n         facesContext.getViewRoot().processApplication(facesContext);\n         return false;\n     }",
+                "raw_url": "https://github.com/apache/myfaces/raw/930a697cb00581702b772079725fa36a5419d45f/impl/src/main/java/org/apache/myfaces/lifecycle/InvokeApplicationExecutor.java",
+                "sha": "a1804333696ab2216e1bb5fe1c9f96b3a766231c",
+                "status": "modified"
+            },
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/myfaces/blob/930a697cb00581702b772079725fa36a5419d45f/impl/src/main/java/org/apache/myfaces/lifecycle/ProcessValidationsExecutor.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/impl/src/main/java/org/apache/myfaces/lifecycle/ProcessValidationsExecutor.java?ref=930a697cb00581702b772079725fa36a5419d45f",
+                "deletions": 0,
+                "filename": "impl/src/main/java/org/apache/myfaces/lifecycle/ProcessValidationsExecutor.java",
+                "patch": "@@ -31,6 +31,10 @@\n {\n     public boolean execute(FacesContext facesContext)\n     {\n+        if (facesContext.getViewRoot() == null)\n+        {\n+            throw new ViewNotFoundException(\"A view is required to execute \"+facesContext.getCurrentPhaseId());\n+        }\n         facesContext.getViewRoot().processValidators(facesContext);\n         return false;\n     }",
+                "raw_url": "https://github.com/apache/myfaces/raw/930a697cb00581702b772079725fa36a5419d45f/impl/src/main/java/org/apache/myfaces/lifecycle/ProcessValidationsExecutor.java",
+                "sha": "2cc0f7d306abfe6a897088b737316b79d0e92f23",
+                "status": "modified"
+            },
+            {
+                "additions": 5,
+                "blob_url": "https://github.com/apache/myfaces/blob/930a697cb00581702b772079725fa36a5419d45f/impl/src/main/java/org/apache/myfaces/lifecycle/RenderResponseExecutor.java",
+                "changes": 5,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/impl/src/main/java/org/apache/myfaces/lifecycle/RenderResponseExecutor.java?ref=930a697cb00581702b772079725fa36a5419d45f",
+                "deletions": 0,
+                "filename": "impl/src/main/java/org/apache/myfaces/lifecycle/RenderResponseExecutor.java",
+                "patch": "@@ -51,6 +51,11 @@ public boolean execute(FacesContext facesContext)\n         String viewId;\n         String newViewId;\n         \n+        if (facesContext.getViewRoot() == null)\n+        {\n+            throw new ViewNotFoundException(\"A view is required to execute \"+facesContext.getCurrentPhaseId());\n+        }\n+        \n         try\n         {\n             // do-while, because the view might change in PreRenderViewEvent-listeners",
+                "raw_url": "https://github.com/apache/myfaces/raw/930a697cb00581702b772079725fa36a5419d45f/impl/src/main/java/org/apache/myfaces/lifecycle/RenderResponseExecutor.java",
+                "sha": "4b215d0fee888e5aa54e98f948fa2f1fbfc35427",
+                "status": "modified"
+            },
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/myfaces/blob/930a697cb00581702b772079725fa36a5419d45f/impl/src/main/java/org/apache/myfaces/lifecycle/UpdateModelValuesExecutor.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/impl/src/main/java/org/apache/myfaces/lifecycle/UpdateModelValuesExecutor.java?ref=930a697cb00581702b772079725fa36a5419d45f",
+                "deletions": 0,
+                "filename": "impl/src/main/java/org/apache/myfaces/lifecycle/UpdateModelValuesExecutor.java",
+                "patch": "@@ -31,6 +31,10 @@\n {\n     public boolean execute(FacesContext facesContext)\n     {\n+        if (facesContext.getViewRoot() == null)\n+        {\n+            throw new ViewNotFoundException(\"A view is required to execute \"+facesContext.getCurrentPhaseId());\n+        }\n         facesContext.getViewRoot().processUpdates(facesContext);\n         return false;\n     }",
+                "raw_url": "https://github.com/apache/myfaces/raw/930a697cb00581702b772079725fa36a5419d45f/impl/src/main/java/org/apache/myfaces/lifecycle/UpdateModelValuesExecutor.java",
+                "sha": "b81b4581496a90d6c880eb973d9ffad93008e57a",
+                "status": "modified"
+            },
+            {
+                "additions": 61,
+                "blob_url": "https://github.com/apache/myfaces/blob/930a697cb00581702b772079725fa36a5419d45f/impl/src/main/java/org/apache/myfaces/lifecycle/ViewNotFoundException.java",
+                "changes": 61,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/impl/src/main/java/org/apache/myfaces/lifecycle/ViewNotFoundException.java?ref=930a697cb00581702b772079725fa36a5419d45f",
+                "deletions": 0,
+                "filename": "impl/src/main/java/org/apache/myfaces/lifecycle/ViewNotFoundException.java",
+                "patch": "@@ -0,0 +1,61 @@\n+/*\r\n+ * Licensed to the Apache Software Foundation (ASF) under one\r\n+ * or more contributor license agreements.  See the NOTICE file\r\n+ * distributed with this work for additional information\r\n+ * regarding copyright ownership.  The ASF licenses this file\r\n+ * to you under the Apache License, Version 2.0 (the\r\n+ * \"License\"); you may not use this file except in compliance\r\n+ * with the License.  You may obtain a copy of the License at\r\n+ *\r\n+ *   http://www.apache.org/licenses/LICENSE-2.0\r\n+ *\r\n+ * Unless required by applicable law or agreed to in writing,\r\n+ * software distributed under the License is distributed on an\r\n+ * \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\r\n+ * KIND, either express or implied.  See the License for the\r\n+ * specific language governing permissions and limitations\r\n+ * under the License.\r\n+ */\r\n+package org.apache.myfaces.lifecycle;\r\n+\r\n+import javax.faces.FacesException;\r\n+\r\n+/**\r\n+ * This exception is thrown when a view is not present before start\r\n+ * one of the following phases: APPLY_REQUEST_VALUES, PROCESS_VALIDATIONS,\r\n+ * INVOKE_APPLICATION, UPDATE_MODEL_VALUES, RENDER_RESPONSE.\r\n+\r\n+ * \r\n+ * @author Leonardo Uribe\r\n+ * @since 2.0.8\r\n+ *\r\n+ */\r\n+public class ViewNotFoundException extends FacesException\r\n+{\r\n+    \r\n+    /**\r\n+     * \r\n+     */\r\n+    private static final long serialVersionUID = -537576038024094272L;\r\n+\r\n+    public ViewNotFoundException()\r\n+    {\r\n+        super();\r\n+    }\r\n+\r\n+    public ViewNotFoundException(String message, Throwable cause)\r\n+    {\r\n+        super(message, cause);\r\n+    }\r\n+\r\n+    public ViewNotFoundException(String message)\r\n+    {\r\n+        super(message);\r\n+    }\r\n+\r\n+    public ViewNotFoundException(Throwable cause)\r\n+    {\r\n+        super(cause);\r\n+    }\r\n+\r\n+}\r",
+                "raw_url": "https://github.com/apache/myfaces/raw/930a697cb00581702b772079725fa36a5419d45f/impl/src/main/java/org/apache/myfaces/lifecycle/ViewNotFoundException.java",
+                "sha": "3230492ad0474a5223c97c5add4810d5c345b7bf",
+                "status": "added"
+            }
+        ],
+        "message": "Add ViewNotFoundException (MYFACES-3188 NPE in org.apache.myfaces.lifecycle.RenderResponseExecutor.execute and MYFACES-3189 NavigationHandler: navigation to nonexistent view after ViewExpired throws NPE)",
+        "parent": "https://github.com/apache/myfaces/commit/02945c409d86decc727afec7162de3e27ea3d0ab",
+        "repo": "myfaces",
+        "unit_tests": [
+            "RenderResponseExecutorTest.java"
+        ]
+    },
+    "myfaces_a5a18f0": {
+        "bug_id": "myfaces_a5a18f0",
+        "commit": "https://github.com/apache/myfaces/commit/a5a18f05d087fdfe6a7eaa6ba2482da70a9d881a",
+        "file": [
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/myfaces/blob/a5a18f05d087fdfe6a7eaa6ba2482da70a9d881a/impl/src/main/java/org/apache/myfaces/lifecycle/ApplyRequestValuesExecutor.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/impl/src/main/java/org/apache/myfaces/lifecycle/ApplyRequestValuesExecutor.java?ref=a5a18f05d087fdfe6a7eaa6ba2482da70a9d881a",
+                "deletions": 0,
+                "filename": "impl/src/main/java/org/apache/myfaces/lifecycle/ApplyRequestValuesExecutor.java",
+                "patch": "@@ -31,6 +31,10 @@\n {\n     public boolean execute(FacesContext facesContext)\n     {\n+        if (facesContext.getViewRoot() == null)\n+        {\n+            throw new ViewNotFoundException(\"A view is required to execute \"+facesContext.getCurrentPhaseId());\n+        }\n         facesContext.getViewRoot().processDecodes(facesContext);\n         return false;\n     }",
+                "raw_url": "https://github.com/apache/myfaces/raw/a5a18f05d087fdfe6a7eaa6ba2482da70a9d881a/impl/src/main/java/org/apache/myfaces/lifecycle/ApplyRequestValuesExecutor.java",
+                "sha": "a82190efad5d03ca24214e4513e5151f0307fc0f",
+                "status": "modified"
+            },
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/myfaces/blob/a5a18f05d087fdfe6a7eaa6ba2482da70a9d881a/impl/src/main/java/org/apache/myfaces/lifecycle/InvokeApplicationExecutor.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/impl/src/main/java/org/apache/myfaces/lifecycle/InvokeApplicationExecutor.java?ref=a5a18f05d087fdfe6a7eaa6ba2482da70a9d881a",
+                "deletions": 0,
+                "filename": "impl/src/main/java/org/apache/myfaces/lifecycle/InvokeApplicationExecutor.java",
+                "patch": "@@ -31,6 +31,10 @@\n {\n     public boolean execute(FacesContext facesContext)\n     {\n+        if (facesContext.getViewRoot() == null)\n+        {\n+            throw new ViewNotFoundException(\"A view is required to execute \"+facesContext.getCurrentPhaseId());\n+        }\n         facesContext.getViewRoot().processApplication(facesContext);\n         return false;\n     }",
+                "raw_url": "https://github.com/apache/myfaces/raw/a5a18f05d087fdfe6a7eaa6ba2482da70a9d881a/impl/src/main/java/org/apache/myfaces/lifecycle/InvokeApplicationExecutor.java",
+                "sha": "a1804333696ab2216e1bb5fe1c9f96b3a766231c",
+                "status": "modified"
+            },
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/myfaces/blob/a5a18f05d087fdfe6a7eaa6ba2482da70a9d881a/impl/src/main/java/org/apache/myfaces/lifecycle/ProcessValidationsExecutor.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/impl/src/main/java/org/apache/myfaces/lifecycle/ProcessValidationsExecutor.java?ref=a5a18f05d087fdfe6a7eaa6ba2482da70a9d881a",
+                "deletions": 0,
+                "filename": "impl/src/main/java/org/apache/myfaces/lifecycle/ProcessValidationsExecutor.java",
+                "patch": "@@ -31,6 +31,10 @@\n {\n     public boolean execute(FacesContext facesContext)\n     {\n+        if (facesContext.getViewRoot() == null)\n+        {\n+            throw new ViewNotFoundException(\"A view is required to execute \"+facesContext.getCurrentPhaseId());\n+        }\n         facesContext.getViewRoot().processValidators(facesContext);\n         return false;\n     }",
+                "raw_url": "https://github.com/apache/myfaces/raw/a5a18f05d087fdfe6a7eaa6ba2482da70a9d881a/impl/src/main/java/org/apache/myfaces/lifecycle/ProcessValidationsExecutor.java",
+                "sha": "2cc0f7d306abfe6a897088b737316b79d0e92f23",
+                "status": "modified"
+            },
+            {
+                "additions": 5,
+                "blob_url": "https://github.com/apache/myfaces/blob/a5a18f05d087fdfe6a7eaa6ba2482da70a9d881a/impl/src/main/java/org/apache/myfaces/lifecycle/RenderResponseExecutor.java",
+                "changes": 5,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/impl/src/main/java/org/apache/myfaces/lifecycle/RenderResponseExecutor.java?ref=a5a18f05d087fdfe6a7eaa6ba2482da70a9d881a",
+                "deletions": 0,
+                "filename": "impl/src/main/java/org/apache/myfaces/lifecycle/RenderResponseExecutor.java",
+                "patch": "@@ -51,6 +51,11 @@ public boolean execute(FacesContext facesContext)\n         String viewId;\n         String newViewId;\n         \n+        if (facesContext.getViewRoot() == null)\n+        {\n+            throw new ViewNotFoundException(\"A view is required to execute \"+facesContext.getCurrentPhaseId());\n+        }\n+        \n         try\n         {\n             // do-while, because the view might change in PreRenderViewEvent-listeners",
+                "raw_url": "https://github.com/apache/myfaces/raw/a5a18f05d087fdfe6a7eaa6ba2482da70a9d881a/impl/src/main/java/org/apache/myfaces/lifecycle/RenderResponseExecutor.java",
+                "sha": "4b215d0fee888e5aa54e98f948fa2f1fbfc35427",
+                "status": "modified"
+            },
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/myfaces/blob/a5a18f05d087fdfe6a7eaa6ba2482da70a9d881a/impl/src/main/java/org/apache/myfaces/lifecycle/UpdateModelValuesExecutor.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/impl/src/main/java/org/apache/myfaces/lifecycle/UpdateModelValuesExecutor.java?ref=a5a18f05d087fdfe6a7eaa6ba2482da70a9d881a",
+                "deletions": 0,
+                "filename": "impl/src/main/java/org/apache/myfaces/lifecycle/UpdateModelValuesExecutor.java",
+                "patch": "@@ -31,6 +31,10 @@\n {\n     public boolean execute(FacesContext facesContext)\n     {\n+        if (facesContext.getViewRoot() == null)\n+        {\n+            throw new ViewNotFoundException(\"A view is required to execute \"+facesContext.getCurrentPhaseId());\n+        }\n         facesContext.getViewRoot().processUpdates(facesContext);\n         return false;\n     }",
+                "raw_url": "https://github.com/apache/myfaces/raw/a5a18f05d087fdfe6a7eaa6ba2482da70a9d881a/impl/src/main/java/org/apache/myfaces/lifecycle/UpdateModelValuesExecutor.java",
+                "sha": "b81b4581496a90d6c880eb973d9ffad93008e57a",
+                "status": "modified"
+            },
+            {
+                "additions": 61,
+                "blob_url": "https://github.com/apache/myfaces/blob/a5a18f05d087fdfe6a7eaa6ba2482da70a9d881a/impl/src/main/java/org/apache/myfaces/lifecycle/ViewNotFoundException.java",
+                "changes": 61,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/impl/src/main/java/org/apache/myfaces/lifecycle/ViewNotFoundException.java?ref=a5a18f05d087fdfe6a7eaa6ba2482da70a9d881a",
+                "deletions": 0,
+                "filename": "impl/src/main/java/org/apache/myfaces/lifecycle/ViewNotFoundException.java",
+                "patch": "@@ -0,0 +1,61 @@\n+/*\r\n+ * Licensed to the Apache Software Foundation (ASF) under one\r\n+ * or more contributor license agreements.  See the NOTICE file\r\n+ * distributed with this work for additional information\r\n+ * regarding copyright ownership.  The ASF licenses this file\r\n+ * to you under the Apache License, Version 2.0 (the\r\n+ * \"License\"); you may not use this file except in compliance\r\n+ * with the License.  You may obtain a copy of the License at\r\n+ *\r\n+ *   http://www.apache.org/licenses/LICENSE-2.0\r\n+ *\r\n+ * Unless required by applicable law or agreed to in writing,\r\n+ * software distributed under the License is distributed on an\r\n+ * \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\r\n+ * KIND, either express or implied.  See the License for the\r\n+ * specific language governing permissions and limitations\r\n+ * under the License.\r\n+ */\r\n+package org.apache.myfaces.lifecycle;\r\n+\r\n+import javax.faces.FacesException;\r\n+\r\n+/**\r\n+ * This exception is thrown when a view is not present before start\r\n+ * one of the following phases: APPLY_REQUEST_VALUES, PROCESS_VALIDATIONS,\r\n+ * INVOKE_APPLICATION, UPDATE_MODEL_VALUES, RENDER_RESPONSE.\r\n+\r\n+ * \r\n+ * @author Leonardo Uribe\r\n+ * @since 2.0.8\r\n+ *\r\n+ */\r\n+public class ViewNotFoundException extends FacesException\r\n+{\r\n+    \r\n+    /**\r\n+     * \r\n+     */\r\n+    private static final long serialVersionUID = -537576038024094272L;\r\n+\r\n+    public ViewNotFoundException()\r\n+    {\r\n+        super();\r\n+    }\r\n+\r\n+    public ViewNotFoundException(String message, Throwable cause)\r\n+    {\r\n+        super(message, cause);\r\n+    }\r\n+\r\n+    public ViewNotFoundException(String message)\r\n+    {\r\n+        super(message);\r\n+    }\r\n+\r\n+    public ViewNotFoundException(Throwable cause)\r\n+    {\r\n+        super(cause);\r\n+    }\r\n+\r\n+}\r",
+                "raw_url": "https://github.com/apache/myfaces/raw/a5a18f05d087fdfe6a7eaa6ba2482da70a9d881a/impl/src/main/java/org/apache/myfaces/lifecycle/ViewNotFoundException.java",
+                "sha": "3230492ad0474a5223c97c5add4810d5c345b7bf",
+                "status": "added"
+            }
+        ],
+        "message": "Add ViewNotFoundException (MYFACES-3188 NPE in org.apache.myfaces.lifecycle.RenderResponseExecutor.execute and MYFACES-3189 NavigationHandler: navigation to nonexistent view after ViewExpired throws NPE)",
+        "parent": "https://github.com/apache/myfaces/commit/0f91f72eeffd2caf16902b7599c77199a40eda5f",
+        "repo": "myfaces",
+        "unit_tests": [
+            "RenderResponseExecutorTest.java"
         ]
     },
     "myfaces_a9f2138": {
@@ -225,6 +429,90 @@
         "repo": "myfaces",
         "unit_tests": [
             "HtmlResponseWriterImplTest.java"
+        ]
+    },
+    "myfaces_b881ddb": {
+        "bug_id": "myfaces_b881ddb",
+        "commit": "https://github.com/apache/myfaces/commit/b881ddb17bbc6886d5845a74a90d16670b984d16",
+        "file": [
+            {
+                "additions": 7,
+                "blob_url": "https://github.com/apache/myfaces/blob/b881ddb17bbc6886d5845a74a90d16670b984d16/impl/src/main/java/org/apache/myfaces/application/ResourceHandlerImpl.java",
+                "changes": 8,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/impl/src/main/java/org/apache/myfaces/application/ResourceHandlerImpl.java?ref=b881ddb17bbc6886d5845a74a90d16670b984d16",
+                "deletions": 1,
+                "filename": "impl/src/main/java/org/apache/myfaces/application/ResourceHandlerImpl.java",
+                "patch": "@@ -138,10 +138,16 @@ public Resource createResource(String resourceName, String libraryName,\n     {\n         Resource resource = null;\n         \n-        if (resourceName == null || resourceName.length() == 0) \n+        if (resourceName == null) \n+        {\n+            throw new NullPointerException();\n+        }\n+\n+        if (resourceName.length() == 0)\n         {\n             return null;\n         }\n+\n         if (resourceName.charAt(0) == '/')\n         {\n             // If resourceName starts with '/', remove that character because it",
+                "raw_url": "https://github.com/apache/myfaces/raw/b881ddb17bbc6886d5845a74a90d16670b984d16/impl/src/main/java/org/apache/myfaces/application/ResourceHandlerImpl.java",
+                "sha": "9d5c9d941a4b636f21d66098c5bf21b6b0b38650",
+                "status": "modified"
+            },
+            {
+                "additions": 15,
+                "blob_url": "https://github.com/apache/myfaces/blob/b881ddb17bbc6886d5845a74a90d16670b984d16/impl/src/test/java/org/apache/myfaces/application/ResourceHandlerImplTest.java",
+                "changes": 15,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/impl/src/test/java/org/apache/myfaces/application/ResourceHandlerImplTest.java?ref=b881ddb17bbc6886d5845a74a90d16670b984d16",
+                "deletions": 0,
+                "filename": "impl/src/test/java/org/apache/myfaces/application/ResourceHandlerImplTest.java",
+                "patch": "@@ -221,4 +221,19 @@ public boolean libraryExists(String libraryName)\n         Assert.assertNull(resource.getResourceVersion());        \n         Assert.assertEquals(\"myres.js\", resource.getResourceName());\n     }\n+\n+    @Test\n+    public void testCreateResourceNullResourceName() throws Exception\n+    {\n+        boolean didNPEOccur = false;\n+        try \n+        {\n+            resourceHandler.createResource(null);\n+        } catch (NullPointerException e)\n+        {\n+            didNPEOccur = true;\n+        }\n+        \n+        Assert.assertTrue(didNPEOccur);\n+    }\n }",
+                "raw_url": "https://github.com/apache/myfaces/raw/b881ddb17bbc6886d5845a74a90d16670b984d16/impl/src/test/java/org/apache/myfaces/application/ResourceHandlerImplTest.java",
+                "sha": "3ca420c6ef4ac8b9ddc7c2b6b92580741b107b3d",
+                "status": "modified"
+            }
+        ],
+        "message": "MYFACES-4187: throw NPE with null resourceName",
+        "parent": "https://github.com/apache/myfaces/commit/b5877dcc2f720cbd7d039c70c59fdfbf77e9d587",
+        "repo": "myfaces",
+        "unit_tests": [
+            "ResourceHandlerImplTest.java"
+        ]
+    },
+    "myfaces_c283a33": {
+        "bug_id": "myfaces_c283a33",
+        "commit": "https://github.com/apache/myfaces/commit/c283a33b9f08a797c692ec70237f6cd3e5b3437a",
+        "file": [
+            {
+                "additions": 5,
+                "blob_url": "https://github.com/apache/myfaces/blob/c283a33b9f08a797c692ec70237f6cd3e5b3437a/api/src/main/java/javax/faces/validator/_MessageUtils.java",
+                "changes": 5,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/api/src/main/java/javax/faces/validator/_MessageUtils.java?ref=c283a33b9f08a797c692ec70237f6cd3e5b3437a",
+                "deletions": 0,
+                "filename": "api/src/main/java/javax/faces/validator/_MessageUtils.java",
+                "patch": "@@ -144,6 +144,11 @@ private static ResourceBundle getBundle(FacesContext facesContext,\n                                             Locale locale,\n                                             String bundleName)\n     {\n+        if(locale == null)\n+        {\n+            locale = Locale.getDefault();\n+        }\n+        \n         try\n         {\n             //First we try the JSF implementation class loader",
+                "raw_url": "https://github.com/apache/myfaces/raw/c283a33b9f08a797c692ec70237f6cd3e5b3437a/api/src/main/java/javax/faces/validator/_MessageUtils.java",
+                "sha": "270f7203fb8c5cdf093e5a0b457a9ee442374340",
+                "status": "modified"
+            },
+            {
+                "additions": 125,
+                "blob_url": "https://github.com/apache/myfaces/blob/c283a33b9f08a797c692ec70237f6cd3e5b3437a/api/src/test/java/javax/faces/Messages.properties",
+                "changes": 125,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/api/src/test/java/javax/faces/Messages.properties?ref=c283a33b9f08a797c692ec70237f6cd3e5b3437a",
+                "deletions": 0,
+                "filename": "api/src/test/java/javax/faces/Messages.properties",
+                "patch": "@@ -0,0 +1,125 @@\n+# Copyright 2004 The Apache Software Foundation.\n+#\n+# Licensed under the Apache License, Version 2.0 (the \"License\");\n+# you may not use this file except in compliance with the License.\n+# You may obtain a copy of the License at\n+#\n+#      http://www.apache.org/licenses/LICENSE-2.0\n+#\n+# Unless required by applicable law or agreed to in writing, software\n+# distributed under the License is distributed on an \"AS IS\" BASIS,\n+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n+# See the License for the specific language governing permissions and\n+# limitations under the License.\n+\n+# standard messages (Spec. 2.5.2.4)\n+\n+# components\n+javax.faces.component.UIInput.CONVERSION = {0}: Conversion error occurred.\n+javax.faces.component.UIInput.REQUIRED = {0}: Validation Error: Value is required.\n+javax.faces.component.UIInput.UPDATE = {0}: An error occurred when processing your submitted information. \n+\n+javax.faces.component.UISelectOne.INVALID = {0}: Validation Error: Value is not valid\n+javax.faces.component.UISelectMany.INVALID = {0}: Validation Error: Value is not valid\n+\n+# converters\n+javax.faces.converter.BigDecimalConverter.DECIMAL = {2}: ''{0}'' must be a signed decimal number.\n+javax.faces.converter.BigDecimalConverter.DECIMAL_detail = {2}: ''{0}'' must be a signed decimal number consisting of zero or more digits, that may be followed by a decimal point and fraction.  Example: {1}\n+ \n+javax.faces.converter.BigIntegerConverter.BIGINTEGER = {2}: ''{0}'' must be a number consisting of one or more digits.\n+javax.faces.converter.BigIntegerConverter.BIGINTEGER_detail = {2}: ''{0}'' must be a number consisting of one or more digits. Example: {1}\n+ \n+javax.faces.converter.BooleanConverter.BOOLEAN = {1}: ''{0}'' must be 'true' or 'false'.\n+javax.faces.converter.BooleanConverter.BOOLEAN_detail = {1}: ''{0}'' must be 'true' or 'false'.  Any value other than 'true' will evaluate to 'false'.\n+\n+javax.faces.converter.ByteConverter.BYTE = {2}: ''{0}'' must be a number between 0 and 255.\n+javax.faces.converter.ByteConverter.BYTE_detail = {2}: ''{0}'' must be a number between 0 and 255.  Example: {1}\n+ \n+javax.faces.converter.CharacterConverter.CHARACTER = {1}: ''{0}'' must be a valid character.\n+javax.faces.converter.CharacterConverter.CHARACTER_detail = {1}: ''{0}'' must be a valid ASCII character.\n+\n+javax.faces.converter.DateTimeConverter.DATE = {2}: ''{0}'' could not be understood as a date.\n+javax.faces.converter.DateTimeConverter.DATE_detail = {2}: ''{0}'' could not be understood as a date. Example: {1} \n+javax.faces.converter.DateTimeConverter.TIME = {2}: ''{0}'' could not be understood as a time.\n+javax.faces.converter.DateTimeConverter.TIME_detail = {2}: ''{0}'' could not be understood as a time. Example: {1} \n+javax.faces.converter.DateTimeConverter.DATETIME = {2}: ''{0}'' could not be understood as a date and time.\n+javax.faces.converter.DateTimeConverter.DATETIME_detail = {2}: ''{0}'' could not be understood as a date and time. Example: {1} \n+javax.faces.converter.DateTimeConverter.PATTERN_TYPE = {1}: A 'pattern' or 'type' attribute must be specified to convert the value ''{0}''.\n+\n+javax.faces.converter.DoubleConverter.DOUBLE = {2}: ''{0}'' must be a number consisting of one or more digits.\n+javax.faces.converter.DoubleConverter.DOUBLE_detail = {2}: ''{0}'' must be a number between 4.9E-324 and 1.7976931348623157E308  Example: {1}\n+\n+javax.faces.converter.EnumConverter.ENUM = {2}: ''{0}'' must be convertible to an enum.\n+javax.faces.converter.EnumConverter.ENUM_detail = {2}: ''{0}'' must be convertible to an enum from the enum that contains the constant ''{1}''.\n+javax.faces.converter.EnumConverter.ENUM_NO_CLASS = {1}: ''{0}'' must be convertible to an enum from the enum, but no enum class provided.\n+javax.faces.converter.EnumConverter.ENUM_NO_CLASS_detail = {1}: ''{0}'' must be convertible to an enum from the enum, but no enum class provided.\n+\n+javax.faces.converter.FloatConverter.FLOAT = {2}: ''{0}'' must be a number consisting of one or more digits.\n+javax.faces.converter.FloatConverter.FLOAT_detail = {2}: ''{0}'' must be a number between 1.4E-45 and 3.4028235E38  Example: {1}\n+\n+javax.faces.converter.IntegerConverter.INTEGER = {2}: ''{0}'' must be a number consisting of one or more digits.\n+javax.faces.converter.IntegerConverter.INTEGER_detail = {2}: ''{0}'' must be a number between -2147483648 and 2147483647 Example: {1}\n+\n+javax.faces.converter.LongConverter.LONG = {2}: ''{0}'' must be a number consisting of one or more digits.\n+javax.faces.converter.LongConverter.LONG_detail = {2}: ''{0}'' must be a number between -9223372036854775808 to 9223372036854775807 Example: {1}\n+\n+javax.faces.converter.NumberConverter.CURRENCY = {2}: ''{0}'' could not be understood as a currency value.\n+javax.faces.converter.NumberConverter.CURRENCY_detail = {2}: ''{0}'' could not be understood as a currency value. Example: {1}\n+javax.faces.converter.NumberConverter.PERCENT = {2}: ''{0}'' could not be understood as a percentage.\n+javax.faces.converter.NumberConverter.PERCENT_detail = {2}: ''{0}'' could not be understood as a percentage. Example: {1}\n+javax.faces.converter.NumberConverter.NUMBER = {2}: ''{0}'' is not a number.\n+javax.faces.converter.NumberConverter.NUMBER_detail = {2}: ''{0}'' is not a number. Example: {1}\n+javax.faces.converter.NumberConverter.PATTERN = {2}: ''{0}'' is not a number pattern.\n+javax.faces.converter.NumberConverter.PATTERN_detail = {2}: ''{0}'' is not a number pattern. Example: {1}\n+\n+javax.faces.converter.ShortConverter.SHORT = {2}: ''{0}'' must be a number consisting of one or more digits.\n+javax.faces.converter.ShortConverter.SHORT_detail = {2}: ''{0}'' must be a number between -32768 and 32767 Example: {1}\n+\n+javax.faces.converter.STRING = {1}: Could not convert ''{0}'' to a string.\n+\n+# validators\n+javax.faces.validator.NOT_IN_RANGE = Validation Error: Specified attribute is not between the expected values of {0} and {1}.\n+\n+javax.faces.validator.DoubleRangeValidator.MAXIMUM = {1}: Validation Error: Value is greater than allowable maximum of \"{0}\"\n+javax.faces.validator.DoubleRangeValidator.MINIMUM = {1}: Validation Error: Value is less than allowable minimum of ''{0}''\n+javax.faces.validator.DoubleRangeValidator.NOT_IN_RANGE = {2}: Validation Error: Specified attribute is not between the expected values of {0} and {1}.\n+javax.faces.validator.DoubleRangeValidator.TYPE = {0}: Validation Error: Value is not of the correct type\n+\n+javax.faces.validator.LengthValidator.MAXIMUM = {1}: Validation Error: Value is greater than allowable maximum of ''{0}''\n+javax.faces.validator.LengthValidator.MINIMUM = {1}: Validation Error: Value is less than allowable minimum of ''{0}''\n+\n+javax.faces.validator.LongRangeValidator.MAXIMUM = {1}: Validation Error: Value is greater than allowable maximum of ''{0}''\n+javax.faces.validator.LongRangeValidator.MINIMUM = {1}: Validation Error: Value is less than allowable minimum of ''{0}''\n+javax.faces.validator.LongRangeValidator.NOT_IN_RANGE = {2}: Validation Error: Specified attribute is not between the expected values of {0} and {1}.\n+javax.faces.validator.LongRangeValidator.TYPE = {0}: Validation Error: Value is not of the correct type.\n+\n+# myfaces specific messages\n+org.apache.myfaces.renderkit.html.HtmlMessagesRenderer.IN_FIELD = \\u0020in {0}\n+org.apache.myfaces.Email.INVALID = Validation Error\n+org.apache.myfaces.Email.INVALID_detail =The given value ({0}) is not a correct email-address.\n+\n+org.apache.myfaces.Equal.INVALID = Validation Error\n+org.apache.myfaces.Equal.INVALID_detail =The given value ({0}) is not equal with value of \"{1}\".\n+\n+org.apache.myfaces.Creditcard.INVALID = Validation Error\n+org.apache.myfaces.Creditcard.INVALID_detail =The given value ({0}) is not a correct creditcard\n+\n+org.apache.myfaces.Regexpr.INVALID=Validation Error\n+org.apache.myfaces.Regexpr.INVALID_detail=The given value ({0}) is not valid.\n+\n+org.apache.myfaces.Date.INVALID = Validation Error\n+org.apache.myfaces.Date.INVALID_detail =The given value ({0}) is not a correct date\n+\n+org.apache.myfaces.ticker.NOCONNECTION = No Connection: \n+org.apache.myfaces.ticker.NOCONNECTION_detail = Maybe you are behind a firewall?\n+\n+org.apache.myfaces.ISBN.INVALID = Validation Error\n+org.apache.myfaces.ISBN.INVALID_detail =The given value ({0}) is not a correct isbn code.\n+\n+org.apache.myfaces.tree2.MISSING_NODE        = Missing Node\n+org.apache.myfaces.tree2.MISSING_NODE_detail = The requested node \"{0}\" does not exist.\n+\n+org.apache.myfaces.calendar.CONVERSION = Conversion Error\n+org.apache.myfaces.calendar.CONVERSION_detail = \"{0}\": The given value \"{1}\" could not be converted to a date.\n+\n+org.apache.myfaces.FileUpload.SIZE_LIMIT = \"{0}\": The uploaded file exceeded the maximum size of {1} bytes.\n\\ No newline at end of file",
+                "raw_url": "https://github.com/apache/myfaces/raw/c283a33b9f08a797c692ec70237f6cd3e5b3437a/api/src/test/java/javax/faces/Messages.properties",
+                "sha": "5fc4a485c36ad7ce6dc931dc5ecf16ef9a986442",
+                "status": "added"
+            },
+            {
+                "additions": 61,
+                "blob_url": "https://github.com/apache/myfaces/blob/c283a33b9f08a797c692ec70237f6cd3e5b3437a/api/src/test/java/javax/faces/validator/_MessageUtilsTest.java",
+                "changes": 61,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/api/src/test/java/javax/faces/validator/_MessageUtilsTest.java?ref=c283a33b9f08a797c692ec70237f6cd3e5b3437a",
+                "deletions": 0,
+                "filename": "api/src/test/java/javax/faces/validator/_MessageUtilsTest.java",
+                "patch": "@@ -0,0 +1,61 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one\n+ * or more contributor license agreements.  See the NOTICE file\n+ * distributed with this work for additional information\n+ * regarding copyright ownership.  The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance\n+ * with the License.  You may obtain a copy of the License at\n+ *\n+ *   http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing,\n+ * software distributed under the License is distributed on an\n+ * \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+ * KIND, either express or implied.  See the License for the\n+ * specific language governing permissions and limitations\n+ * under the License.\n+ */\n+package javax.faces.validator;\n+\n+import static org.easymock.EasyMock.expect;\n+import static org.testng.Assert.assertEquals;\n+\n+import javax.faces.application.Application;\n+import javax.faces.component.UIViewRoot;\n+\n+import org.apache.shale.test.mock.MockFacesContext12;\n+import org.easymock.classextension.EasyMock;\n+import org.easymock.classextension.IMocksControl;\n+import org.testng.annotations.Test;\n+\n+/**\n+ * @author Mathias Broekelmann (latest modification by $Author$)\n+ * @version $Revision$ $Date$\n+ */\n+public class _MessageUtilsTest\n+{\n+\n+    /**\n+     * Test method for\n+     * {@link javax.faces.validator._MessageUtils#getErrorMessage(javax.faces.context.FacesContext, java.lang.String, java.lang.Object[])}.\n+     */\n+    @Test\n+    public void testErrorMessage()\n+    {\n+        UIViewRoot root = new UIViewRoot();\n+        MockFacesContext12 facesContext = new MockFacesContext12();\n+        IMocksControl mocksControl = EasyMock.createControl();\n+        Application application = mocksControl.createMock(Application.class);\n+        facesContext.setApplication(application);\n+        facesContext.setViewRoot(root);\n+\n+        expect(application.getMessageBundle()).andReturn(\"javax.faces.Messages\");\n+        mocksControl.replay();\n+\n+        assertEquals(_MessageUtils.getErrorMessage(facesContext, \"javax.faces.validator.DoubleRangeValidator.MAXIMUM\",\n+                new Object[] { \"xyz\", \"xxx\" }).getDetail(),\n+                \"xxx: Validation Error: Value is greater than allowable maximum of \\\"xyz\\\"\");\n+    }\n+\n+}",
+                "raw_url": "https://github.com/apache/myfaces/raw/c283a33b9f08a797c692ec70237f6cd3e5b3437a/api/src/test/java/javax/faces/validator/_MessageUtilsTest.java",
+                "sha": "1527a4e3c20d56fae5690de0c58968ac0a35c77f",
+                "status": "added"
+            }
+        ],
+        "message": "fix NPE if locale is null",
+        "parent": "https://github.com/apache/myfaces/commit/e0b164d052980a5a874dbc7c071563e1b5c4e71b",
+        "repo": "myfaces",
+        "unit_tests": [
+            "_MessageUtilsTest.java"
         ]
     },
     "myfaces_ca86c8d": {
@@ -297,6 +585,150 @@
         "repo": "myfaces",
         "unit_tests": [
             "HtmlFormatRendererTest.java"
+        ]
+    },
+    "myfaces_e576ea9": {
+        "bug_id": "myfaces_e576ea9",
+        "commit": "https://github.com/apache/myfaces/commit/e576ea9c2a3344c1698f007d26347c5ddca5e575",
+        "file": [
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/myfaces/blob/e576ea9c2a3344c1698f007d26347c5ddca5e575/impl/src/main/java/org/apache/myfaces/application/ApplicationImpl.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/impl/src/main/java/org/apache/myfaces/application/ApplicationImpl.java?ref=e576ea9c2a3344c1698f007d26347c5ddca5e575",
+                "deletions": 0,
+                "filename": "impl/src/main/java/org/apache/myfaces/application/ApplicationImpl.java",
+                "patch": "@@ -1108,6 +1108,12 @@ public UIComponent createComponent(FacesContext context, Resource componentResou\n          * This version of JSF specification uses JavaBeans as the API to the component metadata.\n          */\n         BeanInfo metadata = vdl.getComponentMetadata(context, componentResource);\n+        if (metadata == null)\n+        {\n+            throw new FacesException(\"Could not get component metadata for \" \n+                    + componentResource.getResourceName()\n+                    + \". Did you forget to specify <composite:interface>?\");\n+        }\n \n         /*\n          * Determine if the component author declared a component-type for this component instance by obtaining the",
+                "raw_url": "https://github.com/apache/myfaces/raw/e576ea9c2a3344c1698f007d26347c5ddca5e575/impl/src/main/java/org/apache/myfaces/application/ApplicationImpl.java",
+                "sha": "a08b136c981dac9e62d7e46c99a59f1c42a0e8af",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/myfaces/blob/e576ea9c2a3344c1698f007d26347c5ddca5e575/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/AttachedObjectTargetHandler.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/AttachedObjectTargetHandler.java?ref=e576ea9c2a3344c1698f007d26347c5ddca5e575",
+                "deletions": 1,
+                "filename": "impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/AttachedObjectTargetHandler.java",
+                "patch": "@@ -109,7 +109,7 @@ public void apply(FaceletContext ctx, UIComponent parent)\n         {\n             if (log.isLoggable(Level.SEVERE))\n             {\n-                log.severe(\"Cannot found composite bean descriptor UIComponent.BEANINFO_KEY \");\n+                log.severe(\"Cannot find composite bean descriptor UIComponent.BEANINFO_KEY \");\n             }\n             return;\n         }",
+                "raw_url": "https://github.com/apache/myfaces/raw/e576ea9c2a3344c1698f007d26347c5ddca5e575/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/AttachedObjectTargetHandler.java",
+                "sha": "5b5591c58716e9f7199bde877afc1cb4200981dd",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/myfaces/blob/e576ea9c2a3344c1698f007d26347c5ddca5e575/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/AttributeHandler.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/AttributeHandler.java?ref=e576ea9c2a3344c1698f007d26347c5ddca5e575",
+                "deletions": 1,
+                "filename": "impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/AttributeHandler.java",
+                "patch": "@@ -179,7 +179,7 @@ public void apply(FaceletContext ctx, UIComponent parent)\n         {\n             if (log.isLoggable(Level.SEVERE))\n             {\n-                log.severe(\"Cannot found composite bean descriptor UIComponent.BEANINFO_KEY \");\n+                log.severe(\"Cannot find composite bean descriptor UIComponent.BEANINFO_KEY \");\n             }\n             return;\n         }",
+                "raw_url": "https://github.com/apache/myfaces/raw/e576ea9c2a3344c1698f007d26347c5ddca5e575/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/AttributeHandler.java",
+                "sha": "fe99c66ef002e9db115cf1c0797c3b55a8bb23c0",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/myfaces/blob/e576ea9c2a3344c1698f007d26347c5ddca5e575/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/ClientBehaviorHandler.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/ClientBehaviorHandler.java?ref=e576ea9c2a3344c1698f007d26347c5ddca5e575",
+                "deletions": 1,
+                "filename": "impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/ClientBehaviorHandler.java",
+                "patch": "@@ -136,7 +136,7 @@ public void apply(FaceletContext ctx, UIComponent parent)\n         {\r\n             if (log.isLoggable(Level.SEVERE))\r\n             {\r\n-                log.severe(\"Cannot found composite bean descriptor UIComponent.BEANINFO_KEY \");\r\n+                log.severe(\"Cannot find composite bean descriptor UIComponent.BEANINFO_KEY \");\r\n             }\r\n             return;\r\n         }\r",
+                "raw_url": "https://github.com/apache/myfaces/raw/e576ea9c2a3344c1698f007d26347c5ddca5e575/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/ClientBehaviorHandler.java",
+                "sha": "bc9f09fceb1e0a0b802367c6429fa76c91853fe9",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/myfaces/blob/e576ea9c2a3344c1698f007d26347c5ddca5e575/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/ExtensionHandler.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/ExtensionHandler.java?ref=e576ea9c2a3344c1698f007d26347c5ddca5e575",
+                "deletions": 1,
+                "filename": "impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/ExtensionHandler.java",
+                "patch": "@@ -61,7 +61,7 @@ public void apply(FaceletContext ctx, UIComponent parent)\n         {\n             if (log.isLoggable(Level.SEVERE))\n             {\n-                log.severe(\"Cannot found composite bean descriptor UIComponent.BEANINFO_KEY \");\n+                log.severe(\"Cannot find composite bean descriptor UIComponent.BEANINFO_KEY \");\n             }\n             return;\n         }",
+                "raw_url": "https://github.com/apache/myfaces/raw/e576ea9c2a3344c1698f007d26347c5ddca5e575/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/ExtensionHandler.java",
+                "sha": "193126ba4877e81a31eadac56765691a56658c1c",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/myfaces/blob/e576ea9c2a3344c1698f007d26347c5ddca5e575/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/FacetHandler.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/FacetHandler.java?ref=e576ea9c2a3344c1698f007d26347c5ddca5e575",
+                "deletions": 1,
+                "filename": "impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/FacetHandler.java",
+                "patch": "@@ -171,7 +171,7 @@ public void apply(FaceletContext ctx, UIComponent parent)\n         {\n             if (log.isLoggable(Level.SEVERE))\n             {\n-                log.severe(\"Cannot found composite bean descriptor UIComponent.BEANINFO_KEY \");\n+                log.severe(\"Cannot find composite bean descriptor UIComponent.BEANINFO_KEY \");\n             }\n             return;\n         }",
+                "raw_url": "https://github.com/apache/myfaces/raw/e576ea9c2a3344c1698f007d26347c5ddca5e575/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/FacetHandler.java",
+                "sha": "98cc6a24171376526f5610cf473575ab4385674f",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/myfaces/blob/e576ea9c2a3344c1698f007d26347c5ddca5e575/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/ImplementationHandler.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/ImplementationHandler.java?ref=e576ea9c2a3344c1698f007d26347c5ddca5e575",
+                "deletions": 1,
+                "filename": "impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/ImplementationHandler.java",
+                "patch": "@@ -78,7 +78,7 @@ public void apply(FaceletContext ctx, UIComponent parent)\n             {\n                 if (log.isLoggable(Level.SEVERE))\n                 {\n-                    log.severe(\"Cannot found composite bean descriptor UIComponent.BEANINFO_KEY \");\n+                    log.severe(\"Cannot find composite bean descriptor UIComponent.BEANINFO_KEY \");\n                 }\n                 return;\n             }",
+                "raw_url": "https://github.com/apache/myfaces/raw/e576ea9c2a3344c1698f007d26347c5ddca5e575/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/ImplementationHandler.java",
+                "sha": "000e375b6f6866daf239aabc83964ae58fdff997",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/myfaces/blob/e576ea9c2a3344c1698f007d26347c5ddca5e575/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/InsertChildrenHandler.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/InsertChildrenHandler.java?ref=e576ea9c2a3344c1698f007d26347c5ddca5e575",
+                "deletions": 1,
+                "filename": "impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/InsertChildrenHandler.java",
+                "patch": "@@ -68,7 +68,7 @@ public void apply(FaceletContext ctx, UIComponent parent)\n             {\n                 if (log.isLoggable(Level.SEVERE))\n                 {\n-                    log.severe(\"Cannot found composite bean descriptor UIComponent.BEANINFO_KEY \");\n+                    log.severe(\"Cannot find composite bean descriptor UIComponent.BEANINFO_KEY \");\n                 }\n                 return;\n             }",
+                "raw_url": "https://github.com/apache/myfaces/raw/e576ea9c2a3344c1698f007d26347c5ddca5e575/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/InsertChildrenHandler.java",
+                "sha": "1782869e5755ca47b2ac86e21d0be75453fa3247",
+                "status": "modified"
+            },
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/myfaces/blob/e576ea9c2a3344c1698f007d26347c5ddca5e575/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/InsertFacetHandler.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/InsertFacetHandler.java?ref=e576ea9c2a3344c1698f007d26347c5ddca5e575",
+                "deletions": 2,
+                "filename": "impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/InsertFacetHandler.java",
+                "patch": "@@ -101,7 +101,7 @@ public void apply(FaceletContext ctx, UIComponent parent)\n             {\n                 if (log.isLoggable(Level.SEVERE))\n                 {\n-                    log.severe(\"Cannot found composite bean descriptor UIComponent.BEANINFO_KEY \");\n+                    log.severe(\"Cannot find composite bean descriptor UIComponent.BEANINFO_KEY \");\n                 }\n                 return;\n             }\n@@ -146,7 +146,7 @@ public void apply(FaceletContext ctx, UIComponent parent)\n         \n         if (_required != null && _required.getBoolean(ctx) && parentCompositeComponent.getFacet(facetName) == null)\n         {\n-            throw new TagException(this.tag, \"Cannot found facet with name \"+facetName+\" in composite component \"\n+            throw new TagException(this.tag, \"Cannot find facet with name \"+facetName+\" in composite component \"\n                     +parentCompositeComponent.getClientId(ctx.getFacesContext()));\n         }\n         ",
+                "raw_url": "https://github.com/apache/myfaces/raw/e576ea9c2a3344c1698f007d26347c5ddca5e575/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/InsertFacetHandler.java",
+                "sha": "2fde7046e805db4524cb5a760ed6687f74d5e2a0",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/myfaces/blob/e576ea9c2a3344c1698f007d26347c5ddca5e575/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/InterfaceHandler.java",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/InterfaceHandler.java?ref=e576ea9c2a3344c1698f007d26347c5ddca5e575",
+                "deletions": 2,
+                "filename": "impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/InterfaceHandler.java",
+                "patch": "@@ -24,7 +24,6 @@\n import java.util.logging.Level;\n import java.util.logging.Logger;\n \n-import javax.faces.application.Resource;\n import javax.faces.component.UIComponent;\n import javax.faces.view.Location;\n import javax.faces.view.facelets.FaceletContext;\n@@ -168,7 +167,7 @@ public void apply(FaceletContext ctx, UIComponent parent)\n             {\n                 if (log.isLoggable(Level.SEVERE))\n                 {\n-                    log.severe(\"Cannot found composite bean descriptor UIComponent.BEANINFO_KEY \");\n+                    log.severe(\"Cannot find composite bean descriptor UIComponent.BEANINFO_KEY \");\n                 }\n                 return;\n             }            ",
+                "raw_url": "https://github.com/apache/myfaces/raw/e576ea9c2a3344c1698f007d26347c5ddca5e575/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/InterfaceHandler.java",
+                "sha": "a3a25f566576a8b05eff789937b6dfa0fce21c27",
+                "status": "modified"
+            },
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/myfaces/blob/e576ea9c2a3344c1698f007d26347c5ddca5e575/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/RenderFacetHandler.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/myfaces/contents/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/RenderFacetHandler.java?ref=e576ea9c2a3344c1698f007d26347c5ddca5e575",
+                "deletions": 2,
+                "filename": "impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/RenderFacetHandler.java",
+                "patch": "@@ -94,7 +94,7 @@ public void apply(FaceletContext ctx, UIComponent parent)\n             {\n                 if (log.isLoggable(Level.SEVERE))\n                 {\n-                    log.severe(\"Cannot found composite bean descriptor UIComponent.BEANINFO_KEY \");\n+                    log.severe(\"Cannot find composite bean descriptor UIComponent.BEANINFO_KEY \");\n                 }\n                 return;\n             }\n@@ -129,7 +129,7 @@ public void onComponentPopulated(FaceletContext ctx, UIComponent c,\n     \n             if (_required != null && _required.getBoolean(ctx) && parentCompositeComponent.getFacet(facetName) == null)\n             {\n-                throw new TagException(this.tag, \"Cannot found facet with name \"+facetName+\" in composite component \"\n+                throw new TagException(this.tag, \"Cannot find facet with name \"+facetName+\" in composite component \"\n                         +parentCompositeComponent.getClientId(ctx.getFacesContext()));\n             }\n             ",
+                "raw_url": "https://github.com/apache/myfaces/raw/e576ea9c2a3344c1698f007d26347c5ddca5e575/impl/src/main/java/org/apache/myfaces/view/facelets/tag/composite/RenderFacetHandler.java",
+                "sha": "ebdb7210f64791a9091dd1ebb141c4427e52d8e3",
+                "status": "modified"
+            }
+        ],
+        "message": "MYFACES-2784 NPE when I forget to add an interface to a composite component (added FacesException and fixed typo)",
+        "parent": "https://github.com/apache/myfaces/commit/574cf62c495751b8987194a27e478cdcbe214480",
+        "repo": "myfaces",
+        "unit_tests": [
+            "ApplicationImplTest.java"
         ]
     },
     "myfaces_efebceb": {

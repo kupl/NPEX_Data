@@ -95,6 +95,66 @@
             "TestJavaTypes.java"
         ]
     },
+    "openjpa_73cd301": {
+        "bug_id": "openjpa_73cd301",
+        "commit": "https://github.com/apache/openjpa/commit/73cd30152044f4fc56f25eb4b64529983dc9b0a1",
+        "file": [
+            {
+                "additions": 8,
+                "blob_url": "https://github.com/apache/openjpa/blob/73cd30152044f4fc56f25eb4b64529983dc9b0a1/openjpa-kernel/src/main/java/org/apache/openjpa/datacache/DataCacheStoreManager.java",
+                "changes": 11,
+                "contents_url": "https://api.github.com/repos/apache/openjpa/contents/openjpa-kernel/src/main/java/org/apache/openjpa/datacache/DataCacheStoreManager.java?ref=73cd30152044f4fc56f25eb4b64529983dc9b0a1",
+                "deletions": 3,
+                "filename": "openjpa-kernel/src/main/java/org/apache/openjpa/datacache/DataCacheStoreManager.java",
+                "patch": "@@ -392,9 +392,14 @@ public boolean initialize(OpenJPAStateManager sm, PCState state, FetchConfigurat\n                            && ((fetch.getCacheStoreMode() == DataCacheStoreMode.USE && !alreadyCached)\n                             || (fetch.getCacheStoreMode() == DataCacheStoreMode.REFRESH));\n         if (updateCache) {\n-            cacheStateManager(cache, sm, data);\n-            if (stats.isEnabled()) {\n-                ((CacheStatisticsSPI) stats).newPut(sm.getMetaData().getDescribedType());\n+            // It is possible that the \"cacheability\" of the provided SM changed after hitting the DB. This can happen\n+            // when we are operating against an Entity that is in some sort of inheritance structure.\n+            cache = _mgr.selectCache(sm);\n+            if (cache != null) {\n+                cacheStateManager(cache, sm, data);\n+                if (stats.isEnabled()) {\n+                    ((CacheStatisticsSPI) stats).newPut(sm.getMetaData().getDescribedType());\n+                }\n             }\n         }\n         return fromDatabase || alreadyCached;",
+                "raw_url": "https://github.com/apache/openjpa/raw/73cd30152044f4fc56f25eb4b64529983dc9b0a1/openjpa-kernel/src/main/java/org/apache/openjpa/datacache/DataCacheStoreManager.java",
+                "sha": "127d50a6e11d750829e0e6f4fd883885b287ed3f",
+                "status": "modified"
+            },
+            {
+                "additions": 65,
+                "blob_url": "https://github.com/apache/openjpa/blob/73cd30152044f4fc56f25eb4b64529983dc9b0a1/openjpa-persistence-jdbc/src/test/java/org/apache/openjpa/persistence/cache/jpa/TestCacheModeDisableSelectiveInheritance.java",
+                "changes": 65,
+                "contents_url": "https://api.github.com/repos/apache/openjpa/contents/openjpa-persistence-jdbc/src/test/java/org/apache/openjpa/persistence/cache/jpa/TestCacheModeDisableSelectiveInheritance.java?ref=73cd30152044f4fc56f25eb4b64529983dc9b0a1",
+                "deletions": 0,
+                "filename": "openjpa-persistence-jdbc/src/test/java/org/apache/openjpa/persistence/cache/jpa/TestCacheModeDisableSelectiveInheritance.java",
+                "patch": "@@ -0,0 +1,65 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one\n+ * or more contributor license agreements.  See the NOTICE file\n+ * distributed with this work for additional information\n+ * regarding copyright ownership.  The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance\n+ * with the License.  You may obtain a copy of the License at\n+ *\n+ * http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing,\n+ * software distributed under the License is distributed on an\n+ * \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+ * KIND, either express or implied.  See the License for the\n+ * specific language governing permissions and limitations\n+ * under the License.    \n+ */\n+package org.apache.openjpa.persistence.cache.jpa;\n+\n+import javax.persistence.EntityManager;\n+\n+import org.apache.openjpa.persistence.cache.jpa.model.ChildUncacheable;\n+import org.apache.openjpa.persistence.cache.jpa.model.ParentUnspecifiedEntity;\n+import org.apache.openjpa.persistence.test.SingleEMFTestCase;\n+\n+/**\n+ * This test was added for https://issues.apache.org/jira/browse/OPENJPA-1892.\n+ * \n+ * The key to this test is that the ChildUncacheable is uncacheable and ParentUnspecifiedEntity is cacheable. In the\n+ * case were we pass the root Entity in em.find(ParentUnspecifiedEntity.class, 1) AND the id we passed corresponds to\n+ * the child Entity we shouldn't be caching this result.\n+ * \n+ */\n+public class TestCacheModeDisableSelectiveInheritance extends SingleEMFTestCase {\n+    Object[] params =\n+        new Object[] { ChildUncacheable.class, ParentUnspecifiedEntity.class, CLEAR_TABLES,\n+            \"javax.persistence.sharedCache.mode\", \"DISABLE_SELECTIVE\", \"openjpa.DataCache\", \"true\" };\n+\n+    @Override\n+    public void setUp() throws Exception {\n+        super.setUp(params);\n+    }\n+\n+    @Override\n+    public void tearDown() throws Exception {\n+\n+    }\n+\n+    public void testSimpleFind() throws Exception {\n+        EntityManager em = emf.createEntityManager();\n+        try {\n+            ChildUncacheable c = new ChildUncacheable();\n+            em.getTransaction().begin();\n+            em.persist(c);\n+            em.getTransaction().commit();\n+            assertEquals(c, em.find(ChildUncacheable.class, c.getId()));\n+            em.clear();\n+            assertEquals(c.getId(), em.find(ChildUncacheable.class, c.getId()).getId());\n+\n+        } finally {\n+            em.close();\n+        }\n+    }\n+}",
+                "raw_url": "https://github.com/apache/openjpa/raw/73cd30152044f4fc56f25eb4b64529983dc9b0a1/openjpa-persistence-jdbc/src/test/java/org/apache/openjpa/persistence/cache/jpa/TestCacheModeDisableSelectiveInheritance.java",
+                "sha": "4c5245465056eab2272d638137b4dc171d1d4d8a",
+                "status": "added"
+            },
+            {
+                "additions": 30,
+                "blob_url": "https://github.com/apache/openjpa/blob/73cd30152044f4fc56f25eb4b64529983dc9b0a1/openjpa-persistence-jdbc/src/test/java/org/apache/openjpa/persistence/cache/jpa/model/ChildUncacheable.java",
+                "changes": 30,
+                "contents_url": "https://api.github.com/repos/apache/openjpa/contents/openjpa-persistence-jdbc/src/test/java/org/apache/openjpa/persistence/cache/jpa/model/ChildUncacheable.java?ref=73cd30152044f4fc56f25eb4b64529983dc9b0a1",
+                "deletions": 0,
+                "filename": "openjpa-persistence-jdbc/src/test/java/org/apache/openjpa/persistence/cache/jpa/model/ChildUncacheable.java",
+                "patch": "@@ -0,0 +1,30 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one\n+ * or more contributor license agreements.  See the NOTICE file\n+ * distributed with this work for additional information\n+ * regarding copyright ownership.  The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance\n+ * with the License.  You may obtain a copy of the License at\n+ *\n+ * http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing,\n+ * software distributed under the License is distributed on an\n+ * \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+ * KIND, either express or implied.  See the License for the\n+ * specific language governing permissions and limitations\n+ * under the License.    \n+ */\n+package org.apache.openjpa.persistence.cache.jpa.model;\n+\n+import javax.persistence.Basic;\n+import javax.persistence.Cacheable;\n+import javax.persistence.Entity;\n+\n+@Entity\n+@Cacheable(value = false)\n+public class ChildUncacheable extends ParentUnspecifiedEntity {\n+    @Basic\n+    String child;\n+}",
+                "raw_url": "https://github.com/apache/openjpa/raw/73cd30152044f4fc56f25eb4b64529983dc9b0a1/openjpa-persistence-jdbc/src/test/java/org/apache/openjpa/persistence/cache/jpa/model/ChildUncacheable.java",
+                "sha": "0ebdf818b6c3a0b97523f09048bc9bf1b62391e3",
+                "status": "added"
+            },
+            {
+                "additions": 61,
+                "blob_url": "https://github.com/apache/openjpa/blob/73cd30152044f4fc56f25eb4b64529983dc9b0a1/openjpa-persistence-jdbc/src/test/java/org/apache/openjpa/persistence/cache/jpa/model/ParentUnspecifiedEntity.java",
+                "changes": 61,
+                "contents_url": "https://api.github.com/repos/apache/openjpa/contents/openjpa-persistence-jdbc/src/test/java/org/apache/openjpa/persistence/cache/jpa/model/ParentUnspecifiedEntity.java?ref=73cd30152044f4fc56f25eb4b64529983dc9b0a1",
+                "deletions": 0,
+                "filename": "openjpa-persistence-jdbc/src/test/java/org/apache/openjpa/persistence/cache/jpa/model/ParentUnspecifiedEntity.java",
+                "patch": "@@ -0,0 +1,61 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one\n+ * or more contributor license agreements.  See the NOTICE file\n+ * distributed with this work for additional information\n+ * regarding copyright ownership.  The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance\n+ * with the License.  You may obtain a copy of the License at\n+ *\n+ * http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing,\n+ * software distributed under the License is distributed on an\n+ * \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+ * KIND, either express or implied.  See the License for the\n+ * specific language governing permissions and limitations\n+ * under the License.    \n+ */\n+package org.apache.openjpa.persistence.cache.jpa.model;\n+\n+import javax.persistence.Column;\n+import javax.persistence.Entity;\n+import javax.persistence.Id;\n+import javax.persistence.Version;\n+\n+@Entity\n+public class ParentUnspecifiedEntity {\n+    @Id\n+    @Column(name = \"ID\")\n+    protected int id;\n+\n+    @Version\n+    @Column(name = \"VERSN\")\n+    protected int version;\n+\n+    protected String name;\n+\n+    public String getName() {\n+        return name;\n+    }\n+\n+    public void setName(String name) {\n+        this.name = name;\n+    }\n+\n+    public int getId() {\n+        return id;\n+    }\n+\n+    public void setId(int id) {\n+        this.id = id;\n+    }\n+\n+    public int getVersion() {\n+        return version;\n+    }\n+\n+    public void setVersion(int version) {\n+        this.version = version;\n+    }\n+}",
+                "raw_url": "https://github.com/apache/openjpa/raw/73cd30152044f4fc56f25eb4b64529983dc9b0a1/openjpa-persistence-jdbc/src/test/java/org/apache/openjpa/persistence/cache/jpa/model/ParentUnspecifiedEntity.java",
+                "sha": "62be9aa98fc39ecd8a4af690a0f83b9f284cb699",
+                "status": "added"
+            }
+        ],
+        "message": "OPENJPA-1892: Fix NPE in DataCacheStoreManager.\n\ngit-svn-id: https://svn.apache.org/repos/asf/openjpa/trunk@1036988 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/openjpa/commit/24e17363ef3faf489bf187b26f748eb80a19d3a0",
+        "repo": "openjpa",
+        "unit_tests": [
+            "TestDataCacheStoreManager.java"
+        ]
+    },
     "openjpa_7cee19d": {
         "bug_id": "openjpa_7cee19d",
         "commit": "https://github.com/apache/openjpa/commit/7cee19d3be610e178020eabdae6c877e6784373c",
@@ -284,6 +344,7 @@
         "parent": "https://github.com/apache/openjpa/commit/22226fc0f4b49f5cdb16792e0901d94ae7d838b7",
         "repo": "openjpa",
         "unit_tests": [
+            "TestMetaDataRepository.java",
             "TestXMLPersistenceMetaDataParser.java"
         ]
     },
@@ -309,6 +370,138 @@
         "repo": "openjpa",
         "unit_tests": [
             "TestDB2Dictionary.java"
+        ]
+    },
+    "openjpa_c960f72": {
+        "bug_id": "openjpa_c960f72",
+        "commit": "https://github.com/apache/openjpa/commit/c960f725cb6d6ad6211ceec654ea657ccbebface",
+        "file": [
+            {
+                "additions": 7,
+                "blob_url": "https://github.com/apache/openjpa/blob/c960f725cb6d6ad6211ceec654ea657ccbebface/openjpa-kernel/src/main/java/org/apache/openjpa/datacache/DataCacheStoreManager.java",
+                "changes": 15,
+                "contents_url": "https://api.github.com/repos/apache/openjpa/contents/openjpa-kernel/src/main/java/org/apache/openjpa/datacache/DataCacheStoreManager.java?ref=c960f725cb6d6ad6211ceec654ea657ccbebface",
+                "deletions": 8,
+                "filename": "openjpa-kernel/src/main/java/org/apache/openjpa/datacache/DataCacheStoreManager.java",
+                "patch": "@@ -281,17 +281,17 @@ private static Modifications getModifications(Map<DataCache,Modifications> modMa\n \n     public boolean exists(OpenJPAStateManager sm, Object edata) {\n         DataCache cache = _mgr.selectCache(sm);\n-        CacheStatistics stats = cache.getStatistics();\n+        CacheStatistics stats = (cache == null) ? null : cache.getStatistics();\n         if (cache != null && !isLocking(null) && cache.contains(sm.getObjectId())){\n-            if (stats.isEnabled()) {\n+            if (stats != null && stats.isEnabled()) {\n                 // delay this call ONLY if stats collection is enabled\n                 Class<?> cls = sm.getMetaData().getDescribedType();\n                 ((CacheStatisticsSPI)stats).newGet(cls, false);\n             }\n             return true;\n         }\n         // If isLocking(null)==true && cache.contains(..) == true... probably shouldn't count?\n-        if (stats.isEnabled()) {\n+        if (stats != null && stats.isEnabled()) {\n             // delay this call ONLY if stats collection is enabled\n             Class<?> cls = sm.getMetaData().getDescribedType();\n             ((CacheStatisticsSPI)stats).newGet(cls, false);\n@@ -322,14 +322,13 @@ public boolean isCached(List<Object> oids, BitSet edata) {\n     public boolean syncVersion(OpenJPAStateManager sm, Object edata) {\n         DataCache cache = _mgr.selectCache(sm);\n         FetchConfiguration fc = sm.getContext().getFetchConfiguration();\n-        CacheStatistics stats = cache.getStatistics();\n+        CacheStatistics stats = (cache == null) ? null : cache.getStatistics();\n         if (cache == null || sm.isEmbedded() || fc.getCacheRetrieveMode() == DataCacheRetrieveMode.BYPASS) {\n-            if(stats.isEnabled()){\n-                ((CacheStatisticsSPI)stats).newGet(sm.getMetaData().getDescribedType(), false);\n+            if (stats != null && stats.isEnabled()) {\n+                ((CacheStatisticsSPI) stats).newGet(sm.getMetaData().getDescribedType(), false);\n             }\n             return super.syncVersion(sm, edata);\n         }\n-        \n         DataCachePCData data;\n         Object version = null;\n         data = cache.get(sm.getObjectId());\n@@ -338,7 +337,7 @@ public boolean syncVersion(OpenJPAStateManager sm, Object edata) {\n \n         // if we have a cached version update from there\n         if (version != null) {\n-            if(stats.isEnabled()){\n+            if (stats != null && stats.isEnabled()) {\n                 ((CacheStatisticsSPI)stats).newGet(data.getType(), true);\n             }\n             if (!version.equals(sm.getVersion())) {",
+                "raw_url": "https://github.com/apache/openjpa/raw/c960f725cb6d6ad6211ceec654ea657ccbebface/openjpa-kernel/src/main/java/org/apache/openjpa/datacache/DataCacheStoreManager.java",
+                "sha": "8f1fecf645abe5319ba1152fcbe21a432436a337",
+                "status": "modified"
+            },
+            {
+                "additions": 82,
+                "blob_url": "https://github.com/apache/openjpa/blob/c960f725cb6d6ad6211ceec654ea657ccbebface/openjpa-persistence-jdbc/src/test/java/org/apache/openjpa/persistence/datacache/TestDataCacheStoreManager.java",
+                "changes": 82,
+                "contents_url": "https://api.github.com/repos/apache/openjpa/contents/openjpa-persistence-jdbc/src/test/java/org/apache/openjpa/persistence/datacache/TestDataCacheStoreManager.java?ref=c960f725cb6d6ad6211ceec654ea657ccbebface",
+                "deletions": 0,
+                "filename": "openjpa-persistence-jdbc/src/test/java/org/apache/openjpa/persistence/datacache/TestDataCacheStoreManager.java",
+                "patch": "@@ -0,0 +1,82 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one\n+ * or more contributor license agreements.  See the NOTICE file\n+ * distributed with this work for additional information\n+ * regarding copyright ownership.  The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance\n+ * with the License.  You may obtain a copy of the License at\n+ *\n+ * http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing,\n+ * software distributed under the License is distributed on an\n+ * \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+ * KIND, either express or implied.  See the License for the\n+ * specific language governing permissions and limitations\n+ * under the License.\n+ */\n+package org.apache.openjpa.persistence.datacache;\n+\n+import javax.persistence.EntityManager;\n+\n+import org.apache.openjpa.datacache.DataCacheManager;\n+import org.apache.openjpa.datacache.DataCacheStoreManager;\n+import org.apache.openjpa.enhance.PersistenceCapable;\n+import org.apache.openjpa.kernel.DelegatingStoreManager;\n+import org.apache.openjpa.kernel.OpenJPAStateManager;\n+import org.apache.openjpa.persistence.EntityManagerImpl;\n+import org.apache.openjpa.persistence.test.SingleEMFTestCase;\n+\n+/**\n+ * \n+ * This test was added for OPENJPA-1882.\n+ * <p>\n+ * When caching is enabled and a given type isn't being cached, make sure calling exists/syncVersion with that type\n+ * doesn't result in a NPE.\n+ * \n+ */\n+public class TestDataCacheStoreManager extends SingleEMFTestCase {\n+    Object[] p =\n+        new Object[] { CLEAR_TABLES, CachedEntityStatistics.class, \"openjpa.DataCache\", \"true(EnableStatistics=true)\",\n+            \"openjpa.QueryCache\", \"true\", };\n+\n+    private EntityManager em;\n+    private DataCacheStoreManager dsm;\n+    private DataCacheManager dcm;\n+    private OpenJPAStateManager sm;\n+\n+    public void setUp() {\n+        super.setUp(p);\n+\n+        em = emf.createEntityManager();\n+        dcm = emf.getConfiguration().getDataCacheManagerInstance();\n+        dsm =\n+            (DataCacheStoreManager) ((DelegatingStoreManager) ((EntityManagerImpl) em).getBroker().getStoreManager())\n+                .getDelegate();\n+\n+        em.getTransaction().begin();\n+        CachedEntityStatistics p = new CachedEntityStatistics();\n+        em.persist(p);\n+        em.getTransaction().commit();\n+\n+        dcm.stopCaching(CachedEntityStatistics.class.getName());\n+\n+        sm = (OpenJPAStateManager) ((PersistenceCapable) p).pcGetStateManager();\n+    }\n+\n+    public void tearDown() throws Exception {\n+        dcm.startCaching(CachedEntityStatistics.class.getName());\n+        em.close();\n+\n+        super.tearDown();\n+    }\n+\n+    public void testExists() {\n+        dsm.exists(sm, null);\n+    }\n+\n+    public void testsyncVersion() {\n+        dsm.syncVersion(sm, null);\n+    }\n+}",
+                "raw_url": "https://github.com/apache/openjpa/raw/c960f725cb6d6ad6211ceec654ea657ccbebface/openjpa-persistence-jdbc/src/test/java/org/apache/openjpa/persistence/datacache/TestDataCacheStoreManager.java",
+                "sha": "e84cf8c91811000650b021406db7414b1ac5f4d6",
+                "status": "added"
+            }
+        ],
+        "message": "OPENJPA-1882: Fix DataCacheStoreManager NPE.\n\ngit-svn-id: https://svn.apache.org/repos/asf/openjpa/trunk@1033637 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/openjpa/commit/5040a436e7dc394dececa869321cfae52f30e4ac",
+        "repo": "openjpa",
+        "unit_tests": [
+            "TestDataCacheStoreManager.java"
+        ]
+    },
+    "openjpa_cc1dcd9": {
+        "bug_id": "openjpa_cc1dcd9",
+        "commit": "https://github.com/apache/openjpa/commit/cc1dcd9a4c177a28db4d8060748f59bf4e9b670e",
+        "file": [
+            {
+                "additions": 34,
+                "blob_url": "https://github.com/apache/openjpa/blob/cc1dcd9a4c177a28db4d8060748f59bf4e9b670e/openjpa-jdbc/src/main/java/org/apache/openjpa/jdbc/schema/SchemaGenerator.java",
+                "changes": 76,
+                "contents_url": "https://api.github.com/repos/apache/openjpa/contents/openjpa-jdbc/src/main/java/org/apache/openjpa/jdbc/schema/SchemaGenerator.java?ref=cc1dcd9a4c177a28db4d8060748f59bf4e9b670e",
+                "deletions": 42,
+                "filename": "openjpa-jdbc/src/main/java/org/apache/openjpa/jdbc/schema/SchemaGenerator.java",
+                "patch": "@@ -267,59 +267,52 @@ public void generateSchemas(String[] schemasAndTables)\n      * {@link #generatePrimaryKeys}, and {@link #generateForeignKeys}\n      * automatically.\n      */\n-    public void generateSchemas(DBIdentifier[] schemasAndTables)\n-        throws SQLException {\n+    public void generateSchemas(DBIdentifier[] schemasAndTables) throws SQLException {\n         fireGenerationEvent(_loc.get(\"generating-schemas\"));\n+        // generate all schemas and tables\n+        try {\n+            getConn();\n+            Object[][] schemaMap;\n+            if (schemasAndTables == null || schemasAndTables.length == 0)\n+                schemaMap = _allowed;\n+            else\n+                schemaMap = parseSchemasList(schemasAndTables);\n \n-        Object[][] schemaMap;\n-        if (schemasAndTables == null || schemasAndTables.length == 0)\n-            schemaMap = _allowed;\n-        else\n-            schemaMap = parseSchemasList(schemasAndTables);\n-\n-        if (schemaMap == null) {\n-            generateSchema(DBIdentifier.NULL, (DBIdentifier[])null);\n-\n-            // estimate the number of schema objects we will need to visit\n-            // in order to estimate progress total for any listeners\n-            int numTables = getTables(null).size();\n-            _schemaObjects += numTables\n-                + (_pks ? numTables : 0)\n-                + (_indexes ? numTables : 0)\n-                + (_fks ? numTables : 0);\n-\n-            if (_pks)\n-                generatePrimaryKeys(DBIdentifier.NULL, null);\n-            if (_indexes)\n-                generateIndexes(DBIdentifier.NULL, null);\n-            if (_fks)\n-                generateForeignKeys(DBIdentifier.NULL, null);\n-            return;\n-        }\n+            if (schemaMap == null) {\n+                generateSchema(DBIdentifier.NULL, (DBIdentifier[]) null);\n+\n+                // estimate the number of schema objects we will need to visit\n+                // in order to estimate progress total for any listeners\n+                int numTables = getTables(null).size();\n+                _schemaObjects +=\n+                    numTables + (_pks ? numTables : 0) + (_indexes ? numTables : 0) + (_fks ? numTables : 0);\n+\n+                if (_pks)\n+                    generatePrimaryKeys(DBIdentifier.NULL, null);\n+                if (_indexes)\n+                    generateIndexes(DBIdentifier.NULL, null);\n+                if (_fks)\n+                    generateForeignKeys(DBIdentifier.NULL, null);\n+                return;\n+            }\n \n-        // generate all schemas and tables\n-        try{ \n-            getConn(); \n             for (int i = 0; i < schemaMap.length; i++) {\n                 generateSchema((DBIdentifier) schemaMap[i][0], (DBIdentifier[]) schemaMap[i][1]);\n             }\n-        \n+\n             // generate pks, indexes, fks\n             DBIdentifier schemaName = DBIdentifier.NULL;\n             DBIdentifier[] tableNames;\n             for (int i = 0; i < schemaMap.length; i++) {\n                 schemaName = (DBIdentifier) schemaMap[i][0];\n                 tableNames = (DBIdentifier[]) schemaMap[i][1];\n-    \n+\n                 // estimate the number of schema objects we will need to visit\n                 // in order to estimate progress total for any listeners\n-                int numTables = (tableNames != null) ? tableNames.length\n-                    : getTables(schemaName).size();\n-                _schemaObjects += numTables\n-                    + (_pks ? numTables : 0)\n-                    + (_indexes ? numTables : 0)\n-                    + (_fks ? numTables : 0);\n-    \n+                int numTables = (tableNames != null) ? tableNames.length : getTables(schemaName).size();\n+                _schemaObjects +=\n+                    numTables + (_pks ? numTables : 0) + (_indexes ? numTables : 0) + (_fks ? numTables : 0);\n+\n                 if (_pks) {\n                     generatePrimaryKeys(schemaName, tableNames);\n                 }\n@@ -330,9 +323,8 @@ public void generateSchemas(DBIdentifier[] schemasAndTables)\n                     generateForeignKeys(schemaName, tableNames);\n                 }\n             }\n-        }\n-        finally  { \n-            closeConn(); \n+        } finally {\n+            closeConn();\n         }\n     }\n ",
+                "raw_url": "https://github.com/apache/openjpa/raw/cc1dcd9a4c177a28db4d8060748f59bf4e9b670e/openjpa-jdbc/src/main/java/org/apache/openjpa/jdbc/schema/SchemaGenerator.java",
+                "sha": "51bf3acbdf54e3481eebc25e127ef887f29ef7c1",
+                "status": "modified"
+            },
+            {
+                "additions": 0,
+                "blob_url": "https://github.com/apache/openjpa/blob/cc1dcd9a4c177a28db4d8060748f59bf4e9b670e/openjpa-persistence-jdbc/pom.xml",
+                "changes": 1,
+                "contents_url": "https://api.github.com/repos/apache/openjpa/contents/openjpa-persistence-jdbc/pom.xml?ref=cc1dcd9a4c177a28db4d8060748f59bf4e9b670e",
+                "deletions": 1,
+                "filename": "openjpa-persistence-jdbc/pom.xml",
+                "patch": "@@ -926,7 +926,6 @@\n                         <exclude>org/apache/openjpa/persistence/jdbc/schema/TestPerClassSequenceFactory.java</exclude>\n                         <exclude>org/apache/openjpa/persistence/jdbc/schema/TestSchema.java</exclude>\n                         <exclude>org/apache/openjpa/persistence/jdbc/schema/TestSchemaClone.java</exclude>\n-                        <exclude>org/apache/openjpa/persistence/jdbc/schema/TestSchemaGenerator.java</exclude>\n                         <exclude>org/apache/openjpa/persistence/jdbc/schema/TestSequenceGeneratorEnsureCapacityCall.java</exclude>\n                         <exclude>org/apache/openjpa/persistence/jdbc/schema/TestXMLSchemaParser.java</exclude>\n                         <exclude>org/apache/openjpa/persistence/jdbc/schema/TestXMLSchemaSerializer.java</exclude>",
+                "raw_url": "https://github.com/apache/openjpa/raw/cc1dcd9a4c177a28db4d8060748f59bf4e9b670e/openjpa-persistence-jdbc/pom.xml",
+                "sha": "35fc1c398c4aa082b1e8e6d61e5cdaac87cb6581",
+                "status": "modified"
+            },
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/openjpa/blob/cc1dcd9a4c177a28db4d8060748f59bf4e9b670e/openjpa-persistence-jdbc/src/test/java/org/apache/openjpa/persistence/jdbc/kernel/BaseJDBCTest.java",
+                "changes": 26,
+                "contents_url": "https://api.github.com/repos/apache/openjpa/contents/openjpa-persistence-jdbc/src/test/java/org/apache/openjpa/persistence/jdbc/kernel/BaseJDBCTest.java?ref=cc1dcd9a4c177a28db4d8060748f59bf4e9b670e",
+                "deletions": 20,
+                "filename": "openjpa-persistence-jdbc/src/test/java/org/apache/openjpa/persistence/jdbc/kernel/BaseJDBCTest.java",
+                "patch": "@@ -27,31 +27,17 @@\n  */\n package org.apache.openjpa.persistence.jdbc.kernel;\n \n-import java.beans.BeanInfo;\n-import java.beans.Introspector;\n-import java.beans.PropertyDescriptor;\n-import java.lang.reflect.InvocationTargetException;\n-import java.lang.reflect.Method;\n-import java.math.BigDecimal;\n-import java.math.BigInteger;\n-import java.util.*;\n-import javax.management.IntrospectionException;\n+import java.util.HashMap;\n+import java.util.List;\n+import java.util.Map;\n+import java.util.Properties;\n+\n import org.apache.openjpa.kernel.Broker;\n-import org.apache.openjpa.kernel.OpenJPAStateManager;\n import org.apache.openjpa.kernel.jpql.JPQLParser;\n import org.apache.openjpa.lib.conf.ConfigurationProvider;\n import org.apache.openjpa.lib.conf.Configurations;\n-import org.apache.openjpa.persistence.OpenJPAPersistence;\n-\n-\n-\n-import java.lang.annotation.Annotation;\n-import junit.framework.*;\n-import javax.persistence.EntityManager;\n-import javax.persistence.EntityManagerFactory;\n-import org.apache.openjpa.persistence.OpenJPAEntityManagerFactory;\n-import org.apache.openjpa.persistence.OpenJPAEntityManager;\n import org.apache.openjpa.persistence.JPAFacadeHelper;\n+import org.apache.openjpa.persistence.OpenJPAEntityManager;\n \n \n public class BaseJDBCTest",
+                "raw_url": "https://github.com/apache/openjpa/raw/cc1dcd9a4c177a28db4d8060748f59bf4e9b670e/openjpa-persistence-jdbc/src/test/java/org/apache/openjpa/persistence/jdbc/kernel/BaseJDBCTest.java",
+                "sha": "ec67df180415a5572e9ed929bdca7777386a9ebe",
+                "status": "modified"
+            },
+            {
+                "additions": 18,
+                "blob_url": "https://github.com/apache/openjpa/blob/cc1dcd9a4c177a28db4d8060748f59bf4e9b670e/openjpa-persistence-jdbc/src/test/java/org/apache/openjpa/persistence/jdbc/schema/TestSchemaGenerator.java",
+                "changes": 83,
+                "contents_url": "https://api.github.com/repos/apache/openjpa/contents/openjpa-persistence-jdbc/src/test/java/org/apache/openjpa/persistence/jdbc/schema/TestSchemaGenerator.java?ref=cc1dcd9a4c177a28db4d8060748f59bf4e9b670e",
+                "deletions": 65,
+                "filename": "openjpa-persistence-jdbc/src/test/java/org/apache/openjpa/persistence/jdbc/schema/TestSchemaGenerator.java",
+                "patch": "@@ -42,7 +42,6 @@\n \n import org.apache.openjpa.persistence.jdbc.common.apps.*;\n \n-\n import java.lang.annotation.Annotation;\n import junit.framework.*;\n import javax.persistence.EntityManager;\n@@ -53,82 +52,36 @@\n import org.apache.openjpa.persistence.OpenJPAEntityManagerSPI;\n import org.apache.openjpa.persistence.OpenJPAPersistence;\n \n+public class TestSchemaGenerator extends org.apache.openjpa.persistence.jdbc.kernel.BaseJDBCTest {\n \n-public class TestSchemaGenerator\n-        extends org.apache.openjpa.persistence.jdbc.kernel.BaseJDBCTest {\n-        \n-    /** Creates a new instance of TestSchemaGenerator */\n-    public TestSchemaGenerator(String name) \n-    {\n-    \tsuper(name);\n+    @Override\n+    protected String getPersistenceUnitName() {\n+        // TODO Auto-generated method stub\n+        return \"TestConv\";\n     }\n-    \n-    public void DBMetadataTest()\n-    throws Exception {\n-        OpenJPAEntityManagerFactory pmf = (OpenJPAEntityManagerFactory)\n-        getEmf();\n-        //FIXME jthomas\n-        \n-        //ClassMapping cm = (ClassMapping) KodoJDOHelper.getMetaData\n-        //    (pmf, RuntimeTest1.class);\n-        ClassMapping cm =null;\n-        JDBCConfiguration conf = (JDBCConfiguration) getConfiguration();\n-        \n-        DataSource ds = (DataSource) conf.getDataSource2(null);\n-        Connection c = ds.getConnection();\n-        DatabaseMetaData meta = c.getMetaData();\n-        DBDictionary dict = conf.getDBDictionaryInstance();\n-        \n-        String schema = cm.getTable().getSchema().getName();\n-        Table[] tables = dict.getTables(meta, c.getCatalog(), schema,\n-                cm.getTable().getName(), c);\n-        assertEquals(1, tables.length);\n-        \n-        Column[] columns = dict.getColumns(meta, c.getCatalog(), schema,\n-                cm.getTable().getName(), null, c);\n-        for (int i = 0; i < columns.length; i++)\n-            System.out.println(\"### \" + columns[i].getName());\n+\n+    /** Creates a new instance of TestSchemaGenerator */\n+    public TestSchemaGenerator(String name) {\n+        super(name);\n     }\n-    \n-    public void testSchemaGen()\n-    throws Exception {\n-        OpenJPAEntityManagerFactory pmf = (OpenJPAEntityManagerFactory)\n-        getEmf();\n+\n+    public void testSchemaGen() throws Exception {\n+        OpenJPAEntityManagerFactory pmf = (OpenJPAEntityManagerFactory) getEmf();\n         OpenJPAEntityManager pm = pmf.createEntityManager();\n-        JDBCConfiguration con =\n-            (JDBCConfiguration) ((OpenJPAEntityManagerSPI) pm)\n-            .getConfiguration();\n-        DBDictionary dict = con.getDBDictionaryInstance();\n-        MappingRepository repos = con.getMappingRepositoryInstance();\n-        ClassMapping cm = repos.getMapping(RuntimeTest1.class,\n-                pm.getClassLoader(), true);\n-        String schemas = cm.getTable().getSchema().getName();\n-        if (schemas == null)\n-            schemas = \"\";\n-        schemas += \".\" + cm.getTable().getName();\n-        \n-        Map props=new HashMap();\n-        props.put(\"openjpa.jdbc.Schemas\", schemas);\n-        \n-        OpenJPAEntityManagerFactory kpmf =(OpenJPAEntityManagerFactory)\n-                getEmf(props);\n-        JDBCConfiguration conf =\n-            (JDBCConfiguration) ((OpenJPAEntityManagerFactorySPI) kpmf)\n-            .getConfiguration();\n-        \n+        JDBCConfiguration conf = (JDBCConfiguration) ((OpenJPAEntityManagerFactorySPI) pmf).getConfiguration();\n+\n         StringWriter sw = new StringWriter();\n-        \n+\n         SchemaTool.Flags flags = new SchemaTool.Flags();\n         flags.writer = sw;\n         flags.primaryKeys = true;\n         flags.foreignKeys = true;\n         flags.indexes = true;\n         flags.openjpaTables = true;\n         flags.action = SchemaTool.ACTION_REFLECT;\n-        \n-        SchemaTool.run(conf, new String[0], flags,\n-                getClass().getClassLoader());\n-        \n+\n+        SchemaTool.run(conf, new String[0], flags, getClass().getClassLoader());\n+\n         sw.flush();\n         String data = sw.toString();\n         assertTrue(data.length() > 0);",
+                "raw_url": "https://github.com/apache/openjpa/raw/cc1dcd9a4c177a28db4d8060748f59bf4e9b670e/openjpa-persistence-jdbc/src/test/java/org/apache/openjpa/persistence/jdbc/schema/TestSchemaGenerator.java",
+                "sha": "2832d6c47109142d725613fff06bcfd2e921fa4b",
+                "status": "modified"
+            }
+        ],
+        "message": "OPENJPA-1847: Fix NPE in SchemaGenerator and formatting.\n\ngit-svn-id: https://svn.apache.org/repos/asf/openjpa/trunk@1063827 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/openjpa/commit/d91475d506d06aa550b4ff15c20bcdc348c58684",
+        "repo": "openjpa",
+        "unit_tests": [
+            "TestSchemaGenerator.java"
+        ]
+    },
+    "openjpa_f641376": {
+        "bug_id": "openjpa_f641376",
+        "commit": "https://github.com/apache/openjpa/commit/f6413764d5b41a83003a163b74023dce8398fb05",
+        "file": [
+            {
+                "additions": 8,
+                "blob_url": "https://github.com/apache/openjpa/blob/f6413764d5b41a83003a163b74023dce8398fb05/openjpa-lib/src/main/java/org/apache/openjpa/lib/util/UUIDGenerator.java",
+                "changes": 13,
+                "contents_url": "https://api.github.com/repos/apache/openjpa/contents/openjpa-lib/src/main/java/org/apache/openjpa/lib/util/UUIDGenerator.java?ref=f6413764d5b41a83003a163b74023dce8398fb05",
+                "deletions": 5,
+                "filename": "openjpa-lib/src/main/java/org/apache/openjpa/lib/util/UUIDGenerator.java",
+                "patch": "@@ -94,15 +94,16 @@\n     private static long _lastMillis = 0L;\n     private static final int MAX_14BIT = 0x3FFF;\n     private static short _seq = 0;\n-        \n+\n+    private static boolean type1Initialized = false;\n     /*\n      * Initializer for type 1 UUIDs.  Creates random generator and genenerates\n      * the node portion of the UUID using the IP address.\n      */\n-    private static synchronized void initializeForType1()\n-    {\n-        if (RANDOM != null)\n+    private static synchronized void initializeForType1() {\n+        if (type1Initialized == true) {\n             return;\n+        }\n         // note that secure random is very slow the first time\n         // it is used; consider switching to a standard random\n         RANDOM = new SecureRandom();\n@@ -118,6 +119,7 @@ private static synchronized void initializeForType1()\n         IP = new byte[6];\n         RANDOM.nextBytes(IP);\n         System.arraycopy(ip, 0, IP, 2, ip.length);        \n+        type1Initialized = true;\n     }\n \n     /**\n@@ -134,8 +136,9 @@ private static synchronized void initializeForType1()\n      * Creates a type 1 UUID \n      */\n     public static byte[] createType1() {\n-        if (RANDOM == null)\n+        if (type1Initialized == false) {\n             initializeForType1();\n+        }\n         // set ip addr\n         byte[] uuid = new byte[16];\n         System.arraycopy(IP, 0, uuid, 10, IP.length);",
+                "raw_url": "https://github.com/apache/openjpa/raw/f6413764d5b41a83003a163b74023dce8398fb05/openjpa-lib/src/main/java/org/apache/openjpa/lib/util/UUIDGenerator.java",
+                "sha": "a9028a6383827b4079169907a550f7ac10ac19d1",
+                "status": "modified"
+            },
+            {
+                "additions": 35,
+                "blob_url": "https://github.com/apache/openjpa/blob/f6413764d5b41a83003a163b74023dce8398fb05/openjpa-lib/src/test/java/org/apache/openjpa/lib/util/TestUUIDGenerator.java",
+                "changes": 35,
+                "contents_url": "https://api.github.com/repos/apache/openjpa/contents/openjpa-lib/src/test/java/org/apache/openjpa/lib/util/TestUUIDGenerator.java?ref=f6413764d5b41a83003a163b74023dce8398fb05",
+                "deletions": 0,
+                "filename": "openjpa-lib/src/test/java/org/apache/openjpa/lib/util/TestUUIDGenerator.java",
+                "patch": "@@ -18,6 +18,10 @@\n  */\n package org.apache.openjpa.lib.util;\n \n+import java.lang.reflect.Field;\n+import java.security.AccessController;\n+import java.security.PrivilegedAction;\n+import java.security.PrivilegedExceptionAction;\n import java.util.HashSet;\n import java.util.Set;\n \n@@ -76,4 +80,35 @@ public void testGetTime() {\n             time = newTime;\n         }\n     }\n+    \n+    public void testInitType1MultiThreaded() throws Exception {\n+        // This test method depends IP and RANDOM in UUIDGenerator to be null\n+        // and type1Initialized to be false. Using reflection to ensure that\n+        // those fields are null. Wrap this  method in doPrivledgedAction so it\n+        // doesn't fail when running with security.\n+        AccessController.doPrivileged(new PrivilegedExceptionAction<Object>() {\n+            public Object run() throws Exception {\n+                Class uuid = UUIDGenerator.class;\n+                Field[] fields = uuid.getDeclaredFields();\n+                for (Field f : fields) {\n+                    if (f.getName().equals(\"type1Initialized\")) {\n+                        f.setAccessible(true);\n+                        f.set(null, false);\n+                    } else if (f.getName().equals(\"IP\") || f.getName().equals(\"RANDOM\")) {\n+                        f.setAccessible(true);\n+                        f.set(null, null);\n+                    }\n+                }\n+                Thread t = new Thread() {\n+                    public void run() {\n+                        UUIDGenerator.createType1();\n+                    }\n+                };\n+\n+                t.start();\n+                UUIDGenerator.createType1();\n+                return null;\n+            }\n+        });\n+    }// end testInitType1MultiThreaded\n }",
+                "raw_url": "https://github.com/apache/openjpa/raw/f6413764d5b41a83003a163b74023dce8398fb05/openjpa-lib/src/test/java/org/apache/openjpa/lib/util/TestUUIDGenerator.java",
+                "sha": "8b86fe23429fdbedbd7f0c81789edb39c47916c7",
+                "status": "modified"
+            }
+        ],
+        "message": "OPENJPA-1168:\nImproved checking for type1 UUID generator is initialized. Reducing\ntiming window which could result in a NPE.\nSubmitted by: Rick Curtis\n\tmodified:   openjpa-lib/src/main/java/org/apache/openjpa/lib/util/UUIDGenerator.java\n\tmodified:   openjpa-lib/src/test/java/org/apache/openjpa/lib/util/TestUUIDGenerator.java\n\ngit-svn-id: https://svn.apache.org/repos/asf/openjpa/trunk@792592 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/openjpa/commit/07a98e871b2676bc3c868e4ca0e652a6af9027f2",
+        "repo": "openjpa",
+        "unit_tests": [
+            "TestUUIDGenerator.java"
         ]
     }
 }

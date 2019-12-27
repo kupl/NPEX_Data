@@ -1,1 +1,38 @@
-{}
+{
+    "calcite-avatica_5c754cf": {
+        "bug_id": "calcite-avatica_5c754cf",
+        "commit": "https://github.com/apache/calcite-avatica/commit/5c754cfebdfbb4d2061ef7f3f1e72fa0c98cbdb9",
+        "file": [
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/calcite-avatica/blob/5c754cfebdfbb4d2061ef7f3f1e72fa0c98cbdb9/core/src/main/java/org/apache/calcite/avatica/remote/TypedValue.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/calcite-avatica/contents/core/src/main/java/org/apache/calcite/avatica/remote/TypedValue.java?ref=5c754cfebdfbb4d2061ef7f3f1e72fa0c98cbdb9",
+                "deletions": 0,
+                "filename": "core/src/main/java/org/apache/calcite/avatica/remote/TypedValue.java",
+                "patch": "@@ -359,6 +359,12 @@ private static Object serialToJdbc(ColumnMetaData.Rep type, ColumnMetaData.Rep c\n           copy.add(serialToJdbc(componentRep, null, o, calendar));\n         }\n       }\n+      if (componentRep == null && list.size() > 0) {\n+        componentRep = ((TypedValue) list.get(0)).type;\n+        if (componentRep == null) {\n+          throw new RuntimeException(\"ComponentRep of element must not be null for ARRAYs\");\n+        }\n+      }\n       AvaticaType elementType = new AvaticaType(componentRep.typeId, componentRep.name(),\n           componentRep);\n       return new ArrayFactoryImpl(calendar.getTimeZone()).createArray(elementType, copy);",
+                "raw_url": "https://github.com/apache/calcite-avatica/raw/5c754cfebdfbb4d2061ef7f3f1e72fa0c98cbdb9/core/src/main/java/org/apache/calcite/avatica/remote/TypedValue.java",
+                "sha": "9b98d2abb2e1e6102f5b9443b9d50cbbf3897756",
+                "status": "modified"
+            },
+            {
+                "additions": 53,
+                "blob_url": "https://github.com/apache/calcite-avatica/blob/5c754cfebdfbb4d2061ef7f3f1e72fa0c98cbdb9/server/src/test/java/org/apache/calcite/avatica/remote/ArrayTypeTest.java",
+                "changes": 53,
+                "contents_url": "https://api.github.com/repos/apache/calcite-avatica/contents/server/src/test/java/org/apache/calcite/avatica/remote/ArrayTypeTest.java?ref=5c754cfebdfbb4d2061ef7f3f1e72fa0c98cbdb9",
+                "deletions": 0,
+                "filename": "server/src/test/java/org/apache/calcite/avatica/remote/ArrayTypeTest.java",
+                "patch": "@@ -474,6 +474,59 @@ public ArrayTypeTest(Serialization serialization, HttpServer server) {\n     }\n   }\n \n+  @Test public void testBatchInsert() throws Exception {\n+    try (Connection conn = DriverManager.getConnection(url)) {\n+      ScalarType component = ColumnMetaData.scalar(Types.VARCHAR, \"VARCHAR\", Rep.STRING);\n+      List<Array> arrays = new ArrayList<>();\n+      // Construct the data\n+      for (int i = 0; i < 5; i++) {\n+        List<String> elements = new ArrayList<>();\n+        for (int j = 0; j < 5; j++) {\n+          elements.add(i + \"_\" + j);\n+        }\n+        arrays.add(createArray(\"VARCHAR\", component, elements));\n+      }\n+\n+      String tableName = \"test_batch_insert\";\n+      // Drop and create the table\n+      try (Statement stmt = conn.createStatement()) {\n+        assertFalse(stmt.execute(Unsafe.formatLocalString(\"DROP TABLE IF EXISTS %s\", tableName)));\n+        String createTableSql = Unsafe.formatLocalString(\n+                \"CREATE TABLE %s (id integer, vals %s ARRAY)\", tableName, \"VARCHAR\");\n+        assertFalse(stmt.execute(createTableSql));\n+      }\n+\n+      // Insert records, each with an array\n+      final String dml = Unsafe.formatLocalString(\"INSERT INTO %s VALUES (?, ?)\", tableName);\n+      try (PreparedStatement stmt = conn.prepareStatement(dml)) {\n+        int i = 0;\n+        for (Array inputArray : arrays)  {\n+          stmt.setInt(1, i);\n+          stmt.setArray(2, inputArray);\n+          stmt.addBatch();\n+          i++;\n+        }\n+        assertEquals(i, stmt.executeBatch().length);\n+      }\n+\n+      // Read the records\n+      try (Statement stmt = conn.createStatement()) {\n+        ResultSet results = stmt.executeQuery(\n+                Unsafe.formatLocalString(\"SELECT * FROM %s\", tableName));\n+        assertNotNull(\"Expected a ResultSet\", results);\n+        int i = 0;\n+        for (Array expectedArray : arrays) {\n+          assertTrue(results.next());\n+          assertEquals(i++, results.getInt(1));\n+          Array actualArray = results.getArray(2);\n+\n+          PRIMITIVE_LIST_VALIDATOR.validate(expectedArray, actualArray);\n+        }\n+        assertFalse(\"Expected no more records\", results.next());\n+      }\n+    }\n+  }\n+\n   /**\n    * Creates a JDBC {@link Array} from a list of values.\n    *",
+                "raw_url": "https://github.com/apache/calcite-avatica/raw/5c754cfebdfbb4d2061ef7f3f1e72fa0c98cbdb9/server/src/test/java/org/apache/calcite/avatica/remote/ArrayTypeTest.java",
+                "sha": "d73648d4666c1914541b05c6e1adf7fc628b2591",
+                "status": "modified"
+            }
+        ],
+        "message": "[CALCITE-2939] NPE when executeBatch array type (Bake)",
+        "parent": "https://github.com/apache/calcite-avatica/commit/4ad09fa0758ba482f216e5c3bf1a7a2d65fe0392",
+        "repo": "calcite-avatica",
+        "unit_tests": [
+            "TypedValueTest.java"
+        ]
+    }
+}

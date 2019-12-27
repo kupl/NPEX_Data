@@ -1,4 +1,52 @@
 {
+    "hadoop-mapreduce_0727aa6": {
+        "bug_id": "hadoop-mapreduce_0727aa6",
+        "commit": "https://github.com/apache/hadoop-mapreduce/commit/0727aa6e8cb2499562ae1d35f7a4e5a923083571",
+        "file": [
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/hadoop-mapreduce/blob/0727aa6e8cb2499562ae1d35f7a4e5a923083571/CHANGES.txt",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/hadoop-mapreduce/contents/CHANGES.txt?ref=0727aa6e8cb2499562ae1d35f7a4e5a923083571",
+                "deletions": 0,
+                "filename": "CHANGES.txt",
+                "patch": "@@ -163,6 +163,9 @@ Trunk (unreleased changes)\n \n   BUG FIXES\n \n+    MAPREDUCE-2539. Fixed NPE in getMapTaskReports in JobClient. (Robert Evans via\n+    acmurthy) \n+\n     MAPREDUCE-2531. Fixed jobcontrol to downgrade JobID. (Robert Evans via\n     acmurthy) \n ",
+                "raw_url": "https://github.com/apache/hadoop-mapreduce/raw/0727aa6e8cb2499562ae1d35f7a4e5a923083571/CHANGES.txt",
+                "sha": "493d13037e920b46fb0b710e743a3eaf1d5f3b8f",
+                "status": "modified"
+            },
+            {
+                "additions": 14,
+                "blob_url": "https://github.com/apache/hadoop-mapreduce/blob/0727aa6e8cb2499562ae1d35f7a4e5a923083571/src/java/org/apache/hadoop/mapred/JobClient.java",
+                "changes": 34,
+                "contents_url": "https://api.github.com/repos/apache/hadoop-mapreduce/contents/src/java/org/apache/hadoop/mapred/JobClient.java?ref=0727aa6e8cb2499562ae1d35f7a4e5a923083571",
+                "deletions": 20,
+                "filename": "src/java/org/apache/hadoop/mapred/JobClient.java",
+                "patch": "@@ -576,6 +576,8 @@ public RunningJob getJob(String jobid) throws IOException {\n     return getJob(JobID.forName(jobid));\n   }\n   \n+  private static final TaskReport[] EMPTY_TASK_REPORTS = new TaskReport[0];\n+  \n   /**\n    * Get the information of the current state of the map tasks of a job.\n    * \n@@ -584,9 +586,16 @@ public RunningJob getJob(String jobid) throws IOException {\n    * @throws IOException\n    */\n   public TaskReport[] getMapTaskReports(JobID jobId) throws IOException {\n+    return getTaskReports(jobId, TaskType.MAP);\n+  }\n+  \n+  private TaskReport[] getTaskReports(JobID jobId, TaskType type) throws IOException {\n     try {\n-      return TaskReport.downgradeArray(\n-        cluster.getJob(jobId).getTaskReports(TaskType.MAP));\n+      Job j = cluster.getJob(jobId);\n+      if(j == null) {\n+        return EMPTY_TASK_REPORTS;\n+      }\n+      return TaskReport.downgradeArray(j.getTaskReports(type));\n     } catch (InterruptedException ie) {\n       throw new IOException(ie);\n     }\n@@ -606,12 +615,7 @@ public RunningJob getJob(String jobid) throws IOException {\n    * @throws IOException\n    */    \n   public TaskReport[] getReduceTaskReports(JobID jobId) throws IOException {\n-    try {\n-      return TaskReport.downgradeArray(\n-        cluster.getJob(jobId).getTaskReports(TaskType.REDUCE));\n-    } catch (InterruptedException ie) {\n-      throw new IOException(ie);\n-    }\n+    return getTaskReports(jobId, TaskType.REDUCE);\n   }\n \n   /**\n@@ -622,12 +626,7 @@ public RunningJob getJob(String jobid) throws IOException {\n    * @throws IOException\n    */    \n   public TaskReport[] getCleanupTaskReports(JobID jobId) throws IOException {\n-    try {\n-      return TaskReport.downgradeArray(\n-        cluster.getJob(jobId).getTaskReports(TaskType.JOB_CLEANUP));\n-    } catch (InterruptedException ie) {\n-      throw new IOException(ie);\n-    }\n+    return getTaskReports(jobId, TaskType.JOB_CLEANUP);\n   }\n \n   /**\n@@ -638,12 +637,7 @@ public RunningJob getJob(String jobid) throws IOException {\n    * @throws IOException\n    */    \n   public TaskReport[] getSetupTaskReports(JobID jobId) throws IOException {\n-    try {\n-      return TaskReport.downgradeArray(\n-        cluster.getJob(jobId).getTaskReports(TaskType.JOB_SETUP));\n-    } catch (InterruptedException ie) {\n-      throw new IOException(ie);\n-    }\n+    return getTaskReports(jobId, TaskType.JOB_SETUP);\n   }\n \n   ",
+                "raw_url": "https://github.com/apache/hadoop-mapreduce/raw/0727aa6e8cb2499562ae1d35f7a4e5a923083571/src/java/org/apache/hadoop/mapred/JobClient.java",
+                "sha": "245e362866fe446422f09c9425a1f3e6651e7879",
+                "status": "modified"
+            },
+            {
+                "additions": 94,
+                "blob_url": "https://github.com/apache/hadoop-mapreduce/blob/0727aa6e8cb2499562ae1d35f7a4e5a923083571/src/test/mapred/org/apache/hadoop/mapred/JobClientUnitTest.java",
+                "changes": 94,
+                "contents_url": "https://api.github.com/repos/apache/hadoop-mapreduce/contents/src/test/mapred/org/apache/hadoop/mapred/JobClientUnitTest.java?ref=0727aa6e8cb2499562ae1d35f7a4e5a923083571",
+                "deletions": 0,
+                "filename": "src/test/mapred/org/apache/hadoop/mapred/JobClientUnitTest.java",
+                "patch": "@@ -0,0 +1,94 @@\n+/**\n+ * Licensed to the Apache Software Foundation (ASF) under one\n+ * or more contributor license agreements.  See the NOTICE file\n+ * distributed with this work for additional information\n+ * regarding copyright ownership.  The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance\n+ * with the License.  You may obtain a copy of the License at\n+ *\n+ *     http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing, software\n+ * distributed under the License is distributed on an \"AS IS\" BASIS,\n+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n+ * See the License for the specific language governing permissions and\n+ * limitations under the License.\n+ */\n+\n+package org.apache.hadoop.mapred;\n+\n+import static org.junit.Assert.assertEquals;\n+import static org.mockito.Mockito.mock;\n+import static org.mockito.Mockito.verify;\n+import static org.mockito.Mockito.when;\n+\n+import org.apache.hadoop.mapreduce.Cluster;\n+import org.junit.Test;\n+\n+public class JobClientUnitTest {\n+  \n+  @SuppressWarnings(\"deprecation\")\n+  @Test\n+  public void testMapTaskReportsWithNullJob() throws Exception {\n+    JobClient client = new JobClient();\n+    Cluster mockCluster = mock(Cluster.class);\n+    client.cluster = mockCluster;\n+    JobID id = new JobID(\"test\",0);\n+    \n+    when(mockCluster.getJob(id)).thenReturn(null);\n+    \n+    TaskReport[] result = client.getMapTaskReports(id);\n+    assertEquals(0, result.length);\n+    \n+    verify(mockCluster).getJob(id);\n+  }\n+  \n+  @SuppressWarnings(\"deprecation\")\n+  @Test\n+  public void testReduceTaskReportsWithNullJob() throws Exception {\n+    JobClient client = new JobClient();\n+    Cluster mockCluster = mock(Cluster.class);\n+    client.cluster = mockCluster;\n+    JobID id = new JobID(\"test\",0);\n+    \n+    when(mockCluster.getJob(id)).thenReturn(null);\n+    \n+    TaskReport[] result = client.getReduceTaskReports(id);\n+    assertEquals(0, result.length);\n+    \n+    verify(mockCluster).getJob(id);\n+  }\n+  \n+  @SuppressWarnings(\"deprecation\")\n+  @Test\n+  public void testSetupTaskReportsWithNullJob() throws Exception {\n+    JobClient client = new JobClient();\n+    Cluster mockCluster = mock(Cluster.class);\n+    client.cluster = mockCluster;\n+    JobID id = new JobID(\"test\",0);\n+    \n+    when(mockCluster.getJob(id)).thenReturn(null);\n+    \n+    TaskReport[] result = client.getSetupTaskReports(id);\n+    assertEquals(0, result.length);\n+    \n+    verify(mockCluster).getJob(id);\n+  }\n+  \n+  @SuppressWarnings(\"deprecation\")\n+  @Test\n+  public void testCleanupTaskReportsWithNullJob() throws Exception {\n+    JobClient client = new JobClient();\n+    Cluster mockCluster = mock(Cluster.class);\n+    client.cluster = mockCluster;\n+    JobID id = new JobID(\"test\",0);\n+    \n+    when(mockCluster.getJob(id)).thenReturn(null);\n+    \n+    TaskReport[] result = client.getCleanupTaskReports(id);\n+    assertEquals(0, result.length);\n+    \n+    verify(mockCluster).getJob(id);\n+  }\n+}",
+                "raw_url": "https://github.com/apache/hadoop-mapreduce/raw/0727aa6e8cb2499562ae1d35f7a4e5a923083571/src/test/mapred/org/apache/hadoop/mapred/JobClientUnitTest.java",
+                "sha": "11873c14233814e67b9a766c486e4f8b775edd10",
+                "status": "added"
+            }
+        ],
+        "message": "MAPREDUCE-2539. Fixed NPE in getMapTaskReports in JobClient. Contributed by Robert Evans.\n\n\ngit-svn-id: https://svn.apache.org/repos/asf/hadoop/mapreduce/trunk@1130994 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/hadoop-mapreduce/commit/34fc2ec906ba5602d4a65b0bb2ec9fc7c4cb855f",
+        "repo": "hadoop-mapreduce",
+        "unit_tests": [
+            "TestJobClient.java"
+        ]
+    },
     "hadoop-mapreduce_11131d7": {
         "bug_id": "hadoop-mapreduce_11131d7",
         "commit": "https://github.com/apache/hadoop-mapreduce/commit/11131d72040c250f897a8d1c130b83ce1b065050",
@@ -69,6 +117,283 @@
         "repo": "hadoop-mapreduce",
         "unit_tests": [
             "TestFairScheduler.java"
+        ]
+    },
+    "hadoop-mapreduce_2c80616": {
+        "bug_id": "hadoop-mapreduce_2c80616",
+        "commit": "https://github.com/apache/hadoop-mapreduce/commit/2c80616ea8adcfe3e2db598eb6991d84e0dcfbc3",
+        "file": [
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/hadoop-mapreduce/blob/2c80616ea8adcfe3e2db598eb6991d84e0dcfbc3/CHANGES.txt",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/hadoop-mapreduce/contents/CHANGES.txt?ref=2c80616ea8adcfe3e2db598eb6991d84e0dcfbc3",
+                "deletions": 0,
+                "filename": "CHANGES.txt",
+                "patch": "@@ -232,6 +232,8 @@ Trunk (unreleased changes)\n     MAPREDUCE-2495. exit() the TaskTracker when the distributed cache cleanup\n     thread dies. (Robert Joseph Evans via cdouglas)\n \n+    MAPREDUCE-2470. Fix NPE in RunningJobs::getCounters. (Robert Joseph Evans\n+    via cdouglas)\n \n Release 0.22.0 - Unreleased\n ",
+                "raw_url": "https://github.com/apache/hadoop-mapreduce/raw/2c80616ea8adcfe3e2db598eb6991d84e0dcfbc3/CHANGES.txt",
+                "sha": "267bbd5f6761ad691d7e255f6a8f1b766e31c5d1",
+                "status": "modified"
+            },
+            {
+                "additions": 9,
+                "blob_url": "https://github.com/apache/hadoop-mapreduce/blob/2c80616ea8adcfe3e2db598eb6991d84e0dcfbc3/src/java/org/apache/hadoop/mapred/JobClient.java",
+                "changes": 15,
+                "contents_url": "https://api.github.com/repos/apache/hadoop-mapreduce/contents/src/java/org/apache/hadoop/mapred/JobClient.java?ref=2c80616ea8adcfe3e2db598eb6991d84e0dcfbc3",
+                "deletions": 6,
+                "filename": "src/java/org/apache/hadoop/mapred/JobClient.java",
+                "patch": "@@ -42,8 +42,6 @@\n import org.apache.hadoop.fs.FileSystem;\n import org.apache.hadoop.fs.Path;\n import org.apache.hadoop.io.Text;\n-import org.apache.hadoop.ipc.RemoteException;\n-import org.apache.hadoop.security.AccessControlException;\n import org.apache.hadoop.security.token.Token;\n import org.apache.hadoop.security.token.SecretManager.InvalidToken;\n import org.apache.hadoop.util.Tool;\n@@ -149,7 +147,7 @@\n    * a JobProfile object to provide some info, and interacts with the\n    * remote service to provide certain functionality.\n    */\n-  class NetworkedJob implements RunningJob {\n+  static class NetworkedJob implements RunningJob {\n     Job job;\n     /**\n      * We store a JobProfile and a timestamp for when we last\n@@ -158,7 +156,7 @@\n      * has completely forgotten about the job.  (eg, 24 hours after the\n      * job completes.)\n      */\n-    public NetworkedJob(JobStatus status) throws IOException {\n+    public NetworkedJob(JobStatus status, Cluster cluster) throws IOException {\n       job = Job.getInstance(cluster, status, new JobConf(status.getJobFile()));\n     }\n \n@@ -380,7 +378,12 @@ public String toString() {\n      */\n     public Counters getCounters() throws IOException {\n       try { \n-        return Counters.downgrade(job.getCounters());\n+        Counters result = null;\n+        org.apache.hadoop.mapreduce.Counters temp = job.getCounters();\n+        if(temp != null) {\n+          result = Counters.downgrade(temp);\n+        }\n+        return result;\n       } catch (InterruptedException ie) {\n         throw new IOException(ie);\n       }\n@@ -557,7 +560,7 @@ public RunningJob getJob(JobID jobid) throws IOException {\n       if (job != null) {\n         JobStatus status = JobStatus.downgrade(job.getStatus());\n         if (status != null) {\n-          return new NetworkedJob(status);\n+          return new NetworkedJob(status, cluster);\n         } \n       }\n     } catch (InterruptedException ie) {",
+                "raw_url": "https://github.com/apache/hadoop-mapreduce/raw/2c80616ea8adcfe3e2db598eb6991d84e0dcfbc3/src/java/org/apache/hadoop/mapred/JobClient.java",
+                "sha": "3b5f84bfe1fb6d4c0920e78cfbc20d3de32c28e1",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/hadoop-mapreduce/blob/2c80616ea8adcfe3e2db598eb6991d84e0dcfbc3/src/java/org/apache/hadoop/mapred/RunningJob.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/hadoop-mapreduce/contents/src/java/org/apache/hadoop/mapred/RunningJob.java?ref=2c80616ea8adcfe3e2db598eb6991d84e0dcfbc3",
+                "deletions": 1,
+                "filename": "src/java/org/apache/hadoop/mapred/RunningJob.java",
+                "patch": "@@ -193,7 +193,7 @@\n   /**\n    * Gets the counters for this job.\n    * \n-   * @return the counters for this job.\n+   * @return the counters for this job or null if the job has been retired.\n    * @throws IOException\n    */\n   public Counters getCounters() throws IOException;",
+                "raw_url": "https://github.com/apache/hadoop-mapreduce/raw/2c80616ea8adcfe3e2db598eb6991d84e0dcfbc3/src/java/org/apache/hadoop/mapred/RunningJob.java",
+                "sha": "b3af4f6c98d5ebe15971387e23173e2e4a0513a8",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/hadoop-mapreduce/blob/2c80616ea8adcfe3e2db598eb6991d84e0dcfbc3/src/java/org/apache/hadoop/mapreduce/protocol/ClientProtocol.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/hadoop-mapreduce/contents/src/java/org/apache/hadoop/mapreduce/protocol/ClientProtocol.java?ref=2c80616ea8adcfe3e2db598eb6991d84e0dcfbc3",
+                "deletions": 1,
+                "filename": "src/java/org/apache/hadoop/mapreduce/protocol/ClientProtocol.java",
+                "patch": "@@ -230,7 +230,7 @@ public Counters getJobCounters(JobID jobid)\n   \n   /**\n    * Get task completion events for the jobid, starting from fromEventId. \n-   * Returns empty aray if no events are available. \n+   * Returns empty array if no events are available. \n    * @param jobid job id \n    * @param fromEventId event id to start from.\n    * @param maxEvents the max number of events we want to look at ",
+                "raw_url": "https://github.com/apache/hadoop-mapreduce/raw/2c80616ea8adcfe3e2db598eb6991d84e0dcfbc3/src/java/org/apache/hadoop/mapreduce/protocol/ClientProtocol.java",
+                "sha": "80e556bac2f3f4929cd313ea3e21c4a4839719c9",
+                "status": "modified"
+            },
+            {
+                "additions": 44,
+                "blob_url": "https://github.com/apache/hadoop-mapreduce/blob/2c80616ea8adcfe3e2db598eb6991d84e0dcfbc3/src/test/mapred/org/apache/hadoop/mapred/TestNetworkedJob.java",
+                "changes": 44,
+                "contents_url": "https://api.github.com/repos/apache/hadoop-mapreduce/contents/src/test/mapred/org/apache/hadoop/mapred/TestNetworkedJob.java?ref=2c80616ea8adcfe3e2db598eb6991d84e0dcfbc3",
+                "deletions": 0,
+                "filename": "src/test/mapred/org/apache/hadoop/mapred/TestNetworkedJob.java",
+                "patch": "@@ -0,0 +1,44 @@\n+/**\n+ * Licensed to the Apache Software Foundation (ASF) under one\n+ * or more contributor license agreements.  See the NOTICE file\n+ * distributed with this work for additional information\n+ * regarding copyright ownership.  The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance\n+ * with the License.  You may obtain a copy of the License at\n+ *\n+ *     http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing, software\n+ * distributed under the License is distributed on an \"AS IS\" BASIS,\n+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n+ * See the License for the specific language governing permissions and\n+ * limitations under the License.\n+ */\n+\n+package org.apache.hadoop.mapred;\n+\n+import static org.junit.Assert.*;\n+\n+import java.util.List;\n+\n+import org.apache.hadoop.mapreduce.Job;\n+import org.junit.Test;\n+import static org.mockito.Mockito.*;\n+\n+\n+public class TestNetworkedJob {\n+\n+  @SuppressWarnings(\"deprecation\")\n+  @Test\n+  public void testGetNullCounters() throws Exception {\n+    //mock creation\n+    Job mockJob = mock(Job.class);\n+    RunningJob underTest = new JobClient.NetworkedJob(mockJob); \n+\n+    when(mockJob.getCounters()).thenReturn(null);\n+    assertNull(underTest.getCounters());\n+    //verification\n+    verify(mockJob).getCounters();\n+  }\n+}",
+                "raw_url": "https://github.com/apache/hadoop-mapreduce/raw/2c80616ea8adcfe3e2db598eb6991d84e0dcfbc3/src/test/mapred/org/apache/hadoop/mapred/TestNetworkedJob.java",
+                "sha": "b6565e28956d7446628aae1da838b930a83313db",
+                "status": "added"
+            },
+            {
+                "additions": 5,
+                "blob_url": "https://github.com/apache/hadoop-mapreduce/blob/2c80616ea8adcfe3e2db598eb6991d84e0dcfbc3/src/test/system/test/org/apache/hadoop/mapred/TestTaskKilling.java",
+                "changes": 10,
+                "contents_url": "https://api.github.com/repos/apache/hadoop-mapreduce/contents/src/test/system/test/org/apache/hadoop/mapred/TestTaskKilling.java?ref=2c80616ea8adcfe3e2db598eb6991d84e0dcfbc3",
+                "deletions": 5,
+                "filename": "src/test/system/test/org/apache/hadoop/mapred/TestTaskKilling.java",
+                "patch": "@@ -129,7 +129,7 @@ public void testFailedTaskJobStatus()\n     }\n     Assert.assertTrue(\"Task has not been started for 1 min.\", counter != 60);\n \n-    NetworkedJob networkJob = jobClient.new NetworkedJob(jInfo.getStatus());\n+    NetworkedJob networkJob = new JobClient.NetworkedJob(jInfo.getStatus(),jobClient.cluster);\n     TaskID tID = TaskID.downgrade(taskInfo.getTaskID());\n     TaskAttemptID taskAttID = new TaskAttemptID(tID, 0);\n     networkJob.killTask(taskAttID, false);\n@@ -245,7 +245,7 @@ public void testDirCleanupAfterTaskKilled()\n       filesStatus = ttClient.listStatus(localTaskDir, true);\n       if (filesStatus.length > 0) {\n         isTempFolderExists = true;\n-        NetworkedJob networkJob = jobClient.new NetworkedJob(jInfo.getStatus());\n+        NetworkedJob networkJob = new JobClient.NetworkedJob(jInfo.getStatus(),jobClient.cluster);\n         networkJob.killTask(taskAttID, false);\n         break;\n       }\n@@ -558,7 +558,7 @@ public void testAllTaskAttemptKill() throws Exception {\n             taskIdKilled = taskid.toString();\n             taskAttemptID = new TaskAttemptID(taskid, i);\n             LOG.info(\"taskAttemptid going to be killed is : \" + taskAttemptID);\n-            (jobClient.new NetworkedJob(jInfo.getStatus())).killTask(\n+            (new JobClient.NetworkedJob(jInfo.getStatus(),jobClient.cluster)).killTask(\n                 taskAttemptID, true);\n             checkTaskCompletionEvent(taskAttemptID, jInfo);\n             break;\n@@ -568,7 +568,7 @@ public void testAllTaskAttemptKill() throws Exception {\n               LOG\n                   .info(\"taskAttemptid going to be killed is : \"\n                       + taskAttemptID);\n-              (jobClient.new NetworkedJob(jInfo.getStatus())).killTask(\n+              (new JobClient.NetworkedJob(jInfo.getStatus(),jobClient.cluster)).killTask(\n                   taskAttemptID, true);\n               checkTaskCompletionEvent(taskAttemptID, jInfo);\n               break;\n@@ -611,7 +611,7 @@ public void checkTaskCompletionEvent(\n     int count = 0;\n     while (!match) {\n       TaskCompletionEvent[] taskCompletionEvents =\n-          jobClient.new NetworkedJob(jInfo.getStatus())\n+          new JobClient.NetworkedJob(jInfo.getStatus(),jobClient.cluster)\n               .getTaskCompletionEvents(0);\n       for (TaskCompletionEvent taskCompletionEvent : taskCompletionEvents) {\n         if ((taskCompletionEvent.getTaskAttemptId().toString())",
+                "raw_url": "https://github.com/apache/hadoop-mapreduce/raw/2c80616ea8adcfe3e2db598eb6991d84e0dcfbc3/src/test/system/test/org/apache/hadoop/mapred/TestTaskKilling.java",
+                "sha": "d84f41a547b710bcec7bebea5f1ed74266917589",
+                "status": "modified"
+            }
+        ],
+        "message": "MAPREDUCE-2470. Fix NPE in RunningJobs::getCounters.\nContributed by Robert Joseph Evans\n\n\ngit-svn-id: https://svn.apache.org/repos/asf/hadoop/mapreduce/trunk@1127444 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/hadoop-mapreduce/commit/64b55c391e197a8a72d40da7be50fdcb9f8748b9",
+        "repo": "hadoop-mapreduce",
+        "unit_tests": [
+            "TestJobClient.java"
+        ]
+    },
+    "hadoop-mapreduce_4b28c4e": {
+        "bug_id": "hadoop-mapreduce_4b28c4e",
+        "commit": "https://github.com/apache/hadoop-mapreduce/commit/4b28c4e7d3999df0fb8b95487b217a5e801aa1e6",
+        "file": [
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/hadoop-mapreduce/blob/4b28c4e7d3999df0fb8b95487b217a5e801aa1e6/CHANGES.txt",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/hadoop-mapreduce/contents/CHANGES.txt?ref=4b28c4e7d3999df0fb8b95487b217a5e801aa1e6",
+                "deletions": 0,
+                "filename": "CHANGES.txt",
+                "patch": "@@ -214,6 +214,9 @@ Trunk (unreleased changes)\n     MAPREDUCE-2518. The t flag is missing in distcp help message.  (Wei Yongjun\n     via szetszwo)\n \n+    MAPREDUCE-2470. Fix NPE in RunningJobs::getCounters. (Robert Joseph Evans\n+    via cdouglas)\n+\n Release 0.22.0 - Unreleased\n \n   INCOMPATIBLE CHANGES",
+                "raw_url": "https://github.com/apache/hadoop-mapreduce/raw/4b28c4e7d3999df0fb8b95487b217a5e801aa1e6/CHANGES.txt",
+                "sha": "e1eb16d5a672f5955bcf791150d2caaf76949320",
+                "status": "modified"
+            },
+            {
+                "additions": 9,
+                "blob_url": "https://github.com/apache/hadoop-mapreduce/blob/4b28c4e7d3999df0fb8b95487b217a5e801aa1e6/src/java/org/apache/hadoop/mapred/JobClient.java",
+                "changes": 15,
+                "contents_url": "https://api.github.com/repos/apache/hadoop-mapreduce/contents/src/java/org/apache/hadoop/mapred/JobClient.java?ref=4b28c4e7d3999df0fb8b95487b217a5e801aa1e6",
+                "deletions": 6,
+                "filename": "src/java/org/apache/hadoop/mapred/JobClient.java",
+                "patch": "@@ -42,8 +42,6 @@\n import org.apache.hadoop.fs.FileSystem;\n import org.apache.hadoop.fs.Path;\n import org.apache.hadoop.io.Text;\n-import org.apache.hadoop.ipc.RemoteException;\n-import org.apache.hadoop.security.AccessControlException;\n import org.apache.hadoop.security.token.Token;\n import org.apache.hadoop.security.token.SecretManager.InvalidToken;\n import org.apache.hadoop.util.Tool;\n@@ -149,7 +147,7 @@\n    * a JobProfile object to provide some info, and interacts with the\n    * remote service to provide certain functionality.\n    */\n-  class NetworkedJob implements RunningJob {\n+  static class NetworkedJob implements RunningJob {\n     Job job;\n     /**\n      * We store a JobProfile and a timestamp for when we last\n@@ -158,7 +156,7 @@\n      * has completely forgotten about the job.  (eg, 24 hours after the\n      * job completes.)\n      */\n-    public NetworkedJob(JobStatus status) throws IOException {\n+    public NetworkedJob(JobStatus status, Cluster cluster) throws IOException {\n       job = Job.getInstance(cluster, status, new JobConf(status.getJobFile()));\n     }\n \n@@ -380,7 +378,12 @@ public String toString() {\n      */\n     public Counters getCounters() throws IOException {\n       try { \n-        return Counters.downgrade(job.getCounters());\n+        Counters result = null;\n+        org.apache.hadoop.mapreduce.Counters temp = job.getCounters();\n+        if(temp != null) {\n+          result = Counters.downgrade(temp);\n+        }\n+        return result;\n       } catch (InterruptedException ie) {\n         throw new IOException(ie);\n       }\n@@ -557,7 +560,7 @@ public RunningJob getJob(JobID jobid) throws IOException {\n       if (job != null) {\n         JobStatus status = JobStatus.downgrade(job.getStatus());\n         if (status != null) {\n-          return new NetworkedJob(status);\n+          return new NetworkedJob(status, cluster);\n         } \n       }\n     } catch (InterruptedException ie) {",
+                "raw_url": "https://github.com/apache/hadoop-mapreduce/raw/4b28c4e7d3999df0fb8b95487b217a5e801aa1e6/src/java/org/apache/hadoop/mapred/JobClient.java",
+                "sha": "3b5f84bfe1fb6d4c0920e78cfbc20d3de32c28e1",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/hadoop-mapreduce/blob/4b28c4e7d3999df0fb8b95487b217a5e801aa1e6/src/java/org/apache/hadoop/mapred/RunningJob.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/hadoop-mapreduce/contents/src/java/org/apache/hadoop/mapred/RunningJob.java?ref=4b28c4e7d3999df0fb8b95487b217a5e801aa1e6",
+                "deletions": 1,
+                "filename": "src/java/org/apache/hadoop/mapred/RunningJob.java",
+                "patch": "@@ -193,7 +193,7 @@\n   /**\n    * Gets the counters for this job.\n    * \n-   * @return the counters for this job.\n+   * @return the counters for this job or null if the job has been retired.\n    * @throws IOException\n    */\n   public Counters getCounters() throws IOException;",
+                "raw_url": "https://github.com/apache/hadoop-mapreduce/raw/4b28c4e7d3999df0fb8b95487b217a5e801aa1e6/src/java/org/apache/hadoop/mapred/RunningJob.java",
+                "sha": "b3af4f6c98d5ebe15971387e23173e2e4a0513a8",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/hadoop-mapreduce/blob/4b28c4e7d3999df0fb8b95487b217a5e801aa1e6/src/java/org/apache/hadoop/mapreduce/protocol/ClientProtocol.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/hadoop-mapreduce/contents/src/java/org/apache/hadoop/mapreduce/protocol/ClientProtocol.java?ref=4b28c4e7d3999df0fb8b95487b217a5e801aa1e6",
+                "deletions": 1,
+                "filename": "src/java/org/apache/hadoop/mapreduce/protocol/ClientProtocol.java",
+                "patch": "@@ -230,7 +230,7 @@ public Counters getJobCounters(JobID jobid)\n   \n   /**\n    * Get task completion events for the jobid, starting from fromEventId. \n-   * Returns empty aray if no events are available. \n+   * Returns empty array if no events are available. \n    * @param jobid job id \n    * @param fromEventId event id to start from.\n    * @param maxEvents the max number of events we want to look at ",
+                "raw_url": "https://github.com/apache/hadoop-mapreduce/raw/4b28c4e7d3999df0fb8b95487b217a5e801aa1e6/src/java/org/apache/hadoop/mapreduce/protocol/ClientProtocol.java",
+                "sha": "80e556bac2f3f4929cd313ea3e21c4a4839719c9",
+                "status": "modified"
+            },
+            {
+                "additions": 44,
+                "blob_url": "https://github.com/apache/hadoop-mapreduce/blob/4b28c4e7d3999df0fb8b95487b217a5e801aa1e6/src/test/mapred/org/apache/hadoop/mapred/TestNetworkedJob.java",
+                "changes": 44,
+                "contents_url": "https://api.github.com/repos/apache/hadoop-mapreduce/contents/src/test/mapred/org/apache/hadoop/mapred/TestNetworkedJob.java?ref=4b28c4e7d3999df0fb8b95487b217a5e801aa1e6",
+                "deletions": 0,
+                "filename": "src/test/mapred/org/apache/hadoop/mapred/TestNetworkedJob.java",
+                "patch": "@@ -0,0 +1,44 @@\n+/**\n+ * Licensed to the Apache Software Foundation (ASF) under one\n+ * or more contributor license agreements.  See the NOTICE file\n+ * distributed with this work for additional information\n+ * regarding copyright ownership.  The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance\n+ * with the License.  You may obtain a copy of the License at\n+ *\n+ *     http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing, software\n+ * distributed under the License is distributed on an \"AS IS\" BASIS,\n+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n+ * See the License for the specific language governing permissions and\n+ * limitations under the License.\n+ */\n+\n+package org.apache.hadoop.mapred;\n+\n+import static org.junit.Assert.*;\n+\n+import java.util.List;\n+\n+import org.apache.hadoop.mapreduce.Job;\n+import org.junit.Test;\n+import static org.mockito.Mockito.*;\n+\n+\n+public class TestNetworkedJob {\n+\n+  @SuppressWarnings(\"deprecation\")\n+  @Test\n+  public void testGetNullCounters() throws Exception {\n+    //mock creation\n+    Job mockJob = mock(Job.class);\n+    RunningJob underTest = new JobClient.NetworkedJob(mockJob); \n+\n+    when(mockJob.getCounters()).thenReturn(null);\n+    assertNull(underTest.getCounters());\n+    //verification\n+    verify(mockJob).getCounters();\n+  }\n+}",
+                "raw_url": "https://github.com/apache/hadoop-mapreduce/raw/4b28c4e7d3999df0fb8b95487b217a5e801aa1e6/src/test/mapred/org/apache/hadoop/mapred/TestNetworkedJob.java",
+                "sha": "b6565e28956d7446628aae1da838b930a83313db",
+                "status": "added"
+            }
+        ],
+        "message": "MAPREDUCE-2470. Fix NPE in RunningJobs::getCounters.\nContributed by Robert Joseph Evans\n\n\ngit-svn-id: https://svn.apache.org/repos/asf/hadoop/mapreduce/trunk@1125578 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/hadoop-mapreduce/commit/921c7920150466cb545dca153e05f0edeacd3754",
+        "repo": "hadoop-mapreduce",
+        "unit_tests": [
+            "TestJobClient.java"
+        ]
+    },
+    "hadoop-mapreduce_9c08b79": {
+        "bug_id": "hadoop-mapreduce_9c08b79",
+        "commit": "https://github.com/apache/hadoop-mapreduce/commit/9c08b79db0aa747720b5794ad67cba9187d29371",
+        "file": [
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/hadoop-mapreduce/blob/9c08b79db0aa747720b5794ad67cba9187d29371/CHANGES.txt",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/hadoop-mapreduce/contents/CHANGES.txt?ref=9c08b79db0aa747720b5794ad67cba9187d29371",
+                "deletions": 0,
+                "filename": "CHANGES.txt",
+                "patch": "@@ -960,3 +960,7 @@ Release 0.21.0 - Unreleased\n \n     MAPREDUCE-1161. Remove ineffective synchronization in NotificationTestCase.\n     (Owen O'Malley via cdouglas)\n+\n+    MAPREDUCE-1075. Fix JobTracker to not throw an NPE for a non-existent\n+    queue. (V.V.Chaitanya Krishna via yhemanth)\n+",
+                "raw_url": "https://github.com/apache/hadoop-mapreduce/raw/9c08b79db0aa747720b5794ad67cba9187d29371/CHANGES.txt",
+                "sha": "385924c8cfabac25911a0372a8c58acbc643c1df",
+                "status": "modified"
+            },
+            {
+                "additions": 10,
+                "blob_url": "https://github.com/apache/hadoop-mapreduce/blob/9c08b79db0aa747720b5794ad67cba9187d29371/src/java/org/apache/hadoop/mapred/JobClient.java",
+                "changes": 12,
+                "contents_url": "https://api.github.com/repos/apache/hadoop-mapreduce/contents/src/java/org/apache/hadoop/mapred/JobClient.java?ref=9c08b79db0aa747720b5794ad67cba9187d29371",
+                "deletions": 2,
+                "filename": "src/java/org/apache/hadoop/mapred/JobClient.java",
+                "patch": "@@ -1001,8 +1001,12 @@ public Path getSystemDir() {\n   \n   public JobStatus[] getJobsFromQueue(String queueName) throws IOException {\n     try {\n+      QueueInfo queue = cluster.getQueue(queueName);\n+      if (queue == null) {\n+        return null;\n+      }\n       org.apache.hadoop.mapreduce.JobStatus[] stats = \n-        cluster.getQueue(queueName).getJobStatuses();\n+        queue.getJobStatuses();\n       JobStatus[] ret = new JobStatus[stats.length];\n       for (int i = 0 ; i < stats.length; i++ ) {\n         ret[i] = JobStatus.downgrade(stats[i]);\n@@ -1022,7 +1026,11 @@ public Path getSystemDir() {\n    */\n   public JobQueueInfo getQueueInfo(String queueName) throws IOException {\n     try {\n-      return new JobQueueInfo(cluster.getQueue(queueName));\n+      QueueInfo queueInfo = cluster.getQueue(queueName);\n+      if (queueInfo != null) {\n+        return new JobQueueInfo(queueInfo);\n+      }\n+      return null;\n     } catch (InterruptedException ie) {\n       throw new IOException(ie);\n     }",
+                "raw_url": "https://github.com/apache/hadoop-mapreduce/raw/9c08b79db0aa747720b5794ad67cba9187d29371/src/java/org/apache/hadoop/mapred/JobClient.java",
+                "sha": "3ec640566492e9af0e17a0d348b52d43e1617fe4",
+                "status": "modified"
+            },
+            {
+                "additions": 5,
+                "blob_url": "https://github.com/apache/hadoop-mapreduce/blob/9c08b79db0aa747720b5794ad67cba9187d29371/src/java/org/apache/hadoop/mapred/JobQueueClient.java",
+                "changes": 5,
+                "contents_url": "https://api.github.com/repos/apache/hadoop-mapreduce/contents/src/java/org/apache/hadoop/mapred/JobQueueClient.java?ref=9c08b79db0aa747720b5794ad67cba9187d29371",
+                "deletions": 0,
+                "filename": "src/java/org/apache/hadoop/mapred/JobQueueClient.java",
+                "patch": "@@ -175,6 +175,11 @@ private void displayQueueList() throws IOException {\n   private void displayQueueInfo(String queue, boolean showJobs)\n       throws IOException {\n     JobQueueInfo jobQueueInfo = jc.getQueueInfo(queue);\n+    \n+    if (jobQueueInfo == null) {\n+      System.out.println(\"Queue \\\"\" + queue + \"\\\" does not exist.\");\n+      return;\n+    }\n     printJobQueueInfo(jobQueueInfo, new PrintWriter(System.out));\n     if (showJobs && (jobQueueInfo.getChildren() == null ||\n         jobQueueInfo.getChildren().size() == 0)) {",
+                "raw_url": "https://github.com/apache/hadoop-mapreduce/raw/9c08b79db0aa747720b5794ad67cba9187d29371/src/java/org/apache/hadoop/mapred/JobQueueClient.java",
+                "sha": "129b175966e1fda1d229e1117f2ed5c64b8411ab",
+                "status": "modified"
+            },
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/hadoop-mapreduce/blob/9c08b79db0aa747720b5794ad67cba9187d29371/src/java/org/apache/hadoop/mapred/JobTracker.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/hadoop-mapreduce/contents/src/java/org/apache/hadoop/mapred/JobTracker.java?ref=9c08b79db0aa747720b5794ad67cba9187d29371",
+                "deletions": 1,
+                "filename": "src/java/org/apache/hadoop/mapred/JobTracker.java",
+                "patch": "@@ -3966,7 +3966,9 @@ public JobQueueInfo getQueueInfo(String queue) throws IOException {\n   @Override\n   public QueueInfo getQueue(String queue) throws IOException {\n     JobQueueInfo jqueue = queueManager.getJobQueueInfo(queue);\n-    jqueue.setJobStatuses(getJobsFromQueue(jqueue.getQueueName()));\n+    if (jqueue != null) {\n+      jqueue.setJobStatuses(getJobsFromQueue(jqueue.getQueueName()));\n+    }\n     return jqueue;\n   }\n ",
+                "raw_url": "https://github.com/apache/hadoop-mapreduce/raw/9c08b79db0aa747720b5794ad67cba9187d29371/src/java/org/apache/hadoop/mapred/JobTracker.java",
+                "sha": "6686c97fb3dede682ea457b0a2b577795a5746d2",
+                "status": "modified"
+            },
+            {
+                "additions": 36,
+                "blob_url": "https://github.com/apache/hadoop-mapreduce/blob/9c08b79db0aa747720b5794ad67cba9187d29371/src/test/mapred/org/apache/hadoop/mapred/TestJobQueueClient.java",
+                "changes": 40,
+                "contents_url": "https://api.github.com/repos/apache/hadoop-mapreduce/contents/src/test/mapred/org/apache/hadoop/mapred/TestJobQueueClient.java?ref=9c08b79db0aa747720b5794ad67cba9187d29371",
+                "deletions": 4,
+                "filename": "src/test/mapred/org/apache/hadoop/mapred/TestJobQueueClient.java",
+                "patch": "@@ -17,20 +17,33 @@\n  */\n package org.apache.hadoop.mapred;\n \n+import static org.apache.hadoop.mapred.QueueManagerTestUtils.CONFIG;\n+import static org.apache.hadoop.mapred.QueueManagerTestUtils.checkForConfigFile;\n+import static org.apache.hadoop.mapred.QueueManagerTestUtils.createDocument;\n+import static org.apache.hadoop.mapred.QueueManagerTestUtils.createSimpleDocumentWithAcls;\n+import static org.apache.hadoop.mapred.QueueManagerTestUtils.miniMRCluster;\n+import static org.apache.hadoop.mapred.QueueManagerTestUtils.setUpCluster;\n+import static org.apache.hadoop.mapred.QueueManagerTestUtils.writeToFile;\n import static org.junit.Assert.assertEquals;\n+import static org.junit.Assert.assertNull;\n+import static org.junit.Assert.assertTrue;\n+import static org.junit.Assert.fail;\n \n import java.io.File;\n+import java.io.IOException;\n import java.io.StringWriter;\n import java.util.ArrayList;\n import java.util.List;\n \n-import org.junit.After;\n+import org.apache.hadoop.conf.Configuration;\n+import org.apache.hadoop.mapreduce.Cluster;\n+import org.apache.hadoop.mapreduce.QueueInfo;\n import org.junit.Test;\n+import org.w3c.dom.Document;\n \n public class TestJobQueueClient {\n   @Test\n   public void testQueueOrdering() throws Exception {\n-    System.out.println(\"in test queue ordering\");\n     // create some sample queues in a hierarchy..\n     JobQueueInfo[] roots = new JobQueueInfo[2];\n     roots[0] = new JobQueueInfo(\"q1\", \"q1 scheduling info\");\n@@ -53,7 +66,6 @@ public void testQueueOrdering() throws Exception {\n   \n   @Test\n   public void testQueueInfoPrinting() throws Exception {\n-    System.out.println(\"in test queue info printing\");\n     // create a test queue with children.\n     // create some sample queues in a hierarchy..\n     JobQueueInfo root = new JobQueueInfo(\"q1\", \"q1 scheduling info\");\n@@ -76,4 +88,24 @@ public void testQueueInfoPrinting() throws Exception {\n     \n     assertEquals(sb.toString(), writer.toString());\n   }\n-}\n\\ No newline at end of file\n+  \n+  @Test\n+  public void testGetQueue() throws Exception {\n+    checkForConfigFile();\n+    Document doc = createDocument();\n+    createSimpleDocumentWithAcls(doc, \"true\");\n+    writeToFile(doc, CONFIG);\n+    Configuration conf = new Configuration();\n+    conf.addResource(CONFIG);\n+    setUpCluster(conf);\n+    JobClient jc = new JobClient(miniMRCluster.createJobConf());\n+    // test for existing queue\n+    QueueInfo queueInfo = jc.getQueueInfo(\"q1\");\n+    assertEquals(\"q1\",queueInfo.getQueueName());\n+    // try getting a non-existing queue\n+    queueInfo = jc.getQueueInfo(\"queue\");\n+    assertNull(queueInfo);\n+\n+    new File(CONFIG).delete();\n+  }\n+}",
+                "raw_url": "https://github.com/apache/hadoop-mapreduce/raw/9c08b79db0aa747720b5794ad67cba9187d29371/src/test/mapred/org/apache/hadoop/mapred/TestJobQueueClient.java",
+                "sha": "94735fe317e52351eb3e6335c25534af225b676b",
+                "status": "modified"
+            }
+        ],
+        "message": "MAPREDUCE-1075. Fix JobTracker to not throw an NPE for a non-existent queue. Contributed by V.V.Chaitanya Krishna.\n\ngit-svn-id: https://svn.apache.org/repos/asf/hadoop/mapreduce/trunk@888257 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/hadoop-mapreduce/commit/ddc67bf61e875e82b47ffb998172f5062791586d",
+        "repo": "hadoop-mapreduce",
+        "unit_tests": [
+            "TestJobClient.java",
+            "TestJobQueueClient.java"
+        ]
+    },
+    "hadoop-mapreduce_f5822bd": {
+        "bug_id": "hadoop-mapreduce_f5822bd",
+        "commit": "https://github.com/apache/hadoop-mapreduce/commit/f5822bd5c9c1b70e443d98ae82ed00e5c6f6e0c4",
+        "file": [
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/hadoop-mapreduce/blob/f5822bd5c9c1b70e443d98ae82ed00e5c6f6e0c4/CHANGES.txt",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/hadoop-mapreduce/contents/CHANGES.txt?ref=f5822bd5c9c1b70e443d98ae82ed00e5c6f6e0c4",
+                "deletions": 0,
+                "filename": "CHANGES.txt",
+                "patch": "@@ -629,3 +629,6 @@ Trunk (unreleased changes)\n \n     MAPREDUCE-971. distcp does not always remove distcp.tmp.dir. (Aaron Kimball\n     via tomwhite)\n+\n+    MAPREDUCE-995. Fix a bug in JobHistory where tasks completing after the job\n+    is closed cause a NPE. (Jothi Padmanabhan via cdouglas)",
+                "raw_url": "https://github.com/apache/hadoop-mapreduce/raw/f5822bd5c9c1b70e443d98ae82ed00e5c6f6e0c4/CHANGES.txt",
+                "sha": "2464a02711e43999d7b52749b7bc0dfc84e75831",
+                "status": "modified"
+            },
+            {
+                "additions": 26,
+                "blob_url": "https://github.com/apache/hadoop-mapreduce/blob/f5822bd5c9c1b70e443d98ae82ed00e5c6f6e0c4/src/java/org/apache/hadoop/mapreduce/jobhistory/JobHistory.java",
+                "changes": 53,
+                "contents_url": "https://api.github.com/repos/apache/hadoop-mapreduce/contents/src/java/org/apache/hadoop/mapreduce/jobhistory/JobHistory.java?ref=f5822bd5c9c1b70e443d98ae82ed00e5c6f6e0c4",
+                "deletions": 27,
+                "filename": "src/java/org/apache/hadoop/mapreduce/jobhistory/JobHistory.java",
+                "patch": "@@ -21,7 +21,7 @@\n import java.io.File;\n import java.io.IOException;\n import java.util.ArrayList;\n-import java.util.Date;\n+import java.util.Collections;\n import java.util.EnumSet;\n import java.util.HashMap;\n import java.util.List;\n@@ -55,7 +55,8 @@\n   final Log LOG = LogFactory.getLog(JobHistory.class);\n \n   private long jobHistoryBlockSize;\n-  private Map<JobID, MetaInfo> fileMap;\n+  private final Map<JobID, MetaInfo> fileMap =\n+    Collections.<JobID,MetaInfo>synchronizedMap(new HashMap<JobID,MetaInfo>());\n   private ThreadPoolExecutor executor = null;\n   static final FsPermission HISTORY_DIR_PERMISSION =\n     FsPermission.createImmutable((short) 0750); // rwxr-x---\n@@ -115,8 +116,6 @@ public void init(JobTracker jt, JobConf conf, String hostname,\n           3 * 1024 * 1024);\n     \n     jobTracker = jt;\n-    \n-    fileMap = new HashMap<JobID, MetaInfo> ();\n   }\n   \n   /** Initialize the done directory and start the history cleaner thread */\n@@ -305,40 +304,28 @@ public void setupEventWriter(JobID jobId, JobConf jobConf)\n   /** Close the event writer for this id */\n   public void closeWriter(JobID id) {\n     try {\n-      EventWriter writer = getWriter(id);\n-      writer.close();\n+      final MetaInfo mi = fileMap.get(id);\n+      if (mi != null) {\n+        mi.closeWriter();\n+      }\n     } catch (IOException e) {\n       LOG.info(\"Error closing writer for JobID: \" + id);\n     }\n   }\n \n-\n-  /**\n-   * Get the JsonEventWriter for the specified Job Id\n-   * @param jobId\n-   * @return\n-   * @throws IOException if a writer is not available\n-   */\n-  private EventWriter getWriter(final JobID jobId) throws IOException {\n-    EventWriter writer = null;\n-    MetaInfo mi = fileMap.get(jobId);\n-    if (mi == null || (writer = mi.getEventWriter()) == null) {\n-      throw new IOException(\"History File does not exist for JobID\");\n-    }\n-    return writer;\n-  }\n-\n   /**\n    * Method to log the specified event\n    * @param event The event to log\n    * @param id The Job ID of the event\n    */\n   public void logEvent(HistoryEvent event, JobID id) {\n     try {\n-      EventWriter writer = getWriter(id);\n-      writer.write(event);\n+      final MetaInfo mi = fileMap.get(id);\n+      if (mi != null) {\n+        mi.writeEvent(event);\n+      }\n     } catch (IOException e) {\n-      LOG.error(\"Error creating writer, \" + e.getMessage());\n+      LOG.error(\"Error Logging event, \" + e.getMessage());\n     }\n   }\n \n@@ -388,7 +375,7 @@ private void moveOldFiles() throws IOException {\n   \n   private void moveToDone(final JobID id) {\n     final List<Path> paths = new ArrayList<Path>();\n-    MetaInfo metaInfo = fileMap.get(id);\n+    final MetaInfo metaInfo = fileMap.get(id);\n     if (metaInfo == null) {\n       LOG.info(\"No file for job-history with \" + id + \" found in cache!\");\n       return;\n@@ -456,7 +443,19 @@ private String getUserName(JobConf jobConf) {\n \n     Path getHistoryFile() { return historyFile; }\n     Path getConfFile() { return confFile; }\n-    EventWriter getEventWriter() { return writer; }\n+\n+    synchronized void closeWriter() throws IOException {\n+      if (writer != null) {\n+        writer.close();\n+      }\n+      writer = null;\n+    }\n+\n+    synchronized void writeEvent(HistoryEvent event) throws IOException {\n+      if (writer != null) {\n+        writer.write(event);\n+      }\n+    }\n   }\n \n   /**",
+                "raw_url": "https://github.com/apache/hadoop-mapreduce/raw/f5822bd5c9c1b70e443d98ae82ed00e5c6f6e0c4/src/java/org/apache/hadoop/mapreduce/jobhistory/JobHistory.java",
+                "sha": "77644667b2c2acaa1e2fc6bf9f25fd566d132a65",
+                "status": "modified"
+            },
+            {
+                "additions": 116,
+                "blob_url": "https://github.com/apache/hadoop-mapreduce/blob/f5822bd5c9c1b70e443d98ae82ed00e5c6f6e0c4/src/test/mapred/org/apache/hadoop/mapred/TestJobHistoryParsing.java",
+                "changes": 116,
+                "contents_url": "https://api.github.com/repos/apache/hadoop-mapreduce/contents/src/test/mapred/org/apache/hadoop/mapred/TestJobHistoryParsing.java?ref=f5822bd5c9c1b70e443d98ae82ed00e5c6f6e0c4",
+                "deletions": 0,
+                "filename": "src/test/mapred/org/apache/hadoop/mapred/TestJobHistoryParsing.java",
+                "patch": "@@ -0,0 +1,116 @@\n+/**\n+ * Licensed to the Apache Software Foundation (ASF) under one\n+ * or more contributor license agreements.  See the NOTICE file\n+ * distributed with this work for additional information\n+ * regarding copyright ownership.  The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance\n+ * with the License.  You may obtain a copy of the License at\n+ *\n+ *     http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing, software\n+ * distributed under the License is distributed on an \"AS IS\" BASIS,\n+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n+ * See the License for the specific language governing permissions and\n+ * limitations under the License.\n+ */\n+package org.apache.hadoop.mapred;\n+\n+import java.io.IOException;\n+\n+import junit.framework.TestCase;\n+\n+import org.apache.hadoop.fs.FileSystem;\n+import org.apache.hadoop.fs.Path;\n+import org.apache.hadoop.mapreduce.Counters;\n+import org.apache.hadoop.mapreduce.JobID;\n+import org.apache.hadoop.mapreduce.TaskType;\n+import org.apache.hadoop.mapreduce.jobhistory.JobFinishedEvent;\n+import org.apache.hadoop.mapreduce.jobhistory.JobHistory;\n+import org.apache.hadoop.mapreduce.jobhistory.JobHistoryParser;\n+import org.apache.hadoop.mapreduce.jobhistory.JobSubmittedEvent;\n+import org.apache.hadoop.mapreduce.jobhistory.TaskFinishedEvent;\n+\n+/**\n+ * Unit test to test if the JobHistory writer/parser is able to handle\n+ * values with special characters\n+ * This test also tests if the job history module is able to gracefully\n+ * ignore events after the event writer is closed\n+ *\n+ */\n+public class TestJobHistoryParsing  extends TestCase {\n+\n+  public void testHistoryParsing() throws IOException {\n+    // open a test history file\n+    Path historyDir = new Path(System.getProperty(\"test.build.data\", \".\"),\n+                                \"history\");\n+    JobConf conf = new JobConf();\n+    conf.set(\"hadoop.job.history.location\", historyDir.toString());\n+    FileSystem fs = FileSystem.getLocal(new JobConf());\n+\n+    // Some weird strings\n+    String username = \"user\";\n+    String weirdJob = \"Value has \\n new line \\n and \" +\n+                    \"dot followed by new line .\\n in it +\" +\n+                    \"ends with escape\\\\\";\n+    String weirdPath = \"Value has characters: \" +\n+                    \"`1234567890-=qwertyuiop[]\\\\asdfghjkl;'zxcvbnm,./\" +\n+                    \"~!@#$%^&*()_+QWERTYUIOP{}|ASDFGHJKL:\\\"'ZXCVBNM<>?\" +\n+                    \"\\t\\b\\n\\f\\\"\\n in it\";\n+\n+    conf.setUser(username);\n+\n+    MiniMRCluster mr = null;\n+    mr = new MiniMRCluster(2, \"file:///\", 3, null, null, conf);\n+\n+    JobTracker jt = mr.getJobTrackerRunner().getJobTracker();\n+    JobHistory jh = jt.getJobHistory();\n+\n+    jh.init(jt, conf, \"localhost\", 1234);\n+    JobID jobId = JobID.forName(\"job_200809171136_0001\");\n+    jh.setupEventWriter(jobId, conf);\n+    JobSubmittedEvent jse =\n+      new JobSubmittedEvent(jobId, weirdJob, username, 12345, weirdPath);\n+    jh.logEvent(jse, jobId);\n+\n+    JobFinishedEvent jfe =\n+      new JobFinishedEvent(jobId, 12346, 1, 1, 0, 0, new Counters());\n+    jh.logEvent(jfe, jobId);\n+    jh.closeWriter(jobId);\n+\n+    // Try to write one more event now, should not fail\n+    TaskID tid = TaskID.forName(\"task_200809171136_0001_m_000002\");\n+    TaskFinishedEvent tfe =\n+      new TaskFinishedEvent(tid, 0, TaskType.MAP, \"\", null);\n+    boolean caughtException = false;\n+\n+    try {\n+      jh.logEvent(tfe, jobId);\n+    } catch (Exception e) {\n+      caughtException = true;\n+    }\n+\n+    assertFalse(\"Writing an event after closing event writer is not handled\",\n+        caughtException);\n+\n+    String historyFileName = jobId.toString() + \"_\" + username;\n+    Path historyFilePath = new Path (historyDir.toString(),\n+      historyFileName);\n+\n+    System.out.println(\"History File is \" + historyFilePath.toString());\n+\n+    JobHistoryParser parser =\n+      new JobHistoryParser(fs, historyFilePath);\n+\n+    JobHistoryParser.JobInfo jobInfo = parser.parse();\n+\n+    assertTrue (jobInfo.getUsername().equals(username));\n+    assertTrue(jobInfo.getJobname().equals(weirdJob));\n+    assertTrue(jobInfo.getJobConfPath().equals(weirdPath));\n+\n+    if (mr != null) {\n+      mr.shutdown();\n+    }\n+  }\n+}",
+                "raw_url": "https://github.com/apache/hadoop-mapreduce/raw/f5822bd5c9c1b70e443d98ae82ed00e5c6f6e0c4/src/test/mapred/org/apache/hadoop/mapred/TestJobHistoryParsing.java",
+                "sha": "5dc445ec0633fe0f9529f9376fb55ef007a9afcc",
+                "status": "added"
+            }
+        ],
+        "message": "MAPREDUCE-995. Fix a bug in JobHistory where tasks completing after the job\nis closed cause a NPE. Contributed by Jothi Padmanabhan\n\n\ngit-svn-id: https://svn.apache.org/repos/asf/hadoop/mapreduce/trunk@816454 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/hadoop-mapreduce/commit/c82125320349962f05edc66d819c00db2681db97",
+        "repo": "hadoop-mapreduce",
+        "unit_tests": [
+            "TestJobHistory.java"
         ]
     }
 }

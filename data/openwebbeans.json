@@ -47,6 +47,150 @@
             "WebContextsServiceTest.java"
         ]
     },
+    "openwebbeans_5905c8b": {
+        "bug_id": "openwebbeans_5905c8b",
+        "commit": "https://github.com/apache/openwebbeans/commit/5905c8bc4ac4541ee66147d15177c2d4d05456ef",
+        "file": [
+            {
+                "additions": 7,
+                "blob_url": "https://github.com/apache/openwebbeans/blob/5905c8bc4ac4541ee66147d15177c2d4d05456ef/webbeans-impl/src/main/java/org/apache/webbeans/intercept/InterceptorResolutionService.java",
+                "changes": 8,
+                "contents_url": "https://api.github.com/repos/apache/openwebbeans/contents/webbeans-impl/src/main/java/org/apache/webbeans/intercept/InterceptorResolutionService.java?ref=5905c8bc4ac4541ee66147d15177c2d4d05456ef",
+                "deletions": 1,
+                "filename": "webbeans-impl/src/main/java/org/apache/webbeans/intercept/InterceptorResolutionService.java",
+                "patch": "@@ -336,7 +336,13 @@ else if (interceptorBindings != null)\n     private <T> SelfInterceptorBean<T> resolveSelfInterceptorBean(AnnotatedType<T> annotatedType)\n     {\n         BeanAttributesImpl<T> beanAttributes = BeanAttributesBuilder.forContext(webBeansContext).newBeanAttibutes(annotatedType).build();\n-        SelfInterceptorBeanBuilder<T>sibb = new SelfInterceptorBeanBuilder<>(webBeansContext, annotatedType, beanAttributes);\n+        if (beanAttributes == null)\n+        {\n+            // might happen if a proxying rule eefines that this is not a valid bean type.\n+            return null;\n+        }\n+\n+        SelfInterceptorBeanBuilder<T> sibb = new SelfInterceptorBeanBuilder<>(webBeansContext, annotatedType, beanAttributes);\n         sibb.defineSelfInterceptorRules();\n         if (!sibb.isInterceptorEnabled())\n         {",
+                "raw_url": "https://github.com/apache/openwebbeans/raw/5905c8bc4ac4541ee66147d15177c2d4d05456ef/webbeans-impl/src/main/java/org/apache/webbeans/intercept/InterceptorResolutionService.java",
+                "sha": "fe51899bc0f175a467bb6d3c3a465afe456c983f",
+                "status": "modified"
+            },
+            {
+                "additions": 7,
+                "blob_url": "https://github.com/apache/openwebbeans/blob/5905c8bc4ac4541ee66147d15177c2d4d05456ef/webbeans-impl/src/test/java/org/apache/webbeans/test/producer/ProducerBean.java",
+                "changes": 7,
+                "contents_url": "https://api.github.com/repos/apache/openwebbeans/contents/webbeans-impl/src/test/java/org/apache/webbeans/test/producer/ProducerBean.java?ref=5905c8bc4ac4541ee66147d15177c2d4d05456ef",
+                "deletions": 0,
+                "filename": "webbeans-impl/src/test/java/org/apache/webbeans/test/producer/ProducerBean.java",
+                "patch": "@@ -20,6 +20,7 @@\n \n import javax.enterprise.inject.Produces;\n import javax.inject.Named;\n+import java.net.URI;\n \n public class ProducerBean {\n \n@@ -58,4 +59,10 @@ public String getName5() {\n     public boolean isName6() {\n         return true;\n     }\n+\n+    @Produces\n+    public URI createUri()\n+    {\n+        return URI.create(\"http://invalid.invalid\");\n+    }\n }",
+                "raw_url": "https://github.com/apache/openwebbeans/raw/5905c8bc4ac4541ee66147d15177c2d4d05456ef/webbeans-impl/src/test/java/org/apache/webbeans/test/producer/ProducerBean.java",
+                "sha": "6356d34c2bcfc447a5317fc33a19daf83a42a8cd",
+                "status": "modified"
+            }
+        ],
+        "message": "OWB-1213 fix NPE when scanning for self-intercepting bean \n\nDid happen on producermethods which return a class with a private ct.\n\n\ngit-svn-id: https://svn.apache.org/repos/asf/openwebbeans/trunk@1805243 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/openwebbeans/commit/a5a6a30e103a46174536f07757fbbfc37080ba4e",
+        "repo": "openwebbeans",
+        "unit_tests": [
+            "InterceptorResolutionServiceTest.java"
+        ]
+    },
+    "openwebbeans_592af6f": {
+        "bug_id": "openwebbeans_592af6f",
+        "commit": "https://github.com/apache/openwebbeans/commit/592af6fca8e6d707942b38de993ceb684c2c5d1e",
+        "file": [
+            {
+                "additions": 7,
+                "blob_url": "https://github.com/apache/openwebbeans/blob/592af6fca8e6d707942b38de993ceb684c2c5d1e/webbeans-impl/src/main/java/org/apache/webbeans/util/WebBeansUtil.java",
+                "changes": 15,
+                "contents_url": "https://api.github.com/repos/apache/openwebbeans/contents/webbeans-impl/src/main/java/org/apache/webbeans/util/WebBeansUtil.java?ref=592af6fca8e6d707942b38de993ceb684c2c5d1e",
+                "deletions": 8,
+                "filename": "webbeans-impl/src/main/java/org/apache/webbeans/util/WebBeansUtil.java",
+                "patch": "@@ -2640,16 +2640,15 @@ public static Object getObjectFromCreationalContext(Bean<?> bean,CreationalConte\n             throw new IllegalArgumentException(\"Creational context is null\");\n         }\n         \n-        if(cc.getBean().equals(bean))\n+        final Contextual<?> existing = cc.getBean();\n+        if(existing != null && existing.equals(bean))\n         {\n-            return cc.getProxyInstance();   \n-        }            \n-        else\n+            return cc.getProxyInstance();\n+        }\n+\n+        if(cc.getOwnerCreational() != null)\n         {\n-            if(cc.getOwnerCreational() != null)\n-            {\n-                return getObjectFromCreationalContext(bean, cc.getOwnerCreational());   \n-            }\n+            return getObjectFromCreationalContext(bean, cc.getOwnerCreational());\n         }\n         \n         return null;",
+                "raw_url": "https://github.com/apache/openwebbeans/raw/592af6fca8e6d707942b38de993ceb684c2c5d1e/webbeans-impl/src/main/java/org/apache/webbeans/util/WebBeansUtil.java",
+                "sha": "67600401943b1a48c0ca75b67d0a1999358fb371",
+                "status": "modified"
+            },
+            {
+                "additions": 26,
+                "blob_url": "https://github.com/apache/openwebbeans/blob/592af6fca8e6d707942b38de993ceb684c2c5d1e/webbeans-impl/src/test/java/org/apache/webbeans/newtests/injection/noncontextual/ContextualBean.java",
+                "changes": 26,
+                "contents_url": "https://api.github.com/repos/apache/openwebbeans/contents/webbeans-impl/src/test/java/org/apache/webbeans/newtests/injection/noncontextual/ContextualBean.java?ref=592af6fca8e6d707942b38de993ceb684c2c5d1e",
+                "deletions": 0,
+                "filename": "webbeans-impl/src/test/java/org/apache/webbeans/newtests/injection/noncontextual/ContextualBean.java",
+                "patch": "@@ -0,0 +1,26 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one\n+ * or more contributor license agreements.  See the NOTICE file\n+ * distributed with this work for additional information\n+ * regarding copyright ownership.  The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance\n+ * with the License.  You may obtain a copy of the License at\n+ *\n+ * http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing,\n+ * software distributed under the License is distributed on an\n+ * \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+ * KIND, either express or implied.  See the License for the\n+ * specific language governing permissions and limitations\n+ * under the License.\n+ */\n+package org.apache.webbeans.newtests.injection.noncontextual;\n+\n+import javax.enterprise.context.ApplicationScoped;\n+\n+@ApplicationScoped\n+public class ContextualBean\n+{\n+}",
+                "raw_url": "https://github.com/apache/openwebbeans/raw/592af6fca8e6d707942b38de993ceb684c2c5d1e/webbeans-impl/src/test/java/org/apache/webbeans/newtests/injection/noncontextual/ContextualBean.java",
+                "sha": "7b1ceb47e6077943bb18ea23ecfef56c359ac5f1",
+                "status": "added"
+            },
+            {
+                "additions": 67,
+                "blob_url": "https://github.com/apache/openwebbeans/blob/592af6fca8e6d707942b38de993ceb684c2c5d1e/webbeans-impl/src/test/java/org/apache/webbeans/newtests/injection/noncontextual/InjectNonContextualTest.java",
+                "changes": 67,
+                "contents_url": "https://api.github.com/repos/apache/openwebbeans/contents/webbeans-impl/src/test/java/org/apache/webbeans/newtests/injection/noncontextual/InjectNonContextualTest.java?ref=592af6fca8e6d707942b38de993ceb684c2c5d1e",
+                "deletions": 0,
+                "filename": "webbeans-impl/src/test/java/org/apache/webbeans/newtests/injection/noncontextual/InjectNonContextualTest.java",
+                "patch": "@@ -0,0 +1,67 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one\n+ * or more contributor license agreements.  See the NOTICE file\n+ * distributed with this work for additional information\n+ * regarding copyright ownership.  The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance\n+ * with the License.  You may obtain a copy of the License at\n+ *\n+ * http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing,\n+ * software distributed under the License is distributed on an\n+ * \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+ * KIND, either express or implied.  See the License for the\n+ * specific language governing permissions and limitations\n+ * under the License.\n+ */\n+package org.apache.webbeans.newtests.injection.noncontextual;\n+\n+import junit.framework.Assert;\n+import org.apache.webbeans.container.BeanManagerImpl;\n+import org.apache.webbeans.newtests.AbstractUnitTest;\n+import org.junit.Test;\n+\n+import javax.enterprise.context.spi.CreationalContext;\n+import javax.enterprise.inject.spi.AnnotatedType;\n+import javax.enterprise.inject.spi.BeanManager;\n+import javax.enterprise.inject.spi.InjectionTarget;\n+import java.net.URL;\n+import java.util.ArrayList;\n+import java.util.Collection;\n+\n+public class InjectNonContextualTest extends AbstractUnitTest\n+{\n+    @SuppressWarnings(\"unchecked\")\n+    public <T> void inject(T instance)\n+    {\n+        BeanManager mgr = BeanManagerImpl.getManager();\n+        AnnotatedType<T> annotatedType = mgr.createAnnotatedType((Class<T>) instance.getClass());\n+        InjectionTarget<T> injectionTarget = mgr.createInjectionTarget(annotatedType);\n+        CreationalContext<T> context = mgr.createCreationalContext(null);\n+        injectionTarget.inject(instance, context);\n+    }\n+\n+\n+    @Test\n+    public void testInjectingNonContextualBean()\n+    {\n+        Collection<URL> beanXmls = new ArrayList<URL>();\n+\n+        Collection<Class<?>> beanClasses = new ArrayList<Class<?>>();\n+        beanClasses.add(ContextualBean.class);\n+        startContainer(beanClasses, beanXmls);\n+        try\n+        {\n+            final NonContextualBean bean = new NonContextualBean();\n+            inject(bean);\n+            Assert.assertNotNull(bean.getContextual());\n+        }\n+        finally\n+        {\n+            shutDownContainer();\n+        }\n+    }\n+\n+}",
+                "raw_url": "https://github.com/apache/openwebbeans/raw/592af6fca8e6d707942b38de993ceb684c2c5d1e/webbeans-impl/src/test/java/org/apache/webbeans/newtests/injection/noncontextual/InjectNonContextualTest.java",
+                "sha": "12a00c3329c726fba2dc2e2bdd69918c3e0bb8b7",
+                "status": "added"
+            },
+            {
+                "additions": 44,
+                "blob_url": "https://github.com/apache/openwebbeans/blob/592af6fca8e6d707942b38de993ceb684c2c5d1e/webbeans-impl/src/test/java/org/apache/webbeans/newtests/injection/noncontextual/NonContextualBean.java",
+                "changes": 44,
+                "contents_url": "https://api.github.com/repos/apache/openwebbeans/contents/webbeans-impl/src/test/java/org/apache/webbeans/newtests/injection/noncontextual/NonContextualBean.java?ref=592af6fca8e6d707942b38de993ceb684c2c5d1e",
+                "deletions": 0,
+                "filename": "webbeans-impl/src/test/java/org/apache/webbeans/newtests/injection/noncontextual/NonContextualBean.java",
+                "patch": "@@ -0,0 +1,44 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one\n+ * or more contributor license agreements.  See the NOTICE file\n+ * distributed with this work for additional information\n+ * regarding copyright ownership.  The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance\n+ * with the License.  You may obtain a copy of the License at\n+ *\n+ * http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing,\n+ * software distributed under the License is distributed on an\n+ * \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+ * KIND, either express or implied.  See the License for the\n+ * specific language governing permissions and limitations\n+ * under the License.\n+ */\n+package org.apache.webbeans.newtests.injection.noncontextual;\n+\n+import javax.inject.Inject;\n+\n+public class NonContextualBean\n+{\n+//**********************************************************************************************************************\n+// Fields\n+//**********************************************************************************************************************\n+\n+    @Inject private ContextualBean contextual;\n+\n+//**********************************************************************************************************************\n+// Getter/Setter Methods\n+//**********************************************************************************************************************\n+\n+    public ContextualBean getContextual()\n+    {\n+        return contextual;\n+    }\n+\n+    public void setContextual(ContextualBean contextual)\n+    {\n+        this.contextual = contextual;\n+    }\n+}",
+                "raw_url": "https://github.com/apache/openwebbeans/raw/592af6fca8e6d707942b38de993ceb684c2c5d1e/webbeans-impl/src/test/java/org/apache/webbeans/newtests/injection/noncontextual/NonContextualBean.java",
+                "sha": "499f0cb6c47949e708a78a0b4fe3464b15cd1eab",
+                "status": "added"
+            }
+        ],
+        "message": "OWB-339 Injecting Non-Contextual Beans Causes NPE in WebBeansUtil\n\nthanks to James Carman!\n\n\ngit-svn-id: https://svn.apache.org/repos/asf/openwebbeans/trunk@928358 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/openwebbeans/commit/d53f681bcec264b0547fad8462e5f6c8d60b66c9",
+        "repo": "openwebbeans",
+        "unit_tests": [
+            "WebBeansUtilTest.java"
+        ]
+    },
+    "openwebbeans_64338ed": {
+        "bug_id": "openwebbeans_64338ed",
+        "commit": "https://github.com/apache/openwebbeans/commit/64338ed836d29436bfc67f79f8611d4d0d92824c",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/openwebbeans/blob/64338ed836d29436bfc67f79f8611d4d0d92824c/webbeans-impl/src/main/java/org/apache/webbeans/container/BeanManagerImpl.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/openwebbeans/contents/webbeans-impl/src/main/java/org/apache/webbeans/container/BeanManagerImpl.java?ref=64338ed836d29436bfc67f79f8611d4d0d92824c",
+                "deletions": 1,
+                "filename": "webbeans-impl/src/main/java/org/apache/webbeans/container/BeanManagerImpl.java",
+                "patch": "@@ -1247,7 +1247,7 @@ public void addAdditionalScope(ExternalScope additionalScope)\n         final Collection<AnnotatedType<T>> types = new ArrayList<AnnotatedType<T>>(2);\n         types.add(annotatedElementFactory.getAnnotatedType(type));\n         final ConcurrentMap<String, AnnotatedType<?>> aTypes = additionalAnnotatedTypes.get(type);\n-        if (types != null)\n+        if (aTypes != null)\n         {\n             for (final AnnotatedType at : aTypes.values())\n             {",
+                "raw_url": "https://github.com/apache/openwebbeans/raw/64338ed836d29436bfc67f79f8611d4d0d92824c/webbeans-impl/src/main/java/org/apache/webbeans/container/BeanManagerImpl.java",
+                "sha": "6722b401210ccae3f7ffff4926027d40c7abc25f",
+                "status": "modified"
+            },
+            {
+                "additions": 10,
+                "blob_url": "https://github.com/apache/openwebbeans/blob/64338ed836d29436bfc67f79f8611d4d0d92824c/webbeans-impl/src/main/java/org/apache/webbeans/util/GenericsUtil.java",
+                "changes": 11,
+                "contents_url": "https://api.github.com/repos/apache/openwebbeans/contents/webbeans-impl/src/main/java/org/apache/webbeans/util/GenericsUtil.java?ref=64338ed836d29436bfc67f79f8611d4d0d92824c",
+                "deletions": 1,
+                "filename": "webbeans-impl/src/main/java/org/apache/webbeans/util/GenericsUtil.java",
+                "patch": "@@ -338,6 +338,11 @@ private static boolean isAssignableFrom(boolean isDelegate, WildcardType injecti\n     {\n         for (Type bounds: injectionPointType.getLowerBounds())\n         {\n+            if (!isAssignableFrom(isDelegate, beanType, bounds))\n+            {\n+                return false;\n+            }\n+            /*\n             Set<Type> beanTypeClosure = getTypeClosure(beanType);\n             boolean isAssignable = false;\n             for (Type beanSupertype: beanTypeClosure)\n@@ -352,14 +357,18 @@ private static boolean isAssignableFrom(boolean isDelegate, WildcardType injecti\n             { \n                 return false;\n             }\n+            */\n         }\n         for (Type bounds: injectionPointType.getUpperBounds())\n         {\n             Set<Type> beanTypeClosure = getTypeClosure(beanType);\n             boolean isAssignable = false;\n             for (Type beanSupertype: beanTypeClosure)\n             {\n-                if (isAssignableFrom(isDelegate, bounds, beanSupertype))\n+                if (isAssignableFrom(isDelegate, bounds, beanSupertype)\n+                    || (Class.class.isInstance(bounds)\n+                        && ParameterizedType.class.isInstance(beanSupertype)\n+                        && bounds == ParameterizedType.class.cast(beanSupertype).getRawType()))\n                 {\n                     isAssignable = true;\n                     break;",
+                "raw_url": "https://github.com/apache/openwebbeans/raw/64338ed836d29436bfc67f79f8611d4d0d92824c/webbeans-impl/src/main/java/org/apache/webbeans/util/GenericsUtil.java",
+                "sha": "7b663aa284e32164788487edd72e4d9a4d39e2dd",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/openwebbeans/blob/64338ed836d29436bfc67f79f8611d4d0d92824c/webbeans-tck/testng-dev.xml",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/openwebbeans/contents/webbeans-tck/testng-dev.xml?ref=64338ed836d29436bfc67f79f8611d4d0d92824c",
+                "deletions": 1,
+                "filename": "webbeans-tck/testng-dev.xml",
+                "patch": "@@ -18,7 +18,7 @@\n <suite name=\"JSR-346-TCK\" verbose=\"2\" configfailurepolicy=\"continue\">\n   <test name=\"JSR-346 TCK\">\n     <classes>\n-      <class name=\"org.jboss.cdi.tck.tests.event.observer.wildcardAndTypeVariable.ObserverMethodWithParametertizedTypeTest\" />\n+      <class name=\"org.jboss.cdi.tck.tests.event.resolve.typeWithParameters.CheckTypeParametersWhenResolvingObserversTest\" />\n       <!--\n       <class name=\"org.jboss.cdi.tck.tests.event.parameterized.ParameterizedEventTest\" />\n       <class name=\"org.jboss.cdi.tck.tests.event.fires.FireEventTest\" />",
+                "raw_url": "https://github.com/apache/openwebbeans/raw/64338ed836d29436bfc67f79f8611d4d0d92824c/webbeans-tck/testng-dev.xml",
+                "sha": "f69504237f01fc1fa11ce1595a424da8a55eb8c3",
+                "status": "modified"
+            }
+        ],
+        "message": "avoiding NPE + few more generics\n\ngit-svn-id: https://svn.apache.org/repos/asf/openwebbeans/trunk@1607310 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/openwebbeans/commit/711860eb9f22abd3113fc9767b4392be057b97e7",
+        "repo": "openwebbeans",
+        "unit_tests": [
+            "GenericsUtilTest.java"
+        ]
+    },
     "openwebbeans_a713f50": {
         "bug_id": "openwebbeans_a713f50",
         "commit": "https://github.com/apache/openwebbeans/commit/a713f50075004dc3d9a398811cc94c5f5501e8b1",

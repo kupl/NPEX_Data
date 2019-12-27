@@ -23,6 +23,102 @@
             "DbGeneratorTaskTest.java"
         ]
     },
+    "cayenne_65ebda9": {
+        "bug_id": "cayenne_65ebda9",
+        "commit": "https://github.com/apache/cayenne/commit/65ebda996b5dff7b9887a45fc1d5c5759192f8e3",
+        "file": [
+            {
+                "additions": 7,
+                "blob_url": "https://github.com/apache/cayenne/blob/65ebda996b5dff7b9887a45fc1d5c5759192f8e3/cayenne-server/src/main/java/org/apache/cayenne/reflect/LifecycleCallbackEventHandler.java",
+                "changes": 16,
+                "contents_url": "https://api.github.com/repos/apache/cayenne/contents/cayenne-server/src/main/java/org/apache/cayenne/reflect/LifecycleCallbackEventHandler.java?ref=65ebda996b5dff7b9887a45fc1d5c5759192f8e3",
+                "deletions": 9,
+                "filename": "cayenne-server/src/main/java/org/apache/cayenne/reflect/LifecycleCallbackEventHandler.java",
+                "patch": "@@ -20,7 +20,6 @@\n \n import org.apache.cayenne.Persistent;\n import org.apache.cayenne.map.EntityResolver;\n-import org.apache.cayenne.map.ObjEntity;\n \n import java.lang.reflect.Method;\n import java.util.ArrayList;\n@@ -111,21 +110,20 @@ void addListener(Class<?> entityClass, Object listener, Method method) {\n      * Registers a callback object to be invoked when a lifecycle event occurs.\n      */\n     private void addCallback(Class<?> entityClass, AbstractCallback callback) {\n-        Collection<AbstractCallback> entityListeners = listeners.get(entityClass\n-                .getName());\n-\n-        if (entityListeners == null) {\n-            entityListeners = new ArrayList<>(3);\n-            listeners.put(entityClass.getName(), entityListeners);\n-        }\n-\n+        Collection<AbstractCallback> entityListeners = listeners\n+                .computeIfAbsent(entityClass.getName(), k -> new ArrayList<>(3));\n         entityListeners.add(callback);\n     }\n \n     /**\n      * Invokes callbacks for a given entity object.\n      */\n     void performCallbacks(Persistent object) {\n+        if(object == null) {\n+            // this can happen if object resolved to null from some query with outer join\n+            // (e.g. in EJBQL or SQLTemplate)\n+            return;\n+        }\n \n         // default listeners are invoked first\n         if (!defaultListeners.isEmpty()) {",
+                "raw_url": "https://github.com/apache/cayenne/raw/65ebda996b5dff7b9887a45fc1d5c5759192f8e3/cayenne-server/src/main/java/org/apache/cayenne/reflect/LifecycleCallbackEventHandler.java",
+                "sha": "fd044a63408e74adb8a08578ceeaf5ecd6f50cdc",
+                "status": "modified"
+            },
+            {
+                "additions": 29,
+                "blob_url": "https://github.com/apache/cayenne/blob/65ebda996b5dff7b9887a45fc1d5c5759192f8e3/cayenne-server/src/test/java/org/apache/cayenne/query/EJBQLQueryIT.java",
+                "changes": 29,
+                "contents_url": "https://api.github.com/repos/apache/cayenne/contents/cayenne-server/src/test/java/org/apache/cayenne/query/EJBQLQueryIT.java?ref=65ebda996b5dff7b9887a45fc1d5c5759192f8e3",
+                "deletions": 0,
+                "filename": "cayenne-server/src/test/java/org/apache/cayenne/query/EJBQLQueryIT.java",
+                "patch": "@@ -28,6 +28,8 @@\n import org.apache.cayenne.exp.Expression;\n import org.apache.cayenne.map.EJBQLQueryDescriptor;\n import org.apache.cayenne.map.EntityResolver;\n+import org.apache.cayenne.map.LifecycleEvent;\n+import org.apache.cayenne.reflect.LifecycleCallbackRegistry;\n import org.apache.cayenne.test.jdbc.DBHelper;\n import org.apache.cayenne.test.jdbc.TableHelper;\n import org.apache.cayenne.testdo.testmap.Artist;\n@@ -645,4 +647,31 @@ public void testNullObjects() throws Exception {\n         }\n     }\n \n+    @Test\n+    public void testNullObjectsCallback() throws Exception {\n+        tArtist.insert(1, \"a1\");\n+        tArtist.insert(2, \"a2\");\n+        tArtist.insert(3, \"a3\");\n+\n+        tPainting.insert(1, 2, \"title1\");\n+        tPainting.insert(2, 1, \"title2\");\n+        tPainting.insert(3, 1, \"title3\");\n+\n+        // set callback to be called\n+        LifecycleCallbackRegistry registry = runtime\n+                .getDataDomain()\n+                .getEntityResolver()\n+                .getCallbackRegistry();\n+        registry.addCallback(LifecycleEvent.POST_LOAD, Painting.class, \"postAddCallback\");\n+\n+        // select Paintings, where one of it will be null\n+        EJBQLQuery queryFullProduct = new EJBQLQuery(\"select a.paintingArray+ from Artist a order by a.artistName\");\n+        List<Painting> result1 = context.performQuery(queryFullProduct);\n+        assertEquals(4, result1.size());\n+        assertNull(result1.get(3));\n+        for(int i=0; i<3; i++) {\n+            assertNotNull(result1.get(i));\n+            assertTrue(result1.get(i).isPostAdded());\n+        }\n+    }\n }",
+                "raw_url": "https://github.com/apache/cayenne/raw/65ebda996b5dff7b9887a45fc1d5c5759192f8e3/cayenne-server/src/test/java/org/apache/cayenne/query/EJBQLQueryIT.java",
+                "sha": "a760f3c91468540c20f9d78ea72556a3b54b1b45",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/cayenne/blob/65ebda996b5dff7b9887a45fc1d5c5759192f8e3/docs/doc/src/main/resources/RELEASE-NOTES.txt",
+                "changes": 1,
+                "contents_url": "https://api.github.com/repos/apache/cayenne/contents/docs/doc/src/main/resources/RELEASE-NOTES.txt?ref=65ebda996b5dff7b9887a45fc1d5c5759192f8e3",
+                "deletions": 0,
+                "filename": "docs/doc/src/main/resources/RELEASE-NOTES.txt",
+                "patch": "@@ -38,6 +38,7 @@ CAY-2353 Broken paginated column select with only one entity in the result\n CAY-2354 DbGenerator.runGenerator must commit its connection\n CAY-2356 EJBQL: Incorrect COUNT() on outer joined table\n CAY-2357 Generic select queries silently convert result to nulls if no PK column found\n+CAY-2358 NPE when callbacks invoked on null objects\n \n ----------------------------------\n Release: 4.0.B1",
+                "raw_url": "https://github.com/apache/cayenne/raw/65ebda996b5dff7b9887a45fc1d5c5759192f8e3/docs/doc/src/main/resources/RELEASE-NOTES.txt",
+                "sha": "d80050a6238b528a68414242fa345e9cd20142fb",
+                "status": "modified"
+            }
+        ],
+        "message": "CAY-2358 NPE when callbacks invoked on null objects",
+        "parent": "https://github.com/apache/cayenne/commit/8452d41def3796502d297456043d97822665e3b3",
+        "repo": "cayenne",
+        "unit_tests": [
+            "LifecycleCallbackEventHandlerTest.java"
+        ]
+    },
+    "cayenne_872f231": {
+        "bug_id": "cayenne_872f231",
+        "commit": "https://github.com/apache/cayenne/commit/872f231a1984033771867628b1e4f660dfec2b28",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/cayenne/blob/872f231a1984033771867628b1e4f660dfec2b28/RELEASE-NOTES.txt",
+                "changes": 1,
+                "contents_url": "https://api.github.com/repos/apache/cayenne/contents/RELEASE-NOTES.txt?ref=872f231a1984033771867628b1e4f660dfec2b28",
+                "deletions": 0,
+                "filename": "RELEASE-NOTES.txt",
+                "patch": "@@ -59,6 +59,7 @@ CAY-2425 Modeler: Migrate DB Direction field is locked if no option was selected\n CAY-2427 Modeler: Undo throws exception\n CAY-2429 Generate classes: Invalid template type: EMBEDDABLE_SINGLE_CLASS\n CAY-2430 Modeler: Redo throws NPE\n+CAY-2436 NPE in CayenneRuntimeException constructor\n \n ----------------------------------\n Release: 4.1.M1",
+                "raw_url": "https://github.com/apache/cayenne/raw/872f231a1984033771867628b1e4f660dfec2b28/RELEASE-NOTES.txt",
+                "sha": "3806615e348c704318fc4fc7b2500ee5c4ddfae6",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/cayenne/blob/872f231a1984033771867628b1e4f660dfec2b28/cayenne-server/src/main/java/org/apache/cayenne/CayenneRuntimeException.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/cayenne/contents/cayenne-server/src/main/java/org/apache/cayenne/CayenneRuntimeException.java?ref=872f231a1984033771867628b1e4f660dfec2b28",
+                "deletions": 1,
+                "filename": "cayenne-server/src/main/java/org/apache/cayenne/CayenneRuntimeException.java",
+                "patch": "@@ -37,7 +37,7 @@ public CayenneRuntimeException() {\n      * conventions.\n      */\n     public CayenneRuntimeException(String messageFormat, Object... messageArgs) {\n-        super(String.format(messageFormat, messageArgs));\n+        super(messageFormat == null ? null : String.format(messageFormat, messageArgs));\n     }\n \n     /**",
+                "raw_url": "https://github.com/apache/cayenne/raw/872f231a1984033771867628b1e4f660dfec2b28/cayenne-server/src/main/java/org/apache/cayenne/CayenneRuntimeException.java",
+                "sha": "135b50ce2b9e6495186b1408028dca2638be2a79",
+                "status": "modified"
+            },
+            {
+                "additions": 23,
+                "blob_url": "https://github.com/apache/cayenne/blob/872f231a1984033771867628b1e4f660dfec2b28/cayenne-server/src/test/java/org/apache/cayenne/CayenneRuntimeExceptionTest.java",
+                "changes": 33,
+                "contents_url": "https://api.github.com/repos/apache/cayenne/contents/cayenne-server/src/test/java/org/apache/cayenne/CayenneRuntimeExceptionTest.java?ref=872f231a1984033771867628b1e4f660dfec2b28",
+                "deletions": 10,
+                "filename": "cayenne-server/src/test/java/org/apache/cayenne/CayenneRuntimeExceptionTest.java",
+                "patch": "@@ -29,26 +29,24 @@\n import static org.junit.Assert.assertSame;\n import static org.junit.Assert.assertTrue;\n \n-/**\n- */\n public class CayenneRuntimeExceptionTest {\n \n     @Test\n-    public void testConstructor1() throws Exception {\n+    public void testConstructor1() {\n         CayenneRuntimeException ex = new CayenneRuntimeException();\n         assertNull(ex.getCause());\n         assertTrue(ex.getMessage().startsWith(CayenneException.getExceptionLabel()));\n     }\n \n     @Test\n-    public void testConstructor2() throws Exception {\n+    public void testConstructor2() {\n         CayenneRuntimeException ex = new CayenneRuntimeException(\"abc\");\n         assertNull(ex.getCause());\n         assertEquals(CayenneException.getExceptionLabel() + \"abc\", ex.getMessage());\n     }\n \n     @Test\n-    public void testConstructor3() throws Exception {\n+    public void testConstructor3() {\n         Throwable cause = new Throwable();\n         CayenneRuntimeException ex = new CayenneRuntimeException(cause);\n         assertSame(cause, ex.getCause());\n@@ -58,15 +56,30 @@ public void testConstructor3() throws Exception {\n     }\n \n     @Test\n-    public void testConstructor4() throws Exception {\n+    public void testConstructor4() {\n         Throwable cause = new Throwable();\n         CayenneRuntimeException ex = new CayenneRuntimeException(\"abc\", cause);\n         assertSame(cause, ex.getCause());\n         assertEquals(CayenneException.getExceptionLabel() + \"abc\", ex.getMessage());\n     }\n \n     @Test\n-    public void testThrow1() throws Exception {\n+    public void testConstructorNullMessage() {\n+        Throwable cause = new Throwable();\n+\n+        CayenneRuntimeException ex = new CayenneRuntimeException(null, cause);\n+        assertSame(cause, ex.getCause());\n+        assertEquals(CayenneException.getExceptionLabel() + \"(no message)\", ex.getMessage());\n+        assertNull(ex.getUnlabeledMessage());\n+\n+        CayenneRuntimeException ex2 = new CayenneRuntimeException((String)null);\n+        assertNull(ex2.getCause());\n+        assertEquals(CayenneException.getExceptionLabel() + \"(no message)\", ex2.getMessage());\n+        assertNull(ex2.getUnlabeledMessage());\n+    }\n+\n+    @Test\n+    public void testThrow1() {\n         try {\n             throw new CayenneRuntimeException();\n         }\n@@ -77,7 +90,7 @@ public void testThrow1() throws Exception {\n     }\n \n     @Test\n-    public void testThrow2() throws Exception {\n+    public void testThrow2() {\n         try {\n             try {\n                 throw new Throwable(\"Test Cause\");\n@@ -93,13 +106,13 @@ public void testThrow2() throws Exception {\n     }\n \n     @Test\n-    public void testMessageFormatting1() throws Exception {\n+    public void testMessageFormatting1() {\n         CayenneRuntimeException ex = new CayenneRuntimeException(\"x%sx%sx\", \"a\", \"b\");\n         assertEquals(\"xaxbx\", ex.getUnlabeledMessage());\n     }\n \n     @Test\n-    public void testMessageFormatting2() throws Exception {\n+    public void testMessageFormatting2() {\n         Throwable cause = new Throwable();\n         CayenneRuntimeException ex = new CayenneRuntimeException(\"x%sx%sx\", cause, \"a\", \"b\");\n         assertEquals(\"xaxbx\", ex.getUnlabeledMessage());",
+                "raw_url": "https://github.com/apache/cayenne/raw/872f231a1984033771867628b1e4f660dfec2b28/cayenne-server/src/test/java/org/apache/cayenne/CayenneRuntimeExceptionTest.java",
+                "sha": "0e60ecfc17b09137bfeadee488a83510a60b564e",
+                "status": "modified"
+            }
+        ],
+        "message": "CAY-2436 NPE in CayenneRuntimeException constructor",
+        "parent": "https://github.com/apache/cayenne/commit/57361b635f58afe0f06c332f8f57449dd2963836",
+        "repo": "cayenne",
+        "unit_tests": [
+            "CayenneRuntimeExceptionTest.java"
+        ]
+    },
     "cayenne_876f16d": {
         "bug_id": "cayenne_876f16d",
         "commit": "https://github.com/apache/cayenne/commit/876f16d40cfaa04fad57ac42b26d0ecee0dacaa8",

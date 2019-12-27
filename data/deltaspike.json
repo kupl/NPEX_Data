@@ -47,6 +47,42 @@
             "AbstractContextTest.java"
         ]
     },
+    "deltaspike_49c9a9e": {
+        "bug_id": "deltaspike_49c9a9e",
+        "commit": "https://github.com/apache/deltaspike/commit/49c9a9eafd2aa69a0264a69eea388ad32fdaa803",
+        "file": [
+            {
+                "additions": 29,
+                "blob_url": "https://github.com/apache/deltaspike/blob/49c9a9eafd2aa69a0264a69eea388ad32fdaa803/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/util/proxy/AsmProxyClassGenerator.java",
+                "changes": 31,
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/util/proxy/AsmProxyClassGenerator.java?ref=49c9a9eafd2aa69a0264a69eea388ad32fdaa803",
+                "deletions": 2,
+                "filename": "deltaspike/core/api/src/main/java/org/apache/deltaspike/core/util/proxy/AsmProxyClassGenerator.java",
+                "patch": "@@ -111,7 +111,8 @@ private AsmProxyClassGenerator()\n         }\n \n         defineInvocationHandlerField(cw, invocationHandlerType);\n-        defineConstructor(cw, proxyType, superType);\n+        defineDefaultConstructor(cw, proxyType, superType);\n+        defineDelegateInvocationHandlerConstructor(cw, proxyType, superType, invocationHandlerType);\n         defineDeltaSpikeProxyMethods(cw, proxyType, invocationHandlerType);\n \n         for (java.lang.reflect.Method method : delegateMethods)\n@@ -136,7 +137,7 @@ private static void defineInvocationHandlerField(ClassWriter cw, Type invocation\n                 invocationHandlerType.getDescriptor(), null, null).visitEnd();\n     }\n \n-    private static void defineConstructor(ClassWriter cw, Type proxyType, Type superType)\n+    private static void defineDefaultConstructor(ClassWriter cw, Type proxyType, Type superType)\n     {\n         GeneratorAdapter mg = new GeneratorAdapter(Opcodes.ACC_PUBLIC,\n                 new Method(\"<init>\", Type.VOID_TYPE, new Type[]{ }),\n@@ -154,6 +155,32 @@ private static void defineConstructor(ClassWriter cw, Type proxyType, Type super\n \n         mg.visitEnd();\n     }\n+    \n+    private static void defineDelegateInvocationHandlerConstructor(ClassWriter cw, Type proxyType, Type superType,\n+            Type invocationHandlerType)\n+    {\n+        GeneratorAdapter mg = new GeneratorAdapter(Opcodes.ACC_PUBLIC,\n+                new Method(\"<init>\", Type.VOID_TYPE, new Type[] { invocationHandlerType }),\n+                null,\n+                null,\n+                cw);\n+\n+        mg.visitCode();\n+\n+        // invoke super constructor\n+        mg.loadThis();\n+        mg.invokeConstructor(superType, Method.getMethod(\"void <init> ()\"));\n+        \n+        // set invocation handler\n+        mg.loadThis();\n+        mg.loadArg(0);\n+        mg.putField(proxyType, FIELDNAME_DELEGATE_INVOCATION_HANDLER, invocationHandlerType);\n+        \n+        mg.returnValue();\n+        mg.endMethod();\n+\n+        mg.visitEnd();\n+    }\n \n     private static void defineDeltaSpikeProxyMethods(ClassWriter cw, Type proxyType, Type invocationHandlerType)\n     {",
+                "raw_url": "https://github.com/apache/deltaspike/raw/49c9a9eafd2aa69a0264a69eea388ad32fdaa803/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/util/proxy/AsmProxyClassGenerator.java",
+                "sha": "e1f839479784c4dc7c3008a6301d83479616278b",
+                "status": "modified"
+            },
+            {
+                "additions": 9,
+                "blob_url": "https://github.com/apache/deltaspike/blob/49c9a9eafd2aa69a0264a69eea388ad32fdaa803/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/util/proxy/DeltaSpikeProxyContextualLifecycle.java",
+                "changes": 12,
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/util/proxy/DeltaSpikeProxyContextualLifecycle.java?ref=49c9a9eafd2aa69a0264a69eea388ad32fdaa803",
+                "deletions": 3,
+                "filename": "deltaspike/core/api/src/main/java/org/apache/deltaspike/core/util/proxy/DeltaSpikeProxyContextualLifecycle.java",
+                "patch": "@@ -18,6 +18,7 @@\n  */\n package org.apache.deltaspike.core.util.proxy;\n \n+import java.lang.reflect.Constructor;\n import java.lang.reflect.InvocationHandler;\n import java.util.Set;\n import javax.enterprise.context.Dependent;\n@@ -60,12 +61,17 @@ public T create(Bean bean, CreationalContext creationalContext)\n     {\n         try\n         {\n-            T instance = proxyClass.newInstance();\n+            T instance;\n \n-            if (delegateInvocationHandlerClass != null)\n+            if (delegateInvocationHandlerClass == null)\n+            {\n+                instance = proxyClass.newInstance();\n+            }\n+            else\n             {\n                 H delegateInvocationHandler = instantiateDelegateInvocationHandler();\n-                ((DeltaSpikeProxy) instance).setDelegateInvocationHandler(delegateInvocationHandler);\n+                Constructor<T> constructor = proxyClass.getConstructor(delegateInvocationHandlerClass);\n+                instance = constructor.newInstance(delegateInvocationHandler);\n             }\n \n             if (this.injectionTarget != null)",
+                "raw_url": "https://github.com/apache/deltaspike/raw/49c9a9eafd2aa69a0264a69eea388ad32fdaa803/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/util/proxy/DeltaSpikeProxyContextualLifecycle.java",
+                "sha": "a9fb26d3393251af769eb8d9b8343b382bf7776d",
+                "status": "modified"
+            }
+        ],
+        "message": "DELTASPIKE-863 NPE when invoking proxy for custom jsf converter",
+        "parent": "https://github.com/apache/deltaspike/commit/4edbca0cabfb017460262a0ccd529597aa98a017",
+        "repo": "deltaspike",
+        "unit_tests": [
+            "AsmProxyClassGeneratorTest.java"
+        ]
+    },
     "deltaspike_709fdb7": {
         "bug_id": "deltaspike_709fdb7",
         "commit": "https://github.com/apache/deltaspike/commit/709fdb7cd7fc20abd151b1a92a7c9021553e5924",
@@ -69,6 +105,54 @@
         "repo": "deltaspike",
         "unit_tests": [
             "BeanManagerProviderTest.java"
+        ]
+    },
+    "deltaspike_e60776c": {
+        "bug_id": "deltaspike_e60776c",
+        "commit": "https://github.com/apache/deltaspike/commit/e60776cc76c12e10b214db5950fcbf0d80f883e3",
+        "file": [
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/deltaspike/blob/e60776cc76c12e10b214db5950fcbf0d80f883e3/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/api/config/ConfigResolver.java",
+                "changes": 5,
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/api/config/ConfigResolver.java?ref=e60776cc76c12e10b214db5950fcbf0d80f883e3",
+                "deletions": 2,
+                "filename": "deltaspike/core/api/src/main/java/org/apache/deltaspike/core/api/config/ConfigResolver.java",
+                "patch": "@@ -900,15 +900,16 @@ public T getValue()\n \n             value = fallbackToDefaultIfEmpty(keyResolved, value, defaultValue);\n \n-            if (logChanges && (value != null && lastValue == null || !value.equals(lastValue)) )\n+            if (logChanges && (value != null && !value.equals(lastValue) || (value == null && lastValue != null)) )\n             {\n                 LOG.log(Level.INFO, \"New value {0} for key {1}.\",\n                     new Object[]{filterConfigValueForLog(keyOriginal, valueStr), keyOriginal});\n             }\n \n+            lastValue = value;\n+\n             if (cacheTimeMs > 0)\n             {\n-                lastValue = value;\n                 reloadAfter = now + cacheTimeMs;\n             }\n ",
+                "raw_url": "https://github.com/apache/deltaspike/raw/e60776cc76c12e10b214db5950fcbf0d80f883e3/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/api/config/ConfigResolver.java",
+                "sha": "a2b8ed6ae8a8ff9055d29b9a9bd055e93380fe99",
+                "status": "modified"
+            },
+            {
+                "additions": 41,
+                "blob_url": "https://github.com/apache/deltaspike/blob/e60776cc76c12e10b214db5950fcbf0d80f883e3/deltaspike/core/api/src/test/java/org/apache/deltaspike/test/api/config/ConfigResolverTest.java",
+                "changes": 42,
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/core/api/src/test/java/org/apache/deltaspike/test/api/config/ConfigResolverTest.java?ref=e60776cc76c12e10b214db5950fcbf0d80f883e3",
+                "deletions": 1,
+                "filename": "deltaspike/core/api/src/test/java/org/apache/deltaspike/test/api/config/ConfigResolverTest.java",
+                "patch": "@@ -21,6 +21,7 @@\n import org.apache.deltaspike.core.api.config.ConfigResolver;\n import org.apache.deltaspike.core.api.projectstage.ProjectStage;\n import org.apache.deltaspike.core.spi.config.ConfigFilter;\n+import org.apache.deltaspike.core.spi.config.ConfigSource;\n import org.apache.deltaspike.core.util.ProjectStageProducer;\n import org.junit.Assert;\n import org.junit.Before;\n@@ -160,8 +161,8 @@ public void testConfigVariableNotExisting()\n             String url = ConfigResolver.getPropertyValue(\"deltaspike.test.nonexisting.variable\", true);\n             Assert.assertEquals(\"${does.not.exist}/someservice/myendpoint\", url);\n         }\n-\n     }\n+\n     @Test\n     public void testConfigVariableRecursiveDeclaration()\n     {\n@@ -173,6 +174,44 @@ public void testConfigVariableRecursiveDeclaration()\n         Assert.assertEquals(\"pre-crazy-post/ohgosh/crazy\", tr.getValue());\n     }\n \n+    @Test\n+    public void testTypedResolver_NonExistingValue()\n+    {\n+        final String key = \"non.existing.key\";\n+\n+        ConfigResolver.TypedResolver<String> resolver = ConfigResolver.resolve(key)\n+            .logChanges(true);\n+\n+        Assert.assertNull(resolver.getValue());\n+\n+        setTestConfigSourceValue(key, \"somevalue\");\n+        Assert.assertEquals(\"somevalue\", resolver.getValue());\n+\n+        setTestConfigSourceValue(key, null);\n+        Assert.assertNull(resolver.getValue());\n+    }\n+\n+    private void setTestConfigSourceValue(String key, String value)\n+    {\n+        ConfigSource[] configSources = ConfigResolver.getConfigSources();\n+        for (ConfigSource configSource : configSources)\n+        {\n+            if (configSource instanceof TestConfigSource)\n+            {\n+                if (value == null)\n+                {\n+                    configSource.getProperties().remove(key);\n+                }\n+                else\n+                {\n+                    configSource.getProperties().put(key, value);\n+                }\n+\n+                break;\n+            }\n+        }\n+    }\n+\n     public static class TestConfigFilter implements ConfigFilter\n     {\n         @Override\n@@ -195,4 +234,5 @@ public String filterValueForLog(String key, String value)\n             return value;\n         }\n     }\n+\n }",
+                "raw_url": "https://github.com/apache/deltaspike/raw/e60776cc76c12e10b214db5950fcbf0d80f883e3/deltaspike/core/api/src/test/java/org/apache/deltaspike/test/api/config/ConfigResolverTest.java",
+                "sha": "6afdce763ca1ba2d1be9f4f795771f707f89cc54",
+                "status": "modified"
+            },
+            {
+                "additions": 0,
+                "blob_url": "https://github.com/apache/deltaspike/blob/e60776cc76c12e10b214db5950fcbf0d80f883e3/deltaspike/core/api/src/test/resources/META-INF/services/org.apache.deltaspike.core.spi.config.ConfigSource",
+                "changes": 57,
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/core/api/src/test/resources/META-INF/services/org.apache.deltaspike.core.spi.config.ConfigSource?ref=e60776cc76c12e10b214db5950fcbf0d80f883e3",
+                "deletions": 57,
+                "filename": "deltaspike/core/api/src/test/resources/META-INF/services/org.apache.deltaspike.core.spi.config.ConfigSource",
+                "patch": "@@ -1,60 +1,3 @@\n-#\n-# Licensed to the Apache Software Foundation (ASF) under one\n-# or more contributor license agreements. See the NOTICE file\n-# distributed with this work for additional information\n-# regarding copyright ownership. The ASF licenses this file\n-# to you under the Apache License, Version 2.0 (the\n-# \"License\"); you may not use this file except in compliance\n-# with the License. You may obtain a copy of the License at\n-#\n-# http://www.apache.org/licenses/LICENSE-2.0\n-#\n-# Unless required by applicable law or agreed to in writing,\n-# software distributed under the License is distributed on an\n-# \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n-# KIND, either express or implied. See the License for the\n-# specific language governing permissions and limitations\n-# under the License.\n-#\n-\n-#\n-# Licensed to the Apache Software Foundation (ASF) under one\n-# or more contributor license agreements. See the NOTICE file\n-# distributed with this work for additional information\n-# regarding copyright ownership. The ASF licenses this file\n-# to you under the Apache License, Version 2.0 (the\n-# \"License\"); you may not use this file except in compliance\n-# with the License. You may obtain a copy of the License at\n-#\n-# http://www.apache.org/licenses/LICENSE-2.0\n-#\n-# Unless required by applicable law or agreed to in writing,\n-# software distributed under the License is distributed on an\n-# \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n-# KIND, either express or implied.  See the License for the\n-# specific language governing permissions and limitations\n-# under the License.\n-#\n-\n-#\n-# Licensed to the Apache Software Foundation (ASF) under one\n-# or more contributor license agreements.  See the NOTICE file\n-# distributed with this work for additional information\n-# regarding copyright ownership.  The ASF licenses this file\n-# to you under the Apache License, Version 2.0 (the\n-# \"License\"); you may not use this file except in compliance\n-# with the License.  You may obtain a copy of the License at\n-#\n-# http://www.apache.org/licenses/LICENSE-2.0\n-#\n-# Unless required by applicable law or agreed to in writing,\n-# software distributed under the License is distributed on an\n-# \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n-# KIND, either express or implied.  See the License for the\n-# specific language governing permissions and limitations\n-# under the License.\n-#\n-\n #####################################################################################\n # Licensed to the Apache Software Foundation (ASF) under one\n # or more contributor license agreements. See the NOTICE file",
+                "raw_url": "https://github.com/apache/deltaspike/raw/e60776cc76c12e10b214db5950fcbf0d80f883e3/deltaspike/core/api/src/test/resources/META-INF/services/org.apache.deltaspike.core.spi.config.ConfigSource",
+                "sha": "84d58751f5921ee5699a33a4799a996701b348b8",
+                "status": "modified"
+            }
+        ],
+        "message": "DELTASPIKE-1139 also fix a NPE if the configured value is not set and logValues is enabled",
+        "parent": "https://github.com/apache/deltaspike/commit/07f5199529a0e2cdb6dfbda20e4b16f060378b84",
+        "repo": "deltaspike",
+        "unit_tests": [
+            "ConfigResolverTest.java"
         ]
     }
 }

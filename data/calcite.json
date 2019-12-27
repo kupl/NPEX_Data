@@ -23,6 +23,54 @@
             "FrameworksTest.java"
         ]
     },
+    "calcite_188c802": {
+        "bug_id": "calcite_188c802",
+        "commit": "https://github.com/apache/calcite/commit/188c8020d4e68c0a3180265b07949aeb8830ff1b",
+        "file": [
+            {
+                "additions": 16,
+                "blob_url": "https://github.com/apache/calcite/blob/188c8020d4e68c0a3180265b07949aeb8830ff1b/core/src/main/java/org/apache/calcite/sql2rel/SqlToRelConverter.java",
+                "changes": 16,
+                "contents_url": "https://api.github.com/repos/apache/calcite/contents/core/src/main/java/org/apache/calcite/sql2rel/SqlToRelConverter.java?ref=188c8020d4e68c0a3180265b07949aeb8830ff1b",
+                "deletions": 0,
+                "filename": "core/src/main/java/org/apache/calcite/sql2rel/SqlToRelConverter.java",
+                "patch": "@@ -2693,6 +2693,10 @@ protected final void createAggImpl(\n     replaceSubQueries(bb, aggregateFinder.list,\n         RelOptUtil.Logic.TRUE_FALSE_UNKNOWN);\n \n+    // also replace sub-queries inside filters in the aggregates\n+    replaceSubQueries(bb, aggregateFinder.filterList,\n+        RelOptUtil.Logic.TRUE_FALSE_UNKNOWN);\n+\n     // If group-by clause is missing, pretend that it has zero elements.\n     if (groupList == null) {\n       groupList = SqlNodeList.EMPTY;\n@@ -5214,12 +5218,24 @@ private SubQuery(SqlNode node, RelOptUtil.Logic logic) {\n    */\n   private static class AggregateFinder extends SqlBasicVisitor<Void> {\n     final SqlNodeList list = new SqlNodeList(SqlParserPos.ZERO);\n+    final SqlNodeList filterList = new SqlNodeList(SqlParserPos.ZERO);\n \n     @Override public Void visit(SqlCall call) {\n       // ignore window aggregates and ranking functions (associated with OVER operator)\n       if (call.getOperator().getKind() == SqlKind.OVER) {\n         return null;\n       }\n+\n+      if (call.getOperator().getKind() == SqlKind.FILTER) {\n+        // the WHERE in a FILTER must be tracked too so we can call replaceSubQueries on it.\n+        // see https://issues.apache.org/jira/browse/CALCITE-1910\n+        final SqlNode aggCall = call.getOperandList().get(0);\n+        final SqlNode whereCall = call.getOperandList().get(1);\n+        list.add(aggCall);\n+        filterList.add(whereCall);\n+        return null;\n+      }\n+\n       if (call.getOperator().isAggregator()) {\n         list.add(call);\n         return null;",
+                "raw_url": "https://github.com/apache/calcite/raw/188c8020d4e68c0a3180265b07949aeb8830ff1b/core/src/main/java/org/apache/calcite/sql2rel/SqlToRelConverter.java",
+                "sha": "752743b1fdca265450fd5efb591e0c9b08224834",
+                "status": "modified"
+            },
+            {
+                "additions": 8,
+                "blob_url": "https://github.com/apache/calcite/blob/188c8020d4e68c0a3180265b07949aeb8830ff1b/core/src/test/java/org/apache/calcite/test/SqlToRelConverterTest.java",
+                "changes": 8,
+                "contents_url": "https://api.github.com/repos/apache/calcite/contents/core/src/test/java/org/apache/calcite/test/SqlToRelConverterTest.java?ref=188c8020d4e68c0a3180265b07949aeb8830ff1b",
+                "deletions": 0,
+                "filename": "core/src/test/java/org/apache/calcite/test/SqlToRelConverterTest.java",
+                "patch": "@@ -469,6 +469,14 @@ protected final void check(\n     sql(sql).ok();\n   }\n \n+  @Test public void testAggFilterWithIn() {\n+    final String sql = \"select\\n\"\n+        + \"  deptno, sum(sal * 2) filter (where empno not in (1, 2)), count(*)\\n\"\n+        + \"from emp\\n\"\n+        + \"group by deptno\";\n+    sql(sql).ok();\n+  }\n+\n   @Test public void testFakeStar() {\n     sql(\"SELECT * FROM (VALUES (0, 0)) AS T(A, \\\"*\\\")\").ok();\n   }",
+                "raw_url": "https://github.com/apache/calcite/raw/188c8020d4e68c0a3180265b07949aeb8830ff1b/core/src/test/java/org/apache/calcite/test/SqlToRelConverterTest.java",
+                "sha": "f0276f400f86e7a29d35f336793eef27fc2f8682",
+                "status": "modified"
+            },
+            {
+                "additions": 15,
+                "blob_url": "https://github.com/apache/calcite/blob/188c8020d4e68c0a3180265b07949aeb8830ff1b/core/src/test/resources/org/apache/calcite/test/SqlToRelConverterTest.xml",
+                "changes": 15,
+                "contents_url": "https://api.github.com/repos/apache/calcite/contents/core/src/test/resources/org/apache/calcite/test/SqlToRelConverterTest.xml?ref=188c8020d4e68c0a3180265b07949aeb8830ff1b",
+                "deletions": 0,
+                "filename": "core/src/test/resources/org/apache/calcite/test/SqlToRelConverterTest.xml",
+                "patch": "@@ -2888,6 +2888,21 @@ group by deptno]]>\n LogicalAggregate(group=[{0}], EXPR$1=[SUM($1) FILTER $2], EXPR$2=[COUNT()])\n   LogicalProject(DEPTNO=[$7], $f1=[*($5, 2)], $f2=[<($0, 10)])\n     LogicalTableScan(table=[[CATALOG, SALES, EMP]])\n+]]>\n+        </Resource>\n+    </TestCase>\n+    <TestCase name=\"testAggFilterWithIn\">\n+        <Resource name=\"sql\">\n+            <![CDATA[select\n+  deptno, sum(sal * 2) filter (where empno not in (1, 2)), count(*)\n+from emp\n+group by deptno]]>\n+        </Resource>\n+        <Resource name=\"plan\">\n+            <![CDATA[\n+LogicalAggregate(group=[{0}], EXPR$1=[SUM($1) FILTER $2], EXPR$2=[COUNT()])\n+  LogicalProject(DEPTNO=[$7], $f1=[*($5, 2)], $f2=[AND(<>($0, 1), <>($0, 2))])\n+    LogicalTableScan(table=[[CATALOG, SALES, EMP]])\n ]]>\n         </Resource>\n     </TestCase>",
+                "raw_url": "https://github.com/apache/calcite/raw/188c8020d4e68c0a3180265b07949aeb8830ff1b/core/src/test/resources/org/apache/calcite/test/SqlToRelConverterTest.xml",
+                "sha": "dd944d10800162a0a1594eb4ba30c39a8fc4746e",
+                "status": "modified"
+            }
+        ],
+        "message": "[CALCITE-1910] NPE on filtered aggregators using \"IN\"\n\nClose apache/calcite#548",
+        "parent": "https://github.com/apache/calcite/commit/9baa96f39005a51061a675e245f1975254e37b13",
+        "repo": "calcite",
+        "unit_tests": [
+            "SqlToRelConverterTest.java"
+        ]
+    },
     "calcite_7341708": {
         "bug_id": "calcite_7341708",
         "commit": "https://github.com/apache/calcite/commit/73417080f317fb925cf3978d40af6ba97129e3c8",
@@ -69,6 +117,210 @@
         "repo": "calcite",
         "unit_tests": [
             "VolcanoPlannerTest.java"
+        ]
+    },
+    "calcite_af3e35d": {
+        "bug_id": "calcite_af3e35d",
+        "commit": "https://github.com/apache/calcite/commit/af3e35d64a7c29dfaa451c4ab4880424a8fe8cee",
+        "file": [
+            {
+                "additions": 0,
+                "blob_url": "https://github.com/apache/calcite/blob/af3e35d64a7c29dfaa451c4ab4880424a8fe8cee/core/src/main/java/org/apache/calcite/adapter/enumerable/EnumerableRelImplementor.java",
+                "changes": 1,
+                "contents_url": "https://api.github.com/repos/apache/calcite/contents/core/src/main/java/org/apache/calcite/adapter/enumerable/EnumerableRelImplementor.java?ref=af3e35d64a7c29dfaa451c4ab4880424a8fe8cee",
+                "deletions": 1,
+                "filename": "core/src/main/java/org/apache/calcite/adapter/enumerable/EnumerableRelImplementor.java",
+                "patch": "@@ -72,7 +72,6 @@\n       new HashMap<>();\n   private final Map<Object, ParameterExpression> stashedParameters =\n       new IdentityHashMap<>();\n-  int windowCount = 0;\n \n   protected final Function1<String, RexToLixTranslator.InputGetter> allCorrelateVariables =\n       this::getCorrelVariableGetter;",
+                "raw_url": "https://github.com/apache/calcite/raw/af3e35d64a7c29dfaa451c4ab4880424a8fe8cee/core/src/main/java/org/apache/calcite/adapter/enumerable/EnumerableRelImplementor.java",
+                "sha": "58f26e721df70029c5c2265234d1e20982091951",
+                "status": "modified"
+            },
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/calcite/blob/af3e35d64a7c29dfaa451c4ab4880424a8fe8cee/core/src/main/java/org/apache/calcite/adapter/enumerable/EnumerableWindow.java",
+                "changes": 5,
+                "contents_url": "https://api.github.com/repos/apache/calcite/contents/core/src/main/java/org/apache/calcite/adapter/enumerable/EnumerableWindow.java?ref=af3e35d64a7c29dfaa451c4ab4880424a8fe8cee",
+                "deletions": 3,
+                "filename": "core/src/main/java/org/apache/calcite/adapter/enumerable/EnumerableWindow.java",
+                "patch": "@@ -175,11 +175,10 @@ public Result implement(EnumerableRelImplementor implementor, Prefer pref) {\n \n     PhysType inputPhysType = result.physType;\n \n-    final int w = implementor.windowCount++;\n     ParameterExpression prevStart =\n-        Expressions.parameter(int.class, builder.newName(\"prevStart\" + w));\n+        Expressions.parameter(int.class, builder.newName(\"prevStart\"));\n     ParameterExpression prevEnd =\n-        Expressions.parameter(int.class, builder.newName(\"prevEnd\" + w));\n+        Expressions.parameter(int.class, builder.newName(\"prevEnd\"));\n \n     builder.add(Expressions.declare(0, prevStart, null));\n     builder.add(Expressions.declare(0, prevEnd, null));",
+                "raw_url": "https://github.com/apache/calcite/raw/af3e35d64a7c29dfaa451c4ab4880424a8fe8cee/core/src/main/java/org/apache/calcite/adapter/enumerable/EnumerableWindow.java",
+                "sha": "6b55983af9d4d2bde33fddb01adfd2f51d33387d",
+                "status": "modified"
+            },
+            {
+                "additions": 55,
+                "blob_url": "https://github.com/apache/calcite/blob/af3e35d64a7c29dfaa451c4ab4880424a8fe8cee/core/src/test/resources/sql/winagg.iq",
+                "changes": 57,
+                "contents_url": "https://api.github.com/repos/apache/calcite/contents/core/src/test/resources/sql/winagg.iq?ref=af3e35d64a7c29dfaa451c4ab4880424a8fe8cee",
+                "deletions": 2,
+                "filename": "core/src/test/resources/sql/winagg.iq",
+                "patch": "@@ -420,16 +420,69 @@ limit 5;\n +--------+-----+-----+\n | deptno | AR  | BR  |\n +--------+-----+-----+\n+|     10 | 110 | 100 |\n |     10 | 110 | 110 |\n |     10 | 110 | 110 |\n-|     10 | 110 | 110 |\n+|     10 | 110 | 150 |\n |     20 | 200 | 200 |\n-|     20 | 200 |     |\n +--------+-----+-----+\n (5 rows)\n \n !ok\n \n+select a.\"empid\", a.\"deptno\", a.\"commission\", a.r as ar, b.r as br\n+from (\n+  select \"empid\", \"deptno\", \"commission\", first_value(\"empid\") over w as r\n+  from \"hr\".\"emps\"\n+  window w as (partition by \"deptno\" order by \"commission\")) a\n+join (\n+  select \"empid\", \"deptno\", \"commission\", last_value(\"empid\") over w as r\n+  from \"hr\".\"emps\"\n+  window w as (partition by \"deptno\" order by \"commission\")) b\n+on a.\"empid\" = b.\"empid\"\n+limit 5;\n+\n++-------+--------+------------+-----+-----+\n+| empid | deptno | commission | AR  | BR  |\n++-------+--------+------------+-----+-----+\n+|   100 |     10 |       1000 | 110 | 100 |\n+|   110 |     10 |        250 | 110 | 110 |\n+|   150 |     10 |            | 110 | 150 |\n+|   200 |     20 |        500 | 200 | 200 |\n++-------+--------+------------+-----+-----+\n+(4 rows)\n+\n+!ok\n+\n+# [CALCITE-2271] Two windows under a JOIN 2\n+select\n+ t1.l, t1.key as key1, t2.key as key2\n+from\n+ (\n+  select\n+   dense_rank() over (order by key) l,\n+   key\n+  from\n+   unnest(map[1,1,2,2]) k\n+ ) t1\n+ join\n+ (\n+  select\n+   dense_rank() over(order by key) l,\n+   key\n+  from\n+   unnest(map[2,2]) k\n+ ) t2 on (t1.l = t2.l and t1.key + 1 = t2.key);\n+\n++---+------+------+\n+| L | KEY1 | KEY2 |\n++---+------+------+\n+| 1 |    1 |    2 |\n++---+------+------+\n+(1 row)\n+\n+!ok\n+\n # NTH_VALUE\n select emp.\"ENAME\", emp.\"DEPTNO\",\n  nth_value(emp.\"DEPTNO\", 1) over() as \"first_value\",",
+                "raw_url": "https://github.com/apache/calcite/raw/af3e35d64a7c29dfaa451c4ab4880424a8fe8cee/core/src/test/resources/sql/winagg.iq",
+                "sha": "ff0aadcf5ad9bbea194fc000a4be9f137d78c127",
+                "status": "modified"
+            },
+            {
+                "additions": 28,
+                "blob_url": "https://github.com/apache/calcite/blob/af3e35d64a7c29dfaa451c4ab4880424a8fe8cee/linq4j/src/main/java/org/apache/calcite/linq4j/tree/BlockBuilder.java",
+                "changes": 37,
+                "contents_url": "https://api.github.com/repos/apache/calcite/contents/linq4j/src/main/java/org/apache/calcite/linq4j/tree/BlockBuilder.java?ref=af3e35d64a7c29dfaa451c4ab4880424a8fe8cee",
+                "deletions": 9,
+                "filename": "linq4j/src/main/java/org/apache/calcite/linq4j/tree/BlockBuilder.java",
+                "patch": "@@ -121,19 +121,30 @@ public Expression append(String name, BlockStatement block,\n       }\n       if (statement instanceof DeclarationStatement) {\n         DeclarationStatement declaration = (DeclarationStatement) statement;\n-        if (variables.contains(declaration.parameter.name)) {\n-          Expression x = append(\n-              newName(declaration.parameter.name, optimize),\n-              declaration.initializer);\n+        if (!variables.contains(declaration.parameter.name)) {\n+          add(statement);\n+        } else {\n+          String newName = newName(declaration.parameter.name, optimize);\n+          Expression x;\n+          // When initializer is null, append(name, initializer) can't deduce expression type\n+          if (declaration.initializer != null && isSafeForReuse(declaration)) {\n+            x = append(newName, declaration.initializer);\n+          } else {\n+            ParameterExpression pe = Expressions.parameter(\n+                declaration.parameter.type, newName);\n+            DeclarationStatement newDeclaration = Expressions.declare(\n+                declaration.modifiers, pe, declaration.initializer\n+            );\n+            x = pe;\n+            add(newDeclaration);\n+          }\n           statement = null;\n           result = x;\n           if (declaration.parameter != x) {\n             // declaration.parameter can be equal to x if exactly the same\n             // declaration was present in BlockBuilder\n             replacements.put(declaration.parameter, x);\n           }\n-        } else {\n-          add(statement);\n         }\n       } else {\n         add(statement);\n@@ -237,7 +248,7 @@ protected boolean isSimpleExpression(Expression expr) {\n   }\n \n   protected boolean isSafeForReuse(DeclarationStatement decl) {\n-    return (decl.modifiers & Modifier.FINAL) != 0;\n+    return (decl.modifiers & Modifier.FINAL) != 0 && !decl.parameter.name.startsWith(\"_\");\n   }\n \n   protected void addExpressionForReuse(DeclarationStatement decl) {\n@@ -340,7 +351,7 @@ private boolean optimize(Shuttle optimizer, boolean performInline) {\n     }\n     final Map<ParameterExpression, Expression> subMap =\n         new IdentityHashMap<>(useCounter.map.size());\n-    final SubstituteVariableVisitor visitor = new SubstituteVariableVisitor(\n+    final Shuttle visitor = new InlineVariableVisitor(\n         subMap);\n     final ArrayList<Statement> oldStatements = new ArrayList<>(statements);\n     statements.clear();\n@@ -493,7 +504,7 @@ public BlockBuilder append(Expression expression) {\n \n   /** Substitute Variable Visitor. */\n   private static class SubstituteVariableVisitor extends Shuttle {\n-    private final Map<ParameterExpression, Expression> map;\n+    protected final Map<ParameterExpression, Expression> map;\n     private final Map<ParameterExpression, Boolean> actives =\n         new IdentityHashMap<>();\n \n@@ -519,6 +530,14 @@ public BlockBuilder append(Expression expression) {\n       }\n       return super.visit(parameterExpression);\n     }\n+  }\n+\n+  /** Inline Variable Visitor. */\n+  private static class InlineVariableVisitor extends SubstituteVariableVisitor {\n+    InlineVariableVisitor(\n+        Map<ParameterExpression, Expression> map) {\n+      super(map);\n+    }\n \n     @Override public Expression visit(UnaryExpression unaryExpression,\n         Expression expression) {",
+                "raw_url": "https://github.com/apache/calcite/raw/af3e35d64a7c29dfaa451c4ab4880424a8fe8cee/linq4j/src/main/java/org/apache/calcite/linq4j/tree/BlockBuilder.java",
+                "sha": "e59bc65d31ae1bfaab8c9963d111e33267d4b088",
+                "status": "modified"
+            },
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/calcite/blob/af3e35d64a7c29dfaa451c4ab4880424a8fe8cee/linq4j/src/main/java/org/apache/calcite/linq4j/tree/Expressions.java",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/calcite/contents/linq4j/src/main/java/org/apache/calcite/linq4j/tree/Expressions.java?ref=af3e35d64a7c29dfaa451c4ab4880424a8fe8cee",
+                "deletions": 0,
+                "filename": "linq4j/src/main/java/org/apache/calcite/linq4j/tree/Expressions.java",
+                "patch": "@@ -2940,6 +2940,9 @@ public static DeclarationStatement declare(int modifiers,\n    */\n   public static DeclarationStatement declare(int modifiers, String name,\n       Expression initializer) {\n+    assert initializer != null\n+        : \"empty initializer for variable declaration with name '\" + name + \"', modifiers \"\n+        + modifiers + \". Please use declare(int, ParameterExpression, initializer) instead\";\n     return declare(modifiers, parameter(initializer.getType(), name),\n         initializer);\n   }",
+                "raw_url": "https://github.com/apache/calcite/raw/af3e35d64a7c29dfaa451c4ab4880424a8fe8cee/linq4j/src/main/java/org/apache/calcite/linq4j/tree/Expressions.java",
+                "sha": "0e4c3c2da1d54964f2a3ce766823f318c5c11dea",
+                "status": "modified"
+            },
+            {
+                "additions": 46,
+                "blob_url": "https://github.com/apache/calcite/blob/af3e35d64a7c29dfaa451c4ab4880424a8fe8cee/linq4j/src/test/java/org/apache/calcite/linq4j/test/BlockBuilderTest.java",
+                "changes": 46,
+                "contents_url": "https://api.github.com/repos/apache/calcite/contents/linq4j/src/test/java/org/apache/calcite/linq4j/test/BlockBuilderTest.java?ref=af3e35d64a7c29dfaa451c4ab4880424a8fe8cee",
+                "deletions": 0,
+                "filename": "linq4j/src/test/java/org/apache/calcite/linq4j/test/BlockBuilderTest.java",
+                "patch": "@@ -22,6 +22,7 @@\n import org.apache.calcite.linq4j.tree.ExpressionType;\n import org.apache.calcite.linq4j.tree.Expressions;\n import org.apache.calcite.linq4j.tree.OptimizeShuttle;\n+import org.apache.calcite.linq4j.tree.ParameterExpression;\n import org.apache.calcite.linq4j.tree.Shuttle;\n \n import org.junit.Before;\n@@ -78,6 +79,51 @@ public void prepareBuilder() {\n     b.add(Expressions.return_(null, Expressions.add(ONE, TWO)));\n     assertEquals(\"{\\n  return 4;\\n}\\n\", b.toBlock().toString());\n   }\n+\n+  private BlockBuilder appendBlockWithSameVariable(\n+      Expression initializer1, Expression initializer2) {\n+    BlockBuilder outer = new BlockBuilder();\n+    ParameterExpression outerX = Expressions.parameter(int.class, \"x\");\n+    outer.add(Expressions.declare(0, outerX, initializer1));\n+    outer.add(Expressions.statement(Expressions.assign(outerX, Expressions.constant(1))));\n+\n+    BlockBuilder inner = new BlockBuilder();\n+    ParameterExpression innerX = Expressions.parameter(int.class, \"x\");\n+    inner.add(Expressions.declare(0, innerX, initializer2));\n+    inner.add(Expressions.statement(Expressions.assign(innerX, Expressions.constant(42))));\n+    inner.add(Expressions.return_(null, innerX));\n+    outer.append(\"x\", inner.toBlock());\n+    return outer;\n+  }\n+\n+  @Test public void testRenameVariablesWithEmptyInitializer() {\n+    BlockBuilder outer = appendBlockWithSameVariable(null, null);\n+\n+    assertEquals(\"x in the second block should be renamed to avoid name clash\",\n+        \"{\\n\"\n+            + \"  int x;\\n\"\n+            + \"  x = 1;\\n\"\n+            + \"  int x0;\\n\"\n+            + \"  x0 = 42;\\n\"\n+            + \"}\\n\",\n+        Expressions.toString(outer.toBlock()));\n+  }\n+\n+  @Test public void testRenameVariablesWithInitializer() {\n+    BlockBuilder outer = appendBlockWithSameVariable(\n+        Expressions.constant(7), Expressions.constant(8));\n+\n+    assertEquals(\"x in the second block should be renamed to avoid name clash\",\n+        \"{\\n\"\n+            + \"  int x = 7;\\n\"\n+            + \"  x = 1;\\n\"\n+            + \"  int x0 = 8;\\n\"\n+            + \"  x0 = 42;\\n\"\n+            + \"}\\n\",\n+        Expressions.toString(outer.toBlock()));\n+  }\n+\n+\n }\n \n // End BlockBuilderTest.java",
+                "raw_url": "https://github.com/apache/calcite/raw/af3e35d64a7c29dfaa451c4ab4880424a8fe8cee/linq4j/src/test/java/org/apache/calcite/linq4j/test/BlockBuilderTest.java",
+                "sha": "2886269594c6a74f18d4276f7492a1a2bdbe7c42",
+                "status": "modified"
+            },
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/calcite/blob/af3e35d64a7c29dfaa451c4ab4880424a8fe8cee/linq4j/src/test/java/org/apache/calcite/linq4j/test/ExpressionTest.java",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/calcite/contents/linq4j/src/test/java/org/apache/calcite/linq4j/test/ExpressionTest.java?ref=af3e35d64a7c29dfaa451c4ab4880424a8fe8cee",
+                "deletions": 1,
+                "filename": "linq4j/src/test/java/org/apache/calcite/linq4j/test/ExpressionTest.java",
+                "patch": "@@ -995,7 +995,8 @@ public void checkBlockBuilder(boolean optimizing, String expected) {\n             + \"  final int _b = 1 + 2;\\n\"\n             + \"  final int _c = 1 + 3;\\n\"\n             + \"  final int _d = 1 + 4;\\n\"\n-            + \"  org.apache.calcite.linq4j.test.ExpressionTest.bar(1, _b, _c, _d, org.apache.calcite.linq4j.test.ExpressionTest.foo(_c));\\n\"\n+            + \"  final int _b0 = 1 + 3;\\n\"\n+            + \"  org.apache.calcite.linq4j.test.ExpressionTest.bar(1, _b, _c, _d, org.apache.calcite.linq4j.test.ExpressionTest.foo(_b0));\\n\"\n             + \"}\\n\",\n         Expressions.toString(expression));\n     expression.accept(new Shuttle());",
+                "raw_url": "https://github.com/apache/calcite/raw/af3e35d64a7c29dfaa451c4ab4880424a8fe8cee/linq4j/src/test/java/org/apache/calcite/linq4j/test/ExpressionTest.java",
+                "sha": "6e77bd9d29a6a09caea7291b20e39fc76db9ba1a",
+                "status": "modified"
+            }
+        ],
+        "message": "[CALCITE-2271] Join of two views with window aggregates produces incorrect results or NPE\n\nAvoid NPE in BlockBuilder.append when empty variable initializer is used\n\ncloses #673",
+        "parent": "https://github.com/apache/calcite/commit/6cad2ee13e50e9444f80a744409d4e6ca483a30c",
+        "repo": "calcite",
+        "unit_tests": [
+            "BlockBuilderTest.java"
+        ]
+    },
+    "calcite_f2869e9": {
+        "bug_id": "calcite_f2869e9",
+        "commit": "https://github.com/apache/calcite/commit/f2869e9ad3864caa4d1678fbefc50389b981f2e6",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/calcite/blob/f2869e9ad3864caa4d1678fbefc50389b981f2e6/core/src/main/java/org/apache/calcite/sql2rel/SqlToRelConverter.java",
+                "changes": 1,
+                "contents_url": "https://api.github.com/repos/apache/calcite/contents/core/src/main/java/org/apache/calcite/sql2rel/SqlToRelConverter.java?ref=f2869e9ad3864caa4d1678fbefc50389b981f2e6",
+                "deletions": 0,
+                "filename": "core/src/main/java/org/apache/calcite/sql2rel/SqlToRelConverter.java",
+                "patch": "@@ -2276,6 +2276,7 @@ protected void convertMatchRecognize(Blackboard bb, SqlCall call) {\n     final ImmutableMap.Builder<String, RexNode> definitionNodes =\n         ImmutableMap.builder();\n     for (SqlNode def : matchRecognize.getPatternDefList()) {\n+      replaceSubQueries(matchBb, def, RelOptUtil.Logic.UNKNOWN_AS_FALSE);\n       List<SqlNode> operands = ((SqlCall) def).getOperandList();\n       String alias = ((SqlIdentifier) operands.get(1)).getSimple();\n       RexNode rex = matchBb.convertExpression(operands.get(0));",
+                "raw_url": "https://github.com/apache/calcite/raw/f2869e9ad3864caa4d1678fbefc50389b981f2e6/core/src/main/java/org/apache/calcite/sql2rel/SqlToRelConverter.java",
+                "sha": "6d24bf3ce9873e055bd49750b83bc51c9141ae25",
+                "status": "modified"
+            },
+            {
+                "additions": 28,
+                "blob_url": "https://github.com/apache/calcite/blob/f2869e9ad3864caa4d1678fbefc50389b981f2e6/core/src/test/java/org/apache/calcite/rel/rel2sql/RelToSqlConverterTest.java",
+                "changes": 28,
+                "contents_url": "https://api.github.com/repos/apache/calcite/contents/core/src/test/java/org/apache/calcite/rel/rel2sql/RelToSqlConverterTest.java?ref=f2869e9ad3864caa4d1678fbefc50389b981f2e6",
+                "deletions": 0,
+                "filename": "core/src/test/java/org/apache/calcite/rel/rel2sql/RelToSqlConverterTest.java",
+                "patch": "@@ -2978,6 +2978,34 @@ private void checkLiteral2(String expression, String expected) {\n     sql(sql).ok(expected);\n   }\n \n+  @Test public void testMatchRecognizeIn() {\n+    final String sql = \"select *\\n\"\n+        + \"  from \\\"product\\\" match_recognize\\n\"\n+        + \"  (\\n\"\n+        + \"    partition by \\\"product_class_id\\\", \\\"brand_name\\\" \\n\"\n+        + \"    order by \\\"product_class_id\\\" asc, \\\"brand_name\\\" desc \\n\"\n+        + \"    pattern (strt down+ up+)\\n\"\n+        + \"    define\\n\"\n+        + \"      down as down.\\\"net_weight\\\" in (0, 1),\\n\"\n+        + \"      up as up.\\\"net_weight\\\" > prev(up.\\\"net_weight\\\")\\n\"\n+        + \"  ) mr\";\n+\n+    final String expected = \"SELECT *\\n\"\n+        + \"FROM (SELECT *\\n\"\n+        + \"FROM \\\"foodmart\\\".\\\"product\\\") MATCH_RECOGNIZE(\\n\"\n+        + \"PARTITION BY \\\"product_class_id\\\", \\\"brand_name\\\"\\n\"\n+        + \"ORDER BY \\\"product_class_id\\\", \\\"brand_name\\\" DESC\\n\"\n+        + \"ONE ROW PER MATCH\\n\"\n+        + \"AFTER MATCH SKIP TO NEXT ROW\\n\"\n+        + \"PATTERN (\\\"STRT\\\" \\\"DOWN\\\" + \\\"UP\\\" +)\\n\"\n+        + \"DEFINE \"\n+        + \"\\\"DOWN\\\" AS PREV(\\\"DOWN\\\".\\\"net_weight\\\", 0) = \"\n+        + \"0 OR PREV(\\\"DOWN\\\".\\\"net_weight\\\", 0) = 1, \"\n+        + \"\\\"UP\\\" AS PREV(\\\"UP\\\".\\\"net_weight\\\", 0) > \"\n+        + \"PREV(\\\"UP\\\".\\\"net_weight\\\", 1))\";\n+    sql(sql).ok(expected);\n+  }\n+\n   @Test public void testValues() {\n     final String sql = \"select \\\"a\\\"\\n\"\n         + \"from (values (1, 'x'), (2, 'yy')) as t(\\\"a\\\", \\\"b\\\")\";",
+                "raw_url": "https://github.com/apache/calcite/raw/f2869e9ad3864caa4d1678fbefc50389b981f2e6/core/src/test/java/org/apache/calcite/rel/rel2sql/RelToSqlConverterTest.java",
+                "sha": "b82b52cdd977164ca96979a2dd3bdf8b1cc5525f",
+                "status": "modified"
+            },
+            {
+                "additions": 13,
+                "blob_url": "https://github.com/apache/calcite/blob/f2869e9ad3864caa4d1678fbefc50389b981f2e6/core/src/test/java/org/apache/calcite/test/SqlToRelConverterTest.java",
+                "changes": 13,
+                "contents_url": "https://api.github.com/repos/apache/calcite/contents/core/src/test/java/org/apache/calcite/test/SqlToRelConverterTest.java?ref=f2869e9ad3864caa4d1678fbefc50389b981f2e6",
+                "deletions": 0,
+                "filename": "core/src/test/java/org/apache/calcite/test/SqlToRelConverterTest.java",
+                "patch": "@@ -2972,6 +2972,19 @@ private Tester getExtendedTester() {\n     sql(sql).ok();\n   }\n \n+  @Test public void testMatchRecognizeIn() {\n+    final String sql = \"select *\\n\"\n+        + \"  from emp match_recognize\\n\"\n+        + \"  (\\n\"\n+        + \"    partition by job, sal\\n\"\n+        + \"    order by job asc, sal desc, empno\\n\"\n+        + \"    pattern (strt down+ up+)\\n\"\n+        + \"    define\\n\"\n+        + \"      down as down.mgr in (0, 1),\\n\"\n+        + \"      up as up.mgr > prev(up.mgr)) as mr\";\n+    sql(sql).ok();\n+  }\n+\n   /** Test case for\n    * <a href=\"https://issues.apache.org/jira/browse/CALCITE-2323\">[CALCITE-2323]\n    * Validator should allow alternative nullCollations for ORDER BY in",
+                "raw_url": "https://github.com/apache/calcite/raw/f2869e9ad3864caa4d1678fbefc50389b981f2e6/core/src/test/java/org/apache/calcite/test/SqlToRelConverterTest.java",
+                "sha": "d4e2c9b36b53ce116b5964db36a6c4d215738406",
+                "status": "modified"
+            },
+            {
+                "additions": 20,
+                "blob_url": "https://github.com/apache/calcite/blob/f2869e9ad3864caa4d1678fbefc50389b981f2e6/core/src/test/resources/org/apache/calcite/test/SqlToRelConverterTest.xml",
+                "changes": 20,
+                "contents_url": "https://api.github.com/repos/apache/calcite/contents/core/src/test/resources/org/apache/calcite/test/SqlToRelConverterTest.xml?ref=f2869e9ad3864caa4d1678fbefc50389b981f2e6",
+                "deletions": 0,
+                "filename": "core/src/test/resources/org/apache/calcite/test/SqlToRelConverterTest.xml",
+                "patch": "@@ -3024,6 +3024,26 @@ GROUP BY (CASE WHEN emp.empno IN (3) THEN 0 ELSE 1 END)]]>\n LogicalAggregate(group=[{0}])\n   LogicalProject(EXPR$0=[CASE(=($0, 3), 0, 1)])\n     LogicalTableScan(table=[[CATALOG, SALES, EMP]])\n+]]>\n+        </Resource>\n+    </TestCase>\n+    <TestCase name=\"testMatchRecognizeIn\">\n+        <Resource name=\"sql\">\n+            <![CDATA[select *\n+  from emp match_recognize\n+  (\n+    partition by job, sal\n+    order by job asc, sal desc, empno\n+    pattern (strt down+ up+)\n+    define\n+      down as down.mgr in (0, 1),\n+      up as up.mgr > prev(up.mgr)) as mr]]>\n+        </Resource>\n+        <Resource name=\"plan\">\n+            <![CDATA[\n+LogicalProject(EMPNO=[$0], ENAME=[$1], JOB=[$2], MGR=[$3], HIREDATE=[$4], SAL=[$5], COMM=[$6], DEPTNO=[$7], SLACKER=[$8])\n+  LogicalMatch(partition=[[$2, $5]], order=[[2, 5 DESC, 0]], outputFields=[[EMPNO, ENAME, JOB, MGR, HIREDATE, SAL, COMM, DEPTNO, SLACKER]], allRows=[false], after=[FLAG(SKIP TO NEXT ROW)], pattern=[(('STRT', PATTERN_QUANTIFIER('DOWN', 1, -1, false)), PATTERN_QUANTIFIER('UP', 1, -1, false))], isStrictStarts=[false], isStrictEnds=[false], subsets=[[]], patternDefinitions=[[OR(=(PREV(DOWN.$3, 0), 0), =(PREV(DOWN.$3, 0), 1)), >(PREV(UP.$3, 0), PREV(UP.$3, 1))]], inputFields=[[EMPNO, ENAME, JOB, MGR, HIREDATE, SAL, COMM, DEPTNO, SLACKER]])\n+    LogicalTableScan(table=[[CATALOG, SALES, EMP]])\n ]]>\n         </Resource>\n     </TestCase>",
+                "raw_url": "https://github.com/apache/calcite/raw/f2869e9ad3864caa4d1678fbefc50389b981f2e6/core/src/test/resources/org/apache/calcite/test/SqlToRelConverterTest.xml",
+                "sha": "466a0659758f14b5d5a8e5e942a650278b07f0c0",
+                "status": "modified"
+            }
+        ],
+        "message": "[CALCITE-2739] NPE is thrown if the DEFINE statement contains IN in MATCH_RECOGNIZE\n\nClose #970",
+        "parent": "https://github.com/apache/calcite/commit/3ed76375fd05b29db17d6117aa0487ccb85f45ba",
+        "repo": "calcite",
+        "unit_tests": [
+            "SqlToRelConverterTest.java"
+        ]
+    },
+    "calcite_fcdb825": {
+        "bug_id": "calcite_fcdb825",
+        "commit": "https://github.com/apache/calcite/commit/fcdb825e892d39c7f2157e05a68add24bddc82db",
+        "file": [
+            {
+                "additions": 30,
+                "blob_url": "https://github.com/apache/calcite/blob/fcdb825e892d39c7f2157e05a68add24bddc82db/src/main/java/net/hydromatic/optiq/jdbc/Meta.java",
+                "changes": 32,
+                "contents_url": "https://api.github.com/repos/apache/calcite/contents/src/main/java/net/hydromatic/optiq/jdbc/Meta.java?ref=fcdb825e892d39c7f2157e05a68add24bddc82db",
+                "deletions": 2,
+                "filename": "src/main/java/net/hydromatic/optiq/jdbc/Meta.java",
+                "patch": "@@ -24,12 +24,13 @@\n import net.hydromatic.optiq.*;\n import net.hydromatic.optiq.impl.TableInSchemaImpl;\n import net.hydromatic.optiq.impl.java.MapSchema;\n-\n import net.hydromatic.optiq.runtime.*;\n \n import org.eigenbase.reltype.*;\n import org.eigenbase.util.Pair;\n \n+import com.google.common.collect.ImmutableMap;\n+\n import java.lang.reflect.Field;\n import java.sql.*;\n import java.sql.Types;\n@@ -451,6 +452,28 @@ public String getName() {\n   }\n \n   private static class NamedFieldGetter {\n+    private static final Map<Class, Pair<Integer, String>> MAP =\n+        ImmutableMap.<Class, Pair<Integer, String>>builder()\n+            .put(boolean.class, Pair.of(Types.BOOLEAN, \"BOOLEAN\"))\n+            .put(Boolean.class, Pair.of(Types.BOOLEAN, \"BOOLEAN\"))\n+            .put(byte.class, Pair.of(Types.TINYINT, \"TINYINT\"))\n+            .put(Byte.class, Pair.of(Types.TINYINT, \"TINYINT\"))\n+            .put(short.class, Pair.of(Types.SMALLINT, \"SMALLINT\"))\n+            .put(Short.class, Pair.of(Types.SMALLINT, \"SMALLINT\"))\n+            .put(int.class, Pair.of(Types.INTEGER, \"INTEGER\"))\n+            .put(Integer.class, Pair.of(Types.INTEGER, \"INTEGER\"))\n+            .put(long.class, Pair.of(Types.BIGINT, \"BIGINT\"))\n+            .put(Long.class, Pair.of(Types.BIGINT, \"BIGINT\"))\n+            .put(float.class, Pair.of(Types.FLOAT, \"FLOAT\"))\n+            .put(Float.class, Pair.of(Types.FLOAT, \"FLOAT\"))\n+            .put(double.class, Pair.of(Types.DOUBLE, \"DOUBLE\"))\n+            .put(Double.class, Pair.of(Types.DOUBLE, \"DOUBLE\"))\n+            .put(String.class, Pair.of(Types.VARCHAR, \"VARCHAR\"))\n+            .put(java.sql.Date.class, Pair.of(Types.DATE, \"DATE\"))\n+            .put(Time.class, Pair.of(Types.TIME, \"TIME\"))\n+            .put(Timestamp.class, Pair.of(Types.TIMESTAMP, \"TIMESTAMP\"))\n+            .build();\n+\n     private final List<Field> fields = new ArrayList<Field>();\n     private final List<ColumnMetaData> columnNames =\n         new ArrayList<ColumnMetaData>();\n@@ -465,19 +488,24 @@ public NamedFieldGetter(Class clazz, String... names) {\n         } catch (NoSuchFieldException e) {\n           throw new RuntimeException(e);\n         }\n+        Pair<Integer, String> pair = lookupType(field.getType());\n         columnNames.add(\n             new ColumnMetaData(\n                 index, false, true, false, false,\n                 Primitive.is(field.getType())\n                     ? DatabaseMetaData.columnNullable\n                     : DatabaseMetaData.columnNoNulls,\n                 true, -1, name, name, null,\n-                0, 0, null, null, Types.VARCHAR, \"VARCHAR\", true,\n+                0, 0, null, null, pair.left, pair.right, true,\n                 false, false, null, field.getType()));\n         fields.add(field);\n       }\n     }\n \n+    private Pair<Integer, String> lookupType(Class<?> type) {\n+      return MAP.get(type);\n+    }\n+\n     private String uncamel(String name) {\n       StringBuilder buf = new StringBuilder();\n       int nextUpper = -1;",
+                "raw_url": "https://github.com/apache/calcite/raw/fcdb825e892d39c7f2157e05a68add24bddc82db/src/main/java/net/hydromatic/optiq/jdbc/Meta.java",
+                "sha": "882a39f1b440373c6a7b02f8c96112e84a9161cc",
+                "status": "modified"
+            },
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/calcite/blob/fcdb825e892d39c7f2157e05a68add24bddc82db/src/main/java/org/eigenbase/sql2rel/SqlToRelConverter.java",
+                "changes": 5,
+                "contents_url": "https://api.github.com/repos/apache/calcite/contents/src/main/java/org/eigenbase/sql2rel/SqlToRelConverter.java?ref=fcdb825e892d39c7f2157e05a68add24bddc82db",
+                "deletions": 1,
+                "filename": "src/main/java/org/eigenbase/sql2rel/SqlToRelConverter.java",
+                "patch": "@@ -4652,7 +4652,10 @@ public Void visit(SqlCall call)\n                 return null;\n             } else {\n                 for (SqlNode operand : call.operands) {\n-                    operand.accept(this);\n+                    // Operands are occasionally null, e.g. switched CASE arg 0.\n+                    if (operand != null) {\n+                        operand.accept(this);\n+                    }\n                 }\n             }\n             return null;",
+                "raw_url": "https://github.com/apache/calcite/raw/fcdb825e892d39c7f2157e05a68add24bddc82db/src/main/java/org/eigenbase/sql2rel/SqlToRelConverter.java",
+                "sha": "47a79e1fd7cad23ed6d9cb8a24e37eb5a25bf610",
+                "status": "modified"
+            },
+            {
+                "additions": 28,
+                "blob_url": "https://github.com/apache/calcite/blob/fcdb825e892d39c7f2157e05a68add24bddc82db/src/test/java/net/hydromatic/optiq/test/JdbcTest.java",
+                "changes": 28,
+                "contents_url": "https://api.github.com/repos/apache/calcite/contents/src/test/java/net/hydromatic/optiq/test/JdbcTest.java?ref=fcdb825e892d39c7f2157e05a68add24bddc82db",
+                "deletions": 0,
+                "filename": "src/test/java/net/hydromatic/optiq/test/JdbcTest.java",
+                "patch": "@@ -435,6 +435,14 @@ public void onStatementClose(OptiqStatement statement) {\n     DatabaseMetaData metaData = connection.getMetaData();\n     ResultSet resultSet = metaData.getColumns(null, null, null, null);\n     assertTrue(resultSet.next()); // there's something\n+    String name = resultSet.getString(4);\n+    int type = resultSet.getInt(5);\n+    String typeName = resultSet.getString(6);\n+    int columnSize = resultSet.getInt(7);\n+    int decimalDigits = resultSet.getInt(9);\n+    int numPrecRadix = resultSet.getInt(10);\n+    int charOctetLength = resultSet.getInt(16);\n+    String isNullable = resultSet.getString(18);\n     resultSet.close();\n     connection.close();\n   }\n@@ -463,6 +471,16 @@ public void onStatementClose(OptiqStatement statement) {\n     connection.close();\n   }\n \n+  /** Tests some queries that have expedited processing because connection pools\n+   * like to use them to check whether the connection is alive.\n+   */\n+  @Test public void testSimple() {\n+    OptiqAssert.assertThat()\n+        .with(OptiqAssert.Config.FOODMART_CLONE)\n+        .query(\"SELECT 1\")\n+        .returns(\"EXPR$0=1\\n\");\n+  }\n+\n   @Test public void testCloneSchema()\n       throws ClassNotFoundException, SQLException {\n     final OptiqConnection connection = JdbcTest.getConnection(null, false);\n@@ -533,6 +551,16 @@ public void onStatementClose(OptiqStatement statement) {\n             + \"\\n\");\n   }\n \n+  @Test public void testOrderByCase() {\n+    OptiqAssert.assertThat()\n+        .with(OptiqAssert.Config.FOODMART_CLONE)\n+        .query(\n+            \"select \\\"time_by_day\\\".\\\"the_year\\\" as \\\"c0\\\" from \\\"time_by_day\\\" as \\\"time_by_day\\\" group by \\\"time_by_day\\\".\\\"the_year\\\" order by CASE WHEN \\\"time_by_day\\\".\\\"the_year\\\" IS NULL THEN 1 ELSE 0 END, \\\"time_by_day\\\".\\\"the_year\\\" ASC\")\n+        .returns(\n+            \"c0=1997\\n\"\n+            + \"c0=1998\\n\");\n+  }\n+\n   private static final String[] queries = {\n       \"select count(*) from (select 1 as \\\"c0\\\" from \\\"salary\\\" as \\\"salary\\\") as \\\"init\\\"\",\n       \"EXPR$0=21252\\n\",",
+                "raw_url": "https://github.com/apache/calcite/raw/fcdb825e892d39c7f2157e05a68add24bddc82db/src/test/java/net/hydromatic/optiq/test/JdbcTest.java",
+                "sha": "9ea8ed5b163dd2687a1e3619387c99fed41c828c",
+                "status": "modified"
+            }
+        ],
+        "message": "Fix a type-cast issue in DatabaseMetaData.getColumns(), and an NPE handling a switched CASE expression.",
+        "parent": "https://github.com/apache/calcite/commit/6bf299263c39c353e600c4285f3291f4462d5236",
+        "repo": "calcite",
+        "unit_tests": [
+            "SqlToRelConverterTest.java"
         ]
     }
 }
