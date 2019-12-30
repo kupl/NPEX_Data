@@ -83,7 +83,7 @@ def find_test_classes(commit):
 
 
 ## make a directory for repo. and iterate commits until succeed count reaches limit
-def do_repo(repo, limit=100, dir=ROOT_DIR):
+def do_repo(repo, limit=500, dir=ROOT_DIR):
     os.chdir(dir) 
     repo_path = os.path.abspath("benchmarks/%s" % repo)
     os.makedirs(repo_path, exist_ok=True)
@@ -92,12 +92,10 @@ def do_repo(repo, limit=100, dir=ROOT_DIR):
     for bug_id in commits:
         os.chdir(repo_path)
 
-        if limit == 0: return
-
-        if (do_commit(commits[bug_id], repo_path) == True):
-            limit = limit + 16
-        else:
-            limit = limit - 1
+        if (do_commit(commits[bug_id], repo_path) == False):
+            os.chdir(repo_path)
+            commit_id = commits[bug_id]['commit'].split('/')[-1][:6]
+            os.system('rm -rf %s' % commit_id)
         logfile.flush()
 
 
@@ -112,7 +110,7 @@ def unittest(commit, testFile):
     testFilename = (EasyProcess('find . -name %s' % testFile).call()).stdout.split('\n')[0]
     # Testcase exists for latest version, but not for this version.
     if testFilename is '':
-        logfile.writelines(" - no testfile found for %s\n" % commit['bug_id'])
+        logfile.writelines(" - no testfile found for %s\n" % testFile)
         ret['fixed'] = False
         ret['buggy'] = False
         ret['buggy_class'] = None
@@ -125,10 +123,13 @@ def unittest(commit, testFile):
         ret['buggy'] = False
         ret['buggy_class'] = None
         return ret
+    
+    non_testing_names = [changed_file['filename'] for changed_file in commit['file'] \
+        if changed_file['filename'].split('/')[-1] != testFile ]
 
     logfile.writelines(" - test command: %s\n" % test_cmd)
     
-    test_ret = EasyProcess(test_cmd).call()
+    test_ret = EasyProcess(test_cmd).call(timeout=300)
     ret['fixed'] = True if test_ret.return_code is 0 else False
 
     #b) Is buggy code incorrect w.r.t. test-cases?
@@ -140,7 +141,7 @@ def unittest(commit, testFile):
     logfile.writelines(" - git checkout command for buggy version: %s\n" % checkout_cmd)
     checkout_ret = EasyProcess(checkout_cmd).call()
    
-    test_ret = EasyProcess(test_cmd).call()
+    test_ret = EasyProcess(test_cmd).call(timeout=300)
     ret['buggy'] = True if test_ret.return_code is 0 else False
   
     #TODO: parse error message of test_ret.stderr / .stdout
@@ -183,8 +184,13 @@ def do_commit(commit, dir):
     elif has_outdated_urls(): 
         logfile.writelines("# %s HAS OUTDATED URLS \n" % commit['bug_id'])
         return False
+    ##### HEURISTIC: test only if testfile is commited #####
+    changed_files = set(changed_file['filename'].split('/')[-1] for changed_file in commit['file'])
+    if len(changed_files - set(unittests)) == len(changed_files): 
+        logfile.writelines("# %s HAS NO TESTCASE COMMITED \n" % commit['bug_id'])
+        return False
 
-    ret_compile = EasyProcess(compile_cmd).call()
+    ret_compile = EasyProcess(compile_cmd).call(timeout=300)
 
     ## 3. Testing
     status = ""
@@ -204,7 +210,7 @@ def do_commit(commit, dir):
 ## main function
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("--n_cpus", type=int, default=16, help="specify # of threads to use")
+    parser.add_argument("--n_cpus", type=int, default=12, help="specify # of threads to use")
     parser.add_argument("--repo", type=str, default=None, help="specify a repository to test, default: all repository")
     args = parser.parse_args()
     n_cpus = args.n_cpus
