@@ -14,7 +14,7 @@ log = "logs/%s.log" % starttime
 logfile = open(log, 'w')
 
 def do_repo(repo):
-    if os.path.isfile('%s/%s/pom.xml' % (repo, repo)):
+    if os.path.isfile('%s/%s/pom.xml' % (repo, repo)) or os.path.isfile('%s/%s/maven.xml' % (repo, repo)):
         logfile.writelines("%s\n" % repo)
         print("%s" % repo)
         

@@ -24,12 +24,13 @@ class generate_bug_data:
 
     def __init__(self, repo):
         self.repo = repo
-        self.jsonfile = open("data/%s.json" % repo, 'r')
+        print(self.repo)
+        self.jsonfile = open("data/%s.json" % self.repo).read()
         self.repo_commits = json.loads(self.jsonfile)
 
     def is_done(self):
         try:
-            file_to_write = open("data/%s_data.json" % self.repo, 'r')
+            file_to_write = open("data/%s_data.json" % self.repo).read()
         except FileNotFoundError:
             return False
         else:
@@ -72,7 +73,7 @@ class generate_bug_data:
             outputs.append(data)
             i = i + 1
 
-        output_file.write(json.dumps(outputs, indent=4) + '\n')
+        output_file.write(json.dumps(outputs, indent=4))
         outputs = []
         output_file.flush()
         output_file.close()
@@ -83,11 +84,9 @@ class generate_bug_data:
 
 
 if __name__ == '__main__':
-    repo_file = open("repo.txt", 'r')
+    repo_file = open("repo_with_commits.txt", 'r')
     repos = repo_file.readlines()
 
     for repo in repos:
-        gbd = generate_bug_data(repo)
-        gbd.do_repo(repo.split('\n')[0])
-
-
+        gbd = generate_bug_data(repo.split('\n')[0])
+        gbd.do_repo()

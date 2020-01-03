@@ -33,6 +33,7 @@ if __name__ == '__main__':
         backoff = 2.05
         repo = repo.split('\n')[0]
         jsonfile = open("data/%s.json" % repo, 'w')
+        Items = []
         while True:
             time.sleep(backoff)
             commit_page_link = "https://api.github.com/search/commits?q=repo:apache/%s+NPE+OR+NullPointerException&page=%d&per_page=100" % (repo, i)
@@ -61,8 +62,9 @@ if __name__ == '__main__':
             if not items: 
                 break
             
+            Items += items
             new_repofile.write(repo + '\n')
-            jsonfile.write(json.dumps(items, indent=4) + '\n')
-            jsonfile.flush()
             print("done")
             i = i + 1
+        jsonfile.write(json.dumps(Items, indent=4))
+        jsonfile.flush()
