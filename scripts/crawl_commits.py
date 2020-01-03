@@ -24,9 +24,6 @@ headers = \
 if __name__ == '__main__':
     commits = []
     commitfile = open("commits.txt", 'w')
-    
-    jsons = []
-    jsonfile = open("jsons.txt", 'w')
 
     repofile = open("repo.txt", 'r')
     new_repofile = open("repo_with_commits.txt", 'w')
@@ -35,10 +32,10 @@ if __name__ == '__main__':
         i = 1
         backoff = 2.05
         repo = repo.split('\n')[0]
-        jsonfile = open("data/%s" % repo, 'w')
+        jsonfile = open("data/%s.json" % repo, 'w')
         while True:
             time.sleep(backoff)
-            commit_page_link = "https://api.github.com/search/commits?q=repo:apache/%s+NPE&page=%d&per_page=100" % (repo, i)
+            commit_page_link = "https://api.github.com/search/commits?q=repo:apache/%s+NPE+OR+NullPointerException&page=%d&per_page=100" % (repo, i)
 
             res = requests.get(commit_page_link, auth=(username,token), headers=headers)
             print("%s request's status : %d, page: %d" % (repo, res.status_code, i))
@@ -65,10 +62,7 @@ if __name__ == '__main__':
                 break
             
             new_repofile.write(repo + '\n')
-            jsonfile.write(json.JSONEncoder().encode(items) + '\n') 
+            jsonfile.write(json.dumps(items, indent=4) + '\n')
             jsonfile.flush()
             print("done")
             i = i + 1
-
-
-

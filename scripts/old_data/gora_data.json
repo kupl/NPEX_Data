@@ -1,0 +1,563 @@
+[
+    {
+        "commit": "https://github.com/apache/gora/commit/33bab4a3e4711028adc30766b0cc797dab4604ba",
+        "repo": "gora",
+        "parent": "https://github.com/apache/gora/commit/1fe93b6e00c706a862def239ccbbd0bc0821a017",
+        "message": "GORA-499 Fix for a potential NPE",
+        "bug_id": "gora_1",
+        "file": [
+            {
+                "sha": "1f9d614229651d352bc815f846a744baef758b28",
+                "filename": "gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraClient.java",
+                "status": "modified",
+                "additions": 2,
+                "deletions": 2,
+                "changes": 4,
+                "blob_url": "https://github.com/apache/gora/blob/33bab4a3e4711028adc30766b0cc797dab4604ba/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraClient.java",
+                "raw_url": "https://github.com/apache/gora/raw/33bab4a3e4711028adc30766b0cc797dab4604ba/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraClient.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraClient.java?ref=33bab4a3e4711028adc30766b0cc797dab4604ba",
+                "patch": "@@ -208,10 +208,10 @@ public void checkKeyspace() {\n       ccl.setReadCfConsistencyLevels(clmap);\n       ccl.setWriteCfConsistencyLevels(clmap);\n       // Operations consistency levels\n-      String opConsisLvl = (readOpConsLvl!=null || !readOpConsLvl.isEmpty())?readOpConsLvl:DEFAULT_HECTOR_CONSIS_LEVEL;\n+      String opConsisLvl = (readOpConsLvl!=null && !readOpConsLvl.isEmpty())?readOpConsLvl:DEFAULT_HECTOR_CONSIS_LEVEL;\n       ccl.setDefaultReadConsistencyLevel(HConsistencyLevel.valueOf(opConsisLvl));\n       LOG.debug(\"Hector read consistency configured to '\" + opConsisLvl + \"'.\");\n-      opConsisLvl = (writeOpConsLvl!=null || !writeOpConsLvl.isEmpty())?writeOpConsLvl:DEFAULT_HECTOR_CONSIS_LEVEL;\n+      opConsisLvl = (writeOpConsLvl!=null && !writeOpConsLvl.isEmpty())?writeOpConsLvl:DEFAULT_HECTOR_CONSIS_LEVEL;\n       ccl.setDefaultWriteConsistencyLevel(HConsistencyLevel.valueOf(opConsisLvl));\n       LOG.debug(\"Hector write consistency configured to '\" + opConsisLvl + \"'.\");\n "
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/gora/commit/b7fb9eea768a6daac93d1835726c737153f45ef4",
+        "repo": "gora",
+        "parent": "https://github.com/apache/gora/commit/96e623b035b2ab35fca15d03b790bee55636efcd",
+        "message": "GORA_447 NPE Fix",
+        "bug_id": "gora_2",
+        "file": [
+            {
+                "sha": "481b2a7d67f034970d17ad13afbe19c1ad82811f",
+                "filename": "gora-core/src/main/java/org/apache/gora/memory/store/MemStore.java",
+                "status": "modified",
+                "additions": 17,
+                "deletions": 6,
+                "changes": 23,
+                "blob_url": "https://github.com/apache/gora/blob/b7fb9eea768a6daac93d1835726c737153f45ef4/gora-core/src/main/java/org/apache/gora/memory/store/MemStore.java",
+                "raw_url": "https://github.com/apache/gora/raw/b7fb9eea768a6daac93d1835726c737153f45ef4/gora-core/src/main/java/org/apache/gora/memory/store/MemStore.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-core/src/main/java/org/apache/gora/memory/store/MemStore.java?ref=b7fb9eea768a6daac93d1835726c737153f45ef4",
+                "patch": "@@ -106,13 +106,24 @@ public boolean delete(K key) {\n \n   @Override\n   public long deleteByQuery(Query<K, T> query) {\n-    try{\n+    try {\n       long deletedRows = 0;\n-      Result<K,T> result = query.execute();\n-\n-      while(result.next()) {\n-        if(delete(result.getKey()))\n-          deletedRows++;\n+      Result<K, T> result = query.execute();\n+\n+      String[] fields = getFieldsToQuery(query.getFields());\n+      boolean isAllFields = Arrays.equals(fields, getFields());\n+\n+      while (result.next()) {\n+        if (isAllFields) {\n+          if (delete(result.getKey())) {\n+            deletedRows++;\n+            continue;\n+          }\n+        }\n+        for (String field : fields) {\n+          result.get().clearField(field);\n+        }\n+        deletedRows++;\n       }\n       return deletedRows;\n     } catch (Exception e) {"
+            },
+            {
+                "sha": "9d4b6015d8e21de908671c60d902693f07c1cd4c",
+                "filename": "gora-core/src/main/java/org/apache/gora/persistency/Persistent.java",
+                "status": "modified",
+                "additions": 7,
+                "deletions": 0,
+                "changes": 7,
+                "blob_url": "https://github.com/apache/gora/blob/b7fb9eea768a6daac93d1835726c737153f45ef4/gora-core/src/main/java/org/apache/gora/persistency/Persistent.java",
+                "raw_url": "https://github.com/apache/gora/raw/b7fb9eea768a6daac93d1835726c737153f45ef4/gora-core/src/main/java/org/apache/gora/persistency/Persistent.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-core/src/main/java/org/apache/gora/persistency/Persistent.java?ref=b7fb9eea768a6daac93d1835726c737153f45ef4",
+                "patch": "@@ -35,6 +35,13 @@\n */\n   void clear();\n \n+  /**\n+* Clears the inner state of the object based on field without any modification to the actual\n+* data on the data store. This method should be called before re-using the existing fields on\n+* object to hold the data for another result.\n+*/\n+  void clearField(String Field);\n+\n   /**\n * Returns whether the field has been modified.\n *"
+            },
+            {
+                "sha": "d436d5658d4e0dabea3ffce851465a6206f43414",
+                "filename": "gora-core/src/main/java/org/apache/gora/persistency/impl/PersistentBase.java",
+                "status": "modified",
+                "additions": 11,
+                "deletions": 0,
+                "changes": 11,
+                "blob_url": "https://github.com/apache/gora/blob/b7fb9eea768a6daac93d1835726c737153f45ef4/gora-core/src/main/java/org/apache/gora/persistency/impl/PersistentBase.java",
+                "raw_url": "https://github.com/apache/gora/raw/b7fb9eea768a6daac93d1835726c737153f45ef4/gora-core/src/main/java/org/apache/gora/persistency/impl/PersistentBase.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-core/src/main/java/org/apache/gora/persistency/impl/PersistentBase.java?ref=b7fb9eea768a6daac93d1835726c737153f45ef4",
+                "patch": "@@ -196,6 +196,17 @@ public void clear() {\n     clearDirty();\n   }\n \n+  @Override\n+  public void clearField(String field) {\n+    Collection<Field> unmanagedFields = getUnmanagedFields();\n+    Field specificField = getSchema().getField(field);\n+    if (unmanagedFields.contains(specificField)) {\n+      put(specificField.pos(), PersistentData.get().deepCopy(specificField.schema(),\n+              PersistentData.get().getDefaultValue(specificField)));\n+    }\n+    clearDirynessIfFieldIsDirtyable(specificField.pos());\n+  }\n+\n   @Override\n   public boolean equals(Object that) {\n     if (that == this) {"
+            },
+            {
+                "sha": "49db17a2e2cadcdd5de74e51675b5c4570868ac1",
+                "filename": "gora-core/src/test/java/org/apache/gora/memory/store/MemStoreTest.java",
+                "status": "modified",
+                "additions": 9,
+                "deletions": 6,
+                "changes": 15,
+                "blob_url": "https://github.com/apache/gora/blob/b7fb9eea768a6daac93d1835726c737153f45ef4/gora-core/src/test/java/org/apache/gora/memory/store/MemStoreTest.java",
+                "raw_url": "https://github.com/apache/gora/raw/b7fb9eea768a6daac93d1835726c737153f45ef4/gora-core/src/test/java/org/apache/gora/memory/store/MemStoreTest.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-core/src/test/java/org/apache/gora/memory/store/MemStoreTest.java?ref=b7fb9eea768a6daac93d1835726c737153f45ef4",
+                "patch": "@@ -22,6 +22,8 @@\n import org.apache.gora.examples.WebPageDataCreator;\n import org.apache.gora.examples.generated.Employee;\n import org.apache.gora.examples.generated.WebPage;\n+import org.apache.gora.persistency.BeanFactory;\n+import org.apache.gora.persistency.impl.BeanFactoryImpl;\n import org.apache.gora.query.Query;\n import org.apache.gora.store.DataStore;\n import org.apache.gora.store.DataStoreFactory;\n@@ -69,7 +71,7 @@ public void setUp() throws Exception {\n   @SuppressWarnings(\"unchecked\")\n   @Override\n   protected DataStore<String, WebPage> createWebPageDataStore() throws IOException {\n-    return DataStoreFactory.getDataStore(MemStore.class, String.class, Employee.class, conf);\n+    return DataStoreFactory.getDataStore(MemStore.class, String.class, WebPage.class, conf);\n   }\n \n   @Test\n@@ -110,11 +112,12 @@ public void testDeleteByQueryFields() {}\n   @Test\n   public void testGetWithFields() {}\n \n-  @Ignore(\"GORA-447\")\n   @Test\n   public void testMemStoreDeleteByQueryFields() throws Exception {\n \n     DataStore<String, WebPage> store = new MemStore<>();\n+    BeanFactory<String, WebPage> beanFactory = new BeanFactoryImpl<>(String.class, WebPage.class);\n+    store.setBeanFactory(beanFactory);\n     Query<String, WebPage> query;\n \n     //test 5 - delete all with some fields\n@@ -124,9 +127,9 @@ public void testMemStoreDeleteByQueryFields() throws Exception {\n     query.setFields(\"outlinks\", \"parsedContent\", \"content\");\n     \n     Query<String, WebPage> newQuery = store.newQuery();\n-    newQuery.setStartKey(URLS[0]);\n-    newQuery.setEndKey(URLS[9]);\n-    //newQuery.setFields(\"outlinks\", \"parsedContent\", \"content\");\n+    newQuery.setStartKey(SORTED_URLS[0]);\n+    newQuery.setEndKey(SORTED_URLS[9]);\n+    newQuery.setFields(\"outlinks\", \"parsedContent\", \"content\");\n \n     DataStoreTestUtil.assertNumResults(newQuery, URLS.length);\n     store.deleteByQuery(query);\n@@ -178,7 +181,7 @@ public void testMemStoreDeleteByQueryFields() throws Exception {\n     for (int i = 0; i < URLS.length; i++) {\n       WebPage page = store.get(URLS[i]);\n       assertNotNull(page);\n-      if( URLS[i].compareTo(startKey) < 0 || URLS[i].compareTo(endKey) >= 0) {\n+      if( URLS[i].compareTo(startKey) < 0 || URLS[i].compareTo(endKey) > 0) {\n         //not deleted\n         DataStoreTestUtil.assertWebPage(page, i);\n       } else {"
+            },
+            {
+                "sha": "f9c3ca67f6e10944cf7cdb25ac1cbe464251459c",
+                "filename": "gora-dynamodb/src/examples/java/org/apache/gora/dynamodb/example/generated/Person.java",
+                "status": "modified",
+                "additions": 2,
+                "deletions": 0,
+                "changes": 2,
+                "blob_url": "https://github.com/apache/gora/blob/b7fb9eea768a6daac93d1835726c737153f45ef4/gora-dynamodb/src/examples/java/org/apache/gora/dynamodb/example/generated/Person.java",
+                "raw_url": "https://github.com/apache/gora/raw/b7fb9eea768a6daac93d1835726c737153f45ef4/gora-dynamodb/src/examples/java/org/apache/gora/dynamodb/example/generated/Person.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-dynamodb/src/examples/java/org/apache/gora/dynamodb/example/generated/Person.java?ref=b7fb9eea768a6daac93d1835726c737153f45ef4",
+                "patch": "@@ -51,6 +51,8 @@ public void setDirty(boolean pDirty){}\n     @Override\n     public void clear() { }\n     @Override\n+    public void clearField(String Field) { }\n+    @Override\n     public Person clone() { return null; }\n     @Override\n     public boolean isDirty() { return false; }"
+            },
+            {
+                "sha": "e3b6024ae7089a8cbf4d9605f539e86516db53a5",
+                "filename": "gora-dynamodb/src/examples/java/org/apache/gora/dynamodb/example/generated/Webpage.java",
+                "status": "modified",
+                "additions": 2,
+                "deletions": 0,
+                "changes": 2,
+                "blob_url": "https://github.com/apache/gora/blob/b7fb9eea768a6daac93d1835726c737153f45ef4/gora-dynamodb/src/examples/java/org/apache/gora/dynamodb/example/generated/Webpage.java",
+                "raw_url": "https://github.com/apache/gora/raw/b7fb9eea768a6daac93d1835726c737153f45ef4/gora-dynamodb/src/examples/java/org/apache/gora/dynamodb/example/generated/Webpage.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-dynamodb/src/examples/java/org/apache/gora/dynamodb/example/generated/Webpage.java?ref=b7fb9eea768a6daac93d1835726c737153f45ef4",
+                "patch": "@@ -44,6 +44,8 @@ public void setDirty(boolean pDirty){}\n     @Override\n     public void clear() { }\n     @Override\n+    public void clearField(String Field) { }\n+    @Override\n     public Webpage clone() { return null; }\n     @Override\n     public boolean isDirty() { return false; }"
+            },
+            {
+                "sha": "906773b57d590c5b17e79e10a0afd8e170b61eab",
+                "filename": "gora-dynamodb/src/main/java/org/apache/gora/dynamodb/compiler/GoraDynamoDBCompiler.java",
+                "status": "modified",
+                "additions": 2,
+                "deletions": 0,
+                "changes": 2,
+                "blob_url": "https://github.com/apache/gora/blob/b7fb9eea768a6daac93d1835726c737153f45ef4/gora-dynamodb/src/main/java/org/apache/gora/dynamodb/compiler/GoraDynamoDBCompiler.java",
+                "raw_url": "https://github.com/apache/gora/raw/b7fb9eea768a6daac93d1835726c737153f45ef4/gora-dynamodb/src/main/java/org/apache/gora/dynamodb/compiler/GoraDynamoDBCompiler.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-dynamodb/src/main/java/org/apache/gora/dynamodb/compiler/GoraDynamoDBCompiler.java?ref=b7fb9eea768a6daac93d1835726c737153f45ef4",
+                "patch": "@@ -291,6 +291,8 @@ private void setDefaultMethods(int pIden, String tabName) throws IOException {\n     line(pIden, \"@Override\");\n     line(pIden, \"public void clear() { }\");\n     line(pIden, \"@Override\");\n+    line(pIden, \"public void clearField(String Field) { }\");\n+    line(pIden, \"@Override\");\n     line(pIden, \"public \" + tabName + \" clone() { return null; }\");\n     line(pIden, \"@Override\");\n     line(pIden, \"public boolean isDirty() { return false; }\");"
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/gora/commit/b0d69051961c797200ec92b37a1557f1be1c2c58",
+        "repo": "gora",
+        "parent": "https://github.com/apache/gora/commit/570662b02bbe0a0bc10ea0490b323630fb9c0646",
+        "message": "GORA-447 NPE fix removed Persistant API change",
+        "bug_id": "gora_3",
+        "file": [
+            {
+                "sha": "19e3bc0b427f612230ca9762baf97eef9c19813a",
+                "filename": "gora-core/src/main/java/org/apache/gora/memory/store/MemStore.java",
+                "status": "modified",
+                "additions": 16,
+                "deletions": 11,
+                "changes": 27,
+                "blob_url": "https://github.com/apache/gora/blob/b0d69051961c797200ec92b37a1557f1be1c2c58/gora-core/src/main/java/org/apache/gora/memory/store/MemStore.java",
+                "raw_url": "https://github.com/apache/gora/raw/b0d69051961c797200ec92b37a1557f1be1c2c58/gora-core/src/main/java/org/apache/gora/memory/store/MemStore.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-core/src/main/java/org/apache/gora/memory/store/MemStore.java?ref=b0d69051961c797200ec92b37a1557f1be1c2c58",
+                "patch": "@@ -19,11 +19,7 @@\n package org.apache.gora.memory.store;\n \n import java.io.IOException;\n-import java.util.ArrayList;\n-import java.util.Arrays;\n-import java.util.Iterator;\n-import java.util.List;\n-import java.util.NavigableMap;\n+import java.util.*;\n import java.util.concurrent.ConcurrentNavigableMap;\n import java.util.concurrent.ConcurrentSkipListMap;\n \n@@ -117,13 +113,20 @@ public long deleteByQuery(Query<K, T> query) {\n         if (isAllFields) {\n           if (delete(result.getKey())) {\n             deletedRows++;\n-            continue;\n+          }\n+        } else {\n+          ArrayList<String> excludedFields = new ArrayList<>();\n+          for (String field : getFields()){\n+            if (!Arrays.asList(fields).contains(field)){\n+              excludedFields.add(field);\n+            }\n+          }\n+          T newClonedObj = getPersistent(result.get(),excludedFields.toArray(new String[excludedFields.size()]));\n+          if (delete(result.getKey())) {\n+            put(result.getKey(),newClonedObj);\n+            deletedRows++;\n           }\n         }\n-        for (String field : fields) {\n-          result.get().clearField(field);\n-        }\n-        deletedRows++;\n       }\n       return deletedRows;\n     } catch (Exception e) {\n@@ -190,7 +193,9 @@ public T get(K key, String[] fields) {\n       return obj;\n     }\n     T newObj = AvroUtils.deepClonePersistent(obj);\n-    for (Field otherField : otherFields) {\n+    newObj.clear();\n+    for (String field : fields) {\n+      Field otherField = obj.getSchema().getField(field);\n       int index = otherField.pos();\n       newObj.put(index, obj.get(index));\n     }"
+            },
+            {
+                "sha": "bd520a9273583e991e82f7ace785cee5cc126d15",
+                "filename": "gora-core/src/main/java/org/apache/gora/persistency/Persistent.java",
+                "status": "modified",
+                "additions": 0,
+                "deletions": 7,
+                "changes": 7,
+                "blob_url": "https://github.com/apache/gora/blob/b0d69051961c797200ec92b37a1557f1be1c2c58/gora-core/src/main/java/org/apache/gora/persistency/Persistent.java",
+                "raw_url": "https://github.com/apache/gora/raw/b0d69051961c797200ec92b37a1557f1be1c2c58/gora-core/src/main/java/org/apache/gora/persistency/Persistent.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-core/src/main/java/org/apache/gora/persistency/Persistent.java?ref=b0d69051961c797200ec92b37a1557f1be1c2c58",
+                "patch": "@@ -35,13 +35,6 @@\n */\n   void clear();\n \n-  /**\n-* Clears the inner state of the object based on field without any modification to the actual\n-* data on the data store. This method should be called before re-using the existing fields on\n-* object to hold the data for another result.\n-*/\n-  void clearField(String Field);\n-\n   /**\n * Returns whether the field has been modified.\n *"
+            },
+            {
+                "sha": "56c481660e3a80869683e0bcd0d5e1ec2c38a523",
+                "filename": "gora-core/src/main/java/org/apache/gora/persistency/impl/PersistentBase.java",
+                "status": "modified",
+                "additions": 0,
+                "deletions": 11,
+                "changes": 11,
+                "blob_url": "https://github.com/apache/gora/blob/b0d69051961c797200ec92b37a1557f1be1c2c58/gora-core/src/main/java/org/apache/gora/persistency/impl/PersistentBase.java",
+                "raw_url": "https://github.com/apache/gora/raw/b0d69051961c797200ec92b37a1557f1be1c2c58/gora-core/src/main/java/org/apache/gora/persistency/impl/PersistentBase.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-core/src/main/java/org/apache/gora/persistency/impl/PersistentBase.java?ref=b0d69051961c797200ec92b37a1557f1be1c2c58",
+                "patch": "@@ -196,17 +196,6 @@ public void clear() {\n     clearDirty();\n   }\n \n-  @Override\n-  public void clearField(String field) {\n-    Collection<Field> unmanagedFields = getUnmanagedFields();\n-    Field specificField = getSchema().getField(field);\n-    if (unmanagedFields.contains(specificField)) {\n-      put(specificField.pos(), PersistentData.get().deepCopy(specificField.schema(),\n-              PersistentData.get().getDefaultValue(specificField)));\n-    }\n-    clearDirynessIfFieldIsDirtyable(specificField.pos());\n-  }\n-\n   @Override\n   public boolean equals(Object that) {\n     if (that == this) {"
+            },
+            {
+                "sha": "8e94662d2cd9ccef073ea4d6f58605ec9b546b62",
+                "filename": "gora-core/src/test/java/org/apache/gora/memory/store/MemStoreTest.java",
+                "status": "modified",
+                "additions": 22,
+                "deletions": 4,
+                "changes": 26,
+                "blob_url": "https://github.com/apache/gora/blob/b0d69051961c797200ec92b37a1557f1be1c2c58/gora-core/src/test/java/org/apache/gora/memory/store/MemStoreTest.java",
+                "raw_url": "https://github.com/apache/gora/raw/b0d69051961c797200ec92b37a1557f1be1c2c58/gora-core/src/test/java/org/apache/gora/memory/store/MemStoreTest.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-core/src/test/java/org/apache/gora/memory/store/MemStoreTest.java?ref=b0d69051961c797200ec92b37a1557f1be1c2c58",
+                "patch": "@@ -38,6 +38,7 @@\n \n import static org.apache.gora.examples.WebPageDataCreator.SORTED_URLS;\n import static org.apache.gora.examples.WebPageDataCreator.URLS;\n+import static org.apache.gora.examples.WebPageDataCreator.URL_INDEXES;\n import static org.junit.Assert.assertEquals;\n import static org.junit.Assert.assertNotNull;\n import static org.junit.Assert.assertNull;\n@@ -52,7 +53,7 @@\n public class MemStoreTest extends DataStoreTestBase {\n \n   private static final Logger LOG = LoggerFactory.getLogger(MemStoreTest.class);\n-  \n+\n   private static final int NUM_KEYS = 4;\n \n   private Configuration conf;\n@@ -108,9 +109,26 @@ public void testPutGet() throws Exception {\n   @Test\n   public void testDeleteByQueryFields() {}\n \n-  @Ignore(\"GORA-447\")\n   @Test\n-  public void testGetWithFields() {}\n+  public void testGetWithFields() throws Exception {\n+\n+    DataStore<String, WebPage> store = new MemStore<>();\n+    BeanFactory<String, WebPage> beanFactory = new BeanFactoryImpl<>(String.class, WebPage.class);\n+    store.setBeanFactory(beanFactory);\n+    WebPageDataCreator.createWebPageData(store);\n+    String[] interestFields = new String[2];\n+    interestFields[0] = \"url\";\n+    interestFields[1] = \"content\";\n+    WebPage page = store.get(URLS[1], interestFields);\n+    assertNotNull(page);\n+    assertNotNull(page.getUrl());\n+    assertEquals(page.getUrl().toString(), URLS[1]);\n+    assertNotNull(page.getContent());\n+    assertEquals(\"Map of Outlinks should have a size of '0' as it is omitted at retrieval\",\n+            0, page.getOutlinks().size());\n+    assertEquals(\"Map of Parsed Content should have a size of '0' as it is omitted at retrieval\",\n+            0, page.getParsedContent().size());\n+  }\n \n   @Test\n   public void testMemStoreDeleteByQueryFields() throws Exception {\n@@ -125,7 +143,7 @@ public void testMemStoreDeleteByQueryFields() throws Exception {\n \n     query = store.newQuery();\n     query.setFields(\"outlinks\", \"parsedContent\", \"content\");\n-    \n+\n     Query<String, WebPage> newQuery = store.newQuery();\n     newQuery.setStartKey(SORTED_URLS[0]);\n     newQuery.setEndKey(SORTED_URLS[9]);"
+            },
+            {
+                "sha": "471fb59bf14e9852dfd2776f1a35437c56969da8",
+                "filename": "gora-dynamodb/src/examples/java/org/apache/gora/dynamodb/example/generated/Person.java",
+                "status": "modified",
+                "additions": 0,
+                "deletions": 2,
+                "changes": 2,
+                "blob_url": "https://github.com/apache/gora/blob/b0d69051961c797200ec92b37a1557f1be1c2c58/gora-dynamodb/src/examples/java/org/apache/gora/dynamodb/example/generated/Person.java",
+                "raw_url": "https://github.com/apache/gora/raw/b0d69051961c797200ec92b37a1557f1be1c2c58/gora-dynamodb/src/examples/java/org/apache/gora/dynamodb/example/generated/Person.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-dynamodb/src/examples/java/org/apache/gora/dynamodb/example/generated/Person.java?ref=b0d69051961c797200ec92b37a1557f1be1c2c58",
+                "patch": "@@ -51,8 +51,6 @@ public void setDirty(boolean pDirty){}\n     @Override\n     public void clear() { }\n     @Override\n-    public void clearField(String Field) { }\n-    @Override\n     public Person clone() { return null; }\n     @Override\n     public boolean isDirty() { return false; }"
+            },
+            {
+                "sha": "df9eb806b1df5c5adc51e90747e8d50a12f81b6d",
+                "filename": "gora-dynamodb/src/examples/java/org/apache/gora/dynamodb/example/generated/Webpage.java",
+                "status": "modified",
+                "additions": 0,
+                "deletions": 2,
+                "changes": 2,
+                "blob_url": "https://github.com/apache/gora/blob/b0d69051961c797200ec92b37a1557f1be1c2c58/gora-dynamodb/src/examples/java/org/apache/gora/dynamodb/example/generated/Webpage.java",
+                "raw_url": "https://github.com/apache/gora/raw/b0d69051961c797200ec92b37a1557f1be1c2c58/gora-dynamodb/src/examples/java/org/apache/gora/dynamodb/example/generated/Webpage.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-dynamodb/src/examples/java/org/apache/gora/dynamodb/example/generated/Webpage.java?ref=b0d69051961c797200ec92b37a1557f1be1c2c58",
+                "patch": "@@ -44,8 +44,6 @@ public void setDirty(boolean pDirty){}\n     @Override\n     public void clear() { }\n     @Override\n-    public void clearField(String Field) { }\n-    @Override\n     public Webpage clone() { return null; }\n     @Override\n     public boolean isDirty() { return false; }"
+            },
+            {
+                "sha": "be38e361e591dacc942490897191c7080f0ddcda",
+                "filename": "gora-dynamodb/src/main/java/org/apache/gora/dynamodb/compiler/GoraDynamoDBCompiler.java",
+                "status": "modified",
+                "additions": 0,
+                "deletions": 2,
+                "changes": 2,
+                "blob_url": "https://github.com/apache/gora/blob/b0d69051961c797200ec92b37a1557f1be1c2c58/gora-dynamodb/src/main/java/org/apache/gora/dynamodb/compiler/GoraDynamoDBCompiler.java",
+                "raw_url": "https://github.com/apache/gora/raw/b0d69051961c797200ec92b37a1557f1be1c2c58/gora-dynamodb/src/main/java/org/apache/gora/dynamodb/compiler/GoraDynamoDBCompiler.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-dynamodb/src/main/java/org/apache/gora/dynamodb/compiler/GoraDynamoDBCompiler.java?ref=b0d69051961c797200ec92b37a1557f1be1c2c58",
+                "patch": "@@ -291,8 +291,6 @@ private void setDefaultMethods(int pIden, String tabName) throws IOException {\n     line(pIden, \"@Override\");\n     line(pIden, \"public void clear() { }\");\n     line(pIden, \"@Override\");\n-    line(pIden, \"public void clearField(String Field) { }\");\n-    line(pIden, \"@Override\");\n     line(pIden, \"public \" + tabName + \" clone() { return null; }\");\n     line(pIden, \"@Override\");\n     line(pIden, \"public boolean isDirty() { return false; }\");"
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/gora/commit/6304fbedf22dd37b7a849ecdec5affc6fc2a0b59",
+        "repo": "gora",
+        "parent": "https://github.com/apache/gora/commit/d56f37ea1b91c8d7066eff5b0b4b0dd1ff019a92",
+        "message": "GORA-211 thread safety: fix java.lang.NullPointerException - synchronize on mutator\n\ngit-svn-id: https://svn.apache.org/repos/asf/gora/trunk@1455955 13f79535-47bb-0310-9956-ffa450edef68",
+        "bug_id": "gora_4",
+        "file": [
+            {
+                "sha": "a98c586ecadcc744189f084799b0318187411413",
+                "filename": "CHANGES.txt",
+                "status": "modified",
+                "additions": 2,
+                "deletions": 0,
+                "changes": 2,
+                "blob_url": "https://github.com/apache/gora/blob/6304fbedf22dd37b7a849ecdec5affc6fc2a0b59/CHANGES.txt",
+                "raw_url": "https://github.com/apache/gora/raw/6304fbedf22dd37b7a849ecdec5affc6fc2a0b59/CHANGES.txt",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/CHANGES.txt?ref=6304fbedf22dd37b7a849ecdec5affc6fc2a0b59",
+                "patch": "@@ -6,6 +6,8 @@ Gora Change Log\n \n trunk (current development)\n \n+* GORA-211 thread safety: fix java.lang.NullPointerException - synchronize on mutator (rherget)\n+\n * GORA-210 thread safety: fix java.util.ConcurrentModificationException (rherget)\n \n * GORA-190 Add \"version\" switch to bin/gora script (lewismc)"
+            },
+            {
+                "sha": "84acba9999b803a45286d1b9a9acb17d13a1acc4",
+                "filename": "gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraClient.java",
+                "status": "modified",
+                "additions": 9,
+                "deletions": 3,
+                "changes": 12,
+                "blob_url": "https://github.com/apache/gora/blob/6304fbedf22dd37b7a849ecdec5affc6fc2a0b59/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraClient.java",
+                "raw_url": "https://github.com/apache/gora/raw/6304fbedf22dd37b7a849ecdec5affc6fc2a0b59/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraClient.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraClient.java?ref=6304fbedf22dd37b7a849ecdec5affc6fc2a0b59",
+                "patch": "@@ -193,7 +193,9 @@ public void addColumn(K key, String fieldName, Object value) {\n       return;\n     }\n     \n-    HectorUtils.insertColumn(mutator, key, columnFamily, columnName, byteBuffer);\n+    synchronized(mutator) {\n+      HectorUtils.insertColumn(mutator, key, columnFamily, columnName, byteBuffer);\n+    }\n   }\n \n   /**\n@@ -214,7 +216,9 @@ public void addSubColumn(K key, String fieldName, ByteBuffer columnName, Object\n     String columnFamily = this.cassandraMapping.getFamily(fieldName);\n     String superColumnName = this.cassandraMapping.getColumn(fieldName);\n     \n-    HectorUtils.insertSubColumn(mutator, key, columnFamily, superColumnName, columnName, byteBuffer);\n+    synchronized(mutator) {\n+      HectorUtils.insertSubColumn(mutator, key, columnFamily, superColumnName, columnName, byteBuffer);\n+    }\n   }\n \n   public void addSubColumn(K key, String fieldName, String columnName, Object value) {\n@@ -238,7 +242,9 @@ public void deleteSubColumn(K key, String fieldName, ByteBuffer columnName) {\n     String columnFamily = this.cassandraMapping.getFamily(fieldName);\n     String superColumnName = this.cassandraMapping.getColumn(fieldName);\n     \n-    HectorUtils.deleteSubColumn(mutator, key, columnFamily, superColumnName, columnName);\n+    synchronized(mutator) {\n+      HectorUtils.deleteSubColumn(mutator, key, columnFamily, superColumnName, columnName);\n+    }\n   }\n \n   public void deleteSubColumn(K key, String fieldName, String columnName) {"
+            },
+            {
+                "sha": "7e690e3caef56c526caa10fca17873171284ef95",
+                "filename": "gora-cassandra/src/main/java/org/apache/gora/cassandra/store/HectorUtils.java",
+                "status": "modified",
+                "additions": 5,
+                "deletions": 0,
+                "changes": 5,
+                "blob_url": "https://github.com/apache/gora/blob/6304fbedf22dd37b7a849ecdec5affc6fc2a0b59/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/HectorUtils.java",
+                "raw_url": "https://github.com/apache/gora/raw/6304fbedf22dd37b7a849ecdec5affc6fc2a0b59/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/HectorUtils.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/HectorUtils.java?ref=6304fbedf22dd37b7a849ecdec5affc6fc2a0b59",
+                "patch": "@@ -35,6 +35,11 @@\n import org.slf4j.Logger;\n import org.slf4j.LoggerFactory;\n \n+/**\n+ * This class it not thread safe.\n+ * According to Hector's JavaDoc a Mutator isn't thread safe, too.\n+ * Take a look at {@CassandraClient} for safe usage.\n+ */\n public class HectorUtils<K,T extends Persistent> {\n \n   public static final Logger LOG = LoggerFactory.getLogger(HectorUtils.class);"
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/gora/commit/703449a3ddaa99161182ca0d7f562f8d1aff501a",
+        "repo": "gora",
+        "parent": "https://github.com/apache/gora/commit/f78ae6f5d2bbc49bc028084913fdbe2d08d0e0e6",
+        "message": "GORA-211 thread safety: fix java.lang.NullPointerException - synchronize on mutator\n\ngit-svn-id: https://svn.apache.org/repos/asf/gora/trunk@1455955 13f79535-47bb-0310-9956-ffa450edef68",
+        "bug_id": "gora_5",
+        "file": [
+            {
+                "sha": "a98c586ecadcc744189f084799b0318187411413",
+                "filename": "CHANGES.txt",
+                "status": "modified",
+                "additions": 2,
+                "deletions": 0,
+                "changes": 2,
+                "blob_url": "https://github.com/apache/gora/blob/703449a3ddaa99161182ca0d7f562f8d1aff501a/CHANGES.txt",
+                "raw_url": "https://github.com/apache/gora/raw/703449a3ddaa99161182ca0d7f562f8d1aff501a/CHANGES.txt",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/CHANGES.txt?ref=703449a3ddaa99161182ca0d7f562f8d1aff501a",
+                "patch": "@@ -6,6 +6,8 @@ Gora Change Log\n \n trunk (current development)\n \n+* GORA-211 thread safety: fix java.lang.NullPointerException - synchronize on mutator (rherget)\n+\n * GORA-210 thread safety: fix java.util.ConcurrentModificationException (rherget)\n \n * GORA-190 Add \"version\" switch to bin/gora script (lewismc)"
+            },
+            {
+                "sha": "84acba9999b803a45286d1b9a9acb17d13a1acc4",
+                "filename": "gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraClient.java",
+                "status": "modified",
+                "additions": 9,
+                "deletions": 3,
+                "changes": 12,
+                "blob_url": "https://github.com/apache/gora/blob/703449a3ddaa99161182ca0d7f562f8d1aff501a/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraClient.java",
+                "raw_url": "https://github.com/apache/gora/raw/703449a3ddaa99161182ca0d7f562f8d1aff501a/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraClient.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraClient.java?ref=703449a3ddaa99161182ca0d7f562f8d1aff501a",
+                "patch": "@@ -193,7 +193,9 @@ public void addColumn(K key, String fieldName, Object value) {\n       return;\n     }\n     \n-    HectorUtils.insertColumn(mutator, key, columnFamily, columnName, byteBuffer);\n+    synchronized(mutator) {\n+      HectorUtils.insertColumn(mutator, key, columnFamily, columnName, byteBuffer);\n+    }\n   }\n \n   /**\n@@ -214,7 +216,9 @@ public void addSubColumn(K key, String fieldName, ByteBuffer columnName, Object\n     String columnFamily = this.cassandraMapping.getFamily(fieldName);\n     String superColumnName = this.cassandraMapping.getColumn(fieldName);\n     \n-    HectorUtils.insertSubColumn(mutator, key, columnFamily, superColumnName, columnName, byteBuffer);\n+    synchronized(mutator) {\n+      HectorUtils.insertSubColumn(mutator, key, columnFamily, superColumnName, columnName, byteBuffer);\n+    }\n   }\n \n   public void addSubColumn(K key, String fieldName, String columnName, Object value) {\n@@ -238,7 +242,9 @@ public void deleteSubColumn(K key, String fieldName, ByteBuffer columnName) {\n     String columnFamily = this.cassandraMapping.getFamily(fieldName);\n     String superColumnName = this.cassandraMapping.getColumn(fieldName);\n     \n-    HectorUtils.deleteSubColumn(mutator, key, columnFamily, superColumnName, columnName);\n+    synchronized(mutator) {\n+      HectorUtils.deleteSubColumn(mutator, key, columnFamily, superColumnName, columnName);\n+    }\n   }\n \n   public void deleteSubColumn(K key, String fieldName, String columnName) {"
+            },
+            {
+                "sha": "7e690e3caef56c526caa10fca17873171284ef95",
+                "filename": "gora-cassandra/src/main/java/org/apache/gora/cassandra/store/HectorUtils.java",
+                "status": "modified",
+                "additions": 5,
+                "deletions": 0,
+                "changes": 5,
+                "blob_url": "https://github.com/apache/gora/blob/703449a3ddaa99161182ca0d7f562f8d1aff501a/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/HectorUtils.java",
+                "raw_url": "https://github.com/apache/gora/raw/703449a3ddaa99161182ca0d7f562f8d1aff501a/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/HectorUtils.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/HectorUtils.java?ref=703449a3ddaa99161182ca0d7f562f8d1aff501a",
+                "patch": "@@ -35,6 +35,11 @@\n import org.slf4j.Logger;\n import org.slf4j.LoggerFactory;\n \n+/**\n+ * This class it not thread safe.\n+ * According to Hector's JavaDoc a Mutator isn't thread safe, too.\n+ * Take a look at {@CassandraClient} for safe usage.\n+ */\n public class HectorUtils<K,T extends Persistent> {\n \n   public static final Logger LOG = LoggerFactory.getLogger(HectorUtils.class);"
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/gora/commit/d61a1735e3fdaeff00c4ecad85905e335651bafa",
+        "repo": "gora",
+        "parent": "https://github.com/apache/gora/commit/e00f420fbc0d3d89c4c8cc76509d501622c17b3e",
+        "message": "GORA-350 fixed. NPE within CassandraClient.getFamilyMap.",
+        "bug_id": "gora_6",
+        "file": [
+            {
+                "sha": "46dad15816581c0ff65382a82581480ebb6ef24d",
+                "filename": "gora-cassandra/src/main/java/org/apache/gora/cassandra/query/CassandraResult.java",
+                "status": "modified",
+                "additions": 0,
+                "deletions": 2,
+                "changes": 2,
+                "blob_url": "https://github.com/apache/gora/blob/d61a1735e3fdaeff00c4ecad85905e335651bafa/gora-cassandra/src/main/java/org/apache/gora/cassandra/query/CassandraResult.java",
+                "raw_url": "https://github.com/apache/gora/raw/d61a1735e3fdaeff00c4ecad85905e335651bafa/gora-cassandra/src/main/java/org/apache/gora/cassandra/query/CassandraResult.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-cassandra/src/main/java/org/apache/gora/cassandra/query/CassandraResult.java?ref=d61a1735e3fdaeff00c4ecad85905e335651bafa",
+                "patch": "@@ -107,8 +107,6 @@ private void updatePersistent() throws IOException {\n           int pos = this.persistent.getSchema().getField(fieldName).pos();\n           Field field = fields.get(pos);\n           Type fieldType = field.schema().getType();\n-          // LOG.info(StringSerializer.get().fromByteBuffer(cassandraColumn.getName())\n-          // + fieldName + \" \" + fieldType.name());\n           if (fieldType.equals(Type.UNION)) {\n             //getting UNION stored type\n             CassandraColumn cc = getUnionTypeColumn(fieldName"
+            },
+            {
+                "sha": "1d56e32be5de223ae131e2b05833082fab300d26",
+                "filename": "gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraClient.java",
+                "status": "modified",
+                "additions": 2,
+                "deletions": 2,
+                "changes": 4,
+                "blob_url": "https://github.com/apache/gora/blob/d61a1735e3fdaeff00c4ecad85905e335651bafa/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraClient.java",
+                "raw_url": "https://github.com/apache/gora/raw/d61a1735e3fdaeff00c4ecad85905e335651bafa/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraClient.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraClient.java?ref=d61a1735e3fdaeff00c4ecad85905e335651bafa",
+                "patch": "@@ -478,7 +478,7 @@ private String getMappingColumn(String pField){\n         map.put(family, list);\n       }\n       if (persistentSchema.getField(field).schema().getType() == Type.UNION)\n-        list.add(column + CassandraStore.UNION_COL_SUFIX);\n+        list.add(field + CassandraStore.UNION_COL_SUFIX);\n       if (column != null) {\n         list.add(column);\n       }\n@@ -510,7 +510,7 @@ public CassandraMapping getCassandraMapping(){\n       String family = this.getMappingFamily(field);\n       String column = this.getMappingColumn(field);\n       if (persistentSchema.getField(field).schema().getType() == Type.UNION)\n-        map.put(family + \":\" + column + CassandraStore.UNION_COL_SUFIX, field + CassandraStore.UNION_COL_SUFIX);\n+        map.put(family + \":\" + field + CassandraStore.UNION_COL_SUFIX, field + CassandraStore.UNION_COL_SUFIX);\n       map.put(family + \":\" + column, field);\n     }\n     "
+            },
+            {
+                "sha": "ffb4af0eefad651f5207fea57193d8f17e30893a",
+                "filename": "gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraStore.java",
+                "status": "modified",
+                "additions": 1,
+                "deletions": 15,
+                "changes": 16,
+                "blob_url": "https://github.com/apache/gora/blob/d61a1735e3fdaeff00c4ecad85905e335651bafa/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraStore.java",
+                "raw_url": "https://github.com/apache/gora/raw/d61a1735e3fdaeff00c4ecad85905e335651bafa/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraStore.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraStore.java?ref=d61a1735e3fdaeff00c4ecad85905e335651bafa",
+                "patch": "@@ -47,7 +47,6 @@\n import org.apache.avro.specific.SpecificData;\n import org.apache.avro.specific.SpecificDatumWriter;\n import org.apache.avro.util.Utf8;\n-import org.apache.commons.lang.ArrayUtils;\n import org.apache.gora.cassandra.query.CassandraQuery;\n import org.apache.gora.cassandra.query.CassandraResult;\n import org.apache.gora.cassandra.query.CassandraResultSet;\n@@ -314,20 +313,7 @@ public T get(K key, String[] fields) {\n     if (fields == null){\n       fields = this.getFields();\n     }\n-    // Generating UnionFields\n-    ArrayList<String> unionFields = new ArrayList<String>();\n-    for (String field: fields){\n-      Field schemaField =this.fieldMap.get(field);\n-      Type type = schemaField.schema().getType();\n-      if (type.getName().equals(\"UNION\".toLowerCase())){\n-        unionFields.add(field+UNION_COL_SUFIX);\n-      }\n-    }\n-    \n-    String[] arr = unionFields.toArray(new String[unionFields.size()]);\n-    String[] both = (String[]) ArrayUtils.addAll(fields, arr);\n-    \n-    query.setFields(both);\n+    query.setFields(fields);\n \n     query.setLimit(1);\n     Result<K,T> result = execute(query);"
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/gora/commit/b79fc898f83994ebf61a2065a69055d0513bbdb5",
+        "repo": "gora",
+        "parent": "https://github.com/apache/gora/commit/b5ba30c0999088d587755ad5cfdff97faaeb3fea",
+        "message": "Temp fix for GORA-447 Fix NPE within MemStoreTest.testMemStoreDeleteByQueryFields and failed assertion within MemStoreTest.testGetWithFields",
+        "bug_id": "gora_7",
+        "file": [
+            {
+                "sha": "0c56d8e1faccf07c4b6816681ef197281af720e7",
+                "filename": "gora-core/src/test/java/org/apache/gora/memory/store/MemStoreTest.java",
+                "status": "modified",
+                "additions": 6,
+                "deletions": 1,
+                "changes": 7,
+                "blob_url": "https://github.com/apache/gora/blob/b79fc898f83994ebf61a2065a69055d0513bbdb5/gora-core/src/test/java/org/apache/gora/memory/store/MemStoreTest.java",
+                "raw_url": "https://github.com/apache/gora/raw/b79fc898f83994ebf61a2065a69055d0513bbdb5/gora-core/src/test/java/org/apache/gora/memory/store/MemStoreTest.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-core/src/test/java/org/apache/gora/memory/store/MemStoreTest.java?ref=b79fc898f83994ebf61a2065a69055d0513bbdb5",
+                "patch": "@@ -102,10 +102,15 @@ public void testPutGet() throws Exception {\n     store.close();\n   }\n \n-  @Ignore(\"This test assumes that \")\n+  @Ignore(\"GORA-447\")\n   @Test\n   public void testDeleteByQueryFields() {}\n \n+  @Ignore(\"GORA-447\")\n+  @Test\n+  public void testGetWithFields() {}\n+\n+  @Ignore(\"GORA-447\")\n   @Test\n   public void testMemStoreDeleteByQueryFields() throws Exception {\n "
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/gora/commit/8a9ea8ebc323c7351319dbd0dc3456384097b403",
+        "repo": "gora",
+        "parent": "https://github.com/apache/gora/commit/be7344ee4976f0c98762ddcd68107b454b628738",
+        "message": "GORA-199 New bugfixes\n\n- Add missing src/test/conf/gora.properties to avoid NullPointerException\n- Avoid crash in MongoDBQuery if missing fields\n- Start support of UNION (very early stage)\n- Fix behavior of schemaExists / schemaCreate",
+        "bug_id": "gora_8",
+        "file": [
+            {
+                "sha": "e5d4ed404de3c738451f84d9bad4ee836e86aa9e",
+                "filename": "gora-mongodb/src/main/java/org/apache/gora/mongodb/query/MongoDBQuery.java",
+                "status": "modified",
+                "additions": 2,
+                "deletions": 0,
+                "changes": 2,
+                "blob_url": "https://github.com/apache/gora/blob/8a9ea8ebc323c7351319dbd0dc3456384097b403/gora-mongodb/src/main/java/org/apache/gora/mongodb/query/MongoDBQuery.java",
+                "raw_url": "https://github.com/apache/gora/raw/8a9ea8ebc323c7351319dbd0dc3456384097b403/gora-mongodb/src/main/java/org/apache/gora/mongodb/query/MongoDBQuery.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-mongodb/src/main/java/org/apache/gora/mongodb/query/MongoDBQuery.java?ref=8a9ea8ebc323c7351319dbd0dc3456384097b403",
+                "patch": "@@ -70,8 +70,10 @@ public static DBObject toDBQuery(Query<?, ?> query) {\n   public static DBObject toProjection(Query<?, ?> query) {\n     BasicDBObject proj = new BasicDBObject();\n \n+    if (query.getFields() != null) {\n     for (String k : query.getFields())\n       proj.put(k, true);\n+    }\n \n     return proj;\n   }"
+            },
+            {
+                "sha": "e319735dd61cba4d4d89425dc2dbffdabb47c052",
+                "filename": "gora-mongodb/src/main/java/org/apache/gora/mongodb/store/MongoStore.java",
+                "status": "modified",
+                "additions": 27,
+                "deletions": 3,
+                "changes": 30,
+                "blob_url": "https://github.com/apache/gora/blob/8a9ea8ebc323c7351319dbd0dc3456384097b403/gora-mongodb/src/main/java/org/apache/gora/mongodb/store/MongoStore.java",
+                "raw_url": "https://github.com/apache/gora/raw/8a9ea8ebc323c7351319dbd0dc3456384097b403/gora-mongodb/src/main/java/org/apache/gora/mongodb/store/MongoStore.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-mongodb/src/main/java/org/apache/gora/mongodb/store/MongoStore.java?ref=8a9ea8ebc323c7351319dbd0dc3456384097b403",
+                "patch": "@@ -267,9 +267,14 @@ public void createSchema() {\n     if (mongoClientDB == null)\n       throw new IllegalStateException(\n           \"Impossible to create the schema as no database has been selected.\");\n+    if (schemaExists()) {\n+        return;\n+    }\n+\n     // If initialized create the collection\n     mongoClientColl = mongoClientDB.createCollection(\n-        mapping.getCollectionName(), null);\n+        mapping.getCollectionName(), new BasicDBObject()); //  send a DBObject to force creation\n+      // otherwise creation is deferred\n     mongoClientColl.setDBEncoderFactory(GoraDBEncoder.FACTORY);\n \n     LOG.info(\"Collection {} has been created for Mongo instance {}.\",\n@@ -467,7 +472,9 @@ public long deleteByQuery(Query<K, T> query) {\n    */\n   @Override\n   public Query<K, T> newQuery() {\n-    return new MongoDBQuery<K, T>(this);\n+      MongoDBQuery<K, T> query = new MongoDBQuery<K, T>(this);\n+      query.setFields(getFieldsToQuery(null));\n+      return query;\n   }\n \n   /**\n@@ -640,6 +647,22 @@ public T newInstance(DBObject obj, String[] fields) {\n       case NULL:\n         persistent.put(field.pos(), null);\n         break;\n+      case UNION:\n+          if (fieldSchema.getTypes().size() == 2) {\n+\n+          // schema [type0, type1]\n+          Type type0 = fieldSchema.getTypes().get(0).getType() ;\n+          Type type1 = fieldSchema.getTypes().get(1).getType() ;\n+\n+          // Check if types are different and there's a \"null\", like [\"null\",\"type\"] or [\"type\",\"null\"]\n+          if (!type0.equals(type1)\n+                  && (   type0.equals(Schema.Type.NULL)\n+                  || type1.equals(Schema.Type.NULL))) {\n+              persistent.put(field.pos(), easybson.getBytes(docf)); // Deserialize as if schema was [\"type\"]\n+          }\n+\n+          }\n+        break;\n       default:\n         Object o = easybson.get(docf);\n         if (o == null)\n@@ -808,7 +831,8 @@ private BasicDBObject newUpdateSetInstance(T persistent) {\n               record.put(\n                   member.name(),\n                   toMongoMap((Map<Utf8, ?>) recValue, member.schema()\n-                      .getElementType().getType()));\n+                      .getValueType().getType()));\n+              break;\n             case ARRAY:\n               record.put(\n                   member.name(),"
+            },
+            {
+                "sha": "1d152298b6817ca8fa4903dfa32b2cbd0caf89ad",
+                "filename": "gora-mongodb/src/test/conf/gora.properties",
+                "status": "added",
+                "additions": 90,
+                "deletions": 0,
+                "changes": 90,
+                "blob_url": "https://github.com/apache/gora/blob/8a9ea8ebc323c7351319dbd0dc3456384097b403/gora-mongodb/src/test/conf/gora.properties",
+                "raw_url": "https://github.com/apache/gora/raw/8a9ea8ebc323c7351319dbd0dc3456384097b403/gora-mongodb/src/test/conf/gora.properties",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-mongodb/src/test/conf/gora.properties?ref=8a9ea8ebc323c7351319dbd0dc3456384097b403",
+                "patch": "@@ -0,0 +1,90 @@\n+# Licensed to the Apache Software Foundation (ASF) under one or more\n+# contributor license agreements.  See the NOTICE file distributed with\n+# this work for additional information regarding copyright ownership.\n+# The ASF licenses this file to You under the Apache License, Version 2.0\n+# (the \"License\"); you may not use this file except in compliance with\n+# the License.  You may obtain a copy of the License at\n+#\n+#     http://www.apache.org/licenses/LICENSE-2.0\n+#\n+# Unless required by applicable law or agreed to in writing, software\n+# distributed under the License is distributed on an \"AS IS\" BASIS,\n+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n+# See the License for the specific language governing permissions and\n+# limitations under the License.\n+\n+#gora.datastore.default=org.apache.gora.mock.store.MockDataStore\n+gora.datastore.autocreateschema=true\n+\n+###############################\n+# Default SqlStore properties #\n+###############################\n+\n+gora.sqlstore.jdbc.driver=org.hsqldb.jdbc.JDBCDriver\n+gora.sqlstore.jdbc.url=jdbc:hsqldb:hsql://localhost/nutchtest\n+gora.sqlstore.jdbc.user=sa\n+gora.sqlstore.jdbc.password=\n+\n+################################\n+# Default AvroStore properties #\n+################################\n+\n+# gora.avrostore.codec.type=BINARY||JSON\n+# gora.avrostore.output.path=file:///tmp/gora.avrostore.test.output\n+\n+################################\n+# DatafileAvroStore properties #\n+################################\n+# DataFileAvroStore is file based store which uses Avro's \n+# DataFile{Writer,Reader}'s as a backend. This datastore supports \n+# mapreduce.\n+\n+# gora.datafileavrostore.###=\n+\n+#########################\n+# HBaseStore properties #\n+#########################\n+# HBase requires that the Configuration has a valid \"hbase.zookeeper.quorum\"\n+# property. It should be included within hbase-site.xml on the classpath. When\n+# this property is omitted, it expects Zookeeper to run on localhost:2181.\n+\n+# To greatly improve scan performance, increase the hbase-site Configuration\n+# property \"hbase.client.scanner.caching\". This sets the number of rows to grab\n+# per request.\n+\n+# HBase autoflushing. Enabling autoflush decreases write performance. \n+# Available since Gora 0.2. Defaults to disabled.\n+# hbase.client.autoflush.default=false\n+\n+#############################\n+# CassandraStore properties #\n+#############################\n+\n+# gora.cassandrastore.servers=localhost:9160\n+\n+#######################\n+# MemStore properties #\n+#######################\n+# This is a memory based {@link DataStore} implementation for tests.\n+\n+# gora.memstore.###=\n+\n+############################\n+# AccumuloStore properties #\n+############################\n+#gora.datastore.default=org.apache.gora.accumulo.store.AccumuloStore\n+#gora.datastore.accumulo.mock=true\n+#gora.datastore.accumulo.instance=a14\n+#gora.datastore.accumulo.zookeepers=localhost\n+#gora.datastore.accumulo.user=root\n+#gora.datastore.accumulo.password=secret\n+\n+############################\n+# MongoDBStore properties  #\n+############################\n+gora.datastore.default=org.apache.gora.mongodb.store.MongoStore\n+gora.mongodb.override_hadoop_configuration=true\n+gora.mongodb.mapping.file=/gora-mongodb-mapping.xml\n+gora.mongodb.servers=localhost\n+gora.mongodb.db=nutchtest\n+"
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/gora/commit/89c025d2f9e4ba19378eb15537104c8775bf2474",
+        "repo": "gora",
+        "parent": "https://github.com/apache/gora/commit/22b5cf8e5bcd0c974167a1a5cf03a0771f30790a",
+        "message": "GORA-364 MemStore.get fails with NPE when key is not set",
+        "bug_id": "gora_9",
+        "file": [
+            {
+                "sha": "01e14f9767b28aa8b7daed642ae99ccb66401b88",
+                "filename": "CHANGES.txt",
+                "status": "modified",
+                "additions": 2,
+                "deletions": 0,
+                "changes": 2,
+                "blob_url": "https://github.com/apache/gora/blob/89c025d2f9e4ba19378eb15537104c8775bf2474/CHANGES.txt",
+                "raw_url": "https://github.com/apache/gora/raw/89c025d2f9e4ba19378eb15537104c8775bf2474/CHANGES.txt",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/CHANGES.txt?ref=89c025d2f9e4ba19378eb15537104c8775bf2474",
+                "patch": "@@ -4,6 +4,8 @@\n \n Current Development 0.5-SNAPSHOT\n \n+* GORA-364 MemStore.get fails with NPE when key is not set (Gerhard Gossen via lewismc)\n+\n * GORA-189 Embrace all text-like parameters in generated Persistent subclasses by Compiler CharSequence (lewismc)\n \n * GORA-361 AvroUtils.deepClonePersistent needs to flush BinaryEncoder (Gerhard Gossen via hsaputra)"
+            },
+            {
+                "sha": "56ba4e3b2ee8d9f892b13abb929945b657d5cbcc",
+                "filename": "gora-core/src/main/java/org/apache/gora/memory/store/MemStore.java",
+                "status": "modified",
+                "additions": 3,
+                "deletions": 0,
+                "changes": 3,
+                "blob_url": "https://github.com/apache/gora/blob/89c025d2f9e4ba19378eb15537104c8775bf2474/gora-core/src/main/java/org/apache/gora/memory/store/MemStore.java",
+                "raw_url": "https://github.com/apache/gora/raw/89c025d2f9e4ba19378eb15537104c8775bf2474/gora-core/src/main/java/org/apache/gora/memory/store/MemStore.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-core/src/main/java/org/apache/gora/memory/store/MemStore.java?ref=89c025d2f9e4ba19378eb15537104c8775bf2474",
+                "patch": "@@ -139,6 +139,9 @@ public long deleteByQuery(Query<K, T> query) {\n   @Override\n   public T get(K key, String[] fields) {\n     T obj = map.get(key);\n+    if (obj == null) {\n+      return null;\n+    }\n     return getPersistent(obj, getFieldsToQuery(fields));\n   }\n "
+            },
+            {
+                "sha": "f715280faf4924587a35442fe594d8625a2ab9e4",
+                "filename": "gora-core/src/test/java/org/apache/gora/memory/store/MemStoreTest.java",
+                "status": "added",
+                "additions": 31,
+                "deletions": 0,
+                "changes": 31,
+                "blob_url": "https://github.com/apache/gora/blob/89c025d2f9e4ba19378eb15537104c8775bf2474/gora-core/src/test/java/org/apache/gora/memory/store/MemStoreTest.java",
+                "raw_url": "https://github.com/apache/gora/raw/89c025d2f9e4ba19378eb15537104c8775bf2474/gora-core/src/test/java/org/apache/gora/memory/store/MemStoreTest.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-core/src/test/java/org/apache/gora/memory/store/MemStoreTest.java?ref=89c025d2f9e4ba19378eb15537104c8775bf2474",
+                "patch": "@@ -0,0 +1,31 @@\n+package org.apache.gora.memory.store;\n+\n+import org.apache.gora.examples.generated.WebPage;\n+import org.apache.gora.store.DataStore;\n+import org.junit.Test;\n+\n+import static org.junit.Assert.assertNotNull;\n+import static org.junit.Assert.assertNull;\n+import static org.junit.Assume.assumeTrue;\n+\n+public class MemStoreTest {\n+\n+  @Test\n+  public void testGetMissingValue() {\n+    DataStore<String, WebPage> store = new MemStore<String, WebPage>();\n+    WebPage nullWebPage = store.get(\"missing\", new String[0]);\n+    assertNull(nullWebPage);\n+    store.close();\n+  }\n+\n+  @Test\n+  public void testPutGet() throws Exception {\n+    String key = \"org.apache.gora:http:/\";\n+    DataStore<String, WebPage> store = new MemStore<String, WebPage>();\n+    assumeTrue(store.get(key, new String[0]) == null);\n+    store.put(key, WebPage.newBuilder().build());\n+    assertNotNull(store.get(key, new String[0]));\n+    store.close();\n+  }\n+\n+}"
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/gora/commit/692f89574beef37409e29720c7ca73f5e548482b",
+        "repo": "gora",
+        "parent": "https://github.com/apache/gora/commit/3ba3bf581eeb49170c0952bb2707d7eb54173cd1",
+        "message": "GORA-283 avoid NPE\n\ngit-svn-id: https://svn.apache.org/repos/asf/gora/trunk@1558595 13f79535-47bb-0310-9956-ffa450edef68",
+        "bug_id": "gora_10",
+        "file": [
+            {
+                "sha": "bd6604f27c7851a263cb26d45e13df9d2086024d",
+                "filename": "gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraStore.java",
+                "status": "modified",
+                "additions": 2,
+                "deletions": 3,
+                "changes": 5,
+                "blob_url": "https://github.com/apache/gora/blob/692f89574beef37409e29720c7ca73f5e548482b/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraStore.java",
+                "raw_url": "https://github.com/apache/gora/raw/692f89574beef37409e29720c7ca73f5e548482b/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraStore.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraStore.java?ref=692f89574beef37409e29720c7ca73f5e548482b",
+                "patch": "@@ -435,11 +435,10 @@ private void addOrUpdateField(K key, Field field, Object value) {\n         LOG.debug(\"Union with value: \" + value.toString() + \" at index: \" + getUnionSchema(value, schema) + \" supported for field: \" + field.name());\n         this.cassandraClient.addColumn(key, field.name(), value);\n       } else {\n-        LOG.warn(\"Union with value: \" + value.toString() + \" at index: \" + getUnionSchema(value, schema) + \" not supported for field: \" + field.name());\n+        LOG.warn(\"Union with 'null' value not supported for field: \" + field.name());\n       }\n     default:\n-      LOG.warn(\"Type: \" + type.name() + \" with value: \" + value.toString() + \n-          \" not considered for field: \" + field.name() + \". Please report this to dev@gora.apache.org\");\n+      LOG.warn(\"Type: \" + type.name() + \" not considered for field: \" + field.name() + \". Please report this to dev@gora.apache.org\");\n     }\n   }\n "
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/gora/commit/10a701b87343716607435e5a37282fef618e4a03",
+        "repo": "gora",
+        "parent": "https://github.com/apache/gora/commit/c401e929da396fcd3c902ae76a71ba981ff2d67e",
+        "message": "GORA-283 avoid NPE\n\ngit-svn-id: https://svn.apache.org/repos/asf/gora/trunk@1558595 13f79535-47bb-0310-9956-ffa450edef68",
+        "bug_id": "gora_11",
+        "file": [
+            {
+                "sha": "bd6604f27c7851a263cb26d45e13df9d2086024d",
+                "filename": "gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraStore.java",
+                "status": "modified",
+                "additions": 2,
+                "deletions": 3,
+                "changes": 5,
+                "blob_url": "https://github.com/apache/gora/blob/10a701b87343716607435e5a37282fef618e4a03/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraStore.java",
+                "raw_url": "https://github.com/apache/gora/raw/10a701b87343716607435e5a37282fef618e4a03/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraStore.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraStore.java?ref=10a701b87343716607435e5a37282fef618e4a03",
+                "patch": "@@ -435,11 +435,10 @@ private void addOrUpdateField(K key, Field field, Object value) {\n         LOG.debug(\"Union with value: \" + value.toString() + \" at index: \" + getUnionSchema(value, schema) + \" supported for field: \" + field.name());\n         this.cassandraClient.addColumn(key, field.name(), value);\n       } else {\n-        LOG.warn(\"Union with value: \" + value.toString() + \" at index: \" + getUnionSchema(value, schema) + \" not supported for field: \" + field.name());\n+        LOG.warn(\"Union with 'null' value not supported for field: \" + field.name());\n       }\n     default:\n-      LOG.warn(\"Type: \" + type.name() + \" with value: \" + value.toString() + \n-          \" not considered for field: \" + field.name() + \". Please report this to dev@gora.apache.org\");\n+      LOG.warn(\"Type: \" + type.name() + \" not considered for field: \" + field.name() + \". Please report this to dev@gora.apache.org\");\n     }\n   }\n "
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/gora/commit/47794859f50ad5298bb5941e9262ebe98cca20d9",
+        "repo": "gora",
+        "parent": "https://github.com/apache/gora/commit/ddff02db5dd8d93903a1312e999af7867fd3b62f",
+        "message": "GORA-283 avoid NPE\n\ngit-svn-id: https://svn.apache.org/repos/asf/gora/trunk@1558595 13f79535-47bb-0310-9956-ffa450edef68",
+        "bug_id": "gora_12",
+        "file": [
+            {
+                "sha": "bd6604f27c7851a263cb26d45e13df9d2086024d",
+                "filename": "gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraStore.java",
+                "status": "modified",
+                "additions": 2,
+                "deletions": 3,
+                "changes": 5,
+                "blob_url": "https://github.com/apache/gora/blob/47794859f50ad5298bb5941e9262ebe98cca20d9/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraStore.java",
+                "raw_url": "https://github.com/apache/gora/raw/47794859f50ad5298bb5941e9262ebe98cca20d9/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraStore.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-cassandra/src/main/java/org/apache/gora/cassandra/store/CassandraStore.java?ref=47794859f50ad5298bb5941e9262ebe98cca20d9",
+                "patch": "@@ -435,11 +435,10 @@ private void addOrUpdateField(K key, Field field, Object value) {\n         LOG.debug(\"Union with value: \" + value.toString() + \" at index: \" + getUnionSchema(value, schema) + \" supported for field: \" + field.name());\n         this.cassandraClient.addColumn(key, field.name(), value);\n       } else {\n-        LOG.warn(\"Union with value: \" + value.toString() + \" at index: \" + getUnionSchema(value, schema) + \" not supported for field: \" + field.name());\n+        LOG.warn(\"Union with 'null' value not supported for field: \" + field.name());\n       }\n     default:\n-      LOG.warn(\"Type: \" + type.name() + \" with value: \" + value.toString() + \n-          \" not considered for field: \" + field.name() + \". Please report this to dev@gora.apache.org\");\n+      LOG.warn(\"Type: \" + type.name() + \" not considered for field: \" + field.name() + \". Please report this to dev@gora.apache.org\");\n     }\n   }\n "
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/gora/commit/f267370f1bb3a3bc3c69550be8c2d9d7d33affc7",
+        "repo": "gora",
+        "parent": "https://github.com/apache/gora/commit/0126ecd900ec6c9b036db4312073d5ec8ad5f1ca",
+        "message": "GORA-389: Document or List mapping change cause NPE in clearDirty()\n\nThis close PR #15\n\nSquashed commit of the following:\n\ncommit f07ac202b1890afd27d5e071dff5eafdc34bc044\nAuthor: Damien Raude-Morvan <drazzib@drazzib.com>\nDate:   Sat Nov 1 12:16:38 2014 +0100\n\n    GORA-389 Add MongoStore specific tests for Map/List handling\n\ncommit 75805e2eaf3c1c69573dc1b2b2df12a25aec8d25\nAuthor: Damien Raude-Morvan <damien@dictanova.com>\nDate:   Wed Oct 8 20:03:36 2014 +0200\n\n    Don't perform clearDirty() multiple times.\n\ncommit d7a6a4794f2fef492f1e116e1108b59d8e9c81bb\nAuthor: Damien Raude-Morvan <damien@dictanova.com>\nDate:   Wed Oct 8 20:04:06 2014 +0200\n\n    Return empty DirtyListWrapper or DirtyMapWrapper instead of null.",
+        "bug_id": "gora_13",
+        "file": [
+            {
+                "sha": "5524345ac8fb00d683847eb4756a1702cbb2efca",
+                "filename": "gora-mongodb/src/main/java/org/apache/gora/mongodb/query/MongoDBResult.java",
+                "status": "modified",
+                "additions": 0,
+                "deletions": 4,
+                "changes": 4,
+                "blob_url": "https://github.com/apache/gora/blob/f267370f1bb3a3bc3c69550be8c2d9d7d33affc7/gora-mongodb/src/main/java/org/apache/gora/mongodb/query/MongoDBResult.java",
+                "raw_url": "https://github.com/apache/gora/raw/f267370f1bb3a3bc3c69550be8c2d9d7d33affc7/gora-mongodb/src/main/java/org/apache/gora/mongodb/query/MongoDBResult.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-mongodb/src/main/java/org/apache/gora/mongodb/query/MongoDBResult.java?ref=f267370f1bb3a3bc3c69550be8c2d9d7d33affc7",
+                "patch": "@@ -74,10 +74,6 @@ protected boolean nextInner() throws IOException {\n     key = (K) obj.get(\"_id\");\n     persistent = ((MongoStore<K, T>) getDataStore()).newInstance(obj,\n         getQuery().getFields());\n-    if (persistent != null) {\n-      persistent.clearDirty();\n-    }\n-\n     return persistent != null;\n   }\n "
+            },
+            {
+                "sha": "2eea3b89d5fd0196019c2bd9dbe216da874115cd",
+                "filename": "gora-mongodb/src/main/java/org/apache/gora/mongodb/store/MongoStore.java",
+                "status": "modified",
+                "additions": 14,
+                "deletions": 19,
+                "changes": 33,
+                "blob_url": "https://github.com/apache/gora/blob/f267370f1bb3a3bc3c69550be8c2d9d7d33affc7/gora-mongodb/src/main/java/org/apache/gora/mongodb/store/MongoStore.java",
+                "raw_url": "https://github.com/apache/gora/raw/f267370f1bb3a3bc3c69550be8c2d9d7d33affc7/gora-mongodb/src/main/java/org/apache/gora/mongodb/store/MongoStore.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-mongodb/src/main/java/org/apache/gora/mongodb/store/MongoStore.java?ref=f267370f1bb3a3bc3c69550be8c2d9d7d33affc7",
+                "patch": "@@ -369,13 +369,8 @@ public T get(final K key, final String[] fields) {\n     }\n     // Execute the query\n     DBObject res = mongoClientColl.findOne(q, proj);\n-    // Build the corresponding persistent and clears its states\n-    T persistent = newInstance(res, dbFields);\n-    if (persistent != null) {\n-      persistent.clearDirty();\n-    }\n-    // Done\n-    return persistent;\n+    // Build the corresponding persistent\n+    return newInstance(res, dbFields);\n   }\n \n   /**\n@@ -666,14 +661,14 @@ private Object fromMongoRecord(final Schema fieldSchema, final String docf,\n     return result;\n   }\n \n-  private Object fromMongoList(final String docf, final Schema fieldSchema,\n-      final BSONDecorator easybson, final Field f) {\n+  /* pp */ Object fromMongoList(final String docf, final Schema fieldSchema,\n+                       final BSONDecorator easybson, final Field f) {\n     List<Object> list = easybson.getDBList(docf);\n+    List<Object> rlist = new ArrayList<Object>();\n     if (list == null) {\n-      return null;\n+      return new DirtyListWrapper(rlist);\n     }\n \n-    List<Object> rlist = new ArrayList<Object>();\n \n     for (Object item : list) {\n       DocumentFieldType storeType = mapping.getDocumentFieldType(docf);\n@@ -684,13 +679,13 @@ private Object fromMongoList(final String docf, final Schema fieldSchema,\n     return new DirtyListWrapper<Object>(rlist);\n   }\n \n-  private Object fromMongoMap(final String docf, final Schema fieldSchema,\n-      final BSONDecorator easybson, final Field f) {\n+  /* pp */ Object fromMongoMap(final String docf, final Schema fieldSchema,\n+                      final BSONDecorator easybson, final Field f) {\n     BasicDBObject map = easybson.getDBObject(docf);\n+    Map<Utf8, Object> rmap = new HashMap<Utf8, Object>();\n     if (map == null) {\n-      return null;\n+        return new DirtyMapWrapper(rmap);\n     }\n-    Map<Utf8, Object> rmap = new HashMap<Utf8, Object>();\n     for (Entry<String, Object> e : map.entrySet()) {\n       String mapKey = e.getKey();\n       String decodedMapKey = decodeFieldKey(mapKey);\n@@ -960,12 +955,12 @@ private Object stringToMongo(final Schema fieldSchema,\n   private BasicDBObject mapToMongo(final String docf,\n       final Map<CharSequence, ?> value, final Schema fieldSchema,\n       final Type fieldType) {\n+    BasicDBObject map = new BasicDBObject();\n     // Handle null case\n     if (value == null)\n-      return null;\n+      return map;\n \n     // Handle regular cases\n-    BasicDBObject map = new BasicDBObject();\n     for (Entry<CharSequence, ?> e : value.entrySet()) {\n       String mapKey = e.getKey().toString();\n       String encodedMapKey = encodeFieldKey(mapKey);\n@@ -993,12 +988,12 @@ private BasicDBObject mapToMongo(final String docf,\n    */\n   private BasicDBList listToMongo(final String docf, final Collection<?> array,\n       final Schema fieldSchema, final Type fieldType) {\n+    BasicDBList list = new BasicDBList();\n     // Handle null case\n     if (array == null)\n-      return null;\n+      return list;\n \n     // Handle regular cases\n-    BasicDBList list = new BasicDBList();\n     for (Object item : array) {\n       DocumentFieldType storeType = mapping.getDocumentFieldType(docf);\n       Object result = toDBObject(docf, fieldSchema, fieldType, storeType, item);"
+            },
+            {
+                "sha": "0f01173939e677f4bb04528b37e996b2c37c5017",
+                "filename": "gora-mongodb/src/test/java/org/apache/gora/mongodb/store/TestMongoStore.java",
+                "status": "modified",
+                "additions": 46,
+                "deletions": 0,
+                "changes": 46,
+                "blob_url": "https://github.com/apache/gora/blob/f267370f1bb3a3bc3c69550be8c2d9d7d33affc7/gora-mongodb/src/test/java/org/apache/gora/mongodb/store/TestMongoStore.java",
+                "raw_url": "https://github.com/apache/gora/raw/f267370f1bb3a3bc3c69550be8c2d9d7d33affc7/gora-mongodb/src/test/java/org/apache/gora/mongodb/store/TestMongoStore.java",
+                "contents_url": "https://api.github.com/repos/apache/gora/contents/gora-mongodb/src/test/java/org/apache/gora/mongodb/store/TestMongoStore.java?ref=f267370f1bb3a3bc3c69550be8c2d9d7d33affc7",
+                "patch": "@@ -17,15 +17,22 @@\n  */\n package org.apache.gora.mongodb.store;\n \n+import static org.junit.Assert.assertNotNull;\n+\n import java.io.IOException;\n \n import org.apache.gora.examples.generated.Employee;\n import org.apache.gora.examples.generated.WebPage;\n import org.apache.gora.mongodb.GoraMongodbTestDriver;\n+import org.apache.gora.mongodb.utils.BSONDecorator;\n import org.apache.gora.store.DataStore;\n import org.apache.gora.store.DataStoreTestBase;\n import org.junit.Before;\n import org.junit.Ignore;\n+import org.junit.Test;\n+\n+import com.mongodb.BasicDBList;\n+import com.mongodb.BasicDBObject;\n \n public class TestMongoStore extends DataStoreTestBase {\n \n@@ -74,4 +81,43 @@ public void testGet3UnionField() throws IOException, Exception {\n     // MongoStore doesn't support 3 types union field yet\n   }\n \n+  @Test\n+  public void testFromMongoList_null() throws Exception {\n+    MongoStore store = new MongoStore();\n+    BasicDBObject noField = new BasicDBObject();\n+    String field = \"myField\";\n+    Object item = store.fromMongoList(field, null, new BSONDecorator(noField),\n+        null);\n+    assertNotNull(item);\n+  }\n+\n+  @Test\n+  public void testFromMongoList_empty() throws Exception {\n+    MongoStore store = new MongoStore();\n+    String field = \"myField\";\n+    BasicDBObject emptyField = new BasicDBObject(field, new BasicDBList());\n+    Object item = store.fromMongoList(field, null,\n+        new BSONDecorator(emptyField), null);\n+    assertNotNull(item);\n+  }\n+\n+  @Test\n+  public void testFromMongoMap_null() throws Exception {\n+    MongoStore store = new MongoStore();\n+    BasicDBObject noField = new BasicDBObject();\n+    String field = \"myField\";\n+    Object item = store.fromMongoMap(field, null, new BSONDecorator(noField),\n+        null);\n+    assertNotNull(item);\n+  }\n+\n+  @Test\n+  public void testFromMongoMap_empty() throws Exception {\n+    MongoStore store = new MongoStore();\n+    String field = \"myField\";\n+    BasicDBObject emptyField = new BasicDBObject(field, new BasicDBObject());\n+    Object item = store.fromMongoMap(field, null,\n+        new BSONDecorator(emptyField), null);\n+    assertNotNull(item);\n+  }\n }"
+            }
+        ]
+    }
+]

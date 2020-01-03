@@ -1,0 +1,143 @@
+[
+    {
+        "commit": "https://github.com/apache/sling-org-apache-sling-jcr-base/commit/3de2b9f6258bb3dda6bf3cfcf9c39a531fbcc020",
+        "repo": "sling-org-apache-sling-jcr-base",
+        "parent": "https://github.com/apache/sling-org-apache-sling-jcr-base/commit/6f5771acf4b943840c477a8621e54c43a3497b97",
+        "message": "SLING-7811 - NPE when repository is starting up\n\nMake sure that each repository startup thread has an individual name.\nThis makes it easier to distinguish repository restart issues during\nstartup.",
+        "bug_id": "sling-org-apache-sling-jcr-base_1",
+        "file": [
+            {
+                "sha": "002d8bc3eecb51ed86a90db1fe087e4c9816c0d3",
+                "filename": "src/main/java/org/apache/sling/jcr/base/AbstractSlingRepositoryManager.java",
+                "status": "modified",
+                "additions": 3,
+                "deletions": 1,
+                "changes": 4,
+                "blob_url": "https://github.com/apache/sling-org-apache-sling-jcr-base/blob/3de2b9f6258bb3dda6bf3cfcf9c39a531fbcc020/src/main/java/org/apache/sling/jcr/base/AbstractSlingRepositoryManager.java",
+                "raw_url": "https://github.com/apache/sling-org-apache-sling-jcr-base/raw/3de2b9f6258bb3dda6bf3cfcf9c39a531fbcc020/src/main/java/org/apache/sling/jcr/base/AbstractSlingRepositoryManager.java",
+                "contents_url": "https://api.github.com/repos/apache/sling-org-apache-sling-jcr-base/contents/src/main/java/org/apache/sling/jcr/base/AbstractSlingRepositoryManager.java?ref=3de2b9f6258bb3dda6bf3cfcf9c39a531fbcc020",
+                "patch": "@@ -85,6 +85,8 @@\n @ProviderType\n public abstract class AbstractSlingRepositoryManager {\n \n+    private static final AtomicInteger startupCounter = new AtomicInteger();\n+\n     /** default log */\n     private final Logger log = LoggerFactory.getLogger(getClass());\n \n@@ -452,7 +454,7 @@ public LoginAdminWhitelist addingService(final ServiceReference<LoginAdminWhitel\n         // start repository asynchronously to allow LoginAdminWhitelist to become available\n         // NOTE: making this conditional allows tests to register a mock whitelist before\n         // activating the RepositoryManager, so they don't need to deal with async startup\n-        startupThread = new Thread(\"Apache Sling Repository Startup Thread\") {\n+        startupThread = new Thread(\"Apache Sling Repository Startup Thread #\" + startupCounter.incrementAndGet()) {\n             @Override\n             public void run() {\n                 try {"
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/sling-org-apache-sling-jcr-base/commit/6f5771acf4b943840c477a8621e54c43a3497b97",
+        "repo": "sling-org-apache-sling-jcr-base",
+        "parent": "https://github.com/apache/sling-org-apache-sling-jcr-base/commit/0b44cad19c978b4f63d88d12a576634c0388410d",
+        "message": "SLING-7811 - NPE when repository is starting up\n\nMake the repository initialisation and startup process more robust\nagainst restarts.\n\nIt is possible that while a the repository startup is happening in an\nasync manner in the \"Apache Sling Repository Startup Thread\" a stop is\nrequested. This thread should be notified of any stop requests and\ngracefully handle the shutdown.",
+        "bug_id": "sling-org-apache-sling-jcr-base_2",
+        "file": [
+            {
+                "sha": "bedb9e716be1dba1047b6de992f206048058afba",
+                "filename": "src/main/java/org/apache/sling/jcr/base/AbstractSlingRepositoryManager.java",
+                "status": "modified",
+                "additions": 28,
+                "deletions": 3,
+                "changes": 31,
+                "blob_url": "https://github.com/apache/sling-org-apache-sling-jcr-base/blob/6f5771acf4b943840c477a8621e54c43a3497b97/src/main/java/org/apache/sling/jcr/base/AbstractSlingRepositoryManager.java",
+                "raw_url": "https://github.com/apache/sling-org-apache-sling-jcr-base/raw/6f5771acf4b943840c477a8621e54c43a3497b97/src/main/java/org/apache/sling/jcr/base/AbstractSlingRepositoryManager.java",
+                "contents_url": "https://api.github.com/repos/apache/sling-org-apache-sling-jcr-base/contents/src/main/java/org/apache/sling/jcr/base/AbstractSlingRepositoryManager.java?ref=6f5771acf4b943840c477a8621e54c43a3497b97",
+                "patch": "@@ -23,6 +23,7 @@\n import java.util.Dictionary;\n import java.util.concurrent.CountDownLatch;\n import java.util.concurrent.TimeUnit;\n+import java.util.concurrent.atomic.AtomicInteger;\n \n import javax.jcr.Repository;\n \n@@ -109,6 +110,10 @@\n \n     private final Object repoInitLock = new Object();\n \n+    private volatile Thread startupThread;\n+\n+    private volatile boolean stopRequested;\n+\n     /**\n      * Returns the default workspace, which may be <code>null</code> meaning to\n      * use the repository provided default workspace.\n@@ -447,17 +452,20 @@ public LoginAdminWhitelist addingService(final ServiceReference<LoginAdminWhitel\n         // start repository asynchronously to allow LoginAdminWhitelist to become available\n         // NOTE: making this conditional allows tests to register a mock whitelist before\n         // activating the RepositoryManager, so they don't need to deal with async startup\n-        new Thread(\"Apache Sling Repository Startup Thread\") {\n+        startupThread = new Thread(\"Apache Sling Repository Startup Thread\") {\n             @Override\n             public void run() {\n                 try {\n                     waitForWhitelist.await();\n                     initializeAndRegisterRepositoryService();\n                 } catch (InterruptedException e) {\n-                    throw new RuntimeException(\"Interrupted while waiting for LoginAdminWhitelist\", e);\n+                    log.info(\"Interrupted while waiting for the {} service, cancelling repository initialisation\", LoginAdminWhitelist.class.getSimpleName(), e);\n+                    Thread.currentThread().interrupt();\n+                    return;\n                 }\n             }\n-        }.start();\n+        };\n+        startupThread.start();\n     }\n \n     private boolean isRepositoryServiceRegistered() {\n@@ -474,6 +482,11 @@ private void initializeAndRegisterRepositoryService() {\n                 // ensure we really have the repository\n                 log.debug(\"start: got a Repository\");\n                 this.repository = newRepo;\n+                if ( stopRequested ) {\n+                    log.debug(\"Stop requested, cancelling initialisation and stopping repository\");\n+                    stop();\n+                    return;\n+                }\n                 synchronized ( this.repoInitLock ) {\n                     this.masterSlingRepository = this.create(this.bundleContext.getBundle());\n \n@@ -547,6 +560,18 @@ private void executeRepositoryInitializers(final SlingRepository repo) throws Ex\n      */\n     protected final void stop() {\n \n+        stopRequested = true;\n+        if ( startupThread != null && startupThread != Thread.currentThread() ) {\n+            try {\n+                startupThread.interrupt();\n+                startupThread.join();\n+            } catch (InterruptedException e) {\n+                log.debug(\"Interrupted while waiting for the \" + startupThread.getName() + \" to complete.\", e);\n+                Thread.currentThread().interrupt();\n+            }\n+            startupThread = null;\n+        }\n+\n         // ensure the repository is really disposed off\n         if (repository != null || isRepositoryServiceRegistered()) {\n             log.info(\"stop: Repository still running, forcing shutdown\");"
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/sling-org-apache-sling-jcr-base/commit/61ea3e243b492c837336d3fba580b8dd581d3f55",
+        "repo": "sling-org-apache-sling-jcr-base",
+        "parent": "https://github.com/apache/sling-org-apache-sling-jcr-base/commit/177b88be74700a73d013fe89196284b27a375805",
+        "message": "SLING-5456 - avoid NPE\n\ngit-svn-id: https://svn.apache.org/repos/asf/sling/trunk@1727948 13f79535-47bb-0310-9956-ffa450edef68",
+        "bug_id": "sling-org-apache-sling-jcr-base_3",
+        "file": [
+            {
+                "sha": "8a8b18fba10465a5ea81383c04562d695634236c",
+                "filename": "src/main/java/org/apache/sling/jcr/base/AbstractSlingRepositoryManager.java",
+                "status": "modified",
+                "additions": 1,
+                "deletions": 0,
+                "changes": 1,
+                "blob_url": "https://github.com/apache/sling-org-apache-sling-jcr-base/blob/61ea3e243b492c837336d3fba580b8dd581d3f55/src/main/java/org/apache/sling/jcr/base/AbstractSlingRepositoryManager.java",
+                "raw_url": "https://github.com/apache/sling-org-apache-sling-jcr-base/raw/61ea3e243b492c837336d3fba580b8dd581d3f55/src/main/java/org/apache/sling/jcr/base/AbstractSlingRepositoryManager.java",
+                "contents_url": "https://api.github.com/repos/apache/sling-org-apache-sling-jcr-base/contents/src/main/java/org/apache/sling/jcr/base/AbstractSlingRepositoryManager.java?ref=61ea3e243b492c837336d3fba580b8dd581d3f55",
+                "patch": "@@ -359,6 +359,7 @@ private void executeRepositoryInitializers(SlingRepository repo) throws Exceptio\n         final ServiceReference [] refs = repoInitializerTracker.getServiceReferences();\n         if(refs == null || refs.length == 0) {\n             log.debug(\"No SlingRepositoryInitializer services found\");\n+            return;\n         }\n         Arrays.sort(refs);\n         for(ServiceReference ref : refs) {"
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/sling-org-apache-sling-jcr-base/commit/97be951dcad980a1e3c5c7d324cccb629beca03e",
+        "repo": "sling-org-apache-sling-jcr-base",
+        "parent": "https://github.com/apache/sling-org-apache-sling-jcr-base/commit/71b0a9603c7ae1a7956ee6bf9be6312b32a90f1b",
+        "message": "SLING-1363 Must start the session configurer tracker before starting the repository because starting the repository tries to login which in turn accesses the tracker thus causing an NPE.\n\ngit-svn-id: https://svn.apache.org/repos/asf/sling/trunk@908440 13f79535-47bb-0310-9956-ffa450edef68",
+        "bug_id": "sling-org-apache-sling-jcr-base_4",
+        "file": [
+            {
+                "sha": "741dd4bc03d09c3758247649c7461c8a0ae8c6f9",
+                "filename": "src/main/java/org/apache/sling/jcr/base/AbstractSlingRepository.java",
+                "status": "modified",
+                "additions": 3,
+                "deletions": 3,
+                "changes": 6,
+                "blob_url": "https://github.com/apache/sling-org-apache-sling-jcr-base/blob/97be951dcad980a1e3c5c7d324cccb629beca03e/src/main/java/org/apache/sling/jcr/base/AbstractSlingRepository.java",
+                "raw_url": "https://github.com/apache/sling-org-apache-sling-jcr-base/raw/97be951dcad980a1e3c5c7d324cccb629beca03e/src/main/java/org/apache/sling/jcr/base/AbstractSlingRepository.java",
+                "contents_url": "https://api.github.com/repos/apache/sling-org-apache-sling-jcr-base/contents/src/main/java/org/apache/sling/jcr/base/AbstractSlingRepository.java?ref=97be951dcad980a1e3c5c7d324cccb629beca03e",
+                "patch": "@@ -572,6 +572,9 @@ protected void activate(ComponentContext componentContext) throws Exception {\n \n         componentContext.getBundleContext().addBundleListener(this);\n \n+        this.sessionConfigurerTracker = new ServiceTracker(componentContext.getBundleContext(), SessionConfigurer.SERVICE_NAME, null);\n+        this.sessionConfigurerTracker.open();\n+\n         // immediately try to start the repository while activating\n         // this component instance\n         try {\n@@ -586,9 +589,6 @@ protected void activate(ComponentContext componentContext) throws Exception {\n                 \"activate: Unexpected problem starting repository\", t);\n         }\n \n-        this.sessionConfigurerTracker = new ServiceTracker(componentContext.getBundleContext(), SessionConfigurer.SERVICE_NAME, null);\n-        this.sessionConfigurerTracker.open();\n-\n         // launch the background repository checker now\n         startRepositoryPinger();\n     }"
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/sling-org-apache-sling-jcr-base/commit/0cc326bbad8f50b7069e1a17a6607e878f86f181",
+        "repo": "sling-org-apache-sling-jcr-base",
+        "parent": "https://github.com/apache/sling-org-apache-sling-jcr-base/commit/228c6d345710ec2f9a4507073e6624b8160896f5",
+        "message": "SLING-1372 Reverting previous commits to get to a place where jcr bundles can be released.\n\nSquashed commit of the following:\n\ncommit 09ff06e6e95cacef6313232f7aa637175ffb7acc\nAuthor: Ian Boston <ieb@tfd.co.uk>\nDate:   Fri Feb 12 12:34:00 2010 +0000\n\n    Part added SLING-1366 back in Revert \"Revert \"SLING-1366 : Use dynamic proxy to handle session#impersonate call.\"\"\n\n    This reverts commit d0681511cdc8d1b3f18688c5ee2ee71b12e3e76a.\n\n    Conflicts:\n\n    \tbundles/jcr/base/src/main/java/org/apache/sling/jcr/base/AbstractSlingRepository.java\n\ncommit 956e758b6985f6e98e50aaf98508be7f8bf5d36d\nAuthor: Ian Boston <ieb@tfd.co.uk>\nDate:   Fri Feb 12 10:03:57 2010 +0000\n\n    Revert \"SLING-1363 - adding SessionConfigurer interface\"\n\n    This reverts commit 388f1b9373207ae207aa33f5d5c49ff874fd349a.\n\ncommit 4e15f0839cd088db62b32a1632f03f8dfd406253\nAuthor: Ian Boston <ieb@tfd.co.uk>\nDate:   Fri Feb 12 10:03:24 2010 +0000\n\n    Revert \"SLING-1363 Must start the session configurer tracker before starting the repository because starting the repository tries to login which in turn accesses the tracker thus causing an NPE.\"\n\n    This reverts commit d5816bca2af56046d891311f1586e224690f73ab.\n\ncommit c9c885385ecb14917e7341c4656c822836abd918\nAuthor: Ian Boston <ieb@tfd.co.uk>\nDate:   Fri Feb 12 10:02:46 2010 +0000\n\n    Revert \"SLING-1366 : Readd call to NamespaceMapper\"\n\n    This reverts commit 0f8b5c33cd02ec555a527c755b66b827e80ed458.\n\ncommit 90ff911034433cef76556fff6c1d0ef8f7e04cfc\nAuthor: Ian Boston <ieb@tfd.co.uk>\nDate:   Fri Feb 12 10:01:46 2010 +0000\n\n    Revert \"fixing SLING-1367\"\n\n    This reverts commit 33ada52357a8196805c564446d90caf4bf7c6272.\n\ncommit a3e34b648b6ccde37a052276d8c589cd430c0ef0\nAuthor: Ian Boston <ieb@tfd.co.uk>\nDate:   Fri Feb 12 10:01:28 2010 +0000\n\n    Revert \"SLING-1363 - removing SessionConfigurer interface and moving NamespaceMapper from base to api. Created tests for both dynamic NamespaceMapper and static Sling-Namespaces namespace registration. Note - this involved updating the version of jcr.api in the bundle list file which also required including the JCR 2 API bundle.\"\n\n    This reverts commit f7cb30cc73300fec3a49c00d05936bad9a63280a.\n\ncommit a3b32db61b15c2b881733def84770be1fcd96730\nAuthor: Ian Boston <ieb@tfd.co.uk>\nDate:   Fri Feb 12 10:00:56 2010 +0000\n\n    Revert \"correcting jcr.api package version\"\n\n    This reverts commit 21761508bc005ea52150706134da2406b47cb809.\n\ncommit 900e2542ea0a2e38aa09f437fa0521382cf3058e\nAuthor: Ian Boston <ieb@tfd.co.uk>\nDate:   Fri Feb 12 10:00:25 2010 +0000\n\n    Revert \"SLING-1363 - We added a new interface so we should increase the minor version of the exported api; minor cleanup of the interface and a little javadoc.\"\n\n    This reverts commit ea7da107dfd3c2b4f26662469ff6fee66cf2d7f0.\n\ncommit d0681511cdc8d1b3f18688c5ee2ee71b12e3e76a\nAuthor: Ian Boston <ieb@tfd.co.uk>\nDate:   Fri Feb 12 09:59:56 2010 +0000\n\n    Revert \"SLING-1366 : Use dynamic proxy to handle session#impersonate call.\"\n\n    This reverts commit 01ad0d9bd358ce323a5675ef0714a62108a2c24a.\n\ngit-svn-id: https://svn.apache.org/repos/asf/sling/trunk@909431 13f79535-47bb-0310-9956-ffa450edef68",
+        "bug_id": "sling-org-apache-sling-jcr-base_5",
+        "file": [
+            {
+                "sha": "8d77904b8d43cf8dff9e88588c4ad865f04cb690",
+                "filename": "pom.xml",
+                "status": "modified",
+                "additions": 3,
+                "deletions": 3,
+                "changes": 6,
+                "blob_url": "https://github.com/apache/sling-org-apache-sling-jcr-base/blob/0cc326bbad8f50b7069e1a17a6607e878f86f181/pom.xml",
+                "raw_url": "https://github.com/apache/sling-org-apache-sling-jcr-base/raw/0cc326bbad8f50b7069e1a17a6607e878f86f181/pom.xml",
+                "contents_url": "https://api.github.com/repos/apache/sling-org-apache-sling-jcr-base/contents/pom.xml?ref=0cc326bbad8f50b7069e1a17a6607e878f86f181",
+                "patch": "@@ -7,9 +7,9 @@\n     to you under the Apache License, Version 2.0 (the\n     \"License\"); you may not use this file except in compliance\n     with the License.  You may obtain a copy of the License at\n-\n+    \n     http://www.apache.org/licenses/LICENSE-2.0\n-\n+    \n     Unless required by applicable law or agreed to in writing,\n     software distributed under the License is distributed on an\n     \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n@@ -90,7 +90,7 @@\n         <dependency>\n             <groupId>org.apache.sling</groupId>\n             <artifactId>org.apache.sling.jcr.api</artifactId>\n-            <version>2.0.7-SNAPSHOT</version>\n+            <version>2.0.6</version>\n         </dependency>\n         <dependency>\n             <groupId>javax.jcr</groupId>"
+            },
+            {
+                "sha": "b02b70438979c30969821b92ecae40f9bdef0216",
+                "filename": "src/main/java/org/apache/sling/jcr/base/AbstractSlingRepository.java",
+                "status": "modified",
+                "additions": 13,
+                "deletions": 39,
+                "changes": 52,
+                "blob_url": "https://github.com/apache/sling-org-apache-sling-jcr-base/blob/0cc326bbad8f50b7069e1a17a6607e878f86f181/src/main/java/org/apache/sling/jcr/base/AbstractSlingRepository.java",
+                "raw_url": "https://github.com/apache/sling-org-apache-sling-jcr-base/raw/0cc326bbad8f50b7069e1a17a6607e878f86f181/src/main/java/org/apache/sling/jcr/base/AbstractSlingRepository.java",
+                "contents_url": "https://api.github.com/repos/apache/sling-org-apache-sling-jcr-base/contents/src/main/java/org/apache/sling/jcr/base/AbstractSlingRepository.java?ref=0cc326bbad8f50b7069e1a17a6607e878f86f181",
+                "patch": "@@ -30,7 +30,6 @@\n import javax.jcr.Workspace;\n \n import org.apache.jackrabbit.api.JackrabbitWorkspace;\n-import org.apache.sling.jcr.api.NamespaceMapper;\n import org.apache.sling.jcr.api.SlingRepository;\n import org.apache.sling.jcr.base.internal.loader.Loader;\n import org.apache.sling.jcr.base.util.RepositoryAccessor;\n@@ -40,7 +39,6 @@\n import org.osgi.framework.SynchronousBundleListener;\n import org.osgi.service.component.ComponentContext;\n import org.osgi.service.log.LogService;\n-import org.osgi.util.tracker.ServiceTracker;\n \n /**\n  * The <code>AbstractSlingRepository</code> is an abstract implementation of\n@@ -137,8 +135,6 @@\n     // the background thread constantly checking the repository\n     private Thread repositoryPinger;\n \n-    private ServiceTracker namespaceMapperTracker;\n-\n     protected AbstractSlingRepository() {\n     }\n \n@@ -168,42 +164,32 @@ private void setDefaultWorkspace(String defaultWorkspace) {\n     }\n \n     /**\n-     * @see javax.jcr.Repository#login()\n+     * Logs in as an anonymous user. This implementation simply returns the\n+     * result of calling {@link #login(Credentials, String)}\n      */\n     public Session login() throws LoginException, RepositoryException {\n         return this.login(null, null);\n     }\n \n-    /**\n-     * @see org.apache.sling.jcr.api.SlingRepository#loginAdministrative(java.lang.String)\n-     */\n     public Session loginAdministrative(String workspace)\n-    throws RepositoryException {\n+            throws RepositoryException {\n         Credentials sc = getAdministrativeCredentials(this.adminUser);\n         return this.login(sc, workspace);\n     }\n \n-    /**\n-     * @see javax.jcr.Repository#login(javax.jcr.Credentials)\n-     */\n-    public Session login(Credentials credentials)\n-    throws LoginException, RepositoryException {\n+    public Session login(Credentials credentials) throws LoginException,\n+            RepositoryException {\n         return this.login(credentials, null);\n     }\n \n-    /**\n-     * @see javax.jcr.Repository#login(java.lang.String)\n-     */\n-    public Session login(String workspace)\n-    throws LoginException, NoSuchWorkspaceException, RepositoryException {\n+    public Session login(String workspace) throws LoginException,\n+            NoSuchWorkspaceException, RepositoryException {\n         return this.login(null, workspace);\n     }\n \n-    /**\n-     * @see javax.jcr.Repository#login(javax.jcr.Credentials, java.lang.String)\n-     */\n     public Session login(Credentials credentials, String workspace)\n-    throws LoginException, NoSuchWorkspaceException, RepositoryException {\n+            throws LoginException, NoSuchWorkspaceException,\n+            RepositoryException {\n \n         // if already stopped, don't retrieve a session\n         if (this.componentContext == null || this.getRepository() == null) {\n@@ -222,7 +208,7 @@ public Session login(Credentials credentials, String workspace)\n         try {\n             log(LogService.LOG_DEBUG, \"login: Logging in to workspace '\"\n                 + workspace + \"'\");\n-            final Session session = getRepository().login(credentials, workspace);\n+            Session session = getRepository().login(credentials, workspace);\n \n             // if the defualt workspace is null, acquire a session from the pool\n             // and use the workspace used as the new default workspace\n@@ -261,7 +247,7 @@ public Session login(Credentials credentials, String workspace)\n             throw new RepositoryException(re.getMessage(), re);\n         }\n     }\n-\n+    \n     /**\n      * @param anonUser the user name of the anon user.\n      * @return a Credentials implementation that represents the anon user.\n@@ -270,7 +256,7 @@ protected Credentials getAnonCredentials(String anonUser) {\n         // NB: this method is overridden in the Jackrabbit Service bundle to avoid using the anon password. SLING-1282\n         return new SimpleCredentials(anonUser, anonPass);\n     }\n-\n+    \n     /**\n      * @param adminUser the name of the administrative user.\n      * @return a Credentials implementation that represents the administrative user.\n@@ -279,7 +265,7 @@ protected Credentials getAdministrativeCredentials(String adminUser){\n         // NB: this method is overridden in the Jackrabbit Service bundle to avoid using the admin password. SLING-1282\n         return new SimpleCredentials(adminUser, adminPass);\n     }\n-\n+     \n \n \n     /*\n@@ -588,9 +574,6 @@ protected void activate(ComponentContext componentContext) throws Exception {\n \n         componentContext.getBundleContext().addBundleListener(this);\n \n-        this.namespaceMapperTracker = new ServiceTracker(componentContext.getBundleContext(), NamespaceMapper.class.getName(), null);\n-        this.namespaceMapperTracker.open();\n-\n         // immediately try to start the repository while activating\n         // this component instance\n         try {\n@@ -615,7 +598,6 @@ protected void activate(ComponentContext componentContext) throws Exception {\n      * @param componentContext\n      */\n     protected void deactivate(ComponentContext componentContext) {\n-        this.namespaceMapperTracker.close();\n \n         componentContext.getBundleContext().removeBundleListener(this);\n \n@@ -709,14 +691,6 @@ void defineNamespacePrefixes(final Session session) throws RepositoryException {\n             // apply namespace mapping\n             this.namespaceHandler.defineNamespacePrefixes(session);\n         }\n-\n-        // call post processors\n-        Object[] postProcessors = namespaceMapperTracker.getServices();\n-        if (postProcessors != null) {\n-            for (int i = 0; i < postProcessors.length; i++) {\n-                ((NamespaceMapper) postProcessors[i]).defineNamespacePrefixes(session);\n-            }\n-        }\n     }\n \n     // ---------- Background operation checking repository availability --------"
+            },
+            {
+                "sha": "1d1a3874b4ee9749ad6bec7f6fcd13350622ef23",
+                "filename": "src/main/java/org/apache/sling/jcr/base/internal/NamespaceMapper.java",
+                "status": "added",
+                "additions": 32,
+                "deletions": 0,
+                "changes": 32,
+                "blob_url": "https://github.com/apache/sling-org-apache-sling-jcr-base/blob/0cc326bbad8f50b7069e1a17a6607e878f86f181/src/main/java/org/apache/sling/jcr/base/internal/NamespaceMapper.java",
+                "raw_url": "https://github.com/apache/sling-org-apache-sling-jcr-base/raw/0cc326bbad8f50b7069e1a17a6607e878f86f181/src/main/java/org/apache/sling/jcr/base/internal/NamespaceMapper.java",
+                "contents_url": "https://api.github.com/repos/apache/sling-org-apache-sling-jcr-base/contents/src/main/java/org/apache/sling/jcr/base/internal/NamespaceMapper.java?ref=0cc326bbad8f50b7069e1a17a6607e878f86f181",
+                "patch": "@@ -0,0 +1,32 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one\n+ * or more contributor license agreements.  See the NOTICE file\n+ * distributed with this work for additional information\n+ * regarding copyright ownership.  The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance\n+ * with the License.  You may obtain a copy of the License at\n+ *\n+ *   http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing,\n+ * software distributed under the License is distributed on an\n+ * \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+ * KIND, either express or implied.  See the License for the\n+ * specific language governing permissions and limitations\n+ * under the License.\n+ */\n+package org.apache.sling.jcr.base.internal;\n+\n+import javax.jcr.RepositoryException;\n+import javax.jcr.Session;\n+\n+/**\n+ * This interface is used to customize the namespace mapping of\n+ * a session.\n+ */\n+public interface NamespaceMapper {\n+\n+    void defineNamespacePrefixes(Session session)\n+    throws RepositoryException;\n+}"
+            },
+            {
+                "sha": "cd5531fe61ee616227e18f320059b5819f74bb07",
+                "filename": "src/main/java/org/apache/sling/jcr/base/internal/loader/Loader.java",
+                "status": "modified",
+                "additions": 1,
+                "deletions": 1,
+                "changes": 2,
+                "blob_url": "https://github.com/apache/sling-org-apache-sling-jcr-base/blob/0cc326bbad8f50b7069e1a17a6607e878f86f181/src/main/java/org/apache/sling/jcr/base/internal/loader/Loader.java",
+                "raw_url": "https://github.com/apache/sling-org-apache-sling-jcr-base/raw/0cc326bbad8f50b7069e1a17a6607e878f86f181/src/main/java/org/apache/sling/jcr/base/internal/loader/Loader.java",
+                "contents_url": "https://api.github.com/repos/apache/sling-org-apache-sling-jcr-base/contents/src/main/java/org/apache/sling/jcr/base/internal/loader/Loader.java?ref=0cc326bbad8f50b7069e1a17a6607e878f86f181",
+                "patch": "@@ -33,9 +33,9 @@\n import javax.jcr.RepositoryException;\n import javax.jcr.Session;\n \n-import org.apache.sling.jcr.api.NamespaceMapper;\n import org.apache.sling.jcr.base.AbstractSlingRepository;\n import org.apache.sling.jcr.base.NodeTypeLoader;\n+import org.apache.sling.jcr.base.internal.NamespaceMapper;\n import org.osgi.framework.Bundle;\n import org.slf4j.Logger;\n import org.slf4j.LoggerFactory;"
+            }
+        ]
+    }
+]

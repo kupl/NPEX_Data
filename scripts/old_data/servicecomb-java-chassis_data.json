@@ -1,0 +1,443 @@
+[
+    {
+        "commit": "https://github.com/apache/servicecomb-java-chassis/commit/83ad7dfdb9843a5e77ec42a0cf41f5e1592cdc8c",
+        "repo": "servicecomb-java-chassis",
+        "parent": "https://github.com/apache/servicecomb-java-chassis/commit/ebfbf1c82018c3b359d036b90e2878ebe30d20f9",
+        "message": "[SCB-1637] fix NPE caused by HystrixPropertiesStrategy registration\n\nthe demo module import io.micrometer:micrometer-core\nand this module registers HystrixPropertiesStrategy\nbefore the biz-keeper module of Java-Chassis, which\ncauses NPE on consumer side when request timeout occurs.",
+        "bug_id": "servicecomb-java-chassis_1",
+        "file": [
+            {
+                "sha": "2f0ac3dd963c0f1b2503369cf177cde1784d9e90",
+                "filename": "demo/demo-spring-boot-provider/pom.xml",
+                "status": "modified",
+                "additions": 6,
+                "deletions": 0,
+                "changes": 6,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/83ad7dfdb9843a5e77ec42a0cf41f5e1592cdc8c/demo/demo-spring-boot-provider/pom.xml",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/83ad7dfdb9843a5e77ec42a0cf41f5e1592cdc8c/demo/demo-spring-boot-provider/pom.xml",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/demo/demo-spring-boot-provider/pom.xml?ref=83ad7dfdb9843a5e77ec42a0cf41f5e1592cdc8c",
+                "patch": "@@ -46,6 +46,12 @@\n     <dependency>\n       <groupId>org.springframework.boot</groupId>\n       <artifactId>spring-boot-starter-actuator</artifactId>\n+      <exclusions>\n+        <exclusion>\n+          <groupId>io.micrometer</groupId>\n+          <artifactId>micrometer-core</artifactId>\n+        </exclusion>\n+      </exclusions>\n     </dependency>\n   </dependencies>\n </project>"
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/servicecomb-java-chassis/commit/7e23a668ceb7e02cf1e3558a17e80edd9f688357",
+        "repo": "servicecomb-java-chassis",
+        "parent": "https://github.com/apache/servicecomb-java-chassis/commit/be73f2ea603b254244912f8944ffe2d3f70e549d",
+        "message": "[SCB-1297] NPE would be arised if you haven't given any value for servicecomb.config.ignoreResolveFailure",
+        "bug_id": "servicecomb-java-chassis_2",
+        "file": [
+            {
+                "sha": "c7472c7df03f934fedaa93b69092aa4212f959ba",
+                "filename": "foundations/foundation-config/src/main/java/org/apache/servicecomb/config/ConfigurationSpringInitializer.java",
+                "status": "modified",
+                "additions": 10,
+                "deletions": 7,
+                "changes": 17,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/7e23a668ceb7e02cf1e3558a17e80edd9f688357/foundations/foundation-config/src/main/java/org/apache/servicecomb/config/ConfigurationSpringInitializer.java",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/7e23a668ceb7e02cf1e3558a17e80edd9f688357/foundations/foundation-config/src/main/java/org/apache/servicecomb/config/ConfigurationSpringInitializer.java",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/foundations/foundation-config/src/main/java/org/apache/servicecomb/config/ConfigurationSpringInitializer.java?ref=7e23a668ceb7e02cf1e3558a17e80edd9f688357",
+                "patch": "@@ -76,15 +76,16 @@ public ConfigurationSpringInitializer() {\n    */\n   @Override\n   public void setEnvironment(Environment environment) {\n+\n+    ConfigUtil.installDynamicConfig();\n+\n     String environmentName = generateNameForEnvironment(environment);\n     LOGGER.info(\"Environment received, will get configurations from [{}].\", environmentName);\n \n     Map<String, Object> extraConfig = getAllProperties(environment);\n \n     ConfigUtil.addExtraConfig(EXTRA_CONFIG_SOURCE_PREFIX + environmentName, extraConfig);\n \n-    ConfigUtil.installDynamicConfig();\n-\n     setUpSpringPropertySource(environment);\n   }\n \n@@ -200,10 +201,10 @@ private void getProperties(ConfigurableEnvironment environment, PropertySource<?\n         try {\n           configFromSpringBoot.put(propertyName, environment.getProperty(propertyName, Object.class));\n         } catch (Exception e) {\n-          if (!getIfIgnoreEnvironment()) {\n-            throw new RuntimeException(\"set up spring property source failed.\", e);\n-          } else {\n+          if (ignoreResolveFailure()) {\n             LOGGER.warn(\"set up spring property source failed.\", e);\n+          } else {\n+            throw new RuntimeException(\"set up spring property source failed.If you still want to start up the application and ignore the errors, you can set servicecomb.config.ignoreResolveFailure to true.\", e);\n           }\n         }\n       }\n@@ -213,7 +214,9 @@ private void getProperties(ConfigurableEnvironment environment, PropertySource<?\n     LOGGER.debug(\"a none EnumerablePropertySource is ignored, propertySourceName = [{}]\", propertySource.getName());\n   }\n \n-  private boolean getIfIgnoreEnvironment() {\n-    return (Boolean) ConfigUtil.createLocalConfig().getProperty(\"servicecomb.config.ignoreResolveFailure\");\n+  private boolean ignoreResolveFailure() {\n+    return DynamicPropertyFactory.getInstance()\n+            .getBooleanProperty(\"servicecomb.config.ignoreResolveFailure\", false)\n+            .get();\n   }\n }"
+            },
+            {
+                "sha": "ac20e230d9fedbcff532ed4826413a7eee6c0f26",
+                "filename": "foundations/foundation-config/src/test/java/org/apache/servicecomb/config/TestConfigurationSpringInitializer.java",
+                "status": "modified",
+                "additions": 22,
+                "deletions": 0,
+                "changes": 22,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/7e23a668ceb7e02cf1e3558a17e80edd9f688357/foundations/foundation-config/src/test/java/org/apache/servicecomb/config/TestConfigurationSpringInitializer.java",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/7e23a668ceb7e02cf1e3558a17e80edd9f688357/foundations/foundation-config/src/test/java/org/apache/servicecomb/config/TestConfigurationSpringInitializer.java",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/foundations/foundation-config/src/test/java/org/apache/servicecomb/config/TestConfigurationSpringInitializer.java?ref=7e23a668ceb7e02cf1e3558a17e80edd9f688357",
+                "patch": "@@ -43,6 +43,9 @@\n import org.springframework.core.env.ConfigurableEnvironment;\n import org.springframework.core.env.MapPropertySource;\n import org.springframework.core.env.MutablePropertySources;\n+import org.springframework.core.env.PropertySource;\n+import org.springframework.core.env.StandardEnvironment;\n+import org.springframework.core.env.SystemEnvironmentPropertySource;\n import org.springframework.jndi.JndiPropertySource;\n \n import com.netflix.config.ConfigurationManager;\n@@ -224,8 +227,27 @@ public void testSetEnvironmentOnEnvironmentName() {\n     assertEquals(\"value2\", extraProperties.get(\"key2\"));\n   }\n \n+  @Test(expected = RuntimeException.class)\n+  public void shoud_throw_exception_when_given_ignoreResolveFailure_false() {\n+    StandardEnvironment environment = newStandardEnvironment();\n+\n+    ConfigurationSpringInitializer configurationSpringInitializer = new ConfigurationSpringInitializer();\n+    configurationSpringInitializer.setEnvironment(environment);\n+  }\n+\n   private Map<String, Map<String, Object>> getExtraConfigMapFromConfigUtil() {\n     return Deencapsulation\n         .getField(ConfigUtil.class, \"EXTRA_CONFIG_MAP\");\n   }\n+\n+  private StandardEnvironment newStandardEnvironment() {\n+    Map<String, Object> envProperties = new HashMap<>();\n+    envProperties.put(\"IFS-X\", \"${IFS-X}\");\n+    PropertySource<Map<String, Object>> systemEnvironmentPropertySource = new SystemEnvironmentPropertySource(\"system-env\", envProperties);\n+\n+    StandardEnvironment environment = new StandardEnvironment();\n+    environment.getPropertySources()\n+            .addAfter(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME, systemEnvironmentPropertySource);\n+    return environment;\n+  }\n }"
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/servicecomb-java-chassis/commit/9c734ac7691f638ddfb136410c8b65838e7bc594",
+        "repo": "servicecomb-java-chassis",
+        "parent": "https://github.com/apache/servicecomb-java-chassis/commit/bb8c7ffc4eb069c2118941291acf1ed884a56b83",
+        "message": "[SCB-579] fix NullPointerException when consumer upload null file",
+        "bug_id": "servicecomb-java-chassis_3",
+        "file": [
+            {
+                "sha": "c6bb7e94fbf14d7033e8a40e64cbe39476901ef7",
+                "filename": "common/common-rest/src/main/java/org/apache/servicecomb/common/rest/codec/param/RestClientRequestImpl.java",
+                "status": "modified",
+                "additions": 4,
+                "deletions": 0,
+                "changes": 4,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/9c734ac7691f638ddfb136410c8b65838e7bc594/common/common-rest/src/main/java/org/apache/servicecomb/common/rest/codec/param/RestClientRequestImpl.java",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/9c734ac7691f638ddfb136410c8b65838e7bc594/common/common-rest/src/main/java/org/apache/servicecomb/common/rest/codec/param/RestClientRequestImpl.java",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/common/common-rest/src/main/java/org/apache/servicecomb/common/rest/codec/param/RestClientRequestImpl.java?ref=9c734ac7691f638ddfb136410c8b65838e7bc594",
+                "patch": "@@ -83,6 +83,10 @@ public Buffer getBodyBuffer() throws Exception {\n \n   @Override\n   public void attach(String name, Part part) {\n+    if (null == part) {\n+      LOGGER.debug(\"null file is ignored, file name = [{}]\", name);\n+      return;\n+    }\n     uploads.put(name, part);\n   }\n "
+            },
+            {
+                "sha": "d14c10e3600015eccff9812e640ab8d5189df990",
+                "filename": "common/common-rest/src/test/java/org/apache/servicecomb/common/rest/codec/param/TestRestClientRequestImpl.java",
+                "status": "modified",
+                "additions": 29,
+                "deletions": 1,
+                "changes": 30,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/9c734ac7691f638ddfb136410c8b65838e7bc594/common/common-rest/src/test/java/org/apache/servicecomb/common/rest/codec/param/TestRestClientRequestImpl.java",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/9c734ac7691f638ddfb136410c8b65838e7bc594/common/common-rest/src/test/java/org/apache/servicecomb/common/rest/codec/param/TestRestClientRequestImpl.java",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/common/common-rest/src/test/java/org/apache/servicecomb/common/rest/codec/param/TestRestClientRequestImpl.java?ref=9c734ac7691f638ddfb136410c8b65838e7bc594",
+                "patch": "@@ -16,25 +16,30 @@\n  */\n package org.apache.servicecomb.common.rest.codec.param;\n \n+import java.util.Map;\n+\n import javax.servlet.http.Part;\n import javax.ws.rs.core.MediaType;\n \n+import org.hamcrest.Matchers;\n import org.junit.Assert;\n import org.junit.Test;\n+import org.mockito.Mockito;\n \n import io.vertx.core.MultiMap;\n import io.vertx.core.buffer.Buffer;\n import io.vertx.core.http.CaseInsensitiveHeaders;\n import io.vertx.core.http.HttpClientRequest;\n import io.vertx.core.http.HttpHeaders;\n+import mockit.Deencapsulation;\n import mockit.Expectations;\n import mockit.Mock;\n import mockit.MockUp;\n import mockit.Mocked;\n \n public class TestRestClientRequestImpl {\n   @Mocked\n-  HttpClientRequest request;\n+  private HttpClientRequest request;\n \n   @Test\n   public void testForm() throws Exception {\n@@ -113,4 +118,27 @@ public void fileBoundaryInfo_validSubmittedFileName(@Mocked Part part) {\n         \"Content-Transfer-Encoding: binary\\r\\n\" +\n         \"\\r\\n\", buffer.toString());\n   }\n+\n+  @Test\n+  public void testAttach() {\n+    RestClientRequestImpl restClientRequest = new RestClientRequestImpl(request, null, null);\n+    Part part = Mockito.mock(Part.class);\n+    String fileName = \"fileName\";\n+\n+    restClientRequest.attach(fileName, part);\n+\n+    Map<String, Part> uploads = Deencapsulation.getField(restClientRequest, \"uploads\");\n+    Assert.assertEquals(1, uploads.size());\n+    Assert.assertThat(uploads, Matchers.hasEntry(fileName, part));\n+  }\n+\n+  @Test\n+  public void testAttachOnPartIsNull() {\n+    RestClientRequestImpl restClientRequest = new RestClientRequestImpl(request, null, null);\n+\n+    restClientRequest.attach(\"fileName\", null);\n+\n+    Map<String, Part> uploads = Deencapsulation.getField(restClientRequest, \"uploads\");\n+    Assert.assertTrue(uploads.isEmpty());\n+  }\n }"
+            },
+            {
+                "sha": "31b3892cc660e7a320d7bb45fe9dd2fea73498e2",
+                "filename": "foundations/foundation-vertx/src/main/java/org/apache/servicecomb/foundation/vertx/http/VertxServerRequestToHttpServletRequest.java",
+                "status": "modified",
+                "additions": 3,
+                "deletions": 8,
+                "changes": 11,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/9c734ac7691f638ddfb136410c8b65838e7bc594/foundations/foundation-vertx/src/main/java/org/apache/servicecomb/foundation/vertx/http/VertxServerRequestToHttpServletRequest.java",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/9c734ac7691f638ddfb136410c8b65838e7bc594/foundations/foundation-vertx/src/main/java/org/apache/servicecomb/foundation/vertx/http/VertxServerRequestToHttpServletRequest.java",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/foundations/foundation-vertx/src/main/java/org/apache/servicecomb/foundation/vertx/http/VertxServerRequestToHttpServletRequest.java?ref=9c734ac7691f638ddfb136410c8b65838e7bc594",
+                "patch": "@@ -17,7 +17,6 @@\n \n package org.apache.servicecomb.foundation.vertx.http;\n \n-import java.io.IOException;\n import java.util.Collections;\n import java.util.Enumeration;\n import java.util.HashMap;\n@@ -27,7 +26,6 @@\n import java.util.Set;\n \n import javax.servlet.AsyncContext;\n-import javax.servlet.ServletException;\n import javax.servlet.ServletInputStream;\n import javax.servlet.http.Cookie;\n import javax.servlet.http.Part;\n@@ -106,7 +104,6 @@ public String getParameter(String name) {\n     return this.vertxRequest.getParam(name);\n   }\n \n-\n   @Override\n   public String[] getParameterValues(String name) {\n     List<String> paramList = this.vertxRequest.params().getAll(name);\n@@ -154,7 +151,6 @@ public int getLocalPort() {\n     return this.vertxRequest.localAddress().port();\n   }\n \n-\n   @Override\n   public String getHeader(String name) {\n     return this.vertxRequest.getHeader(name);\n@@ -203,7 +199,6 @@ public String getRequestURI() {\n     return this.path;\n   }\n \n-\n   @Override\n   public String getServletPath() {\n     return this.getPathInfo();\n@@ -215,7 +210,7 @@ public String getContextPath() {\n   }\n \n   @Override\n-  public ServletInputStream getInputStream() throws IOException {\n+  public ServletInputStream getInputStream() {\n     if (inputStream == null) {\n       inputStream = new BufferInputStream(context.getBody().getByteBuf());\n     }\n@@ -228,13 +223,13 @@ public AsyncContext getAsyncContext() {\n   }\n \n   @Override\n-  public Part getPart(String name) throws IOException, ServletException {\n+  public Part getPart(String name) {\n     Optional<FileUpload> upload = context.fileUploads()\n         .stream()\n         .filter(fileUpload -> fileUpload.name().equals(name))\n         .findFirst();\n     if (!upload.isPresent()) {\n-      LOGGER.error(\"No such file with name: {}.\", name);\n+      LOGGER.debug(\"No such file with name: {}.\", name);\n       return null;\n     }\n "
+            },
+            {
+                "sha": "eaad2cd743c2c23d8dca5cb446cfb40bb890e1aa",
+                "filename": "swagger/swagger-invocation/invocation-core/src/main/java/org/apache/servicecomb/swagger/invocation/arguments/consumer/ConsumerArgumentSame.java",
+                "status": "modified",
+                "additions": 8,
+                "deletions": 0,
+                "changes": 8,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/9c734ac7691f638ddfb136410c8b65838e7bc594/swagger/swagger-invocation/invocation-core/src/main/java/org/apache/servicecomb/swagger/invocation/arguments/consumer/ConsumerArgumentSame.java",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/9c734ac7691f638ddfb136410c8b65838e7bc594/swagger/swagger-invocation/invocation-core/src/main/java/org/apache/servicecomb/swagger/invocation/arguments/consumer/ConsumerArgumentSame.java",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/swagger/swagger-invocation/invocation-core/src/main/java/org/apache/servicecomb/swagger/invocation/arguments/consumer/ConsumerArgumentSame.java?ref=9c734ac7691f638ddfb136410c8b65838e7bc594",
+                "patch": "@@ -20,8 +20,12 @@\n import org.apache.servicecomb.swagger.invocation.SwaggerInvocation;\n import org.apache.servicecomb.swagger.invocation.arguments.ArgumentMapper;\n import org.apache.servicecomb.swagger.invocation.converter.Converter;\n+import org.slf4j.Logger;\n+import org.slf4j.LoggerFactory;\n \n public final class ConsumerArgumentSame implements ArgumentMapper {\n+  private static final Logger LOGGER = LoggerFactory.getLogger(ConsumerArgumentSame.class);\n+\n   private int consumerIdx;\n \n   private int swaggerIdx;\n@@ -36,6 +40,10 @@ public ConsumerArgumentSame(int consumerIdx, int swaggerIdx, Converter converter\n \n   @Override\n   public void mapArgument(SwaggerInvocation invocation, Object[] consumerArguments) {\n+    if (null == consumerArguments[consumerIdx]) {\n+      LOGGER.debug(\"null argument is ignored, consumerIdx = [{}]\", consumerIdx);\n+      return;\n+    }\n     Object swaggerParam = converter.convert(consumerArguments[consumerIdx]);\n     invocation.setSwaggerArgument(swaggerIdx, swaggerParam);\n   }"
+            },
+            {
+                "sha": "1af5cd8ac1b200ee06a6b69f0a5e5881f959b003",
+                "filename": "swagger/swagger-invocation/invocation-core/src/test/java/org/apache/servicecomb/swagger/invocation/arguments/consumer/ConsumerArgumentSameTest.java",
+                "status": "added",
+                "additions": 53,
+                "deletions": 0,
+                "changes": 53,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/9c734ac7691f638ddfb136410c8b65838e7bc594/swagger/swagger-invocation/invocation-core/src/test/java/org/apache/servicecomb/swagger/invocation/arguments/consumer/ConsumerArgumentSameTest.java",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/9c734ac7691f638ddfb136410c8b65838e7bc594/swagger/swagger-invocation/invocation-core/src/test/java/org/apache/servicecomb/swagger/invocation/arguments/consumer/ConsumerArgumentSameTest.java",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/swagger/swagger-invocation/invocation-core/src/test/java/org/apache/servicecomb/swagger/invocation/arguments/consumer/ConsumerArgumentSameTest.java?ref=9c734ac7691f638ddfb136410c8b65838e7bc594",
+                "patch": "@@ -0,0 +1,53 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one or more\n+ * contributor license agreements.  See the NOTICE file distributed with\n+ * this work for additional information regarding copyright ownership.\n+ * The ASF licenses this file to You under the Apache License, Version 2.0\n+ * (the \"License\"); you may not use this file except in compliance with\n+ * the License.  You may obtain a copy of the License at\n+ *\n+ *     http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing, software\n+ * distributed under the License is distributed on an \"AS IS\" BASIS,\n+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n+ * See the License for the specific language governing permissions and\n+ * limitations under the License.\n+ */\n+\n+package org.apache.servicecomb.swagger.invocation.arguments.consumer;\n+\n+import org.apache.servicecomb.swagger.invocation.SwaggerInvocation;\n+import org.apache.servicecomb.swagger.invocation.converter.Converter;\n+import org.junit.Test;\n+import org.mockito.Mockito;\n+\n+public class ConsumerArgumentSameTest {\n+\n+  private Converter mockConverter = Mockito.mock(Converter.class);\n+\n+  private ConsumerArgumentSame consumerArgumentSame = new ConsumerArgumentSame(0, 0, mockConverter);\n+\n+  @Test\n+  public void testMapArgumentOnArgument() {\n+    SwaggerInvocation swaggerInvocation = Mockito.mock(SwaggerInvocation.class);\n+    String[] args = {\"testArg\"};\n+\n+    Mockito.when(mockConverter.convert(args[0])).thenReturn(args[0]);\n+\n+    consumerArgumentSame.mapArgument(swaggerInvocation, args);\n+\n+    Mockito.verify(mockConverter, Mockito.times(1)).convert(args[0]);\n+    Mockito.verify(swaggerInvocation, Mockito.times(1)).setSwaggerArgument(0, args[0]);\n+  }\n+\n+  @Test\n+  public void testMapArgumentOnArgumentIsNull() {\n+    SwaggerInvocation swaggerInvocation = Mockito.mock(SwaggerInvocation.class);\n+\n+    consumerArgumentSame.mapArgument(swaggerInvocation, new Object[1]);\n+\n+    Mockito.verify(mockConverter, Mockito.never()).convert(Mockito.anyObject());\n+    Mockito.verify(swaggerInvocation, Mockito.never()).setSwaggerArgument(Mockito.anyInt(), Mockito.anyObject());\n+  }\n+}"
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/servicecomb-java-chassis/commit/f8835f4d0ca98b2c732aec5d654f8dc15ccd90d3",
+        "repo": "servicecomb-java-chassis",
+        "parent": "https://github.com/apache/servicecomb-java-chassis/commit/ce299c3d8bebae3bc66c4e58f9afe8a0006c33b6",
+        "message": "[SCB-589][WIP] change control of SCBStatus, avoid NullPointerException before inited",
+        "bug_id": "servicecomb-java-chassis_4",
+        "file": [
+            {
+                "sha": "d30eb3c0750ce69cca1d06a7f491b50e0bec09f6",
+                "filename": "core/src/main/java/org/apache/servicecomb/core/SCBEngine.java",
+                "status": "modified",
+                "additions": 21,
+                "deletions": 0,
+                "changes": 21,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/f8835f4d0ca98b2c732aec5d654f8dc15ccd90d3/core/src/main/java/org/apache/servicecomb/core/SCBEngine.java",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/f8835f4d0ca98b2c732aec5d654f8dc15ccd90d3/core/src/main/java/org/apache/servicecomb/core/SCBEngine.java",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/core/src/main/java/org/apache/servicecomb/core/SCBEngine.java?ref=f8835f4d0ca98b2c732aec5d654f8dc15ccd90d3",
+                "patch": "@@ -28,6 +28,7 @@\n import org.apache.servicecomb.core.event.InvocationStartEvent;\n import org.apache.servicecomb.core.handler.HandlerConfigUtils;\n import org.apache.servicecomb.core.provider.consumer.ConsumerProviderManager;\n+import org.apache.servicecomb.core.provider.consumer.ReferenceConfig;\n import org.apache.servicecomb.core.provider.producer.ProducerProviderManager;\n import org.apache.servicecomb.core.transport.TransportManager;\n import org.apache.servicecomb.foundation.common.event.EventManager;\n@@ -267,4 +268,24 @@ private void validAllInvocationFinished() throws InterruptedException {\n       TimeUnit.SECONDS.sleep(1);\n     }\n   }\n+\n+  protected void ensureStatusUp() {\n+    SCBStatus currentStatus = getStatus();\n+    if (!SCBStatus.UP.equals(currentStatus)) {\n+      throw new IllegalStateException(\n+          \"System is starting and not ready for remote calls or shutting down in progress, STATUS = \" + currentStatus);\n+    }\n+  }\n+\n+  public ReferenceConfig createReferenceConfigForInvoke(String microserviceName, String versionRule, String transport) {\n+    ensureStatusUp();\n+\n+    return consumerProviderManager.createReferenceConfig(microserviceName, versionRule, transport);\n+  }\n+\n+  public ReferenceConfig getReferenceConfigForInvoke(String microserviceName) {\n+    ensureStatusUp();\n+\n+    return consumerProviderManager.getReferenceConfig(microserviceName);\n+  }\n }"
+            },
+            {
+                "sha": "2fef648d390ff905893bba7c5f7908aefd19fea0",
+                "filename": "core/src/main/java/org/apache/servicecomb/core/provider/consumer/InvokerUtils.java",
+                "status": "modified",
+                "additions": 19,
+                "deletions": 20,
+                "changes": 39,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/f8835f4d0ca98b2c732aec5d654f8dc15ccd90d3/core/src/main/java/org/apache/servicecomb/core/provider/consumer/InvokerUtils.java",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/f8835f4d0ca98b2c732aec5d654f8dc15ccd90d3/core/src/main/java/org/apache/servicecomb/core/provider/consumer/InvokerUtils.java",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/core/src/main/java/org/apache/servicecomb/core/provider/consumer/InvokerUtils.java?ref=f8835f4d0ca98b2c732aec5d654f8dc15ccd90d3",
+                "patch": "@@ -17,10 +17,8 @@\n \n package org.apache.servicecomb.core.provider.consumer;\n \n-import org.apache.servicecomb.core.CseContext;\n import org.apache.servicecomb.core.Invocation;\n import org.apache.servicecomb.core.SCBEngine;\n-import org.apache.servicecomb.core.SCBStatus;\n import org.apache.servicecomb.core.definition.SchemaMeta;\n import org.apache.servicecomb.core.invocation.InvocationFactory;\n import org.apache.servicecomb.swagger.invocation.AsyncResponse;\n@@ -35,31 +33,37 @@\n   private static final Logger LOGGER = LoggerFactory.getLogger(InvokerUtils.class);\n \n   public static Object syncInvoke(String microserviceName, String schemaId, String operationName, Object[] args) {\n-    checkEngineStatus();\n-    ReferenceConfig referenceConfig = CseContext.getInstance().getConsumerProviderManager()\n-        .getReferenceConfig(microserviceName);\n+    ReferenceConfig referenceConfig = SCBEngine.getInstance().getReferenceConfigForInvoke(microserviceName);\n     return syncInvoke(generateInvocation(schemaId, operationName, args, referenceConfig));\n   }\n \n   public static Object syncInvoke(String microserviceName, String microserviceVersion, String transport,\n       String schemaId, String operationName, Object[] args) {\n-    checkEngineStatus();\n-    ReferenceConfig referenceConfig = CseContext.getInstance().getConsumerProviderManager()\n-        .createReferenceConfig(microserviceName, microserviceVersion, transport);\n+    ReferenceConfig referenceConfig = SCBEngine.getInstance()\n+        .createReferenceConfigForInvoke(microserviceName, microserviceVersion, transport);\n     return syncInvoke(generateInvocation(schemaId, operationName, args, referenceConfig));\n   }\n \n+  /**\n+   * it's a internal API, caller make sure already invoked SCBEngine.ensureStatusUp\n+   * @param invocation\n+   * @return contract result\n+   * @throws InvocationException\n+   */\n   public static Object syncInvoke(Invocation invocation) throws InvocationException {\n-    checkEngineStatus();\n     Response response = innerSyncInvoke(invocation);\n     if (response.isSuccessed()) {\n       return response.getResult();\n     }\n     throw ExceptionFactory.convertConsumerException(response.getResult());\n   }\n \n+  /**\n+   * it's a internal API, caller make sure already invoked SCBEngine.ensureStatusUp\n+   * @param invocation\n+   * @return servicecomb response object\n+   */\n   public static Response innerSyncInvoke(Invocation invocation) {\n-    checkEngineStatus();\n     try {\n       invocation.onStart();\n       SyncResponseExecutor respExecutor = new SyncResponseExecutor();\n@@ -81,8 +85,12 @@ public static Response innerSyncInvoke(Invocation invocation) {\n     }\n   }\n \n+  /**\n+   * it's a internal API, caller make sure already invoked SCBEngine.ensureStatusUp\n+   * @param invocation\n+   * @param asyncResp\n+   */\n   public static void reactiveInvoke(Invocation invocation, AsyncResponse asyncResp) {\n-    checkEngineStatus();\n     try {\n       invocation.onStart();\n       invocation.setSync(false);\n@@ -114,17 +122,8 @@ private static Invocation generateInvocation(String schemaId, String operationNa\n     return InvocationFactory.forConsumer(referenceConfig, schemaMeta, operationName, args);\n   }\n \n-  private static void checkEngineStatus() {\n-    if (!SCBStatus.UP.equals(SCBEngine.getInstance().getStatus())) {\n-      throw new IllegalStateException(\n-          \"System is starting and not ready for remote calls or shutting down in progress, STATUS = \" + String\n-              .valueOf(SCBEngine.getInstance().getStatus()));\n-    }\n-  }\n-\n   @Deprecated\n   public static Object invoke(Invocation invocation) {\n-    checkEngineStatus();\n     return syncInvoke(invocation);\n   }\n }"
+            },
+            {
+                "sha": "e452e55e387d4694bf9ade8377bbd63a558c2015",
+                "filename": "core/src/test/java/org/apache/servicecomb/core/TestSCBEngine.java",
+                "status": "modified",
+                "additions": 52,
+                "deletions": 0,
+                "changes": 52,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/f8835f4d0ca98b2c732aec5d654f8dc15ccd90d3/core/src/test/java/org/apache/servicecomb/core/TestSCBEngine.java",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/f8835f4d0ca98b2c732aec5d654f8dc15ccd90d3/core/src/test/java/org/apache/servicecomb/core/TestSCBEngine.java",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/core/src/test/java/org/apache/servicecomb/core/TestSCBEngine.java?ref=f8835f4d0ca98b2c732aec5d654f8dc15ccd90d3",
+                "patch": "@@ -21,19 +21,27 @@\n \n import org.apache.servicecomb.core.definition.loader.SchemaListenerManager;\n import org.apache.servicecomb.core.provider.consumer.ConsumerProviderManager;\n+import org.apache.servicecomb.core.provider.consumer.ReferenceConfig;\n import org.apache.servicecomb.core.provider.producer.ProducerProviderManager;\n import org.apache.servicecomb.core.transport.TransportManager;\n import org.apache.servicecomb.foundation.vertx.VertxUtils;\n import org.apache.servicecomb.serviceregistry.RegistryUtils;\n import org.apache.servicecomb.serviceregistry.consumer.AppManager;\n+import org.hamcrest.Matchers;\n import org.junit.Assert;\n+import org.junit.Rule;\n import org.junit.Test;\n+import org.junit.rules.ExpectedException;\n import org.mockito.Mockito;\n \n import mockit.Expectations;\n import mockit.Injectable;\n+import mockit.Mocked;\n \n public class TestSCBEngine {\n+  @Rule\n+  public ExpectedException expectedException = ExpectedException.none();\n+\n   @Test\n   public void test(@Injectable ProducerProviderManager producerProviderManager,\n       @Injectable ConsumerProviderManager consumerProviderManager,\n@@ -68,4 +76,48 @@ public void test(@Injectable ProducerProviderManager producerProviderManager,\n \n     Assert.assertEquals(SCBStatus.DOWN, engine.getStatus());\n   }\n+\n+  @Test\n+  public void createReferenceConfigForInvoke_up(@Mocked ConsumerProviderManager consumerProviderManager) {\n+    SCBEngine engine = new SCBEngine();\n+    engine.setStatus(SCBStatus.UP);\n+    engine.setConsumerProviderManager(consumerProviderManager);\n+\n+    ReferenceConfig referenceConfig = engine.createReferenceConfigForInvoke(null, null, null);\n+    Assert.assertTrue(ReferenceConfig.class.isInstance(referenceConfig));\n+  }\n+\n+  @Test\n+  public void createReferenceConfigForInvoke_down(@Mocked ConsumerProviderManager consumerProviderManager) {\n+    SCBEngine engine = new SCBEngine();\n+    engine.setStatus(SCBStatus.DOWN);\n+    engine.setConsumerProviderManager(consumerProviderManager);\n+\n+    expectedException.expect(IllegalStateException.class);\n+    expectedException.expectMessage(\n+        Matchers.is(\"System is starting and not ready for remote calls or shutting down in progress, STATUS = DOWN\"));\n+    engine.createReferenceConfigForInvoke(null, null, null);\n+  }\n+\n+  @Test\n+  public void getReferenceConfigForInvoke_up(@Mocked ConsumerProviderManager consumerProviderManager) {\n+    SCBEngine engine = new SCBEngine();\n+    engine.setStatus(SCBStatus.UP);\n+    engine.setConsumerProviderManager(consumerProviderManager);\n+\n+    ReferenceConfig referenceConfig = engine.getReferenceConfigForInvoke(null);\n+    Assert.assertTrue(ReferenceConfig.class.isInstance(referenceConfig));\n+  }\n+\n+  @Test\n+  public void getReferenceConfigForInvoke_down(@Mocked ConsumerProviderManager consumerProviderManager) {\n+    SCBEngine engine = new SCBEngine();\n+    engine.setStatus(SCBStatus.DOWN);\n+    engine.setConsumerProviderManager(consumerProviderManager);\n+\n+    expectedException.expect(IllegalStateException.class);\n+    expectedException.expectMessage(\n+        Matchers.is(\"System is starting and not ready for remote calls or shutting down in progress, STATUS = DOWN\"));\n+    engine.getReferenceConfigForInvoke(null);\n+  }\n }"
+            },
+            {
+                "sha": "784a8a66c1dfd3036fea7329e230d5c3fa09d169",
+                "filename": "core/src/test/java/org/apache/servicecomb/core/provider/consumer/TestInvokerUtils.java",
+                "status": "modified",
+                "additions": 32,
+                "deletions": 62,
+                "changes": 94,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/f8835f4d0ca98b2c732aec5d654f8dc15ccd90d3/core/src/test/java/org/apache/servicecomb/core/provider/consumer/TestInvokerUtils.java",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/f8835f4d0ca98b2c732aec5d654f8dc15ccd90d3/core/src/test/java/org/apache/servicecomb/core/provider/consumer/TestInvokerUtils.java",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/core/src/test/java/org/apache/servicecomb/core/provider/consumer/TestInvokerUtils.java?ref=f8835f4d0ca98b2c732aec5d654f8dc15ccd90d3",
+                "patch": "@@ -31,8 +31,12 @@\n import org.apache.servicecomb.swagger.invocation.context.ContextUtils;\n import org.apache.servicecomb.swagger.invocation.context.InvocationContext;\n import org.apache.servicecomb.swagger.invocation.exception.InvocationException;\n+import org.hamcrest.Matchers;\n import org.junit.Assert;\n+import org.junit.Before;\n+import org.junit.Rule;\n import org.junit.Test;\n+import org.junit.rules.ExpectedException;\n import org.mockito.Mockito;\n \n import mockit.Expectations;\n@@ -42,6 +46,21 @@\n import mockit.Mocked;\n \n public class TestInvokerUtils {\n+  @Rule\n+  public ExpectedException expectedException = ExpectedException.none();\n+\n+  SCBEngine scbEngine = new SCBEngine();\n+\n+  @Before\n+  public void setup() {\n+    new MockUp<SCBEngine>() {\n+      @Mock\n+      SCBEngine getInstance() {\n+        return scbEngine;\n+      }\n+    };\n+    scbEngine.setStatus(SCBStatus.UP);\n+  }\n \n   @Test\n   public void testSyncInvokeInvocationWithException() {\n@@ -69,9 +88,6 @@ public Response waitResponse() {\n   @Test\n   public void testReactiveInvoke(@Mocked Invocation invocation, @Mocked InvocationContext parentContext,\n       @Mocked Response response) {\n-\n-    SCBEngine.getInstance().setStatus(SCBStatus.UP);\n-\n     new MockUp<Invocation>(invocation) {\n       @Mock\n       InvocationContext getParentContext() {\n@@ -94,9 +110,6 @@ void next(AsyncResponse asyncResp) {\n   @SuppressWarnings(\"deprecation\")\n   @Test\n   public void invoke() {\n-\n-    SCBEngine.getInstance().setStatus(SCBStatus.UP);\n-\n     new MockUp<InvokerUtils>() {\n       @Mock\n       Object syncInvoke(Invocation invocation) {\n@@ -108,73 +121,30 @@ Object syncInvoke(Invocation invocation) {\n   }\n \n   @Test\n-  public void testSyncInvokeNotReady(@Mocked Invocation invocation) {\n+  public void testSyncInvoke_4param_NotReady() {\n+    scbEngine.setStatus(SCBStatus.DOWN);\n \n-    SCBEngine.getInstance().setStatus(SCBStatus.DOWN);\n-\n-    try {\n-      InvokerUtils.syncInvoke(invocation);\n-      Assert.fail(\"must throw exception\");\n-    } catch (IllegalStateException e) {\n-      Assert\n-          .assertEquals(\"System is starting and not ready for remote calls or shutting down in progress, STATUS = DOWN\",\n-              e.getMessage());\n-    }\n-\n-    try {\n-      InvokerUtils.syncInvoke(\"ms\", \"schemaId\", \"opName\", null);\n-      Assert.fail(\"must throw exception\");\n-    } catch (IllegalStateException e) {\n-      Assert\n-          .assertEquals(\"System is starting and not ready for remote calls or shutting down in progress, STATUS = DOWN\",\n-              e.getMessage());\n-    }\n-\n-    try {\n-      InvokerUtils.syncInvoke(\"ms\", \"latest\", \"rest\", \"schemaId\", \"opName\", null);\n-      Assert.fail(\"must throw exception\");\n-    } catch (IllegalStateException e) {\n-      Assert\n-          .assertEquals(\"System is starting and not ready for remote calls or shutting down in progress, STATUS = DOWN\",\n-              e.getMessage());\n-    }\n+    expectedException.expect(IllegalStateException.class);\n+    expectedException.expectMessage(\n+        Matchers.is(\"System is starting and not ready for remote calls or shutting down in progress, STATUS = DOWN\"));\n+    InvokerUtils.syncInvoke(\"ms\", \"schemaId\", \"opName\", null);\n   }\n \n   @Test\n-  public void testReactiveInvokeNotReady(@Mocked Invocation invocation, @Mocked InvocationContext parentContext,\n-      @Mocked Response response) {\n-\n-    SCBEngine.getInstance().setStatus(SCBStatus.DOWN);\n+  public void testSyncInvoke_6param_NotReady() {\n+    scbEngine.setStatus(SCBStatus.DOWN);\n \n-    new MockUp<Invocation>(invocation) {\n-      @Mock\n-      InvocationContext getParentContext() {\n-        return parentContext;\n-      }\n+    expectedException.expect(IllegalStateException.class);\n+    expectedException.expectMessage(\n+        Matchers.is(\"System is starting and not ready for remote calls or shutting down in progress, STATUS = DOWN\"));\n \n-      @Mock\n-      void next(AsyncResponse asyncResp) {\n-        asyncResp.handle(response);\n-      }\n-    };\n-\n-    Holder<InvocationContext> holder = new Holder<>();\n-    try {\n-      InvokerUtils.reactiveInvoke(invocation, ar -> holder.value = ContextUtils.getInvocationContext());\n-    } catch (IllegalStateException e) {\n-      Assert\n-          .assertEquals(\"System is starting and not ready for remote calls or shutting down in progress, STATUS = DOWN\",\n-              e.getMessage());\n-    }\n+    InvokerUtils.syncInvoke(\"ms\", \"latest\", \"rest\", \"schemaId\", \"opName\", null);\n   }\n \n   @Test\n   public void testSyncInvokeReady(@Injectable ConsumerProviderManager consumerProviderManager,\n       @Injectable Invocation invocation) {\n-\n-    SCBEngine.getInstance().setStatus(SCBStatus.UP);\n-\n-    CseContext.getInstance().setConsumerProviderManager(consumerProviderManager);\n+    scbEngine.setConsumerProviderManager(consumerProviderManager);\n \n     new Expectations(InvocationFactory.class) {\n       {"
+            },
+            {
+                "sha": "1f2b77bc77605847cd17491438443b6d44fa35ef",
+                "filename": "providers/provider-pojo/src/main/java/org/apache/servicecomb/provider/pojo/Invoker.java",
+                "status": "modified",
+                "additions": 2,
+                "deletions": 1,
+                "changes": 3,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/f8835f4d0ca98b2c732aec5d654f8dc15ccd90d3/providers/provider-pojo/src/main/java/org/apache/servicecomb/provider/pojo/Invoker.java",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/f8835f4d0ca98b2c732aec5d654f8dc15ccd90d3/providers/provider-pojo/src/main/java/org/apache/servicecomb/provider/pojo/Invoker.java",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/providers/provider-pojo/src/main/java/org/apache/servicecomb/provider/pojo/Invoker.java?ref=f8835f4d0ca98b2c732aec5d654f8dc15ccd90d3",
+                "patch": "@@ -24,6 +24,7 @@\n \n import org.apache.servicecomb.core.CseContext;\n import org.apache.servicecomb.core.Invocation;\n+import org.apache.servicecomb.core.SCBEngine;\n import org.apache.servicecomb.core.definition.MicroserviceMeta;\n import org.apache.servicecomb.core.definition.SchemaMeta;\n import org.apache.servicecomb.core.invocation.InvocationFactory;\n@@ -63,7 +64,7 @@ public Invoker(String microserviceName, String schemaId, Class<?> consumerIntf)\n   }\n \n   protected void prepare() {\n-    referenceConfig = CseContext.getInstance().getConsumerProviderManager().getReferenceConfig(microserviceName);\n+    referenceConfig = SCBEngine.getInstance().getReferenceConfigForInvoke(microserviceName);\n     MicroserviceMeta microserviceMeta = referenceConfig.getMicroserviceMeta();\n \n     if (StringUtils.isEmpty(schemaId)) {"
+            },
+            {
+                "sha": "e775141ec68ca6d5c01956e6206d53bc02c117ca",
+                "filename": "providers/provider-pojo/src/test/java/org/apache/servicecomb/provider/pojo/TestInvoker.java",
+                "status": "modified",
+                "additions": 12,
+                "deletions": 10,
+                "changes": 22,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/f8835f4d0ca98b2c732aec5d654f8dc15ccd90d3/providers/provider-pojo/src/test/java/org/apache/servicecomb/provider/pojo/TestInvoker.java",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/f8835f4d0ca98b2c732aec5d654f8dc15ccd90d3/providers/provider-pojo/src/test/java/org/apache/servicecomb/provider/pojo/TestInvoker.java",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/providers/provider-pojo/src/test/java/org/apache/servicecomb/provider/pojo/TestInvoker.java?ref=f8835f4d0ca98b2c732aec5d654f8dc15ccd90d3",
+                "patch": "@@ -36,7 +36,6 @@\n import org.apache.servicecomb.swagger.invocation.exception.InvocationException;\n import org.apache.servicecomb.swagger.invocation.response.consumer.ConsumerResponseMapper;\n import org.hamcrest.Matchers;\n-import org.junit.After;\n import org.junit.Assert;\n import org.junit.Before;\n import org.junit.Rule;\n@@ -54,14 +53,17 @@\n   @Rule\n   public ExpectedException expectedException = ExpectedException.none();\n \n+  SCBEngine scbEngine = new SCBEngine();\n+\n   @Before\n   public void setup() {\n-    SCBEngine.getInstance().setStatus(SCBStatus.UP);\n-  }\n-\n-  @After\n-  public void teardown() {\n-    SCBEngine.getInstance().setStatus(SCBStatus.DOWN);\n+    new MockUp<SCBEngine>() {\n+      @Mock\n+      SCBEngine getInstance() {\n+        return scbEngine;\n+      }\n+    };\n+    scbEngine.setStatus(SCBStatus.UP);\n   }\n \n   @Test\n@@ -78,7 +80,7 @@ public void testNormalSchemaId(@Injectable ConsumerProviderManager manager,\n         microserviceMeta.ensureFindSchemaMeta(\"schemaId\");\n       }\n     };\n-    CseContext.getInstance().setConsumerProviderManager(manager);\n+    scbEngine.setConsumerProviderManager(manager);\n     CseContext.getInstance().setConsumerSchemaFactory(factory);\n     CseContext.getInstance().setSwaggerEnvironment(new BootstrapNormal().boot());\n \n@@ -103,7 +105,7 @@ public void testFindSchemaByConsumerInterface(@Injectable ConsumerProviderManage\n         microserviceMeta.findSchemaMeta(IPerson.class);\n       }\n     };\n-    CseContext.getInstance().setConsumerProviderManager(manager);\n+    scbEngine.setConsumerProviderManager(manager);\n     CseContext.getInstance().setConsumerSchemaFactory(factory);\n     CseContext.getInstance().setSwaggerEnvironment(new BootstrapNormal().boot());\n \n@@ -130,7 +132,7 @@ public void testConsumerInterfaceAsSchemaId(@Injectable ConsumerProviderManager\n         microserviceMeta.ensureFindSchemaMeta(IPerson.class.getName());\n       }\n     };\n-    CseContext.getInstance().setConsumerProviderManager(manager);\n+    scbEngine.setConsumerProviderManager(manager);\n     CseContext.getInstance().setConsumerSchemaFactory(factory);\n     CseContext.getInstance().setSwaggerEnvironment(new BootstrapNormal().boot());\n "
+            },
+            {
+                "sha": "de8935dbafa70ea9889daff455a851779c4e2b67",
+                "filename": "providers/provider-springmvc/src/test/java/org/apache/servicecomb/provider/springmvc/reference/TestCseClientHttpRequest.java",
+                "status": "modified",
+                "additions": 12,
+                "deletions": 7,
+                "changes": 19,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/f8835f4d0ca98b2c732aec5d654f8dc15ccd90d3/providers/provider-springmvc/src/test/java/org/apache/servicecomb/provider/springmvc/reference/TestCseClientHttpRequest.java",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/f8835f4d0ca98b2c732aec5d654f8dc15ccd90d3/providers/provider-springmvc/src/test/java/org/apache/servicecomb/provider/springmvc/reference/TestCseClientHttpRequest.java",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/providers/provider-springmvc/src/test/java/org/apache/servicecomb/provider/springmvc/reference/TestCseClientHttpRequest.java?ref=f8835f4d0ca98b2c732aec5d654f8dc15ccd90d3",
+                "patch": "@@ -29,7 +29,6 @@\n import org.apache.servicecomb.core.unittest.UnitTestMeta;\n import org.apache.servicecomb.swagger.generator.springmvc.SpringmvcSwaggerGeneratorContext;\n import org.apache.servicecomb.swagger.invocation.Response;\n-import org.junit.After;\n import org.junit.Assert;\n import org.junit.Before;\n import org.junit.Test;\n@@ -38,15 +37,21 @@\n import org.springframework.web.bind.annotation.RequestMapping;\n import org.springframework.web.bind.annotation.RequestMethod;\n \n+import mockit.Mock;\n+import mockit.MockUp;\n+\n public class TestCseClientHttpRequest {\n+  SCBEngine scbEngine = new SCBEngine();\n+\n   @Before\n   public void setup() {\n-    SCBEngine.getInstance().setStatus(SCBStatus.UP);\n-  }\n-\n-  @After\n-  public void teardown() {\n-    SCBEngine.getInstance().setStatus(SCBStatus.DOWN);\n+    new MockUp<SCBEngine>() {\n+      @Mock\n+      SCBEngine getInstance() {\n+        return scbEngine;\n+      }\n+    };\n+    scbEngine.setStatus(SCBStatus.UP);\n   }\n \n   @RequestMapping(path = \"SpringmvcImpl\")"
+            },
+            {
+                "sha": "b0e3af909ac7302e82011d85bb1aaada9dc9f5d0",
+                "filename": "providers/provider-springmvc/src/test/java/org/apache/servicecomb/provider/springmvc/reference/async/CseAsyncClientHttpRequestTest.java",
+                "status": "modified",
+                "additions": 16,
+                "deletions": 11,
+                "changes": 27,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/f8835f4d0ca98b2c732aec5d654f8dc15ccd90d3/providers/provider-springmvc/src/test/java/org/apache/servicecomb/provider/springmvc/reference/async/CseAsyncClientHttpRequestTest.java",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/f8835f4d0ca98b2c732aec5d654f8dc15ccd90d3/providers/provider-springmvc/src/test/java/org/apache/servicecomb/provider/springmvc/reference/async/CseAsyncClientHttpRequestTest.java",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/providers/provider-springmvc/src/test/java/org/apache/servicecomb/provider/springmvc/reference/async/CseAsyncClientHttpRequestTest.java?ref=f8835f4d0ca98b2c732aec5d654f8dc15ccd90d3",
+                "patch": "@@ -32,7 +32,6 @@\n import org.apache.servicecomb.provider.springmvc.reference.CseClientHttpResponse;\n import org.apache.servicecomb.swagger.generator.springmvc.SpringmvcSwaggerGeneratorContext;\n import org.apache.servicecomb.swagger.invocation.Response;\n-import org.junit.After;\n import org.junit.Assert;\n import org.junit.Before;\n import org.junit.BeforeClass;\n@@ -45,9 +44,25 @@\n import org.springframework.web.bind.annotation.RequestMapping;\n import org.springframework.web.bind.annotation.RequestMethod;\n \n+import mockit.Mock;\n+import mockit.MockUp;\n+\n public class CseAsyncClientHttpRequestTest {\n   static UnitTestMeta meta = new UnitTestMeta();\n \n+  SCBEngine scbEngine = new SCBEngine();\n+\n+  @Before\n+  public void setup() {\n+    new MockUp<SCBEngine>() {\n+      @Mock\n+      SCBEngine getInstance() {\n+        return scbEngine;\n+      }\n+    };\n+    scbEngine.setStatus(SCBStatus.UP);\n+  }\n+\n   @BeforeClass\n   public static void classSetup() {\n     CseContext.getInstance()\n@@ -57,16 +72,6 @@ public static void classSetup() {\n     meta.registerSchema(new SpringmvcSwaggerGeneratorContext(), CseAsyncClientHttpRequestTestSchema.class);\n   }\n \n-  @Before\n-  public void setup() {\n-    SCBEngine.getInstance().setStatus(SCBStatus.UP);\n-  }\n-\n-  @After\n-  public void teardown() {\n-    SCBEngine.getInstance().setStatus(SCBStatus.DOWN);\n-  }\n-\n   @RequestMapping(path = \"CseAsyncClientHttpRequestTestSchema\")\n   static class CseAsyncClientHttpRequestTestSchema {\n     @RequestMapping(path = \"/testbytes\", method = RequestMethod.POST)"
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/servicecomb-java-chassis/commit/a2304046f39f0fa14174550a16b6fb377d580e90",
+        "repo": "servicecomb-java-chassis",
+        "parent": "https://github.com/apache/servicecomb-java-chassis/commit/f2216535be3271a5a06472310c5a5224e1fe2cae",
+        "message": "[SCB-753]NPE when query not exists service",
+        "bug_id": "servicecomb-java-chassis_5",
+        "file": [
+            {
+                "sha": "877b886f8c7fdccbac713349e5fe730ad55c0634",
+                "filename": "service-registry/src/main/java/org/apache/servicecomb/serviceregistry/client/LocalServiceRegistryClientImpl.java",
+                "status": "modified",
+                "additions": 4,
+                "deletions": 2,
+                "changes": 6,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/a2304046f39f0fa14174550a16b6fb377d580e90/service-registry/src/main/java/org/apache/servicecomb/serviceregistry/client/LocalServiceRegistryClientImpl.java",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/a2304046f39f0fa14174550a16b6fb377d580e90/service-registry/src/main/java/org/apache/servicecomb/serviceregistry/client/LocalServiceRegistryClientImpl.java",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/service-registry/src/main/java/org/apache/servicecomb/serviceregistry/client/LocalServiceRegistryClientImpl.java?ref=a2304046f39f0fa14174550a16b6fb377d580e90",
+                "patch": "@@ -272,6 +272,9 @@ protected Microservice findLatest(String appId, String serviceName, VersionRule\n       String strVersionRule) {\n     MicroserviceInstances instances =\n         findServiceInstances(selfMicroserviceId, appId, serviceName, strVersionRule, null);\n+    if(instances.isMicroserviceNotExist()) {\n+      return null;\n+    }\n     return instances.getInstancesResponse().getInstances();\n   }\n \n@@ -291,8 +294,7 @@ public MicroserviceInstances findServiceInstances(String selfMicroserviceId, Str\n     VersionRule versionRule = VersionRuleUtils.getOrCreate(strVersionRule);\n     Microservice latestMicroservice = findLatest(appId, serviceName, versionRule);\n     if (latestMicroservice == null) {\n-      response.setInstances(allInstances);\n-      microserviceInstances.setInstancesResponse(response);\n+      microserviceInstances.setMicroserviceNotExist(true);\n       return microserviceInstances;\n     }\n "
+            },
+            {
+                "sha": "e6aba3b5239dd1fb41b7ecbe617342f113aa218e",
+                "filename": "service-registry/src/main/java/org/apache/servicecomb/serviceregistry/registry/AbstractServiceRegistry.java",
+                "status": "modified",
+                "additions": 1,
+                "deletions": 1,
+                "changes": 2,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/a2304046f39f0fa14174550a16b6fb377d580e90/service-registry/src/main/java/org/apache/servicecomb/serviceregistry/registry/AbstractServiceRegistry.java",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/a2304046f39f0fa14174550a16b6fb377d580e90/service-registry/src/main/java/org/apache/servicecomb/serviceregistry/registry/AbstractServiceRegistry.java",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/service-registry/src/main/java/org/apache/servicecomb/serviceregistry/registry/AbstractServiceRegistry.java?ref=a2304046f39f0fa14174550a16b6fb377d580e90",
+                "patch": "@@ -223,7 +223,7 @@ public boolean unregisterInstance() {\n   public List<MicroserviceInstance> findServiceInstance(String appId, String serviceName,\n       String versionRule) {\n     MicroserviceInstances instances = findServiceInstances(appId, serviceName, versionRule, null);\n-    if (instances == null) {\n+    if (instances == null || instances.isMicroserviceNotExist()) {\n       return null;\n     }\n     return instances.getInstancesResponse().getInstances();"
+            },
+            {
+                "sha": "548f21e233116ed08e368a0f168c2d77ae13aba9",
+                "filename": "service-registry/src/test/java/org/apache/servicecomb/serviceregistry/TestRegistry.java",
+                "status": "modified",
+                "additions": 3,
+                "deletions": 0,
+                "changes": 3,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/a2304046f39f0fa14174550a16b6fb377d580e90/service-registry/src/test/java/org/apache/servicecomb/serviceregistry/TestRegistry.java",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/a2304046f39f0fa14174550a16b6fb377d580e90/service-registry/src/test/java/org/apache/servicecomb/serviceregistry/TestRegistry.java",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/service-registry/src/test/java/org/apache/servicecomb/serviceregistry/TestRegistry.java?ref=a2304046f39f0fa14174550a16b6fb377d580e90",
+                "patch": "@@ -99,6 +99,9 @@ public void testDelegate() {\n     Assert.assertEquals(1, instanceList.size());\n     Assert.assertEquals(RegistryUtils.getMicroservice().getServiceId(), instanceList.get(0).getServiceId());\n \n+    instanceList = RegistryUtils.findServiceInstance(\"default\", \"notExists\", \"0.0.1\");\n+    Assert.assertEquals(null, instanceList);\n+\n     MicroserviceInstances microserviceInstances =\n         RegistryUtils.findServiceInstances(\"default\", \"default\", \"0.0.1\", \"0\");\n     List<MicroserviceInstance> instanceLists = microserviceInstances.getInstancesResponse().getInstances();"
+            },
+            {
+                "sha": "e4fdc7dcfa54d6efa229e8501be96a14cca1d252",
+                "filename": "service-registry/src/test/java/org/apache/servicecomb/serviceregistry/client/LocalServiceRegistryClientImplTest.java",
+                "status": "modified",
+                "additions": 3,
+                "deletions": 4,
+                "changes": 7,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/a2304046f39f0fa14174550a16b6fb377d580e90/service-registry/src/test/java/org/apache/servicecomb/serviceregistry/client/LocalServiceRegistryClientImplTest.java",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/a2304046f39f0fa14174550a16b6fb377d580e90/service-registry/src/test/java/org/apache/servicecomb/serviceregistry/client/LocalServiceRegistryClientImplTest.java",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/service-registry/src/test/java/org/apache/servicecomb/serviceregistry/client/LocalServiceRegistryClientImplTest.java?ref=a2304046f39f0fa14174550a16b6fb377d580e90",
+                "patch": "@@ -121,13 +121,12 @@ public void findServiceInstance_noInstances() {\n     List<MicroserviceInstance> result =\n         registryClient.findServiceInstance(\"self\", appId, microserviceName, DefinitionConst.VERSION_RULE_ALL);\n \n-    Assert.assertThat(result, Matchers.empty());\n+    Assert.assertThat(result, Matchers.nullValue());\n \n     MicroserviceInstances microserviceInstances =\n         registryClient.findServiceInstances(\"self\", appId, microserviceName, DefinitionConst.VERSION_RULE_ALL, null);\n-    List<MicroserviceInstance> results = microserviceInstances.getInstancesResponse().getInstances();\n-\n-    Assert.assertThat(results, Matchers.empty());\n+    Assert.assertThat(microserviceInstances.isMicroserviceNotExist(), Matchers.is(true));\n+    Assert.assertThat(microserviceInstances.getInstancesResponse(), Matchers.nullValue());\n   }\n \n   @Test"
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/servicecomb-java-chassis/commit/22faf9d55744c9485996d2852d7db9815b888048",
+        "repo": "servicecomb-java-chassis",
+        "parent": "https://github.com/apache/servicecomb-java-chassis/commit/fd4acf1b421062b17189b4c6d383316f7eb154f9",
+        "message": "[SCB-617] avoid MetricsBootstrap shutdown NPE",
+        "bug_id": "servicecomb-java-chassis_6",
+        "file": [
+            {
+                "sha": "7f13bf17c87e193195ba179343f85841ef6e90b4",
+                "filename": "foundations/foundation-metrics/src/main/java/org/apache/servicecomb/foundation/metrics/MetricsBootstrap.java",
+                "status": "modified",
+                "additions": 4,
+                "deletions": 2,
+                "changes": 6,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/22faf9d55744c9485996d2852d7db9815b888048/foundations/foundation-metrics/src/main/java/org/apache/servicecomb/foundation/metrics/MetricsBootstrap.java",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/22faf9d55744c9485996d2852d7db9815b888048/foundations/foundation-metrics/src/main/java/org/apache/servicecomb/foundation/metrics/MetricsBootstrap.java",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/foundations/foundation-metrics/src/main/java/org/apache/servicecomb/foundation/metrics/MetricsBootstrap.java?ref=22faf9d55744c9485996d2852d7db9815b888048",
+                "patch": "@@ -54,12 +54,14 @@ public void start(CompositeRegistry globalRegistry, EventBus eventBus) {\n   }\n \n   public void shutdown() {\n-    executorService.shutdown();\n+    if (executorService != null) {\n+      executorService.shutdown();\n+    }\n \n     List<MetricsInitializer> initializers = new ArrayList<>(SPIServiceUtils.getSortedService(MetricsInitializer.class));\n     Collections.reverse(initializers);\n     initializers.forEach(initializer -> {\n-      initializer.uninit();\n+      initializer.destroy();\n     });\n   }\n "
+            },
+            {
+                "sha": "b232f48153017ec1e65a903b7e694953cd5e2d58",
+                "filename": "foundations/foundation-metrics/src/main/java/org/apache/servicecomb/foundation/metrics/MetricsInitializer.java",
+                "status": "modified",
+                "additions": 1,
+                "deletions": 1,
+                "changes": 2,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/22faf9d55744c9485996d2852d7db9815b888048/foundations/foundation-metrics/src/main/java/org/apache/servicecomb/foundation/metrics/MetricsInitializer.java",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/22faf9d55744c9485996d2852d7db9815b888048/foundations/foundation-metrics/src/main/java/org/apache/servicecomb/foundation/metrics/MetricsInitializer.java",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/foundations/foundation-metrics/src/main/java/org/apache/servicecomb/foundation/metrics/MetricsInitializer.java?ref=22faf9d55744c9485996d2852d7db9815b888048",
+                "patch": "@@ -29,7 +29,7 @@ default int getOrder() {\n    */\n   void init(CompositeRegistry globalRegistry, EventBus eventBus, MetricsBootstrapConfig config);\n \n-  default void uninit() {\n+  default void destroy() {\n \n   }\n }"
+            },
+            {
+                "sha": "50cb30c72cba7b7ece118e6c9690f9f3e198515c",
+                "filename": "foundations/foundation-metrics/src/test/java/org/apache/servicecomb/foundation/metrics/TestMetricsBootstrap.java",
+                "status": "modified",
+                "additions": 14,
+                "deletions": 6,
+                "changes": 20,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/22faf9d55744c9485996d2852d7db9815b888048/foundations/foundation-metrics/src/test/java/org/apache/servicecomb/foundation/metrics/TestMetricsBootstrap.java",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/22faf9d55744c9485996d2852d7db9815b888048/foundations/foundation-metrics/src/test/java/org/apache/servicecomb/foundation/metrics/TestMetricsBootstrap.java",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/foundations/foundation-metrics/src/test/java/org/apache/servicecomb/foundation/metrics/TestMetricsBootstrap.java?ref=22faf9d55744c9485996d2852d7db9815b888048",
+                "patch": "@@ -102,7 +102,7 @@ public void onEvent(PolledEvent event) {\n \n   @Test\n   public void shutdown(@Mocked ScheduledExecutorService scheduledExecutorService) {\n-    List<MetricsInitializer> uninitList = new ArrayList<>();\n+    List<MetricsInitializer> destroyList = new ArrayList<>();\n     MetricsInitializer initializer1 = new MetricsInitializer() {\n       @Override\n       public int getOrder() {\n@@ -114,8 +114,8 @@ public void init(CompositeRegistry globalRegistry, EventBus eventBus, MetricsBoo\n       }\n \n       @Override\n-      public void uninit() {\n-        uninitList.add(this);\n+      public void destroy() {\n+        destroyList.add(this);\n       }\n     };\n \n@@ -130,8 +130,8 @@ public void init(CompositeRegistry globalRegistry, EventBus eventBus, MetricsBoo\n       }\n \n       @Override\n-      public void uninit() {\n-        uninitList.add(this);\n+      public void destroy() {\n+        destroyList.add(this);\n       }\n     };\n \n@@ -145,6 +145,14 @@ public void uninit() {\n \n     bootstrap.shutdown();\n \n-    Assert.assertThat(uninitList, Matchers.contains(initializer2, initializer1));\n+    Assert.assertThat(destroyList, Matchers.contains(initializer2, initializer1));\n+  }\n+\n+  @Test\n+  public void shutdown_notStart() {\n+    Assert.assertNull(Deencapsulation.getField(bootstrap, \"executorService\"));\n+\n+    // should not throw exception\n+    bootstrap.shutdown();\n   }\n }"
+            },
+            {
+                "sha": "6bd81463868e26a6364cc89ffcae451064d4cd31",
+                "filename": "metrics/metrics-core/src/main/java/org/apache/servicecomb/metrics/core/DefaultRegistryInitializer.java",
+                "status": "modified",
+                "additions": 1,
+                "deletions": 1,
+                "changes": 2,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/22faf9d55744c9485996d2852d7db9815b888048/metrics/metrics-core/src/main/java/org/apache/servicecomb/metrics/core/DefaultRegistryInitializer.java",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/22faf9d55744c9485996d2852d7db9815b888048/metrics/metrics-core/src/main/java/org/apache/servicecomb/metrics/core/DefaultRegistryInitializer.java",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/metrics/metrics-core/src/main/java/org/apache/servicecomb/metrics/core/DefaultRegistryInitializer.java?ref=22faf9d55744c9485996d2852d7db9815b888048",
+                "patch": "@@ -49,7 +49,7 @@ public void init(CompositeRegistry globalRegistry, EventBus eventBus, MetricsBoo\n   }\n \n   @Override\n-  public void uninit() {\n+  public void destroy() {\n     DefaultMonitorRegistry.getInstance().unregister(registry);\n     globalRegistry.remove(registry);\n   }"
+            },
+            {
+                "sha": "4b2a1c3ffd2c2a6c33f8f5aa9b171ba5a692bc24",
+                "filename": "metrics/metrics-core/src/test/java/org/apache/servicecomb/metrics/core/TestDefaultRegistryInitializer.java",
+                "status": "modified",
+                "additions": 1,
+                "deletions": 1,
+                "changes": 2,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/22faf9d55744c9485996d2852d7db9815b888048/metrics/metrics-core/src/test/java/org/apache/servicecomb/metrics/core/TestDefaultRegistryInitializer.java",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/22faf9d55744c9485996d2852d7db9815b888048/metrics/metrics-core/src/test/java/org/apache/servicecomb/metrics/core/TestDefaultRegistryInitializer.java",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/metrics/metrics-core/src/test/java/org/apache/servicecomb/metrics/core/TestDefaultRegistryInitializer.java?ref=22faf9d55744c9485996d2852d7db9815b888048",
+                "patch": "@@ -49,7 +49,7 @@ public void init() {\n     Assert.assertEquals(1, registries.size());\n     Assert.assertEquals(1, DefaultMonitorRegistry.getInstance().getRegisteredMonitors().size());\n \n-    registryInitializer.uninit();\n+    registryInitializer.destroy();\n \n     Assert.assertEquals(0, registries.size());\n     Assert.assertEquals(0, DefaultMonitorRegistry.getInstance().getRegisteredMonitors().size());"
+            },
+            {
+                "sha": "b1eb9c67c610fdc932b6dea8b6926097594e72da",
+                "filename": "metrics/metrics-integration/metrics-prometheus/src/main/java/org/apache/servicecomb/metrics/prometheus/PrometheusPublisher.java",
+                "status": "modified",
+                "additions": 1,
+                "deletions": 1,
+                "changes": 2,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/22faf9d55744c9485996d2852d7db9815b888048/metrics/metrics-integration/metrics-prometheus/src/main/java/org/apache/servicecomb/metrics/prometheus/PrometheusPublisher.java",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/22faf9d55744c9485996d2852d7db9815b888048/metrics/metrics-integration/metrics-prometheus/src/main/java/org/apache/servicecomb/metrics/prometheus/PrometheusPublisher.java",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/metrics/metrics-integration/metrics-prometheus/src/main/java/org/apache/servicecomb/metrics/prometheus/PrometheusPublisher.java?ref=22faf9d55744c9485996d2852d7db9815b888048",
+                "patch": "@@ -114,7 +114,7 @@ protected Sample convertMeasurementToSample(Measurement measurement) {\n   }\n \n   @Override\n-  public void uninit() {\n+  public void destroy() {\n     if (httpServer == null) {\n       return;\n     }"
+            },
+            {
+                "sha": "c953730f4c0edfe25296c660dc64e59619f12178",
+                "filename": "metrics/metrics-integration/metrics-prometheus/src/test/java/org/apache/servicecomb/metrics/prometheus/TestPrometheusPublisher.java",
+                "status": "modified",
+                "additions": 1,
+                "deletions": 1,
+                "changes": 2,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/22faf9d55744c9485996d2852d7db9815b888048/metrics/metrics-integration/metrics-prometheus/src/test/java/org/apache/servicecomb/metrics/prometheus/TestPrometheusPublisher.java",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/22faf9d55744c9485996d2852d7db9815b888048/metrics/metrics-integration/metrics-prometheus/src/test/java/org/apache/servicecomb/metrics/prometheus/TestPrometheusPublisher.java",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/metrics/metrics-integration/metrics-prometheus/src/test/java/org/apache/servicecomb/metrics/prometheus/TestPrometheusPublisher.java?ref=22faf9d55744c9485996d2852d7db9815b888048",
+                "patch": "@@ -102,6 +102,6 @@ public void collect() throws IllegalAccessException, IOException {\n           \"count_name{tag1=\\\"tag1v\\\",tag2=\\\"tag2v\\\",} 1.0\\n\", IOUtils.toString(is));\n     }\n \n-    publisher.uninit();\n+    publisher.destroy();\n   }\n }"
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/servicecomb-java-chassis/commit/2b0290eb63ffc9bdac4055515abdb8f180f7fb83",
+        "repo": "servicecomb-java-chassis",
+        "parent": "https://github.com/apache/servicecomb-java-chassis/commit/e18392717d4567dc2d22944c7b33f653481c11ef",
+        "message": "Update MicroserviceRegisterTask.java\n\navoid NullPointerException in register task",
+        "bug_id": "servicecomb-java-chassis_7",
+        "file": [
+            {
+                "sha": "9998dc6a39018719e1cb7ed75bfbc398e6bad8f9",
+                "filename": "service-registry/src/main/java/io/servicecomb/serviceregistry/task/MicroserviceRegisterTask.java",
+                "status": "modified",
+                "additions": 4,
+                "deletions": 0,
+                "changes": 4,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/2b0290eb63ffc9bdac4055515abdb8f180f7fb83/service-registry/src/main/java/io/servicecomb/serviceregistry/task/MicroserviceRegisterTask.java",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/2b0290eb63ffc9bdac4055515abdb8f180f7fb83/service-registry/src/main/java/io/servicecomb/serviceregistry/task/MicroserviceRegisterTask.java",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/service-registry/src/main/java/io/servicecomb/serviceregistry/task/MicroserviceRegisterTask.java?ref=2b0290eb63ffc9bdac4055515abdb8f180f7fb83",
+                "patch": "@@ -89,6 +89,10 @@ protected boolean doRegister() {\n \n     private void checkSchemaIdSet() {\n         Microservice existMicroservice = srClient.getMicroservice(microservice.getServiceId());\n+        if (existMicroservice == null) {\n+            LOGGER.error(\"Error to get microservice from service center when check schema set\");\n+            return;\n+        }\n         Set<String> existSchemas = new HashSet<>(existMicroservice.getSchemas());\n         Set<String> localSchemas = new HashSet<>(microservice.getSchemas());\n         schemaIdSetMatch = existSchemas.equals(localSchemas);"
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/servicecomb-java-chassis/commit/6dc769cd363568e20c77cea34e8f198acefec153",
+        "repo": "servicecomb-java-chassis",
+        "parent": "https://github.com/apache/servicecomb-java-chassis/commit/fc9c7f40f4d957152a602e68f3be889bf5b8c68f",
+        "message": "[SCB-562] fix NPE when had empty interface (not have any method) (#729)",
+        "bug_id": "servicecomb-java-chassis_8",
+        "file": [
+            {
+                "sha": "1a4e6f91dfc51218bbc9997f9bfe18e25ffda506",
+                "filename": "core/src/main/java/org/apache/servicecomb/core/definition/SchemaMeta.java",
+                "status": "modified",
+                "additions": 6,
+                "deletions": 0,
+                "changes": 6,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/6dc769cd363568e20c77cea34e8f198acefec153/core/src/main/java/org/apache/servicecomb/core/definition/SchemaMeta.java",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/6dc769cd363568e20c77cea34e8f198acefec153/core/src/main/java/org/apache/servicecomb/core/definition/SchemaMeta.java",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/core/src/main/java/org/apache/servicecomb/core/definition/SchemaMeta.java?ref=6dc769cd363568e20c77cea34e8f198acefec153",
+                "patch": "@@ -83,6 +83,12 @@ public String getPackageName() {\n   }\n \n   private void initOperations() {\n+    if (swagger.getPaths() == null) {\n+      LOGGER.warn(swagger.getInfo().getTitle() + \" with path \" + swagger.getBasePath()\n+          + \" is an empty interface, please delete it or fill with one method!\");\n+      return;\n+    }\n+\n     for (Entry<String, Path> entry : swagger.getPaths().entrySet()) {\n       String strPath = entry.getKey();\n       Path path = entry.getValue();"
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/servicecomb-java-chassis/commit/aaaaf5b82fbe1b51383e432db62ef7747734fde0",
+        "repo": "servicecomb-java-chassis",
+        "parent": "https://github.com/apache/servicecomb-java-chassis/commit/ec3b710e21ab16b7dd73485cefa7a6ef29a21f76",
+        "message": "SCB-374 fix NPE when 404 not found",
+        "bug_id": "servicecomb-java-chassis_9",
+        "file": [
+            {
+                "sha": "3dfb5cc623cf7a4fd41ad38134b62bcdbd1c81e6",
+                "filename": "common/common-rest/src/main/java/org/apache/servicecomb/common/rest/AbstractRestInvocation.java",
+                "status": "modified",
+                "additions": 5,
+                "deletions": 1,
+                "changes": 6,
+                "blob_url": "https://github.com/apache/servicecomb-java-chassis/blob/aaaaf5b82fbe1b51383e432db62ef7747734fde0/common/common-rest/src/main/java/org/apache/servicecomb/common/rest/AbstractRestInvocation.java",
+                "raw_url": "https://github.com/apache/servicecomb-java-chassis/raw/aaaaf5b82fbe1b51383e432db62ef7747734fde0/common/common-rest/src/main/java/org/apache/servicecomb/common/rest/AbstractRestInvocation.java",
+                "contents_url": "https://api.github.com/repos/apache/servicecomb-java-chassis/contents/common/common-rest/src/main/java/org/apache/servicecomb/common/rest/AbstractRestInvocation.java?ref=aaaaf5b82fbe1b51383e432db62ef7747734fde0",
+                "patch": "@@ -196,7 +196,11 @@ protected void sendResponseQuietly(Response response) {\n           e);\n     } finally {\n       requestEx.getAsyncContext().complete();\n-      invocation.onFinish(response);\n+      // if failed to locate path, then will not create invocation\n+      // TODO: statistics this case\n+      if (invocation != null) {\n+        invocation.onFinish(response);\n+      }\n     }\n   }\n "
+            }
+        ]
+    }
+]

@@ -1,0 +1,491 @@
+[
+    {
+        "commit": "https://github.com/apache/deltaspike/commit/d95495b81b52f15f4712ba062c404eb33ecc892b",
+        "repo": "deltaspike",
+        "parent": "https://github.com/apache/deltaspike/commit/82da8a6c5d23513cb6368a642e9ccecc46fcf99a",
+        "message": "DELTASPIKE-1383 Fix multiple threads causing NPE in Authorizer",
+        "bug_id": "deltaspike_1",
+        "file": [
+            {
+                "sha": "c34863276dfa0b623e1940e359831774be0a55ae",
+                "filename": "deltaspike/modules/security/impl/src/main/java/org/apache/deltaspike/security/impl/extension/Authorizer.java",
+                "status": "modified",
+                "additions": 4,
+                "deletions": 3,
+                "changes": 7,
+                "blob_url": "https://github.com/apache/deltaspike/blob/d95495b81b52f15f4712ba062c404eb33ecc892b/deltaspike/modules/security/impl/src/main/java/org/apache/deltaspike/security/impl/extension/Authorizer.java",
+                "raw_url": "https://github.com/apache/deltaspike/raw/d95495b81b52f15f4712ba062c404eb33ecc892b/deltaspike/modules/security/impl/src/main/java/org/apache/deltaspike/security/impl/extension/Authorizer.java",
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/modules/security/impl/src/main/java/org/apache/deltaspike/security/impl/extension/Authorizer.java?ref=d95495b81b52f15f4712ba062c404eb33ecc892b",
+                "patch": "@@ -208,16 +208,17 @@ private synchronized void lazyInitTargetBean(BeanManager beanManager)\n             Method method = boundAuthorizerMethod.getJavaMember();\n \n             Set<Bean<?>> beans = beanManager.getBeans(method.getDeclaringClass());\n-            boundAuthorizerBean = beanManager.resolve(beans);\n+            Bean<?> foundBoundAuthorizerBean = beanManager.resolve(beans);\n \n-            if (boundAuthorizerBean == null)\n+            if (foundBoundAuthorizerBean == null)\n             {\n                 throw new IllegalStateException(\"Exception looking up authorizer method bean - \" +\n                         \"no beans found for method [\" + method.getDeclaringClass() + \".\" +\n                         method.getName() + \"]\");\n             }\n \n-            boundAuthorizerMethodProxy = new InjectableMethod(boundAuthorizerMethod, boundAuthorizerBean, beanManager);\n+            boundAuthorizerMethodProxy = new InjectableMethod(boundAuthorizerMethod, foundBoundAuthorizerBean, beanManager);\n+            boundAuthorizerBean = foundBoundAuthorizerBean;\n         }\n     }\n "
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/deltaspike/commit/d74c387d242fe960151462a6c534ec1e1aec614a",
+        "repo": "deltaspike",
+        "parent": "https://github.com/apache/deltaspike/commit/d76094f6c668cbdc2d487eab4c99df269c27fb1b",
+        "message": "DELTASPIKE-666 OWB and OEJB containers could throw NullPointerExceptions",
+        "bug_id": "deltaspike_2",
+        "file": [
+            {
+                "sha": "1f5382f5514d3de20f1730fb55e29e5bb38fbc38",
+                "filename": "deltaspike/cdictrl/impl-openejb/src/main/java/org/apache/deltaspike/cdise/openejb/OpenEjbContainerControl.java",
+                "status": "modified",
+                "additions": 17,
+                "deletions": 3,
+                "changes": 20,
+                "blob_url": "https://github.com/apache/deltaspike/blob/d74c387d242fe960151462a6c534ec1e1aec614a/deltaspike/cdictrl/impl-openejb/src/main/java/org/apache/deltaspike/cdise/openejb/OpenEjbContainerControl.java",
+                "raw_url": "https://github.com/apache/deltaspike/raw/d74c387d242fe960151462a6c534ec1e1aec614a/deltaspike/cdictrl/impl-openejb/src/main/java/org/apache/deltaspike/cdise/openejb/OpenEjbContainerControl.java",
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/cdictrl/impl-openejb/src/main/java/org/apache/deltaspike/cdise/openejb/OpenEjbContainerControl.java?ref=d74c387d242fe960151462a6c534ec1e1aec614a",
+                "patch": "@@ -143,9 +143,23 @@ public synchronized ContextControl getContextControl()\n     {\n         if (ctxCtrl == null)\n         {\n-            Set<Bean<?>> beans = getBeanManager().getBeans(ContextControl.class);\n-            ctxCtrlBean = (Bean<ContextControl>) getBeanManager().resolve(beans);\n-            ctxCtrlCreationalContext = getBeanManager().createCreationalContext(ctxCtrlBean);\n+            BeanManager beanManager = getBeanManager();\n+\n+            if (beanManager == null)\n+            {\n+                LOG.warning(\"If the CDI-container was started by the environment, you can't use this helper.\" +\n+                        \"Instead you can resolve ContextControl manually \" +\n+                        \"(e.g. via BeanProvider.getContextualReference(ContextControl.class) ). \" +\n+                        \"If the container wasn't started already, you have to use CdiContainer#boot before.\");\n+\n+                return null;\n+            }\n+            Set<Bean<?>> beans = beanManager.getBeans(ContextControl.class);\n+            ctxCtrlBean = (Bean<ContextControl>) beanManager.resolve(beans);\n+\n+            ctxCtrlCreationalContext = getBeanManager()\n+                    .createCreationalContext(ctxCtrlBean);\n+\n             ctxCtrl = (ContextControl)\n                     getBeanManager().getReference(ctxCtrlBean, ContextControl.class, ctxCtrlCreationalContext);\n         }"
+            },
+            {
+                "sha": "6b7fe48b2d33fa465ba9e7674213ef22e6672bfa",
+                "filename": "deltaspike/cdictrl/impl-owb/src/main/java/org/apache/deltaspike/cdise/owb/OpenWebBeansContainerControl.java",
+                "status": "modified",
+                "additions": 1,
+                "deletions": 3,
+                "changes": 4,
+                "blob_url": "https://github.com/apache/deltaspike/blob/d74c387d242fe960151462a6c534ec1e1aec614a/deltaspike/cdictrl/impl-owb/src/main/java/org/apache/deltaspike/cdise/owb/OpenWebBeansContainerControl.java",
+                "raw_url": "https://github.com/apache/deltaspike/raw/d74c387d242fe960151462a6c534ec1e1aec614a/deltaspike/cdictrl/impl-owb/src/main/java/org/apache/deltaspike/cdise/owb/OpenWebBeansContainerControl.java",
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/cdictrl/impl-owb/src/main/java/org/apache/deltaspike/cdise/owb/OpenWebBeansContainerControl.java?ref=d74c387d242fe960151462a6c534ec1e1aec614a",
+                "patch": "@@ -101,8 +101,6 @@ public synchronized ContextControl getContextControl()\n     {\n         if (ctxCtrl == null)\n         {\n-            Set<Bean<?>> beans = getBeanManager().getBeans(ContextControl.class);\n-\n             BeanManager beanManager = getBeanManager();\n \n             if (beanManager == null)\n@@ -114,7 +112,7 @@ public synchronized ContextControl getContextControl()\n \n                 return null;\n             }\n-\n+            Set<Bean<?>> beans = beanManager.getBeans(ContextControl.class);\n             ctxCtrlBean = (Bean<ContextControl>) beanManager.resolve(beans);\n             ctxCtrlCreationalContext = getBeanManager().createCreationalContext(ctxCtrlBean);\n             ctxCtrl = (ContextControl)"
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/deltaspike/commit/23bd326c28e976c74fcf3c0b14b72fb3be34bdd8",
+        "repo": "deltaspike",
+        "parent": "https://github.com/apache/deltaspike/commit/8cff159e6852f4079891f989541e7571bd59b23a",
+        "message": "DELTASPIKE-317 fixed NullPointerException in #getContextControl\n\n (of OpenWebBeansContainerControl and WeldContainerControl)",
+        "bug_id": "deltaspike_3",
+        "file": [
+            {
+                "sha": "9c45aea3e35eab40dea56a9b235e08c36ca80dd3",
+                "filename": "deltaspike/cdictrl/impl-owb/src/main/java/org/apache/deltaspike/cdise/owb/OpenWebBeansContainerControl.java",
+                "status": "modified",
+                "additions": 17,
+                "deletions": 1,
+                "changes": 18,
+                "blob_url": "https://github.com/apache/deltaspike/blob/23bd326c28e976c74fcf3c0b14b72fb3be34bdd8/deltaspike/cdictrl/impl-owb/src/main/java/org/apache/deltaspike/cdise/owb/OpenWebBeansContainerControl.java",
+                "raw_url": "https://github.com/apache/deltaspike/raw/23bd326c28e976c74fcf3c0b14b72fb3be34bdd8/deltaspike/cdictrl/impl-owb/src/main/java/org/apache/deltaspike/cdise/owb/OpenWebBeansContainerControl.java",
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/cdictrl/impl-owb/src/main/java/org/apache/deltaspike/cdise/owb/OpenWebBeansContainerControl.java?ref=23bd326c28e976c74fcf3c0b14b72fb3be34bdd8",
+                "patch": "@@ -27,13 +27,16 @@\n import javax.enterprise.inject.spi.Bean;\n import javax.enterprise.inject.spi.BeanManager;\n import java.util.Set;\n+import java.util.logging.Logger;\n \n /**\n  * OpenWebBeans specific implementation of {@link org.apache.deltaspike.cdise.api.CdiContainer}.\n  */\n @SuppressWarnings(\"UnusedDeclaration\")\n public class OpenWebBeansContainerControl implements CdiContainer\n {\n+    private static final Logger LOG = Logger.getLogger(OpenWebBeansContainerControl.class.getName());\n+\n     private ContainerLifecycle lifecycle;\n \n     private ContextControl ctxCtrl = null;\n@@ -91,7 +94,20 @@ public synchronized ContextControl getContextControl()\n         if (ctxCtrl == null)\n         {\n             Set<Bean<?>> beans = getBeanManager().getBeans(ContextControl.class);\n-            ctxCtrlBean = (Bean<ContextControl>) getBeanManager().resolve(beans);\n+\n+            BeanManager beanManager = getBeanManager();\n+\n+            if (beanManager == null)\n+            {\n+                LOG.warning(\"If the CDI-container was started by the environment, you can't use this helper.\" +\n+                        \"Instead you can resolve ContextControl manually \" +\n+                        \"(e.g. via BeanProvider.getContextualReference(ContextControl.class) ). \" +\n+                        \"If the container wasn't started already, you have to use CdiContainer#boot before.\");\n+\n+                return null;\n+            }\n+\n+            ctxCtrlBean = (Bean<ContextControl>) beanManager.resolve(beans);\n             ctxCtrlCreationalContext = getBeanManager().createCreationalContext(ctxCtrlBean);\n             ctxCtrl = (ContextControl)\n                     getBeanManager().getReference(ctxCtrlBean, ContextControl.class, ctxCtrlCreationalContext);"
+            },
+            {
+                "sha": "65b8fd660de6bc4f4daaf5cbbc44a8941b6dfe31",
+                "filename": "deltaspike/cdictrl/impl-weld/src/main/java/org/apache/deltaspike/cdise/weld/WeldContainerControl.java",
+                "status": "modified",
+                "additions": 15,
+                "deletions": 1,
+                "changes": 16,
+                "blob_url": "https://github.com/apache/deltaspike/blob/23bd326c28e976c74fcf3c0b14b72fb3be34bdd8/deltaspike/cdictrl/impl-weld/src/main/java/org/apache/deltaspike/cdise/weld/WeldContainerControl.java",
+                "raw_url": "https://github.com/apache/deltaspike/raw/23bd326c28e976c74fcf3c0b14b72fb3be34bdd8/deltaspike/cdictrl/impl-weld/src/main/java/org/apache/deltaspike/cdise/weld/WeldContainerControl.java",
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/cdictrl/impl-weld/src/main/java/org/apache/deltaspike/cdise/weld/WeldContainerControl.java?ref=23bd326c28e976c74fcf3c0b14b72fb3be34bdd8",
+                "patch": "@@ -27,13 +27,16 @@\n import javax.enterprise.inject.spi.Bean;\n import javax.enterprise.inject.spi.BeanManager;\n import java.util.Set;\n+import java.util.logging.Logger;\n \n /**\n  * Weld specific implementation of {@link org.apache.deltaspike.cdise.api.CdiContainer}.\n  */\n @SuppressWarnings(\"UnusedDeclaration\")\n public class WeldContainerControl implements CdiContainer\n {\n+    private static final Logger LOG = Logger.getLogger(WeldContainerControl.class.getName());\n+\n     private Weld weld;\n     private WeldContainer weldContainer;\n \n@@ -83,7 +86,18 @@ public synchronized ContextControl getContextControl()\n         if (ctxCtrl == null)\n         {\n             Set<Bean<?>> beans = getBeanManager().getBeans(ContextControl.class);\n-            ctxCtrlBean = (Bean<ContextControl>) getBeanManager().resolve(beans);\n+            BeanManager beanManager = getBeanManager();\n+\n+            if (beanManager == null)\n+            {\n+                LOG.warning(\"If the CDI-container was started by the environment, you can't use this helper.\" +\n+                        \"Instead you can resolve ContextControl manually \" +\n+                        \"(e.g. via BeanProvider.getContextualReference(ContextControl.class) ). \" +\n+                        \"If the container wasn't started already, you have to use CdiContainer#boot before.\");\n+\n+                return null;\n+            }\n+            ctxCtrlBean = (Bean<ContextControl>) beanManager.resolve(beans);\n \n             ctxCtrlCreationalContext = getBeanManager().createCreationalContext(ctxCtrlBean);\n "
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/deltaspike/commit/08d5916ed5719087abe4829f42b83d493c6ede3a",
+        "repo": "deltaspike",
+        "parent": "https://github.com/apache/deltaspike/commit/43bdf6ae593aa568e9a40a66215bf0a70659946f",
+        "message": "DELTASPIKE-1230 fix NPE in CdiTestRunner\n\ntxs rsandtner for the report!",
+        "bug_id": "deltaspike_4",
+        "file": [
+            {
+                "sha": "fd17416787dc2569dd99c0af430be0a55e3fcba2",
+                "filename": "deltaspike/modules/test-control/api/src/main/java/org/apache/deltaspike/testcontrol/api/junit/CdiTestRunner.java",
+                "status": "modified",
+                "additions": 3,
+                "deletions": 1,
+                "changes": 4,
+                "blob_url": "https://github.com/apache/deltaspike/blob/08d5916ed5719087abe4829f42b83d493c6ede3a/deltaspike/modules/test-control/api/src/main/java/org/apache/deltaspike/testcontrol/api/junit/CdiTestRunner.java",
+                "raw_url": "https://github.com/apache/deltaspike/raw/08d5916ed5719087abe4829f42b83d493c6ede3a/deltaspike/modules/test-control/api/src/main/java/org/apache/deltaspike/testcontrol/api/junit/CdiTestRunner.java",
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/modules/test-control/api/src/main/java/org/apache/deltaspike/testcontrol/api/junit/CdiTestRunner.java?ref=08d5916ed5719087abe4829f42b83d493c6ede3a",
+                "patch": "@@ -830,7 +830,9 @@ public static Boolean isAutomaticScopeHandlingActive()\n     {\n         CdiTestRunner cdiTestRunner = currentTestRunner.get();\n \n-        if (cdiTestRunner == null)\n+        if (cdiTestRunner == null ||\n+            cdiTestRunner.testContext == null ||\n+            cdiTestRunner.testContext.externalContainers == null)\n         {\n             return Collections.emptyList();\n         }"
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/deltaspike/commit/41d31e83d488b1eb322c596ee6234108163214a2",
+        "repo": "deltaspike",
+        "parent": "https://github.com/apache/deltaspike/commit/50190f0393cc9e4b5275b13b01c1ee1a9dd174dc",
+        "message": "possible NPE",
+        "bug_id": "deltaspike_5",
+        "file": [
+            {
+                "sha": "623266e4e0d33a667874a0b385c1284975c83aef",
+                "filename": "deltaspike/core/api/src/main/java/org/apache/deltaspike/core/util/context/AbstractContext.java",
+                "status": "modified",
+                "additions": 4,
+                "deletions": 1,
+                "changes": 5,
+                "blob_url": "https://github.com/apache/deltaspike/blob/41d31e83d488b1eb322c596ee6234108163214a2/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/util/context/AbstractContext.java",
+                "raw_url": "https://github.com/apache/deltaspike/raw/41d31e83d488b1eb322c596ee6234108163214a2/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/util/context/AbstractContext.java",
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/util/context/AbstractContext.java?ref=41d31e83d488b1eb322c596ee6234108163214a2",
+                "patch": "@@ -163,7 +163,10 @@ public void destroyAllActive()\n \n         for (ContextualStorage storage : storages)\n         {\n-            destroyAllActive(storage);\n+            if (storage != null)\n+            {\n+                destroyAllActive(storage);\n+            }\n         }\n     }\n "
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/deltaspike/commit/976dcbc6bad30011bb783501a095f134197f1454",
+        "repo": "deltaspike",
+        "parent": "https://github.com/apache/deltaspike/commit/7d77050059b5a4f3690462a86e42ae4a81368ad7",
+        "message": "An NPE question.",
+        "bug_id": "deltaspike_6",
+        "file": [
+            {
+                "sha": "83b06103e223cc0f1ea4ad9a0f4e0e4726023295",
+                "filename": "deltaspike/core/impl/src/main/java/org/apache/deltaspike/core/impl/config/PropertyFileConfigSource.java",
+                "status": "modified",
+                "additions": 1,
+                "deletions": 1,
+                "changes": 2,
+                "blob_url": "https://github.com/apache/deltaspike/blob/976dcbc6bad30011bb783501a095f134197f1454/deltaspike/core/impl/src/main/java/org/apache/deltaspike/core/impl/config/PropertyFileConfigSource.java",
+                "raw_url": "https://github.com/apache/deltaspike/raw/976dcbc6bad30011bb783501a095f134197f1454/deltaspike/core/impl/src/main/java/org/apache/deltaspike/core/impl/config/PropertyFileConfigSource.java",
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/core/impl/src/main/java/org/apache/deltaspike/core/impl/config/PropertyFileConfigSource.java?ref=976dcbc6bad30011bb783501a095f134197f1454",
+                "patch": "@@ -78,7 +78,7 @@ private Properties loadProperties(URL url)\n         }\n         catch (IOException e)\n         {\n-            return null;\n+            return null; // TODO: Shouldn't this return an empty Properties? Otherwise we could cause NPE in the getPropertyValue method\n         }\n         finally\n         {"
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/deltaspike/commit/846537113b633963da07e253edfa7596a392c684",
+        "repo": "deltaspike",
+        "parent": "https://github.com/apache/deltaspike/commit/49c9a9eafd2aa69a0264a69eea388ad32fdaa803",
+        "message": "DELTASPIKE-863 NPE when invoking proxy for custom jsf converter",
+        "bug_id": "deltaspike_7",
+        "file": [
+            {
+                "sha": "d069070605cda6b40b561e8d9840a618a42ec672",
+                "filename": "deltaspike/modules/jsf/impl/src/main/java/org/apache/deltaspike/jsf/impl/injection/proxy/ConverterAndValidatorProxyFactory.java",
+                "status": "modified",
+                "additions": 5,
+                "deletions": 5,
+                "changes": 10,
+                "blob_url": "https://github.com/apache/deltaspike/blob/846537113b633963da07e253edfa7596a392c684/deltaspike/modules/jsf/impl/src/main/java/org/apache/deltaspike/jsf/impl/injection/proxy/ConverterAndValidatorProxyFactory.java",
+                "raw_url": "https://github.com/apache/deltaspike/raw/846537113b633963da07e253edfa7596a392c684/deltaspike/modules/jsf/impl/src/main/java/org/apache/deltaspike/jsf/impl/injection/proxy/ConverterAndValidatorProxyFactory.java",
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/modules/jsf/impl/src/main/java/org/apache/deltaspike/jsf/impl/injection/proxy/ConverterAndValidatorProxyFactory.java?ref=846537113b633963da07e253edfa7596a392c684",
+                "patch": "@@ -46,18 +46,18 @@ protected String getProxyClassSuffix()\n     @Override\n     protected ArrayList<Method> getDelegateMethods(Class<?> targetClass, ArrayList<Method> allMethods)\n     {\n-        List<Class<?>> interfaces = Arrays.asList(targetClass.getInterfaces());\n-        if (!interfaces.contains(PartialStateHolder.class))\n+        if (!StateHolder.class.isAssignableFrom(targetClass))\n         {\n             ArrayList<Method> delegateMethods = new ArrayList<Method>();\n-            delegateMethods.addAll(Arrays.asList(PartialStateHolder.class.getDeclaredMethods()));\n             delegateMethods.addAll(Arrays.asList(StateHolder.class.getDeclaredMethods()));\n+            delegateMethods.addAll(Arrays.asList(PartialStateHolder.class.getDeclaredMethods()));\n             return delegateMethods;\n         }\n-        if (!interfaces.contains(StateHolder.class))\n+        \n+        if (!PartialStateHolder.class.isAssignableFrom(targetClass))\n         {\n             ArrayList<Method> delegateMethods = new ArrayList<Method>();\n-            delegateMethods.addAll(Arrays.asList(StateHolder.class.getDeclaredMethods()));\n+            delegateMethods.addAll(Arrays.asList(PartialStateHolder.class.getDeclaredMethods()));\n             return delegateMethods;\n         }\n         "
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/deltaspike/commit/49c9a9eafd2aa69a0264a69eea388ad32fdaa803",
+        "repo": "deltaspike",
+        "parent": "https://github.com/apache/deltaspike/commit/4edbca0cabfb017460262a0ccd529597aa98a017",
+        "message": "DELTASPIKE-863 NPE when invoking proxy for custom jsf converter",
+        "bug_id": "deltaspike_8",
+        "file": [
+            {
+                "sha": "e1f839479784c4dc7c3008a6301d83479616278b",
+                "filename": "deltaspike/core/api/src/main/java/org/apache/deltaspike/core/util/proxy/AsmProxyClassGenerator.java",
+                "status": "modified",
+                "additions": 29,
+                "deletions": 2,
+                "changes": 31,
+                "blob_url": "https://github.com/apache/deltaspike/blob/49c9a9eafd2aa69a0264a69eea388ad32fdaa803/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/util/proxy/AsmProxyClassGenerator.java",
+                "raw_url": "https://github.com/apache/deltaspike/raw/49c9a9eafd2aa69a0264a69eea388ad32fdaa803/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/util/proxy/AsmProxyClassGenerator.java",
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/util/proxy/AsmProxyClassGenerator.java?ref=49c9a9eafd2aa69a0264a69eea388ad32fdaa803",
+                "patch": "@@ -111,7 +111,8 @@ private AsmProxyClassGenerator()\n         }\n \n         defineInvocationHandlerField(cw, invocationHandlerType);\n-        defineConstructor(cw, proxyType, superType);\n+        defineDefaultConstructor(cw, proxyType, superType);\n+        defineDelegateInvocationHandlerConstructor(cw, proxyType, superType, invocationHandlerType);\n         defineDeltaSpikeProxyMethods(cw, proxyType, invocationHandlerType);\n \n         for (java.lang.reflect.Method method : delegateMethods)\n@@ -136,7 +137,7 @@ private static void defineInvocationHandlerField(ClassWriter cw, Type invocation\n                 invocationHandlerType.getDescriptor(), null, null).visitEnd();\n     }\n \n-    private static void defineConstructor(ClassWriter cw, Type proxyType, Type superType)\n+    private static void defineDefaultConstructor(ClassWriter cw, Type proxyType, Type superType)\n     {\n         GeneratorAdapter mg = new GeneratorAdapter(Opcodes.ACC_PUBLIC,\n                 new Method(\"<init>\", Type.VOID_TYPE, new Type[]{ }),\n@@ -154,6 +155,32 @@ private static void defineConstructor(ClassWriter cw, Type proxyType, Type super\n \n         mg.visitEnd();\n     }\n+    \n+    private static void defineDelegateInvocationHandlerConstructor(ClassWriter cw, Type proxyType, Type superType,\n+            Type invocationHandlerType)\n+    {\n+        GeneratorAdapter mg = new GeneratorAdapter(Opcodes.ACC_PUBLIC,\n+                new Method(\"<init>\", Type.VOID_TYPE, new Type[] { invocationHandlerType }),\n+                null,\n+                null,\n+                cw);\n+\n+        mg.visitCode();\n+\n+        // invoke super constructor\n+        mg.loadThis();\n+        mg.invokeConstructor(superType, Method.getMethod(\"void <init> ()\"));\n+        \n+        // set invocation handler\n+        mg.loadThis();\n+        mg.loadArg(0);\n+        mg.putField(proxyType, FIELDNAME_DELEGATE_INVOCATION_HANDLER, invocationHandlerType);\n+        \n+        mg.returnValue();\n+        mg.endMethod();\n+\n+        mg.visitEnd();\n+    }\n \n     private static void defineDeltaSpikeProxyMethods(ClassWriter cw, Type proxyType, Type invocationHandlerType)\n     {"
+            },
+            {
+                "sha": "a9fb26d3393251af769eb8d9b8343b382bf7776d",
+                "filename": "deltaspike/core/api/src/main/java/org/apache/deltaspike/core/util/proxy/DeltaSpikeProxyContextualLifecycle.java",
+                "status": "modified",
+                "additions": 9,
+                "deletions": 3,
+                "changes": 12,
+                "blob_url": "https://github.com/apache/deltaspike/blob/49c9a9eafd2aa69a0264a69eea388ad32fdaa803/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/util/proxy/DeltaSpikeProxyContextualLifecycle.java",
+                "raw_url": "https://github.com/apache/deltaspike/raw/49c9a9eafd2aa69a0264a69eea388ad32fdaa803/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/util/proxy/DeltaSpikeProxyContextualLifecycle.java",
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/util/proxy/DeltaSpikeProxyContextualLifecycle.java?ref=49c9a9eafd2aa69a0264a69eea388ad32fdaa803",
+                "patch": "@@ -18,6 +18,7 @@\n  */\n package org.apache.deltaspike.core.util.proxy;\n \n+import java.lang.reflect.Constructor;\n import java.lang.reflect.InvocationHandler;\n import java.util.Set;\n import javax.enterprise.context.Dependent;\n@@ -60,12 +61,17 @@ public T create(Bean bean, CreationalContext creationalContext)\n     {\n         try\n         {\n-            T instance = proxyClass.newInstance();\n+            T instance;\n \n-            if (delegateInvocationHandlerClass != null)\n+            if (delegateInvocationHandlerClass == null)\n+            {\n+                instance = proxyClass.newInstance();\n+            }\n+            else\n             {\n                 H delegateInvocationHandler = instantiateDelegateInvocationHandler();\n-                ((DeltaSpikeProxy) instance).setDelegateInvocationHandler(delegateInvocationHandler);\n+                Constructor<T> constructor = proxyClass.getConstructor(delegateInvocationHandlerClass);\n+                instance = constructor.newInstance(delegateInvocationHandler);\n             }\n \n             if (this.injectionTarget != null)"
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/deltaspike/commit/709fdb7cd7fc20abd151b1a92a7c9021553e5924",
+        "repo": "deltaspike",
+        "parent": "https://github.com/apache/deltaspike/commit/b43b71208e28d02ec1f07b4761195d66ba4337e8",
+        "message": "DELTASPIKE-363 prevent NPE at shutdown",
+        "bug_id": "deltaspike_9",
+        "file": [
+            {
+                "sha": "5cb361fc90642819ebd8f1f785d44cde3ba5d9cd",
+                "filename": "deltaspike/core/api/src/main/java/org/apache/deltaspike/core/api/provider/BeanManagerProvider.java",
+                "status": "modified",
+                "additions": 6,
+                "deletions": 0,
+                "changes": 6,
+                "blob_url": "https://github.com/apache/deltaspike/blob/709fdb7cd7fc20abd151b1a92a7c9021553e5924/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/api/provider/BeanManagerProvider.java",
+                "raw_url": "https://github.com/apache/deltaspike/raw/709fdb7cd7fc20abd151b1a92a7c9021553e5924/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/api/provider/BeanManagerProvider.java",
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/api/provider/BeanManagerProvider.java?ref=709fdb7cd7fc20abd151b1a92a7c9021553e5924",
+                "patch": "@@ -234,6 +234,12 @@ public void cleanupFinalBeanManagers(@Observes AfterDeploymentValidation adv)\n      */\n     public void cleanupStoredBeanManagerOnShutdown(@Observes BeforeShutdown beforeShutdown)\n     {\n+        if (bmpSingleton == null)\n+        {\n+            // this happens if there has been a failure at startup\n+            return;\n+        }\n+\n         ClassLoader classLoader = ClassUtils.getClassLoader(null);\n         bmpSingleton.bmInfos.remove(classLoader);\n "
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/deltaspike/commit/e60776cc76c12e10b214db5950fcbf0d80f883e3",
+        "repo": "deltaspike",
+        "parent": "https://github.com/apache/deltaspike/commit/07f5199529a0e2cdb6dfbda20e4b16f060378b84",
+        "message": "DELTASPIKE-1139 also fix a NPE if the configured value is not set and logValues is enabled",
+        "bug_id": "deltaspike_10",
+        "file": [
+            {
+                "sha": "a2b8ed6ae8a8ff9055d29b9a9bd055e93380fe99",
+                "filename": "deltaspike/core/api/src/main/java/org/apache/deltaspike/core/api/config/ConfigResolver.java",
+                "status": "modified",
+                "additions": 3,
+                "deletions": 2,
+                "changes": 5,
+                "blob_url": "https://github.com/apache/deltaspike/blob/e60776cc76c12e10b214db5950fcbf0d80f883e3/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/api/config/ConfigResolver.java",
+                "raw_url": "https://github.com/apache/deltaspike/raw/e60776cc76c12e10b214db5950fcbf0d80f883e3/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/api/config/ConfigResolver.java",
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/api/config/ConfigResolver.java?ref=e60776cc76c12e10b214db5950fcbf0d80f883e3",
+                "patch": "@@ -900,15 +900,16 @@ public T getValue()\n \n             value = fallbackToDefaultIfEmpty(keyResolved, value, defaultValue);\n \n-            if (logChanges && (value != null && lastValue == null || !value.equals(lastValue)) )\n+            if (logChanges && (value != null && !value.equals(lastValue) || (value == null && lastValue != null)) )\n             {\n                 LOG.log(Level.INFO, \"New value {0} for key {1}.\",\n                     new Object[]{filterConfigValueForLog(keyOriginal, valueStr), keyOriginal});\n             }\n \n+            lastValue = value;\n+\n             if (cacheTimeMs > 0)\n             {\n-                lastValue = value;\n                 reloadAfter = now + cacheTimeMs;\n             }\n "
+            },
+            {
+                "sha": "6afdce763ca1ba2d1be9f4f795771f707f89cc54",
+                "filename": "deltaspike/core/api/src/test/java/org/apache/deltaspike/test/api/config/ConfigResolverTest.java",
+                "status": "modified",
+                "additions": 41,
+                "deletions": 1,
+                "changes": 42,
+                "blob_url": "https://github.com/apache/deltaspike/blob/e60776cc76c12e10b214db5950fcbf0d80f883e3/deltaspike/core/api/src/test/java/org/apache/deltaspike/test/api/config/ConfigResolverTest.java",
+                "raw_url": "https://github.com/apache/deltaspike/raw/e60776cc76c12e10b214db5950fcbf0d80f883e3/deltaspike/core/api/src/test/java/org/apache/deltaspike/test/api/config/ConfigResolverTest.java",
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/core/api/src/test/java/org/apache/deltaspike/test/api/config/ConfigResolverTest.java?ref=e60776cc76c12e10b214db5950fcbf0d80f883e3",
+                "patch": "@@ -21,6 +21,7 @@\n import org.apache.deltaspike.core.api.config.ConfigResolver;\n import org.apache.deltaspike.core.api.projectstage.ProjectStage;\n import org.apache.deltaspike.core.spi.config.ConfigFilter;\n+import org.apache.deltaspike.core.spi.config.ConfigSource;\n import org.apache.deltaspike.core.util.ProjectStageProducer;\n import org.junit.Assert;\n import org.junit.Before;\n@@ -160,8 +161,8 @@ public void testConfigVariableNotExisting()\n             String url = ConfigResolver.getPropertyValue(\"deltaspike.test.nonexisting.variable\", true);\n             Assert.assertEquals(\"${does.not.exist}/someservice/myendpoint\", url);\n         }\n-\n     }\n+\n     @Test\n     public void testConfigVariableRecursiveDeclaration()\n     {\n@@ -173,6 +174,44 @@ public void testConfigVariableRecursiveDeclaration()\n         Assert.assertEquals(\"pre-crazy-post/ohgosh/crazy\", tr.getValue());\n     }\n \n+    @Test\n+    public void testTypedResolver_NonExistingValue()\n+    {\n+        final String key = \"non.existing.key\";\n+\n+        ConfigResolver.TypedResolver<String> resolver = ConfigResolver.resolve(key)\n+            .logChanges(true);\n+\n+        Assert.assertNull(resolver.getValue());\n+\n+        setTestConfigSourceValue(key, \"somevalue\");\n+        Assert.assertEquals(\"somevalue\", resolver.getValue());\n+\n+        setTestConfigSourceValue(key, null);\n+        Assert.assertNull(resolver.getValue());\n+    }\n+\n+    private void setTestConfigSourceValue(String key, String value)\n+    {\n+        ConfigSource[] configSources = ConfigResolver.getConfigSources();\n+        for (ConfigSource configSource : configSources)\n+        {\n+            if (configSource instanceof TestConfigSource)\n+            {\n+                if (value == null)\n+                {\n+                    configSource.getProperties().remove(key);\n+                }\n+                else\n+                {\n+                    configSource.getProperties().put(key, value);\n+                }\n+\n+                break;\n+            }\n+        }\n+    }\n+\n     public static class TestConfigFilter implements ConfigFilter\n     {\n         @Override\n@@ -195,4 +234,5 @@ public String filterValueForLog(String key, String value)\n             return value;\n         }\n     }\n+\n }"
+            },
+            {
+                "sha": "84d58751f5921ee5699a33a4799a996701b348b8",
+                "filename": "deltaspike/core/api/src/test/resources/META-INF/services/org.apache.deltaspike.core.spi.config.ConfigSource",
+                "status": "modified",
+                "additions": 0,
+                "deletions": 57,
+                "changes": 57,
+                "blob_url": "https://github.com/apache/deltaspike/blob/e60776cc76c12e10b214db5950fcbf0d80f883e3/deltaspike/core/api/src/test/resources/META-INF/services/org.apache.deltaspike.core.spi.config.ConfigSource",
+                "raw_url": "https://github.com/apache/deltaspike/raw/e60776cc76c12e10b214db5950fcbf0d80f883e3/deltaspike/core/api/src/test/resources/META-INF/services/org.apache.deltaspike.core.spi.config.ConfigSource",
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/core/api/src/test/resources/META-INF/services/org.apache.deltaspike.core.spi.config.ConfigSource?ref=e60776cc76c12e10b214db5950fcbf0d80f883e3",
+                "patch": "@@ -1,60 +1,3 @@\n-#\n-# Licensed to the Apache Software Foundation (ASF) under one\n-# or more contributor license agreements. See the NOTICE file\n-# distributed with this work for additional information\n-# regarding copyright ownership. The ASF licenses this file\n-# to you under the Apache License, Version 2.0 (the\n-# \"License\"); you may not use this file except in compliance\n-# with the License. You may obtain a copy of the License at\n-#\n-# http://www.apache.org/licenses/LICENSE-2.0\n-#\n-# Unless required by applicable law or agreed to in writing,\n-# software distributed under the License is distributed on an\n-# \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n-# KIND, either express or implied. See the License for the\n-# specific language governing permissions and limitations\n-# under the License.\n-#\n-\n-#\n-# Licensed to the Apache Software Foundation (ASF) under one\n-# or more contributor license agreements. See the NOTICE file\n-# distributed with this work for additional information\n-# regarding copyright ownership. The ASF licenses this file\n-# to you under the Apache License, Version 2.0 (the\n-# \"License\"); you may not use this file except in compliance\n-# with the License. You may obtain a copy of the License at\n-#\n-# http://www.apache.org/licenses/LICENSE-2.0\n-#\n-# Unless required by applicable law or agreed to in writing,\n-# software distributed under the License is distributed on an\n-# \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n-# KIND, either express or implied.  See the License for the\n-# specific language governing permissions and limitations\n-# under the License.\n-#\n-\n-#\n-# Licensed to the Apache Software Foundation (ASF) under one\n-# or more contributor license agreements.  See the NOTICE file\n-# distributed with this work for additional information\n-# regarding copyright ownership.  The ASF licenses this file\n-# to you under the Apache License, Version 2.0 (the\n-# \"License\"); you may not use this file except in compliance\n-# with the License.  You may obtain a copy of the License at\n-#\n-# http://www.apache.org/licenses/LICENSE-2.0\n-#\n-# Unless required by applicable law or agreed to in writing,\n-# software distributed under the License is distributed on an\n-# \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n-# KIND, either express or implied.  See the License for the\n-# specific language governing permissions and limitations\n-# under the License.\n-#\n-\n #####################################################################################\n # Licensed to the Apache Software Foundation (ASF) under one\n # or more contributor license agreements. See the NOTICE file"
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/deltaspike/commit/1d3dc077f7f9d3316a13e37448934c97c1bc2257",
+        "repo": "deltaspike",
+        "parent": "https://github.com/apache/deltaspike/commit/3ee1c98a901c43d20852bb94df4e57cc787d1a5c",
+        "message": "DELTASPIKE-679 NPE in BeanManagerProvider if parentClassLoader is null",
+        "bug_id": "deltaspike_11",
+        "file": [
+            {
+                "sha": "3ff13febf414b968d1560b290f722098c0089390",
+                "filename": "deltaspike/core/api/src/main/java/org/apache/deltaspike/core/api/provider/BeanManagerProvider.java",
+                "status": "modified",
+                "additions": 1,
+                "deletions": 1,
+                "changes": 2,
+                "blob_url": "https://github.com/apache/deltaspike/blob/1d3dc077f7f9d3316a13e37448934c97c1bc2257/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/api/provider/BeanManagerProvider.java",
+                "raw_url": "https://github.com/apache/deltaspike/raw/1d3dc077f7f9d3316a13e37448934c97c1bc2257/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/api/provider/BeanManagerProvider.java",
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/api/provider/BeanManagerProvider.java?ref=1d3dc077f7f9d3316a13e37448934c97c1bc2257",
+                "patch": "@@ -337,7 +337,7 @@ private boolean isParentBeanManagerBooted()\n     private BeanManagerInfo getParentBeanManagerInfo(ClassLoader classLoader)\n     {\n         ClassLoader parentClassLoader = classLoader.getParent();\n-        if (parentClassLoader.equals(ClassLoader.getSystemClassLoader()))\n+        if (parentClassLoader == null || parentClassLoader.equals(ClassLoader.getSystemClassLoader()))\n         {\n             return null;\n         }"
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/deltaspike/commit/da47fa57ec9111c87b027a8ca11005cebafcaeb3",
+        "repo": "deltaspike",
+        "parent": "https://github.com/apache/deltaspike/commit/976dcbc6bad30011bb783501a095f134197f1454",
+        "message": "fixed check-style issues and possible npe",
+        "bug_id": "deltaspike_12",
+        "file": [
+            {
+                "sha": "6ee8920bf2d0340bdf250996e0dd95f415c167ac",
+                "filename": "deltaspike/core/api/src/main/java/org/apache/deltaspike/core/api/metadata/builder/AnnotatedCallableImpl.java",
+                "status": "modified",
+                "additions": 1,
+                "deletions": 0,
+                "changes": 1,
+                "blob_url": "https://github.com/apache/deltaspike/blob/da47fa57ec9111c87b027a8ca11005cebafcaeb3/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/api/metadata/builder/AnnotatedCallableImpl.java",
+                "raw_url": "https://github.com/apache/deltaspike/raw/da47fa57ec9111c87b027a8ca11005cebafcaeb3/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/api/metadata/builder/AnnotatedCallableImpl.java",
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/api/metadata/builder/AnnotatedCallableImpl.java?ref=da47fa57ec9111c87b027a8ca11005cebafcaeb3",
+                "patch": "@@ -50,6 +50,7 @@ protected AnnotatedCallableImpl(AnnotatedType<X> declaringType, Y member, Class<\n     /**\n      * {@inheritDoc}\n      */\n+    @Override\n     public List<AnnotatedParameter<X>> getParameters()\n     {\n         return Collections.unmodifiableList(parameters);"
+            },
+            {
+                "sha": "a1011a7321f466efda79e687779370cb5f0b4afd",
+                "filename": "deltaspike/core/impl/src/main/java/org/apache/deltaspike/core/impl/config/PropertyFileConfigSource.java",
+                "status": "modified",
+                "additions": 1,
+                "deletions": 1,
+                "changes": 2,
+                "blob_url": "https://github.com/apache/deltaspike/blob/da47fa57ec9111c87b027a8ca11005cebafcaeb3/deltaspike/core/impl/src/main/java/org/apache/deltaspike/core/impl/config/PropertyFileConfigSource.java",
+                "raw_url": "https://github.com/apache/deltaspike/raw/da47fa57ec9111c87b027a8ca11005cebafcaeb3/deltaspike/core/impl/src/main/java/org/apache/deltaspike/core/impl/config/PropertyFileConfigSource.java",
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/core/impl/src/main/java/org/apache/deltaspike/core/impl/config/PropertyFileConfigSource.java?ref=da47fa57ec9111c87b027a8ca11005cebafcaeb3",
+                "patch": "@@ -78,7 +78,7 @@ private Properties loadProperties(URL url)\n         }\n         catch (IOException e)\n         {\n-            return null; // TODO: Shouldn't this return an empty Properties? Otherwise we could cause NPE in the getPropertyValue method\n+            throw new IllegalStateException(e);\n         }\n         finally\n         {"
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/deltaspike/commit/72bf21777346b64a93afa33b43cec5b6b8b12fee",
+        "repo": "deltaspike",
+        "parent": "https://github.com/apache/deltaspike/commit/61c68f012bb3799a235d6273e5f77b7fc9d45460",
+        "message": "DELTASPIKE-545 implemented #getRootCause to avoid NPE's",
+        "bug_id": "deltaspike_13",
+        "file": [
+            {
+                "sha": "360655a869b83798fbf505f70f1b408226f6e328",
+                "filename": "deltaspike/modules/jsf/impl/src/main/java/org/apache/deltaspike/jsf/impl/exception/DeltaSpikeExceptionHandler.java",
+                "status": "modified",
+                "additions": 13,
+                "deletions": 0,
+                "changes": 13,
+                "blob_url": "https://github.com/apache/deltaspike/blob/72bf21777346b64a93afa33b43cec5b6b8b12fee/deltaspike/modules/jsf/impl/src/main/java/org/apache/deltaspike/jsf/impl/exception/DeltaSpikeExceptionHandler.java",
+                "raw_url": "https://github.com/apache/deltaspike/raw/72bf21777346b64a93afa33b43cec5b6b8b12fee/deltaspike/modules/jsf/impl/src/main/java/org/apache/deltaspike/jsf/impl/exception/DeltaSpikeExceptionHandler.java",
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/modules/jsf/impl/src/main/java/org/apache/deltaspike/jsf/impl/exception/DeltaSpikeExceptionHandler.java?ref=72bf21777346b64a93afa33b43cec5b6b8b12fee",
+                "patch": "@@ -20,6 +20,7 @@\n \n import java.lang.annotation.Annotation;\n import java.util.Iterator;\n+import javax.el.ELException;\n import javax.enterprise.inject.spi.BeanManager;\n import javax.faces.FacesException;\n import javax.faces.context.ExceptionHandler;\n@@ -102,6 +103,18 @@ public void handle() throws FacesException\n         super.handle();\n     }\n \n+    @Override\n+    public Throwable getRootCause(Throwable throwable)\n+    {\n+        while ((ELException.class.isInstance(throwable) || FacesException.class.isInstance(throwable))\n+                && throwable.getCause() != null)\n+        {\n+            throwable = throwable.getCause();\n+        }\n+\n+        return throwable;\n+    }\n+\n     private void lazyInit()\n     {\n         if (this.initialized == null)"
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/deltaspike/commit/2bfcd31301eb5619cb9bd6e3a40ddbc5359800b1",
+        "repo": "deltaspike",
+        "parent": "https://github.com/apache/deltaspike/commit/364b84a831738b7228b81ae5ae1b6638e1d6cc02",
+        "message": "DELTASPIKE-513 Transactional interceptor throws NPE for missing EntityManager",
+        "bug_id": "deltaspike_14",
+        "file": [
+            {
+                "sha": "7f0f118eec16fe159ff926a2e690ae55e3546a0d",
+                "filename": "deltaspike/modules/jpa/impl/src/main/java/org/apache/deltaspike/jpa/impl/transaction/ResourceLocalTransactionStrategy.java",
+                "status": "modified",
+                "additions": 3,
+                "deletions": 1,
+                "changes": 4,
+                "blob_url": "https://github.com/apache/deltaspike/blob/2bfcd31301eb5619cb9bd6e3a40ddbc5359800b1/deltaspike/modules/jpa/impl/src/main/java/org/apache/deltaspike/jpa/impl/transaction/ResourceLocalTransactionStrategy.java",
+                "raw_url": "https://github.com/apache/deltaspike/raw/2bfcd31301eb5619cb9bd6e3a40ddbc5359800b1/deltaspike/modules/jpa/impl/src/main/java/org/apache/deltaspike/jpa/impl/transaction/ResourceLocalTransactionStrategy.java",
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/modules/jpa/impl/src/main/java/org/apache/deltaspike/jpa/impl/transaction/ResourceLocalTransactionStrategy.java?ref=2bfcd31301eb5619cb9bd6e3a40ddbc5359800b1",
+                "patch": "@@ -32,6 +32,7 @@\n import javax.interceptor.InvocationContext;\n import javax.persistence.EntityManager;\n import javax.persistence.EntityTransaction;\n+\n import java.lang.annotation.Annotation;\n import java.util.HashSet;\n import java.util.Set;\n@@ -307,7 +308,8 @@ private EntityManager resolveEntityManagerForQualifier(Class<? extends Annotatio\n \n         if (entityManagerBean == null)\n         {\n-            return null;\n+            throw new IllegalStateException(\"Cannot find an EntityManager qualified with [\" + emQualifier.getName()\n+                    + \"]. Did you add a corresponding producer?\");\n         }\n \n         return (EntityManager) beanManager.getReference(entityManagerBean, EntityManager.class,"
+            },
+            {
+                "sha": "1540d06289f2b2687a8decd82c482cb5565472cf",
+                "filename": "deltaspike/modules/jpa/impl/src/test/java/org/apache/deltaspike/test/jpa/api/transactional/noentitymanager/NoEntityManagerProducerTest.java",
+                "status": "added",
+                "additions": 92,
+                "deletions": 0,
+                "changes": 92,
+                "blob_url": "https://github.com/apache/deltaspike/blob/2bfcd31301eb5619cb9bd6e3a40ddbc5359800b1/deltaspike/modules/jpa/impl/src/test/java/org/apache/deltaspike/test/jpa/api/transactional/noentitymanager/NoEntityManagerProducerTest.java",
+                "raw_url": "https://github.com/apache/deltaspike/raw/2bfcd31301eb5619cb9bd6e3a40ddbc5359800b1/deltaspike/modules/jpa/impl/src/test/java/org/apache/deltaspike/test/jpa/api/transactional/noentitymanager/NoEntityManagerProducerTest.java",
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/modules/jpa/impl/src/test/java/org/apache/deltaspike/test/jpa/api/transactional/noentitymanager/NoEntityManagerProducerTest.java?ref=2bfcd31301eb5619cb9bd6e3a40ddbc5359800b1",
+                "patch": "@@ -0,0 +1,92 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one\n+ * or more contributor license agreements. See the NOTICE file\n+ * distributed with this work for additional information\n+ * regarding copyright ownership. The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance\n+ * with the License. You may obtain a copy of the License at\n+ *\n+ * http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing,\n+ * software distributed under the License is distributed on an\n+ * \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+ * KIND, either express or implied. See the License for the\n+ * specific language governing permissions and limitations\n+ * under the License.\n+ */\n+package org.apache.deltaspike.test.jpa.api.transactional.noentitymanager;\n+\n+import static org.junit.Assert.assertTrue;\n+import static org.junit.Assert.fail;\n+\n+import javax.inject.Inject;\n+\n+import org.apache.deltaspike.core.api.projectstage.ProjectStage;\n+import org.apache.deltaspike.core.util.ProjectStageProducer;\n+import org.apache.deltaspike.test.category.SeCategory;\n+import org.apache.deltaspike.test.jpa.api.shared.Second;\n+import org.apache.deltaspike.test.util.ArchiveUtils;\n+import org.jboss.arquillian.container.test.api.Deployment;\n+import org.jboss.arquillian.junit.Arquillian;\n+import org.jboss.shrinkwrap.api.ShrinkWrap;\n+import org.jboss.shrinkwrap.api.asset.EmptyAsset;\n+import org.jboss.shrinkwrap.api.spec.JavaArchive;\n+import org.jboss.shrinkwrap.api.spec.WebArchive;\n+import org.junit.Before;\n+import org.junit.Test;\n+import org.junit.experimental.categories.Category;\n+import org.junit.runner.RunWith;\n+\n+@RunWith(Arquillian.class)\n+@Category(SeCategory.class)\n+public class NoEntityManagerProducerTest\n+{\n+\n+    @Inject\n+    private TransactionalBean transactionalBean;\n+\n+    @Deployment\n+    public static WebArchive deploy()\n+    {\n+        JavaArchive testJar = ShrinkWrap.create(JavaArchive.class, \"noEntityManagerProducer.jar\")\n+                .addPackage(ArchiveUtils.SHARED_PACKAGE)\n+                .addPackage(NoEntityManagerProducerTest.class.getPackage().getName())\n+                .addAsManifestResource(EmptyAsset.INSTANCE, \"beans.xml\");\n+\n+        return ShrinkWrap.create(WebArchive.class)\n+                .addAsLibraries(ArchiveUtils.getDeltaSpikeCoreAndJpaArchive())\n+                .addAsLibraries(testJar)\n+                .addAsWebInfResource(ArchiveUtils.getBeansXml(), \"beans.xml\");\n+    }\n+\n+    @Before\n+    public void init()\n+    {\n+        ProjectStageProducer.setProjectStage(ProjectStage.UnitTest);\n+    }\n+\n+    @Test\n+    public void shouldFailIfNoEntityManager()\n+    {\n+        try\n+        {\n+            transactionalBean.executeInTransaction();\n+            fail(\"This should fail as there is no EntityManager\");\n+        }\n+        catch (Exception e)\n+        {\n+            /*\n+             * The exception should tell the user that there is no EntityManager with the requested qualifier. The\n+             * following asserts just check for the important keywords in the message of the exception. Not a very nice\n+             * way to test this behavior but it will be sufficient to ensure the user gets all the information required\n+             * to fix the problem.\n+             */\n+            assertTrue(e.getMessage().contains(\"EntityManager\"));\n+            assertTrue(e.getMessage().contains(Second.class.getName()));\n+        }\n+\n+    }\n+\n+}"
+            },
+            {
+                "sha": "74ffb7ee55aea5a1e4dcdfdbde84cb2b23de66f8",
+                "filename": "deltaspike/modules/jpa/impl/src/test/java/org/apache/deltaspike/test/jpa/api/transactional/noentitymanager/TestEntityManagerProducer.java",
+                "status": "added",
+                "additions": 44,
+                "deletions": 0,
+                "changes": 44,
+                "blob_url": "https://github.com/apache/deltaspike/blob/2bfcd31301eb5619cb9bd6e3a40ddbc5359800b1/deltaspike/modules/jpa/impl/src/test/java/org/apache/deltaspike/test/jpa/api/transactional/noentitymanager/TestEntityManagerProducer.java",
+                "raw_url": "https://github.com/apache/deltaspike/raw/2bfcd31301eb5619cb9bd6e3a40ddbc5359800b1/deltaspike/modules/jpa/impl/src/test/java/org/apache/deltaspike/test/jpa/api/transactional/noentitymanager/TestEntityManagerProducer.java",
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/modules/jpa/impl/src/test/java/org/apache/deltaspike/test/jpa/api/transactional/noentitymanager/TestEntityManagerProducer.java?ref=2bfcd31301eb5619cb9bd6e3a40ddbc5359800b1",
+                "patch": "@@ -0,0 +1,44 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one\n+ * or more contributor license agreements. See the NOTICE file\n+ * distributed with this work for additional information\n+ * regarding copyright ownership. The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance\n+ * with the License. You may obtain a copy of the License at\n+ *\n+ * http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing,\n+ * software distributed under the License is distributed on an\n+ * \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+ * KIND, either express or implied. See the License for the\n+ * specific language governing permissions and limitations\n+ * under the License.\n+ */\n+package org.apache.deltaspike.test.jpa.api.transactional.noentitymanager;\n+\n+import javax.enterprise.context.RequestScoped;\n+import javax.enterprise.inject.Produces;\n+import javax.persistence.EntityManager;\n+\n+import org.apache.deltaspike.test.jpa.api.shared.First;\n+import org.apache.deltaspike.test.jpa.api.shared.TestEntityManager;\n+\n+@RequestScoped\n+public class TestEntityManagerProducer\n+{\n+\n+    private TestEntityManager entityManager = new TestEntityManager();\n+\n+    /**\n+     * Producer method for an {@link EntityManager} qualified with {@link First}.\n+     */\n+    @Produces\n+    @First\n+    protected EntityManager entityManager()\n+    {\n+        return entityManager;\n+    }\n+\n+}"
+            },
+            {
+                "sha": "78961aa45914675c6c1f387a78bf3b622ee109c0",
+                "filename": "deltaspike/modules/jpa/impl/src/test/java/org/apache/deltaspike/test/jpa/api/transactional/noentitymanager/TransactionalBean.java",
+                "status": "added",
+                "additions": 41,
+                "deletions": 0,
+                "changes": 41,
+                "blob_url": "https://github.com/apache/deltaspike/blob/2bfcd31301eb5619cb9bd6e3a40ddbc5359800b1/deltaspike/modules/jpa/impl/src/test/java/org/apache/deltaspike/test/jpa/api/transactional/noentitymanager/TransactionalBean.java",
+                "raw_url": "https://github.com/apache/deltaspike/raw/2bfcd31301eb5619cb9bd6e3a40ddbc5359800b1/deltaspike/modules/jpa/impl/src/test/java/org/apache/deltaspike/test/jpa/api/transactional/noentitymanager/TransactionalBean.java",
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/modules/jpa/impl/src/test/java/org/apache/deltaspike/test/jpa/api/transactional/noentitymanager/TransactionalBean.java?ref=2bfcd31301eb5619cb9bd6e3a40ddbc5359800b1",
+                "patch": "@@ -0,0 +1,41 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one\n+ * or more contributor license agreements. See the NOTICE file\n+ * distributed with this work for additional information\n+ * regarding copyright ownership. The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance\n+ * with the License. You may obtain a copy of the License at\n+ *\n+ * http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing,\n+ * software distributed under the License is distributed on an\n+ * \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+ * KIND, either express or implied. See the License for the\n+ * specific language governing permissions and limitations\n+ * under the License.\n+ */\n+package org.apache.deltaspike.test.jpa.api.transactional.noentitymanager;\n+\n+import javax.enterprise.context.ApplicationScoped;\n+import javax.persistence.EntityManager;\n+\n+import org.apache.deltaspike.jpa.api.transaction.Transactional;\n+import org.apache.deltaspike.test.jpa.api.shared.Second;\n+\n+@ApplicationScoped\n+public class TransactionalBean\n+{\n+\n+    /**\n+     * This methods requests a transaction for the EntityManager qualified with {@link Second} although there is no\n+     * producer for such an {@link EntityManager}.\n+     */\n+    @Transactional(qualifier = Second.class)\n+    public void executeInTransaction()\n+    {\n+        // no need to do anything\n+    }\n+\n+}"
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/deltaspike/commit/b43b71208e28d02ec1f07b4761195d66ba4337e8",
+        "repo": "deltaspike",
+        "parent": "https://github.com/apache/deltaspike/commit/d3d26f8dee03e96fc21722bdbb3c501d97ba6317",
+        "message": "DELTASPIKE-354 prevent NPE when passing null to a @MessageBundle",
+        "bug_id": "deltaspike_15",
+        "file": [
+            {
+                "sha": "ae84341df22cd16e7362acc86e8c12640e6488c8",
+                "filename": "deltaspike/core/impl/src/main/java/org/apache/deltaspike/core/impl/message/MessageBundleInvocationHandler.java",
+                "status": "modified",
+                "additions": 7,
+                "deletions": 3,
+                "changes": 10,
+                "blob_url": "https://github.com/apache/deltaspike/blob/b43b71208e28d02ec1f07b4761195d66ba4337e8/deltaspike/core/impl/src/main/java/org/apache/deltaspike/core/impl/message/MessageBundleInvocationHandler.java",
+                "raw_url": "https://github.com/apache/deltaspike/raw/b43b71208e28d02ec1f07b4761195d66ba4337e8/deltaspike/core/impl/src/main/java/org/apache/deltaspike/core/impl/message/MessageBundleInvocationHandler.java",
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/core/impl/src/main/java/org/apache/deltaspike/core/impl/message/MessageBundleInvocationHandler.java?ref=b43b71208e28d02ec1f07b4761195d66ba4337e8",
+                "patch": "@@ -138,12 +138,16 @@ private void applyMessageContextConfig(MessageContext messageContext, MessageCon\n             {\r\n                 Object arg = args[i];\r\n \r\n-                if (i == 0 && MessageContext.class.isAssignableFrom(args[0].getClass()))\r\n+                if (i == 0 && arg != null && MessageContext.class.isAssignableFrom(arg.getClass()))\r\n                 {\r\n                     continue;\r\n                 }\r\n \r\n-                if (arg instanceof Serializable)\r\n+                if (arg == null)\r\n+                {\r\n+                    arguments.add(\"'null'\");\r\n+                }\r\n+                else if (arg instanceof Serializable)\r\n                 {\r\n                     arguments.add((Serializable) arg);\r\n                 }\r\n@@ -160,7 +164,7 @@ private void applyMessageContextConfig(MessageContext messageContext, MessageCon\n \r\n     private MessageContext resolveMessageContextFromArguments(Object[] args)\r\n     {\r\n-        if (args != null && args.length > 0 &&\r\n+        if (args != null && args.length > 0 &&  args[0] != null &&\r\n             MessageContext.class.isAssignableFrom(args[0].getClass()))\r\n         {\r\n             return (MessageContext) args[0];\r"
+            },
+            {
+                "sha": "e7767e3e9728e271e9da783bbaa2df0b458cfa79",
+                "filename": "deltaspike/core/impl/src/test/java/org/apache/deltaspike/test/core/api/message/SimpleMessageTest.java",
+                "status": "modified",
+                "additions": 8,
+                "deletions": 0,
+                "changes": 8,
+                "blob_url": "https://github.com/apache/deltaspike/blob/b43b71208e28d02ec1f07b4761195d66ba4337e8/deltaspike/core/impl/src/test/java/org/apache/deltaspike/test/core/api/message/SimpleMessageTest.java",
+                "raw_url": "https://github.com/apache/deltaspike/raw/b43b71208e28d02ec1f07b4761195d66ba4337e8/deltaspike/core/impl/src/test/java/org/apache/deltaspike/test/core/api/message/SimpleMessageTest.java",
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/core/impl/src/test/java/org/apache/deltaspike/test/core/api/message/SimpleMessageTest.java?ref=b43b71208e28d02ec1f07b4761195d66ba4337e8",
+                "patch": "@@ -91,4 +91,12 @@ public void testDefaultLocaleInMessage()\n         String result = simpleMessage.welcomeWithFloatVariable(f);\n         assertEquals(expectedResult, result);\n     }\n+\n+    @Test\n+    public void testNullMessage()\n+    {\n+        String expectedResult = \"Welcome to 'null'\";\n+        String result = simpleMessage.welcomeWithStringVariable(null);\n+        assertEquals(expectedResult, result);\n+    }\n }"
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/deltaspike/commit/2794579c8ed8544385ffdf2ee7452a8663357958",
+        "repo": "deltaspike",
+        "parent": "https://github.com/apache/deltaspike/commit/7693eddf186e39eb8e252ec87b23a42a9d86079d",
+        "message": "DELTASPIKE-220 revert surefire plugin version to 2.11\n\n2.12 throws some dirty NPE internally :/",
+        "bug_id": "deltaspike_16",
+        "file": [
+            {
+                "sha": "973dbb4517f6abed78c22b1564d147935df24d70",
+                "filename": "deltaspike/core/impl/src/test/resources/arquillian.xml",
+                "status": "renamed",
+                "additions": 0,
+                "deletions": 0,
+                "changes": 0,
+                "blob_url": "https://github.com/apache/deltaspike/blob/2794579c8ed8544385ffdf2ee7452a8663357958/deltaspike/core/impl/src/test/resources/arquillian.xml",
+                "raw_url": "https://github.com/apache/deltaspike/raw/2794579c8ed8544385ffdf2ee7452a8663357958/deltaspike/core/impl/src/test/resources/arquillian.xml",
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/core/impl/src/test/resources/arquillian.xml?ref=2794579c8ed8544385ffdf2ee7452a8663357958",
+                "previous_filename": "deltaspike/core/integration-test/src/test/resources/arquillian.xml"
+            },
+            {
+                "sha": "fc4e4f4734b77c1e9ba8aa4e2bd55016ecb0a63a",
+                "filename": "deltaspike/parent/pom.xml",
+                "status": "modified",
+                "additions": 1,
+                "deletions": 1,
+                "changes": 2,
+                "blob_url": "https://github.com/apache/deltaspike/blob/2794579c8ed8544385ffdf2ee7452a8663357958/deltaspike/parent/pom.xml",
+                "raw_url": "https://github.com/apache/deltaspike/raw/2794579c8ed8544385ffdf2ee7452a8663357958/deltaspike/parent/pom.xml",
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/parent/pom.xml?ref=2794579c8ed8544385ffdf2ee7452a8663357958",
+                "patch": "@@ -144,7 +144,7 @@\n         <mojarra1.version>1.2_14</mojarra1.version>\n \n         <maven.jetty.plugin.version>7.1.5.v20100705</maven.jetty.plugin.version>\n-        <maven.surefire.plugin.version>2.12</maven.surefire.plugin.version>\n+        <maven.surefire.plugin.version>2.11</maven.surefire.plugin.version>\n \n         <hamcrest.version>1.3.RC2</hamcrest.version>\n "
+            }
+        ]
+    },
+    {
+        "commit": "https://github.com/apache/deltaspike/commit/f9becf71d787196103352bae94a955567d5ac2bc",
+        "repo": "deltaspike",
+        "parent": "https://github.com/apache/deltaspike/commit/baa15f072406a0989b0449077988f552620bfeda",
+        "message": "DELTASPIKE-175 fix NPE on Weld\n\nIt seems that in Weld we don't get an empty array but null.\nThis might be caused by a different AnnotatedType implementation.",
+        "bug_id": "deltaspike_17",
+        "file": [
+            {
+                "sha": "f9c102a03e2091fbcd7952926b622cd86a4ecdb0",
+                "filename": "deltaspike/modules/jpa/impl/src/main/java/org/apache/deltaspike/jpa/impl/transaction/PersistenceStrategyHelper.java",
+                "status": "modified",
+                "additions": 7,
+                "deletions": 2,
+                "changes": 9,
+                "blob_url": "https://github.com/apache/deltaspike/blob/f9becf71d787196103352bae94a955567d5ac2bc/deltaspike/modules/jpa/impl/src/main/java/org/apache/deltaspike/jpa/impl/transaction/PersistenceStrategyHelper.java",
+                "raw_url": "https://github.com/apache/deltaspike/raw/f9becf71d787196103352bae94a955567d5ac2bc/deltaspike/modules/jpa/impl/src/main/java/org/apache/deltaspike/jpa/impl/transaction/PersistenceStrategyHelper.java",
+                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/modules/jpa/impl/src/main/java/org/apache/deltaspike/jpa/impl/transaction/PersistenceStrategyHelper.java?ref=f9becf71d787196103352bae94a955567d5ac2bc",
+                "patch": "@@ -62,9 +62,14 @@\n         HashSet<Class<? extends Annotation>> emQualifiers;\n \n \n-        Class<? extends Annotation>[] qualifierClasses = transactionalAnnotation.qualifier();\n+        Class<? extends Annotation>[] qualifierClasses = null;\n \n-        if (qualifierClasses.length == 1 && Any.class.equals(qualifierClasses[0]) )\n+        if (transactionalAnnotation != null)\n+        {\n+            qualifierClasses = transactionalAnnotation.qualifier();\n+        }\n+\n+        if (qualifierClasses == null || qualifierClasses.length == 1 && Any.class.equals(qualifierClasses[0]) )\n         {\n             // this means we have no special EntityManager configured in the interceptor\n             // thus we should scan all the EntityManagers ourselfs from the intercepted class"
+            }
+        ]
+    }
+]
