@@ -27,7 +27,7 @@ def test_filenames(class_name):
      'test%s.java' % class_name, 'tests%s.java' % class_name] 
 
 def is_testfile(class_name):
-    testname = [class_name[-4:], class_name[:3]]
+    testname = [class_name[-4:], class_name[:4]]
     tests = ('Test', 'Tests', 'test', 'tests')
     for test in tests:
         if test in testname:

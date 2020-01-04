@@ -1,0 +1,260 @@
+[
+    {
+        "commit": "https://github.com/apache/commons-jcs/commit/efdbca65496d8d6d928398833c86091dcbeb74eb",
+        "file": [
+            {
+                "patch": "@@ -177,11 +177,10 @@ public IndexedDiskCache(IndexedDiskCacheAttributes cattr, IElementSerializer ele\n \n         try\n         {\n+            initializeRecycleBin();\n             initializeFileSystem(cattr);\n-\n             initializeKeysAndData(cattr);\n \n-            initializeRecycleBin();\n \n             // Initialization finished successfully, so set alive to true.\n             setAlive(true);",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/commons-jcs/raw/efdbca65496d8d6d928398833c86091dcbeb74eb/commons-jcs-core/src/main/java/org/apache/commons/jcs/auxiliary/disk/indexed/IndexedDiskCache.java",
+                "status": "modified",
+                "changes": 3,
+                "deletions": 2,
+                "sha": "825376e5318de03114b35fd4bacbaa48c6b6b7ad",
+                "blob_url": "https://github.com/apache/commons-jcs/blob/efdbca65496d8d6d928398833c86091dcbeb74eb/commons-jcs-core/src/main/java/org/apache/commons/jcs/auxiliary/disk/indexed/IndexedDiskCache.java",
+                "filename": "commons-jcs-core/src/main/java/org/apache/commons/jcs/auxiliary/disk/indexed/IndexedDiskCache.java",
+                "contents_url": "https://api.github.com/repos/apache/commons-jcs/contents/commons-jcs-core/src/main/java/org/apache/commons/jcs/auxiliary/disk/indexed/IndexedDiskCache.java?ref=efdbca65496d8d6d928398833c86091dcbeb74eb"
+            }
+        ],
+        "bug_id": "commons-jcs_1",
+        "parent": "https://github.com/apache/commons-jcs/commit/6b6cf13d8f0709ea8b6029416805d68df594bbd2",
+        "message": "JCS-194 NullPointerException in IndexedDiskCache.addToRecycleBin(...)",
+        "repo": "commons-jcs"
+    },
+    {
+        "commit": "https://github.com/apache/commons-jcs/commit/7cec158bc9faa1d2aa267ddd6a02790ac1f2c3ec",
+        "file": [
+            {
+                "patch": "@@ -34,6 +34,7 @@\n import java.util.Map;\n import java.util.Set;\n import java.util.concurrent.atomic.AtomicInteger;\n+import java.util.concurrent.atomic.AtomicLong;\n import java.util.concurrent.locks.ReentrantReadWriteLock;\n \n import org.apache.commons.jcs.auxiliary.AuxiliaryCacheAttributes;\n@@ -128,7 +129,7 @@\n     private int startupSize = 0;\n \n     /** the number of bytes free on disk. */\n-    private long bytesFree = 0;\n+    private AtomicLong bytesFree = new AtomicLong(0);\n \n     /** mode we are working on (size or count limited **/\n     private DiskLimitType diskLimitType = DiskLimitType.COUNT;\n@@ -1174,16 +1175,25 @@ protected void addToRecycleBin(IndexedDiskElementDescriptor ded)\n         // reuse the spot\n         if (ded != null)\n         {\n-            this.adjustBytesFree(ded, true);\n+            storageLock.readLock().lock();\n \n-            if (doRecycle)\n+            try\n             {\n-                recycle.add(ded);\n-                if (log.isDebugEnabled())\n+                this.adjustBytesFree(ded, true);\n+\n+                if (doRecycle)\n                 {\n-                    log.debug(logCacheName + \"recycled ded\" + ded);\n-                }\n+                    recycle.add(ded);\n+                    if (log.isDebugEnabled())\n+                    {\n+                        log.debug(logCacheName + \"recycled ded\" + ded);\n+                    }\n \n+                }\n+            }\n+            finally\n+            {\n+                storageLock.readLock().unlock();\n             }\n         }\n     }\n@@ -1459,17 +1469,17 @@ protected int getRecyleCount()\n      *\n      * @return The number bytes free on the disk file.\n      */\n-    protected synchronized long getBytesFree()\n+    protected long getBytesFree()\n     {\n-        return this.bytesFree;\n+        return this.bytesFree.get();\n     }\n \n     /**\n      * Resets the number of bytes that are free.\n      */\n-    private synchronized void resetBytesFree()\n+    private void resetBytesFree()\n     {\n-        this.bytesFree = 0;\n+        this.bytesFree.set(0);\n     }\n \n     /**\n@@ -1479,19 +1489,19 @@ private synchronized void resetBytesFree()\n      * @param ded\n      * @param add\n      */\n-    private synchronized void adjustBytesFree(IndexedDiskElementDescriptor ded, boolean add)\n+    private void adjustBytesFree(IndexedDiskElementDescriptor ded, boolean add)\n     {\n         if (ded != null)\n         {\n             int amount = ded.len + IndexedDisk.HEADER_SIZE_BYTES;\n \n             if (add)\n             {\n-                this.bytesFree += amount;\n+                this.bytesFree.addAndGet(amount);\n             }\n             else\n             {\n-                this.bytesFree -= amount;\n+                this.bytesFree.addAndGet(-amount);\n             }\n         }\n     }\n@@ -1604,8 +1614,8 @@ public synchronized IStats getStatistics()\n             log.error(e);\n         }\n         elems.add(new StatElement<Integer>(\"Max Key Size\", this.maxKeySize));\n-        elems.add(new StatElement<Integer>(\"Hit Count\", Integer.valueOf(this.hitCount.get())));\n-        elems.add(new StatElement<Long>(\"Bytes Free\", Long.valueOf(this.bytesFree)));\n+        elems.add(new StatElement<AtomicInteger>(\"Hit Count\", this.hitCount));\n+        elems.add(new StatElement<AtomicLong>(\"Bytes Free\", this.bytesFree));\n         elems.add(new StatElement<Integer>(\"Optimize Operation Count\", Integer.valueOf(this.removeCount)));\n         elems.add(new StatElement<Integer>(\"Times Optimized\", Integer.valueOf(this.timesOptimized)));\n         elems.add(new StatElement<Integer>(\"Recycle Count\", Integer.valueOf(this.recycleCnt)));",
+                "additions": 26,
+                "raw_url": "https://github.com/apache/commons-jcs/raw/7cec158bc9faa1d2aa267ddd6a02790ac1f2c3ec/commons-jcs-core/src/main/java/org/apache/commons/jcs/auxiliary/disk/indexed/IndexedDiskCache.java",
+                "status": "modified",
+                "changes": 42,
+                "deletions": 16,
+                "sha": "e12addda12dfa98a7b76a513af978673a289a1ff",
+                "blob_url": "https://github.com/apache/commons-jcs/blob/7cec158bc9faa1d2aa267ddd6a02790ac1f2c3ec/commons-jcs-core/src/main/java/org/apache/commons/jcs/auxiliary/disk/indexed/IndexedDiskCache.java",
+                "filename": "commons-jcs-core/src/main/java/org/apache/commons/jcs/auxiliary/disk/indexed/IndexedDiskCache.java",
+                "contents_url": "https://api.github.com/repos/apache/commons-jcs/contents/commons-jcs-core/src/main/java/org/apache/commons/jcs/auxiliary/disk/indexed/IndexedDiskCache.java?ref=7cec158bc9faa1d2aa267ddd6a02790ac1f2c3ec"
+            },
+            {
+                "patch": "@@ -20,6 +20,9 @@\n \t</properties>\n \t<body>\n         <release version=\"2.0\" date=\"unreleased\" description=\"JDK 1.6 based major release\">\n+            <action issue=\"JCS-158\" dev=\"tv\" type=\"fix\" due-to=\"Wiktor Niesiobedzki\">\n+                Fix NullPointerException in IndexedDiskCache.addToRecycleBin(...)\n+            </action>\n             <action dev=\"tv\" type=\"update\">\n                 Reduce synchronization\n             </action>",
+                "additions": 3,
+                "raw_url": "https://github.com/apache/commons-jcs/raw/7cec158bc9faa1d2aa267ddd6a02790ac1f2c3ec/src/changes/changes.xml",
+                "status": "modified",
+                "changes": 3,
+                "deletions": 0,
+                "sha": "1b48190d7ce3f862ae436da01b15821271b87e8e",
+                "blob_url": "https://github.com/apache/commons-jcs/blob/7cec158bc9faa1d2aa267ddd6a02790ac1f2c3ec/src/changes/changes.xml",
+                "filename": "src/changes/changes.xml",
+                "contents_url": "https://api.github.com/repos/apache/commons-jcs/contents/src/changes/changes.xml?ref=7cec158bc9faa1d2aa267ddd6a02790ac1f2c3ec"
+            }
+        ],
+        "bug_id": "commons-jcs_2",
+        "parent": "https://github.com/apache/commons-jcs/commit/50ebba3d096b49c3d6856f9cda1664be55c222fa",
+        "message": "Fix JCS-158: NullPointerException in IndexedDiskCache.addToRecycleBin(...)\n\ngit-svn-id: https://svn.apache.org/repos/asf/commons/proper/jcs/trunk@1725098 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "commons-jcs"
+    },
+    {
+        "commit": "https://github.com/apache/commons-jcs/commit/02852f48243245666c0ccf4d0b8dd455d2747fd3",
+        "file": [
+            {
+                "patch": "@@ -18,16 +18,18 @@\n  */\n package org.apache.commons.jcs.jcache.cdi;\n \n-import java.lang.annotation.Annotation;\n-import java.util.HashSet;\n import javax.cache.annotation.CacheInvocationContext;\n import javax.cache.annotation.CacheInvocationParameter;\n import javax.interceptor.InvocationContext;\n+import java.lang.annotation.Annotation;\n+import java.util.HashSet;\n \n import static java.util.Arrays.asList;\n \n public class CacheInvocationContextImpl<A extends Annotation> extends CacheMethodDetailsImpl<A> implements CacheInvocationContext<A>\n {\n+    private static final Object[] EMPTY_ARGS = new Object[0];\n+\n     private CacheInvocationParameter[] parameters = null;\n \n     public CacheInvocationContextImpl(final InvocationContext delegate, final A cacheAnnotation, final String cacheName)\n@@ -63,7 +65,8 @@ public Object getTarget()\n \n     protected CacheInvocationParameter[] doGetAllParameters(final Integer[] indexes)\n     {\n-        final Object[] args = delegate.getParameters();\n+        final Object[] parameters = delegate.getParameters();\n+        final Object[] args = parameters == null ? EMPTY_ARGS : parameters;\n         final Class<?>[] parameterTypes = getMethod().getParameterTypes();\n         final Annotation[][] parameterAnnotations = getMethod().getParameterAnnotations();\n ",
+                "additions": 6,
+                "raw_url": "https://github.com/apache/commons-jcs/raw/02852f48243245666c0ccf4d0b8dd455d2747fd3/commons-jcs-jcache/src/main/java/org/apache/commons/jcs/jcache/cdi/CacheInvocationContextImpl.java",
+                "status": "modified",
+                "changes": 9,
+                "deletions": 3,
+                "sha": "8cf4614a9de91ba8fc780b3e46964b5625a411f2",
+                "blob_url": "https://github.com/apache/commons-jcs/blob/02852f48243245666c0ccf4d0b8dd455d2747fd3/commons-jcs-jcache/src/main/java/org/apache/commons/jcs/jcache/cdi/CacheInvocationContextImpl.java",
+                "filename": "commons-jcs-jcache/src/main/java/org/apache/commons/jcs/jcache/cdi/CacheInvocationContextImpl.java",
+                "contents_url": "https://api.github.com/repos/apache/commons-jcs/contents/commons-jcs-jcache/src/main/java/org/apache/commons/jcs/jcache/cdi/CacheInvocationContextImpl.java?ref=02852f48243245666c0ccf4d0b8dd455d2747fd3"
+            }
+        ],
+        "bug_id": "commons-jcs_3",
+        "parent": "https://github.com/apache/commons-jcs/commit/e1daffbc202f859e502a0840f6203625a66a1f2d",
+        "message": "JCS-180 if there is no argument we don't want to fail with a npe in CacheInvocationContextImpl\n\ngit-svn-id: https://svn.apache.org/repos/asf/commons/proper/jcs/trunk@1799682 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "commons-jcs"
+    },
+    {
+        "commit": "https://github.com/apache/commons-jcs/commit/ce2799a5384000e034250c4cbfa3286b52d79c77",
+        "file": [
+            {
+                "patch": "@@ -20,6 +20,10 @@\n \t</properties>\n \t<body>\n \t\t<release version=\"2.0\" date=\"unreleased\" description=\"JDK 1.6 based major release\">\n+            <action issue=\"JCS-113\" dev=\"sebb\" type=\"fix\">\n+                Potential NPE in JDBCDiskCache\n+                Fixed NPEs in getSize() and getStatistics()\n+            </action>\n             <action issue=\"JCS-112\" dev=\"sebb\" type=\"fix\">\n                 RemoteCacheServer.logUpdateInfo bug updating put count\n             </action>",
+                "additions": 4,
+                "raw_url": "https://github.com/apache/commons-jcs/raw/ce2799a5384000e034250c4cbfa3286b52d79c77/src/changes/changes.xml",
+                "status": "modified",
+                "changes": 4,
+                "deletions": 0,
+                "sha": "5d0c2f5d92335b7a00444d440f3b8ce8d545db73",
+                "blob_url": "https://github.com/apache/commons-jcs/blob/ce2799a5384000e034250c4cbfa3286b52d79c77/src/changes/changes.xml",
+                "filename": "src/changes/changes.xml",
+                "contents_url": "https://api.github.com/repos/apache/commons-jcs/contents/src/changes/changes.xml?ref=ce2799a5384000e034250c4cbfa3286b52d79c77"
+            },
+            {
+                "patch": "@@ -976,10 +976,14 @@ public int getSize()\n         String selectString = \"select count(*) from \" + getJdbcDiskCacheAttributes().getTableName()\n             + \" where REGION = ?\";\n \n+        final JDBCDiskCachePoolAccess pool = getPoolAccess();\n+        if (pool == null) {\n+            return size;\n+        }\n         Connection con;\n         try\n         {\n-            con = getPoolAccess().getConnection();\n+            con = pool.getConnection();\n         }\n         catch ( SQLException e1 )\n         {\n@@ -1141,26 +1145,40 @@ public IStats getStatistics()\n         se.setData( \"\" + getMatchingCount );\n         elems.add( se );\n \n+        final JDBCDiskCachePoolAccess pool = getPoolAccess();\n+\n         se = new StatElement();\n         se.setName( \"Size\" );\n-        se.setData( \"\" + getSize() );\n+        if (pool != null) {\n+            se.setData( \"\" + getSize() );\n+        } else {\n+            se.setData( \"No db connection pool found\" );\n+        }\n         elems.add( se );\n \n         se = new StatElement();\n         se.setName( \"Active DB Connections\" );\n-        se.setData( \"\" + getPoolAccess().getNumActiveInPool() );\n+        if (pool != null) {\n+            se.setData( \"\" + pool.getNumActiveInPool() );\n+        } else {\n+            se.setData( \"No db connection pool found\" );\n+        }\n         elems.add( se );\n \n         se = new StatElement();\n         se.setName( \"Idle DB Connections\" );\n-        se.setData( \"\" + getPoolAccess().getNumIdleInPool() );\n+        if (pool != null) {\n+            se.setData( \"\" + pool.getNumIdleInPool() );\n+        } else {\n+            se.setData( \"No db connection pool found\" );\n+        }\n         elems.add( se );\n \n         se = new StatElement();\n         se.setName( \"DB URL\" );\n-        if ( getPoolAccess() != null )\n+        if ( pool != null )\n         {\n-            se.setData( \"\" + getPoolAccess().getPoolUrl() );\n+            se.setData( \"\" + pool.getPoolUrl() );\n         }\n         else\n         {",
+                "additions": 24,
+                "raw_url": "https://github.com/apache/commons-jcs/raw/ce2799a5384000e034250c4cbfa3286b52d79c77/src/java/org/apache/commons/jcs/auxiliary/disk/jdbc/JDBCDiskCache.java",
+                "status": "modified",
+                "changes": 30,
+                "deletions": 6,
+                "sha": "f7cb1e6a73297c3672c162f04e967a61be50adfd",
+                "blob_url": "https://github.com/apache/commons-jcs/blob/ce2799a5384000e034250c4cbfa3286b52d79c77/src/java/org/apache/commons/jcs/auxiliary/disk/jdbc/JDBCDiskCache.java",
+                "filename": "src/java/org/apache/commons/jcs/auxiliary/disk/jdbc/JDBCDiskCache.java",
+                "contents_url": "https://api.github.com/repos/apache/commons-jcs/contents/src/java/org/apache/commons/jcs/auxiliary/disk/jdbc/JDBCDiskCache.java?ref=ce2799a5384000e034250c4cbfa3286b52d79c77"
+            }
+        ],
+        "bug_id": "commons-jcs_4",
+        "parent": "https://github.com/apache/commons-jcs/commit/44919154229e620bee91670b16fe50f1e8f06cb5",
+        "message": "JCS-113 Potential NPE in JDBCDiskCache\nFixed NPEs in getSize() and getStatistics()\n\ngit-svn-id: https://svn.apache.org/repos/asf/commons/proper/jcs/trunk@1584437 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "commons-jcs"
+    },
+    {
+        "commit": "https://github.com/apache/commons-jcs/commit/8362904047a636575455b38765803a18b13d55d5",
+        "file": [
+            {
+                "patch": "@@ -20,6 +20,10 @@\n \t</properties>\n \t<body>\n \t\t<release version=\"2.0\" date=\"unreleased\" description=\"JDK 1.5 based major release\">\n+            <action dev=\"tv\" type=\"fix\" issue=\"JCS-77\" due-to=\"Matt Morrisson\">\n+                NullPointerException thrown by IndexedDiskCache if IndexedDisk calls fail to \n+                initialize.\n+            </action>\n             <action dev=\"tv\" type=\"fix\" issue=\"JCS-90\" due-to=\"Diego Rivera\">\n                 When issuing a shutDown() command, JCS fails to clean up the Queue Processor \n                 thread.",
+                "additions": 4,
+                "raw_url": "https://github.com/apache/commons-jcs/raw/8362904047a636575455b38765803a18b13d55d5/src/changes/changes.xml",
+                "status": "modified",
+                "changes": 4,
+                "deletions": 0,
+                "sha": "f718ffdaec1a18f5451a31896918b94b31750392",
+                "blob_url": "https://github.com/apache/commons-jcs/blob/8362904047a636575455b38765803a18b13d55d5/src/changes/changes.xml",
+                "filename": "src/changes/changes.xml",
+                "contents_url": "https://api.github.com/repos/apache/commons-jcs/contents/src/changes/changes.xml?ref=8362904047a636575455b38765803a18b13d55d5"
+            },
+            {
+                "patch": "@@ -185,19 +185,19 @@ public IndexedDiskCache( IndexedDiskCacheAttributes cattr, IElementSerializer el\n             {\n                 log.info( logCacheName + \"Indexed Disk Cache is alive.\" );\n             }\n+\n+            // TODO: Should we improve detection of whether or not the file should be optimized.\n+            if ( isRealTimeOptimizationEnabled && keyHash.size() > 0 )\n+            {\n+                // Kick off a real time optimization, in case we didn't do a final optimization.\n+                doOptimizeRealTime();\n+            }\n         }\n         catch ( Exception e )\n         {\n             log.error( logCacheName + \"Failure initializing for fileName: \" + fileName + \" and directory: \"\n                 + this.rafDir.getAbsolutePath(), e );\n         }\n-\n-        // TODO: Should we improve detection of whether or not the file should be optimized.\n-        if ( isRealTimeOptimizationEnabled && keyHash.size() > 0 )\n-        {\n-            // Kick off a real time optimization, in case we didn't do a final optimization.\n-            doOptimizeRealTime();\n-        }\n     }\n \n     /**",
+                "additions": 7,
+                "raw_url": "https://github.com/apache/commons-jcs/raw/8362904047a636575455b38765803a18b13d55d5/src/java/org/apache/jcs/auxiliary/disk/indexed/IndexedDiskCache.java",
+                "status": "modified",
+                "changes": 14,
+                "deletions": 7,
+                "sha": "186723befd7addc5d5a4ce0130d9b2376b13f170",
+                "blob_url": "https://github.com/apache/commons-jcs/blob/8362904047a636575455b38765803a18b13d55d5/src/java/org/apache/jcs/auxiliary/disk/indexed/IndexedDiskCache.java",
+                "filename": "src/java/org/apache/jcs/auxiliary/disk/indexed/IndexedDiskCache.java",
+                "contents_url": "https://api.github.com/repos/apache/commons-jcs/contents/src/java/org/apache/jcs/auxiliary/disk/indexed/IndexedDiskCache.java?ref=8362904047a636575455b38765803a18b13d55d5"
+            }
+        ],
+        "bug_id": "commons-jcs_5",
+        "parent": "https://github.com/apache/commons-jcs/commit/6c459bc581eb6459c2b68b2ea1dcdaa4a5cde301",
+        "message": "Fix for JCS-77: NullPointerException thrown by IndexedDiskCache if IndexedDisk calls fail to initialize.\n\ngit-svn-id: https://svn.apache.org/repos/asf/commons/proper/jcs/trunk@1369337 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "commons-jcs"
+    },
+    {
+        "commit": "https://github.com/apache/commons-jcs/commit/99760aebbf680e0a0220c7675075dd908016f18d",
+        "file": [
+            {
+                "patch": "@@ -701,6 +701,7 @@\n     <jsr107.api.version>1.0.0</jsr107.api.version>\n     <commons.collections.version>4.1</commons.collections.version>\n     <commons.lang.version>3.3.2</commons.lang.version>\n+    <commons.clirr.version>2.8</commons.clirr.version>\n \n     <test.type>Unit</test.type>\n   </properties>",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/commons-jcs/raw/99760aebbf680e0a0220c7675075dd908016f18d/pom.xml",
+                "status": "modified",
+                "changes": 1,
+                "deletions": 0,
+                "sha": "baa1608e83a59a7af5ae6aae9a673a3a366afbe7",
+                "blob_url": "https://github.com/apache/commons-jcs/blob/99760aebbf680e0a0220c7675075dd908016f18d/pom.xml",
+                "filename": "pom.xml",
+                "contents_url": "https://api.github.com/repos/apache/commons-jcs/contents/pom.xml?ref=99760aebbf680e0a0220c7675075dd908016f18d"
+            }
+        ],
+        "bug_id": "commons-jcs_6",
+        "parent": "https://github.com/apache/commons-jcs/commit/31a108fe6631f098ee9fe849c6eb34a7635874a3",
+        "message": "Fix NPE in clirr plugin. See https://github.com/mojohaus/clirr-maven-plugin/issues/7\n\ngit-svn-id: https://svn.apache.org/repos/asf/commons/proper/jcs/trunk@1762369 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "commons-jcs"
+    },
+    {
+        "commit": "https://github.com/apache/commons-jcs/commit/9902a11ce7bc5d27bfaa745de53d74ce438d0a74",
+        "file": [
+            {
+                "patch": "@@ -20,6 +20,9 @@\n \t</properties>\n \t<body>\n \t\t<release version=\"2.0\" date=\"unreleased\" description=\"JDK 1.5 based major release\">\n+            <action dev=\"tv\" type=\"fix\" issue=\"JCS-79\" due-to=\"Graham Leggett\">\n+                Fix NPE in CompositeCacheConfigurator.parseRegion\n+            </action>\n             <action dev=\"tv\" type=\"fix\" issue=\"JCS-68\" due-to=\"Niall Gallagher\">\n                 Made RemoteCacheServer public, added remote cache remove feature to\n                 JCSAdminBean",
+                "additions": 3,
+                "raw_url": "https://github.com/apache/commons-jcs/raw/9902a11ce7bc5d27bfaa745de53d74ce438d0a74/src/changes/changes.xml",
+                "status": "modified",
+                "changes": 3,
+                "deletions": 0,
+                "sha": "ea98505bec90e857d61dba9b9ad7b1657602a5db",
+                "blob_url": "https://github.com/apache/commons-jcs/blob/9902a11ce7bc5d27bfaa745de53d74ce438d0a74/src/changes/changes.xml",
+                "filename": "src/changes/changes.xml",
+                "contents_url": "https://api.github.com/repos/apache/commons-jcs/contents/src/changes/changes.xml?ref=9902a11ce7bc5d27bfaa745de53d74ce438d0a74"
+            },
+            {
+                "patch": "@@ -328,54 +328,56 @@ protected CompositeCache parseRegion( Properties props, String regName, String v\n \n         CompositeCache cache = new CompositeCache( regName, cca, ea );\n \n-        // Next, create the auxiliaries for the new cache\n-        List<AuxiliaryCache> auxList = new ArrayList<AuxiliaryCache>();\n-\n-        if ( log.isDebugEnabled() )\n+        if (value != null)\n         {\n-            log.debug( \"Parsing region name '\" + regName + \"', value '\" + value + \"'\" );\n-        }\n+            // Next, create the auxiliaries for the new cache\n+            List<AuxiliaryCache> auxList = new ArrayList<AuxiliaryCache>();\n \n-        // We must skip over ',' but not white space\n-        StringTokenizer st = new StringTokenizer( value, \",\" );\n+            if ( log.isDebugEnabled() )\n+            {\n+                log.debug( \"Parsing region name '\" + regName + \"', value '\" + value + \"'\" );\n+            }\n \n-        // If value is not in the form \", appender..\" or \"\", then we should set\n-        // the priority of the category.\n+            // We must skip over ',' but not white space\n+            StringTokenizer st = new StringTokenizer( value, \",\" );\n \n-        if ( !( value.startsWith( \",\" ) || value.equals( \"\" ) ) )\n-        {\n-            // just to be on the safe side...\n-            if ( !st.hasMoreTokens() )\n+            // If value is not in the form \", appender..\" or \"\", then we should set\n+            // the priority of the category.\n+\n+            if ( !( value.startsWith( \",\" ) || value.equals( \"\" ) ) )\n             {\n-                return null;\n+                // just to be on the safe side...\n+                if ( !st.hasMoreTokens() )\n+                {\n+                    return null;\n+                }\n             }\n-        }\n \n-        AuxiliaryCache auxCache;\n-        String auxName;\n-        while ( st.hasMoreTokens() )\n-        {\n-            auxName = st.nextToken().trim();\n-            if ( auxName == null || auxName.equals( \",\" ) )\n+            AuxiliaryCache auxCache;\n+            String auxName;\n+            while ( st.hasMoreTokens() )\n             {\n-                continue;\n-            }\n-            log.debug( \"Parsing auxiliary named \\\"\" + auxName + \"\\\".\" );\n+                auxName = st.nextToken().trim();\n+                if ( auxName == null || auxName.equals( \",\" ) )\n+                {\n+                    continue;\n+                }\n+                log.debug( \"Parsing auxiliary named \\\"\" + auxName + \"\\\".\" );\n \n-            auxCache = parseAuxiliary( cache, props, auxName, regName );\n+                auxCache = parseAuxiliary( cache, props, auxName, regName );\n \n-            if ( auxCache != null )\n-            {\n-                auxList.add( auxCache );\n+                if ( auxCache != null )\n+                {\n+                    auxList.add( auxCache );\n+                }\n             }\n-        }\n \n-        // Associate the auxiliaries with the cache\n+            // Associate the auxiliaries with the cache\n \n-        cache.setAuxCaches( auxList.toArray( new AuxiliaryCache[0] ) );\n+            cache.setAuxCaches( auxList.toArray( new AuxiliaryCache[0] ) );\n+        }\n \n         // Return the new cache\n-\n         return cache;\n     }\n ",
+                "additions": 35,
+                "raw_url": "https://github.com/apache/commons-jcs/raw/9902a11ce7bc5d27bfaa745de53d74ce438d0a74/src/java/org/apache/jcs/engine/control/CompositeCacheConfigurator.java",
+                "status": "modified",
+                "changes": 68,
+                "deletions": 33,
+                "sha": "1ee599fd2bd98f7b7713bf9c65563fc0876504f2",
+                "blob_url": "https://github.com/apache/commons-jcs/blob/9902a11ce7bc5d27bfaa745de53d74ce438d0a74/src/java/org/apache/jcs/engine/control/CompositeCacheConfigurator.java",
+                "filename": "src/java/org/apache/jcs/engine/control/CompositeCacheConfigurator.java",
+                "contents_url": "https://api.github.com/repos/apache/commons-jcs/contents/src/java/org/apache/jcs/engine/control/CompositeCacheConfigurator.java?ref=9902a11ce7bc5d27bfaa745de53d74ce438d0a74"
+            }
+        ],
+        "bug_id": "commons-jcs_7",
+        "parent": "https://github.com/apache/commons-jcs/commit/35045d3421d3e476da97c20bd2f1deacfd5e40fc",
+        "message": "Fix NPE in CompositeCacheConfigurator.parseRegion. Fixes JCS-79\n\ngit-svn-id: https://svn.apache.org/repos/asf/commons/proper/jcs/trunk@1195255 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "commons-jcs"
+    },
+    {
+        "commit": "https://github.com/apache/commons-jcs/commit/df1ec5a6cb12a5539163a68d75a433f5429715b8",
+        "file": [
+            {
+                "patch": "@@ -125,31 +125,32 @@ public ICacheElement getQuiet( Serializable key )\n     public synchronized ICacheElement get( Serializable key )\r\n         throws IOException\r\n     {\r\n-        ICacheElement ce = null;\r\n+        MemoryElementDescriptor me = null;\r\n \r\n         if ( log.isDebugEnabled() )\r\n         {\r\n             log.debug( \"getting item from cache \" + cacheName + \" for key \" + key );\r\n         }\r\n \r\n-        ce = map.get( key ).ce;\r\n+        me = map.get( key );\r\n \r\n-        if ( ce != null )\r\n+        if ( me != null )\r\n         {\r\n             hitCnt++;\r\n-            ce.getElementAttributes().setLastAccessTimeNow();\r\n+            me.ce.getElementAttributes().setLastAccessTimeNow();\r\n             if ( log.isDebugEnabled() )\r\n             {\r\n                 log.debug( cacheName + \": LRUMemoryCache hit for \" + key );\r\n             }\r\n+            return me.ce;\r\n         }\r\n         else\r\n         {\r\n             missCnt++;\r\n             log.debug( cacheName + \": LRUMemoryCache miss for \" + key );\r\n         }\r\n \r\n-        return ce;\r\n+        return null;\r\n     }\r\n \r\n     /**\r",
+                "additions": 6,
+                "raw_url": "https://github.com/apache/commons-jcs/raw/df1ec5a6cb12a5539163a68d75a433f5429715b8/src/java/org/apache/jcs/engine/memory/lru/LHMLRUMemoryCache.java",
+                "status": "modified",
+                "changes": 11,
+                "deletions": 5,
+                "sha": "22906f59db711be3363688b800b6e0972840db27",
+                "blob_url": "https://github.com/apache/commons-jcs/blob/df1ec5a6cb12a5539163a68d75a433f5429715b8/src/java/org/apache/jcs/engine/memory/lru/LHMLRUMemoryCache.java",
+                "filename": "src/java/org/apache/jcs/engine/memory/lru/LHMLRUMemoryCache.java",
+                "contents_url": "https://api.github.com/repos/apache/commons-jcs/contents/src/java/org/apache/jcs/engine/memory/lru/LHMLRUMemoryCache.java?ref=df1ec5a6cb12a5539163a68d75a433f5429715b8"
+            }
+        ],
+        "bug_id": "commons-jcs_8",
+        "parent": "https://github.com/apache/commons-jcs/commit/2be95a5b0f43e40adb51efd45b5025b943cf56c8",
+        "message": "Fixed NPE on access\n\ngit-svn-id: https://svn.apache.org/repos/asf/commons/proper/jcs/trunk@1157587 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "commons-jcs"
+    },
+    {
+        "commit": "https://github.com/apache/commons-jcs/commit/60431261912586b5fe0cc5c8b4206e711cb0639a",
+        "file": [
+            {
+                "patch": "@@ -100,7 +100,9 @@ public static void setup()\n     @AfterClass\n     public static void stop() throws IOException\n     {\n-        server.shutdown(\"localhost\", remotePort);\n+        if (server != null) { // in case setup failed, no point throwing NPE as well\n+            server.shutdown(\"localhost\", remotePort);\n+        }\n     }\n \n     /**",
+                "additions": 3,
+                "raw_url": "https://github.com/apache/commons-jcs/raw/60431261912586b5fe0cc5c8b4206e711cb0639a/commons-jcs-core/src/test/java/org/apache/commons/jcs/auxiliary/remote/server/BasicRemoteCacheClientServerUnitTest.java",
+                "status": "modified",
+                "changes": 4,
+                "deletions": 1,
+                "sha": "fb32167c8845517fcbe65799927c798442b9af03",
+                "blob_url": "https://github.com/apache/commons-jcs/blob/60431261912586b5fe0cc5c8b4206e711cb0639a/commons-jcs-core/src/test/java/org/apache/commons/jcs/auxiliary/remote/server/BasicRemoteCacheClientServerUnitTest.java",
+                "filename": "commons-jcs-core/src/test/java/org/apache/commons/jcs/auxiliary/remote/server/BasicRemoteCacheClientServerUnitTest.java",
+                "contents_url": "https://api.github.com/repos/apache/commons-jcs/contents/commons-jcs-core/src/test/java/org/apache/commons/jcs/auxiliary/remote/server/BasicRemoteCacheClientServerUnitTest.java?ref=60431261912586b5fe0cc5c8b4206e711cb0639a"
+            }
+        ],
+        "bug_id": "commons-jcs_9",
+        "parent": "https://github.com/apache/commons-jcs/commit/cf5e503db4274fd2c060571c982a0fba8b00c09c",
+        "message": " in case setup failed, no point throwing NPE as well\n\ngit-svn-id: https://svn.apache.org/repos/asf/commons/proper/jcs/trunk@1606538 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "commons-jcs"
+    },
+    {
+        "commit": "https://github.com/apache/commons-jcs/commit/d968b59c22aeeadb4e5a12eb68b83acd2232ba2c",
+        "file": [
+            {
+                "patch": "@@ -72,7 +72,7 @@ public void update( ICacheElement ce )\n         ce.getElementAttributes().setLastAccessTimeNow();\n         addFirst( ce );\n         MemoryElementDescriptor old =\n-            ( MemoryElementDescriptor ) map.put( ce.getKey(), first );\n+            ( MemoryElementDescriptor ) map.put( first.ce.getKey(), first );\n \n         // If the node was the same as an existing node, remove it.\n \n@@ -107,27 +107,72 @@ public void update( ICacheElement ce )\n             // need to pre-queue the queuing.  This would be a bit wasteful\n             // and wouldn't save much time in this synchronous call.\n \n-            MemoryElementDescriptor node;\n-\n             for ( int i = 0; i < chunkSizeCorrected; i++ )\n             {\n                 synchronized ( this )\n                 {\n-                    cache.spoolToDisk( last.ce );\n-\n-                    map.remove( last.ce.getKey() );\n-\n-                    removeNode( last );\n+                    if ( last != null ) \n+                    {\n+                        if ( last.ce != null )\n+                        {\n+                            cache.spoolToDisk( last.ce );\n+                            if ( !map.containsKey(last.ce.getKey()) )\n+                            {\n+                                log.error(\"update: map does not contain key: \" + last.ce.getKey());\n+                                verifyCache();\n+                            }\n+                            if ( map.remove(last.ce.getKey()) == null )\n+                            {\n+                                log.warn(\"update: remove failed for key: \" + last.ce.getKey() );\n+                                verifyCache();\n+                            }\n+                        }\n+                        else\n+                        {\n+                            throw new Error(\"update: last.ce is null!\");\n+                        }\n+                        removeNode( last );\n+                    } \n+                    else \n+                    {\n+                        verifyCache();\n+                        throw new Error(\"update: last is null!\");\n+                    }\n                 }\n             }\n \n             if ( log.isDebugEnabled() )\n             {\n-                log.debug( \"After spool map size: \" + size );\n+                log.debug(\"update: After spool map size: \" + map.size());\n+            }\n+            if ( map.size() != dumpCacheSize() )\n+            {\n+                log.error(\"update: After spool, size mismatch: map.size() = \"\n+                          + map.size() + \", linked list size = \" +\n+                          dumpCacheSize());\n             }\n         }\n     }\n \n+    /**\n+     * Remove all of the elements from both the Map and the linked\n+     * list implementation. Overrides base class.\n+     */ \n+    public synchronized void removeAll()\n+        throws IOException\n+    {\n+        map.clear();\n+        for ( MemoryElementDescriptor me = first; me != null; ) \n+        {\n+            if ( me.prev != null )\n+            {\n+                me.prev = null;\n+            }\n+            MemoryElementDescriptor next = me.next;\n+            me = next;\n+        }\n+        first = last = null;\n+    }\n \n     /**\n      *  Get an item from the cache without affecting its last access time or\n@@ -168,14 +213,15 @@ else if ( log.isDebugEnabled() )\n      *@return                  ICacheElement if found, else null\n      *@exception  IOException\n      */\n-    public ICacheElement get( Serializable key )\n+    public synchronized ICacheElement get( Serializable key )\n         throws IOException\n     {\n         ICacheElement ce = null;\n \n         if ( log.isDebugEnabled() )\n         {\n-            log.debug( \"getting item for key: \" + key );\n+            log.debug( \"getting item from cache \" + cacheName + \" for key \" +\n+                       key );\n         }\n \n         MemoryElementDescriptor me = (MemoryElementDescriptor)map.get(key);\n@@ -197,6 +243,7 @@ public ICacheElement get( Serializable key )\n             log.debug( cacheName + \": LRUMemoryCache miss for \" + key );\n         }\n         \n+        verifyCache();\n         return ce;\n     }\n \n@@ -210,7 +257,7 @@ public ICacheElement get( Serializable key )\n      *@return\n      *@exception  IOException\n      */\n-    public boolean remove( Serializable key )\n+    public synchronized boolean remove( Serializable key )\n         throws IOException\n     {\n         if ( log.isDebugEnabled() )\n@@ -287,7 +334,9 @@ else if ( key instanceof GroupId )\n     public class IteratorWrapper\n         implements Iterator\n     {\n+        private final Log log = LogFactory.getLog( LRUMemoryCache.class );\n         private final Iterator i;\n+\n         private IteratorWrapper(Map m)\n         {\n             i = m.entrySet().iterator();\n@@ -382,7 +431,8 @@ private synchronized void removeNode( MemoryElementDescriptor me )\n     {\n         if ( log.isDebugEnabled() )\n         {\n-            log.debug( \"removing node \" + me.ce.getKey() );\n+            log.debug( \"removing node \" + me.ce.getKey() + \" from cache \" +\n+                       cacheName );\n         }\n \n         if ( me.next == null )\n@@ -443,7 +493,7 @@ private void addLast( CacheElement ce )\n             me.prev = last;\n         }\n         last = me;\n-        return;\n+        verifyCache(ce.getKey());\n     }\n \n     /**\n@@ -539,6 +589,124 @@ public void dumpCacheEntries()\n                  + me.ce.getKey() + \", val=\" + me.ce.getVal() );\n         }\n     }\n+\n+    private int dumpCacheSize() \n+    {\n+        int size = 0;\n+        for ( MemoryElementDescriptor me = first; me != null;  me = me.next )\n+        {\n+            size++;\n+        }\n+        return size; \n+    }\n+\n+    private void verifyCache() \n+    {\n+        if ( !log.isDebugEnabled() ) \n+            return;\n+\n+        boolean found = false;\n+        log.debug(\"verifycache[\" + cacheName + \"]: mapContains \" + map.size() + \" elements, linked list contains \" \n+                  + dumpCacheSize() + \" elements\" );\n+        log.debug(\"verifycache: checking linked list by key \");\n+        for ( MemoryElementDescriptor li = first; li != null; li = li.next ) \n+        {\n+            Object key = li.ce.getKey();\n+            if ( !map.containsKey(key) ) \n+            {\n+                log.error(\"verifycache[\" + cacheName + \"]: map does not contain key : \" + li.ce.getKey());\n+                log.error(\"li.hashcode=\" + li.ce.getKey().hashCode());\n+                log.error(\"key class=\" + key.getClass());\n+                log.error(\"key hashcode=\" + key.hashCode());\n+                log.error(\"key toString=\" + key.toString());\n+                if ( key instanceof GroupAttrName ) \n+                {\n+                    GroupAttrName name = (GroupAttrName) key;\n+                    log.error(\"GroupID hashcode=\" + name.groupId.hashCode());\n+                    log.error(\"GroupID.class=\" + name.groupId.getClass());\n+                    log.error(\"AttrName hashcode=\" + name.attrName.hashCode());\n+                    log.error(\"AttrName.class=\" + name.attrName.getClass());\n+                }\n+                dumpMap();\n+            }\n+            else if ( map.get(li.ce.getKey()) == null ) \n+            {\n+                log.error(\"verifycache[\" + cacheName +\n+                          \"]: linked list retrieval returned null for key: \" +\n+                          li.ce.getKey());\n+            }\n+        }\n+\n+        log.debug(\"verifycache: checking linked list by value \");\n+        for ( MemoryElementDescriptor li3 = first; li3 != null; li3 = li3.next ) \n+        {\n+            if ( map.containsValue(li3) == false ) \n+            {\n+                log.error(\"verifycache[\" + cacheName + \"]: map does not contain value : \" + li3);\n+                dumpMap();\n+            } \n+        }\n+\n+        log.debug(\"verifycache: checking via keysets!\");\n+        for ( Iterator itr2 = map.keySet().iterator(); itr2.hasNext(); )\n+        {\n+            found = false;\n+            Serializable val = null;\n+            try\n+            {\n+                val = (Serializable) itr2.next();\n+            }\n+            catch ( NoSuchElementException nse )\n+            {\n+                log.error(\"verifycache: no such element exception\");\n+            }                \n+\n+            for ( MemoryElementDescriptor li2 = first; li2 != null; li2 = li2.next ) \n+            {\n+                if ( val.equals(li2.ce.getKey()) )\n+                {\n+                    found = true;\n+                    break;\n+                }\n+            }\n+            if ( !found ) \n+            {\n+                log.error(\"verifycache[\" + cacheName + \"]: key not found in list : \" + val );\n+                dumpCacheEntries();\n+                if ( map.containsKey(val) ) \n+                {\n+                    log.error(\"verifycache: map contains key\");\n+                }\n+                else \n+                {\n+                    log.error(\"verifycache: map does NOT contain key, what the HECK!\");\n+                }\n+            }\n+        }\n+    }\n+\n+    private void verifyCache(Serializable key) \n+    {\n+        if ( !log.isDebugEnabled() ) \n+            return;\n+\n+        boolean found = false;\n+\n+        // go through the linked list looking for the key\n+        for ( MemoryElementDescriptor li = first; li != null; li = li.next ) \n+        {\n+            if ( li.ce.getKey() == key ) \n+            {\n+                found = true;\n+                log.debug(\"verifycache(key) key match: \" + key );\n+                break;\n+            }\n+        }\n+        if ( !found ) \n+        {\n+            log.error(\"verifycache(key)[\" + cacheName + \"], couldn't find key! : \" + key );\n+        }\n+    }\n }\n \n /**",
+                "additions": 182,
+                "raw_url": "https://github.com/apache/commons-jcs/raw/d968b59c22aeeadb4e5a12eb68b83acd2232ba2c/src/java/org/apache/jcs/engine/memory/lru/LRUMemoryCache.java",
+                "status": "modified",
+                "changes": 196,
+                "deletions": 14,
+                "sha": "9c3432c9b60f56c026445e2984d5a62e0abafa5d",
+                "blob_url": "https://github.com/apache/commons-jcs/blob/d968b59c22aeeadb4e5a12eb68b83acd2232ba2c/src/java/org/apache/jcs/engine/memory/lru/LRUMemoryCache.java",
+                "filename": "src/java/org/apache/jcs/engine/memory/lru/LRUMemoryCache.java",
+                "contents_url": "https://api.github.com/repos/apache/commons-jcs/contents/src/java/org/apache/jcs/engine/memory/lru/LRUMemoryCache.java?ref=d968b59c22aeeadb4e5a12eb68b83acd2232ba2c"
+            }
+        ],
+        "bug_id": "commons-jcs_10",
+        "parent": "https://github.com/apache/commons-jcs/commit/88ca20dfa787810cfed8a32f811be7a42bbdd8bd",
+        "message": "* src/java/org/apache/jcs/engine/memory/lru/LRUMemoryCache.java\n  update(): Clarified map.put() operation to be a bit clearer.\n            Removed reference to unused MemoryElementDescriptor object.\n            Added null checks to last and last.ce to avoid NPEs\n            when underlying objects have bugs in their .equals() and\n            .hashCode() implementations.\n            Added debugging messages when items from underlying map\n            cannot be found or removed when a full cache is being purged.\n            Adding more debugging messages after method is complete\n            to verify integrity of the cache.\n\n\n  removeAll(): Added implementation that overrides base class. This fixes\n               issue where underlying map was being reallocated but the\n               linked list still contained data.\n\n  get(): Synchronizing method to prevent possible issues.\n         Adding debug code to verify cache after method completion.\n\n\n  removeNode(): Adding debug code to display cache name in output.\n\n  addLast(): Removing unnecessary return statement.\n             Adding debug code to verify cache after method completion.\n\n  dumpCacheSize(): Adding method to compute number of elements in the\n                   linked list.\n\n  verifyCache(): Adding method to verify the integrity of the cache. This\n                 is done three ways; first by walking the linked list\n                 and verifying that they keys exist in the map, secondly\n                 by walking the list and verifying that the values exist\n                 in the map, and lastly by walking the map and verifying\n                 that the keys exist in the linked list. None of this\n                 verification is done if the Log level is not turned up\n                 to 'DEBUG' level.\n\n  verifyCache(key): Adding method to ensure that an individual key exists\n                    in both the linked list and the map.\n\nSubmitted by: Todd Enersen <tenersen@collab.net>\n\n\ngit-svn-id: https://svn.apache.org/repos/asf/jakarta/jcs/trunk@224036 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "commons-jcs"
+    }
+]

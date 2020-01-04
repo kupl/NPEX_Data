@@ -1,0 +1,254 @@
+[
+    {
+        "commit": "https://github.com/apache/directory-scimple/commit/3b8e4c16ed38d8314f5b8a716b5e9913265e7932",
+        "file": [
+            {
+                "patch": "@@ -71,7 +71,7 @@\n   @ScimAttribute(description = \"A Boolean value indicating the 'primary' or preferred attribute value for this attribute, e.g. the preferred phone number or primary phone number. The primary attribute value 'true' MUST appear no more than once.\")\n   @Getter\n   @Setter\n-  Boolean primary;\n+  Boolean primary = false;\n \n   @Setter(AccessLevel.NONE)\n   @Getter",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/directory-scimple/raw/3b8e4c16ed38d8314f5b8a716b5e9913265e7932/scim-spec/scim-spec-schema/src/main/java/edu/psu/swe/scim/spec/resources/PhoneNumber.java",
+                "status": "modified",
+                "changes": 2,
+                "deletions": 1,
+                "sha": "7b8c75034e97bc1bd1281ea50698a27e801f8a45",
+                "blob_url": "https://github.com/apache/directory-scimple/blob/3b8e4c16ed38d8314f5b8a716b5e9913265e7932/scim-spec/scim-spec-schema/src/main/java/edu/psu/swe/scim/spec/resources/PhoneNumber.java",
+                "filename": "scim-spec/scim-spec-schema/src/main/java/edu/psu/swe/scim/spec/resources/PhoneNumber.java",
+                "contents_url": "https://api.github.com/repos/apache/directory-scimple/contents/scim-spec/scim-spec-schema/src/main/java/edu/psu/swe/scim/spec/resources/PhoneNumber.java?ref=3b8e4c16ed38d8314f5b8a716b5e9913265e7932"
+            }
+        ],
+        "bug_id": "directory-scimple_1",
+        "parent": "https://github.com/apache/directory-scimple/commit/ec4297fccf17751f81b0e41e1c5cfd4f265e4b0b",
+        "message": "Added default false value for PhoneNumber's primary flag. When the primary flag was not specified, serializing a ScimUser would throw a NPE. This fixes the NPE.",
+        "repo": "directory-scimple"
+    },
+    {
+        "commit": "https://github.com/apache/directory-scimple/commit/010e86cfd551da2e134975b59c5f2584d0d37a86",
+        "file": [
+            {
+                "patch": "@@ -7,6 +7,7 @@\n import java.io.ObjectOutputStream;\n import java.lang.reflect.Field;\n import java.util.Collection;\n+import java.util.Collections;\n import java.util.HashSet;\n import java.util.List;\n import java.util.Map.Entry;\n@@ -82,7 +83,6 @@ public void init() { // TODO move this to a CDI producer\n   }\n   \n   private <T extends ScimResource> T setAttributesForDisplayInternal(T resource, Returned ... removeAttributesOfTypes) throws IllegalArgumentException, IllegalAccessException, AttributeDoesNotExistException, IOException {\n-\n     T copy = cloneScimResource(resource);\n     String resourceType = copy.getResourceType();\n     Schema schema = registry.getBaseSchemaOfResourceType(resourceType);\n@@ -110,7 +110,7 @@ public void init() { // TODO move this to a CDI producer\n       return setAttributesForDisplay(resource);\n     } else {\n       T copy = cloneScimResource(resource);\n-\n+      \n       String resourceType = copy.getResourceType();\n       Schema schema = registry.getBaseSchemaOfResourceType(resourceType);\n \n@@ -198,7 +198,6 @@ private void removeAttributes(Object object, AttributeContainer attributeContain\n   }\n \n   private void processAttributes(Object object, AttributeContainer attributeContainer, Function<Attribute, Boolean> function) throws IllegalArgumentException, IllegalAccessException {\n-\n     if (attributeContainer != null && object != null) {\n       for (Attribute attribute : attributeContainer.getAttributes()) {\n         Field field = attribute.getField();\n@@ -276,7 +275,9 @@ private void processAttributes(Object object, AttributeContainer attributeContai\n \n     for (AttributeReference attributeReference : attributeReferences) {\n       Set<Attribute> findAttributes = findAttribute(attributeReference, includeAttributeChain);\n-      attributes.addAll(findAttributes);\n+      if (!findAttributes.isEmpty()) {\n+        attributes.addAll(findAttributes);\n+      }\n     }\n \n     return attributes;\n@@ -285,35 +286,42 @@ private void processAttributes(Object object, AttributeContainer attributeContai\n   private Set<Attribute> findAttribute(AttributeReference attributeReference, boolean includeAttributeChain) throws AttributeDoesNotExistException {\n     String schemaUrn = attributeReference.getUrn();\n     Schema schema = null;\n-\n+    Set<Attribute> attributes;\n+    \n     if (!StringUtils.isEmpty(schemaUrn)) {\n       schema = registry.getSchema(schemaUrn);\n \n-      Set<Attribute> attributes = findAttributeInSchema(schema, attributeReference, includeAttributeChain);\n-      if (attributes == null) {\n+      attributes = findAttributeInSchema(schema, attributeReference, includeAttributeChain);\n+      if (attributes.isEmpty()) {\n+        log.error(\"Attribute \" + attributeReference.getFullyQualifiedAttributeName() + \"not found in schema \" + schemaUrn);\n         throw new AttributeDoesNotExistException(attributeReference.getFullyQualifiedAttributeName());\n       }\n       return attributes;\n     }\n \n     // Handle unqualified attributes, look in the core schemas\n     schema = registry.getSchema(ScimUser.SCHEMA_URI);\n-    Set<Attribute> attributes = findAttributeInSchema(schema, attributeReference, includeAttributeChain);\n-    if (attributes != null) {\n+    attributes = findAttributeInSchema(schema, attributeReference, includeAttributeChain);\n+    if (!attributes.isEmpty()) {\n       return attributes;\n     }\n \n     schema = registry.getSchema(ScimGroup.SCHEMA_URI);\n     attributes = findAttributeInSchema(schema, attributeReference, includeAttributeChain);\n-    if (attributes != null) {\n+    if (!attributes.isEmpty()) {\n       return attributes;\n     }\n \n+    log.error(\"Attribute \" + attributeReference.getFullyQualifiedAttributeName() + \"not found in any schema.\");\n     throw new AttributeDoesNotExistException(attributeReference.getFullyQualifiedAttributeName());\n   }\n \n   private Set<Attribute> findAttributeInSchema(Schema schema, AttributeReference attributeReference, boolean includeAttributeChain) {\n     AttributeContainer attributeContainer = schema;\n+    if (attributeContainer == null) {\n+      return Collections.emptySet();\n+    }\n+    \n     String[] attributeNames = attributeReference.getAttributeName();\n \n     Set<Attribute> attributes = new HashSet<>();\n@@ -322,7 +330,7 @@ private void processAttributes(Object object, AttributeContainer attributeContai\n       attributeContainer = attributeContainer.getAttribute(attributeName);\n \n       if (attributeContainer == null) {\n-        return null;\n+        return Collections.emptySet();\n       }\n \n       if (includeAttributeChain) {",
+                "additions": 19,
+                "raw_url": "https://github.com/apache/directory-scimple/raw/010e86cfd551da2e134975b59c5f2584d0d37a86/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/utility/AttributeUtil.java",
+                "status": "modified",
+                "changes": 30,
+                "deletions": 11,
+                "sha": "f26dad2b8c76a5e9af95284cf7f555c082fc80b3",
+                "blob_url": "https://github.com/apache/directory-scimple/blob/010e86cfd551da2e134975b59c5f2584d0d37a86/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/utility/AttributeUtil.java",
+                "filename": "scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/utility/AttributeUtil.java",
+                "contents_url": "https://api.github.com/repos/apache/directory-scimple/contents/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/utility/AttributeUtil.java?ref=010e86cfd551da2e134975b59c5f2584d0d37a86"
+            }
+        ],
+        "bug_id": "directory-scimple_2",
+        "parent": "https://github.com/apache/directory-scimple/commit/b34e3714ff1945df9b0993b6709d55491abe830c",
+        "message": "Merge pull request #46 from src125/bugfix/issue45\n\nAdd null checks to AttributeUtil to avoid NPE",
+        "repo": "directory-scimple"
+    },
+    {
+        "commit": "https://github.com/apache/directory-scimple/commit/90d1715a3f2c2e0c59908f75a3a4957e8b0bd27c",
+        "file": [
+            {
+                "patch": "@@ -29,7 +29,7 @@\n   //Called through normal injection and calls Post Construct\n   public ObjectMapperContextResolver() {\n     super();\n-    objectMapper = getContext(null);\n+    objectMapper = super.getContext(null);\n   }\n   \n   //Not call through container context and therefore must manually call postConstruct method",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/directory-scimple/raw/90d1715a3f2c2e0c59908f75a3a4957e8b0bd27c/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/rest/ObjectMapperContextResolver.java",
+                "status": "modified",
+                "changes": 2,
+                "deletions": 1,
+                "sha": "e8de140c7a5c9f3d15e32a28e6e285b769559655",
+                "blob_url": "https://github.com/apache/directory-scimple/blob/90d1715a3f2c2e0c59908f75a3a4957e8b0bd27c/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/rest/ObjectMapperContextResolver.java",
+                "filename": "scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/rest/ObjectMapperContextResolver.java",
+                "contents_url": "https://api.github.com/repos/apache/directory-scimple/contents/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/rest/ObjectMapperContextResolver.java?ref=90d1715a3f2c2e0c59908f75a3a4957e8b0bd27c"
+            }
+        ],
+        "bug_id": "directory-scimple_3",
+        "parent": "https://github.com/apache/directory-scimple/commit/6be6e7024ab6adca910e85b6ff1ebf580adbbee7",
+        "message": "Fixing NPE",
+        "repo": "directory-scimple"
+    },
+    {
+        "commit": "https://github.com/apache/directory-scimple/commit/953f19fe0ad1b3c361fc79528f30f059a65133b4",
+        "file": [
+            {
+                "patch": "@@ -201,8 +201,8 @@ public Response query(AttributeReferenceListWrapper attributes, AttributeReferen\n                                                 .map(wrapper -> wrapper.getAttributeReferences())\n                                                 .orElse(Collections.emptySet()));\n \n-    searchRequest.setFilter(filter.getFilter());\n-\n+    searchRequest.setFilter((filter != null) ? filter.getFilter() : null);\n+    \n     searchRequest.setSortBy(sortBy);\n     searchRequest.setSortOrder(sortOrder);\n     searchRequest.setStartIndex(startIndex);",
+                "additions": 2,
+                "raw_url": "https://github.com/apache/directory-scimple/raw/953f19fe0ad1b3c361fc79528f30f059a65133b4/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/rest/BaseResourceTypeResourceImpl.java",
+                "status": "modified",
+                "changes": 4,
+                "deletions": 2,
+                "sha": "b28e2a162695a8a9a178c2f1b72754478ae005c9",
+                "blob_url": "https://github.com/apache/directory-scimple/blob/953f19fe0ad1b3c361fc79528f30f059a65133b4/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/rest/BaseResourceTypeResourceImpl.java",
+                "filename": "scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/rest/BaseResourceTypeResourceImpl.java",
+                "contents_url": "https://api.github.com/repos/apache/directory-scimple/contents/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/rest/BaseResourceTypeResourceImpl.java?ref=953f19fe0ad1b3c361fc79528f30f059a65133b4"
+            }
+        ],
+        "bug_id": "directory-scimple_4",
+        "parent": "https://github.com/apache/directory-scimple/commit/f46daf48e6564b096b78d34da828281d9d7cd53e",
+        "message": "Fix NPE in BaseResourceTypeResourceImpl\n\nAdd a null check to the FilterWrapper object in the query method to avoid NPE when building the SearchRequest object. This was preventing SCIM GET without a filter from executing properly.",
+        "repo": "directory-scimple"
+    },
+    {
+        "commit": "https://github.com/apache/directory-scimple/commit/aac20376cf6ccb4eef8c5b8a995b9a5825e08ce2",
+        "file": [
+            {
+                "patch": "@@ -201,8 +201,8 @@ public Response query(AttributeReferenceListWrapper attributes, AttributeReferen\n                                                 .map(wrapper -> wrapper.getAttributeReferences())\n                                                 .orElse(Collections.emptySet()));\n \n-    searchRequest.setFilter(filter.getFilter());\n-\n+    searchRequest.setFilter((filter != null) ? filter.getFilter() : null);\n+    \n     searchRequest.setSortBy(sortBy);\n     searchRequest.setSortOrder(sortOrder);\n     searchRequest.setStartIndex(startIndex);",
+                "additions": 2,
+                "raw_url": "https://github.com/apache/directory-scimple/raw/aac20376cf6ccb4eef8c5b8a995b9a5825e08ce2/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/rest/BaseResourceTypeResourceImpl.java",
+                "status": "modified",
+                "changes": 4,
+                "deletions": 2,
+                "sha": "b28e2a162695a8a9a178c2f1b72754478ae005c9",
+                "blob_url": "https://github.com/apache/directory-scimple/blob/aac20376cf6ccb4eef8c5b8a995b9a5825e08ce2/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/rest/BaseResourceTypeResourceImpl.java",
+                "filename": "scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/rest/BaseResourceTypeResourceImpl.java",
+                "contents_url": "https://api.github.com/repos/apache/directory-scimple/contents/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/rest/BaseResourceTypeResourceImpl.java?ref=aac20376cf6ccb4eef8c5b8a995b9a5825e08ce2"
+            }
+        ],
+        "bug_id": "directory-scimple_5",
+        "parent": "https://github.com/apache/directory-scimple/commit/0e64de269498f6c4ed418232852eac896a4d0727",
+        "message": "Merge pull request #30 from src125/src125-patch-BaseResourceTypeResourceImpl\n\nFix NPE in BaseResourceTypeResourceImpl",
+        "repo": "directory-scimple"
+    },
+    {
+        "commit": "https://github.com/apache/directory-scimple/commit/80f779d0d9b952d069d030e47ceb4919f52745f1",
+        "file": [
+            {
+                "patch": "@@ -188,8 +188,8 @@ public Response find(SearchRequest request) {\n       return BaseResourceTypeResource.super.find(request);\n     }\n     \n-    Set<AttributeReference> attributes = request.getAttributes();\n-    Set<AttributeReference> excludedAttributes = request.getExcludedAttributes();\n+    Set<AttributeReference> attributes = Optional.ofNullable(request.getAttributes()).orElse(Collections.emptySet());\n+    Set<AttributeReference> excludedAttributes = Optional.ofNullable(request.getExcludedAttributes()).orElse(Collections.emptySet());\n     if (!attributes.isEmpty() && !excludedAttributes.isEmpty()) {\n       return createAmbiguousAttributeParametersResponse();\n     }",
+                "additions": 2,
+                "raw_url": "https://github.com/apache/directory-scimple/raw/80f779d0d9b952d069d030e47ceb4919f52745f1/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/rest/BaseResourceTypeResourceImpl.java",
+                "status": "modified",
+                "changes": 4,
+                "deletions": 2,
+                "sha": "faf8e4d6efd6d2af214a6c7267927f803eeca0ac",
+                "blob_url": "https://github.com/apache/directory-scimple/blob/80f779d0d9b952d069d030e47ceb4919f52745f1/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/rest/BaseResourceTypeResourceImpl.java",
+                "filename": "scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/rest/BaseResourceTypeResourceImpl.java",
+                "contents_url": "https://api.github.com/repos/apache/directory-scimple/contents/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/rest/BaseResourceTypeResourceImpl.java?ref=80f779d0d9b952d069d030e47ceb4919f52745f1"
+            }
+        ],
+        "bug_id": "directory-scimple_6",
+        "parent": "https://github.com/apache/directory-scimple/commit/5cf637dd79dd7dc555b31dadb22799949da808f6",
+        "message": "Fixing NPE with attributes",
+        "repo": "directory-scimple"
+    },
+    {
+        "commit": "https://github.com/apache/directory-scimple/commit/dfe917fe02324ad94f47cc43c28d1796f6148ba6",
+        "file": [
+            {
+                "patch": "@@ -8,6 +8,7 @@\n import java.util.Base64;\n import java.util.Collections;\n import java.util.List;\n+import java.util.Optional;\n import java.util.Set;\n \n import javax.inject.Inject;\n@@ -30,6 +31,7 @@\n import com.fasterxml.jackson.databind.ObjectMapper;\n import com.fasterxml.jackson.module.jaxb.JaxbAnnotationIntrospector;\n import com.fasterxml.jackson.module.jaxb.JaxbAnnotationModule;\n+import com.google.common.base.Equivalence.Wrapper;\n \n import edu.psu.swe.scim.server.exception.AttributeDoesNotExistException;\n import edu.psu.swe.scim.server.exception.UnableToCreateResourceException;\n@@ -79,8 +81,8 @@ public Response getById(String id, AttributeReferenceListWrapper attributes, Att\n       return BaseResourceTypeResource.super.getById(id, attributes, excludedAttributes);\n     }\n \n-    Set<AttributeReference> attributeReferences = attributes.getAttributeReferences();\n-    Set<AttributeReference> excludedAttributeReferences = excludedAttributes.getAttributeReferences();\n+    Set<AttributeReference> attributeReferences = Optional.ofNullable(attributes).map(wrapper -> wrapper.getAttributeReferences()).orElse(Collections.emptySet());\n+    Set<AttributeReference> excludedAttributeReferences = Optional.ofNullable(excludedAttributes).map(wrapper -> wrapper.getAttributeReferences()).orElse(Collections.emptySet());\n     \n     if (!attributeReferences.isEmpty() && !excludedAttributeReferences.isEmpty()) {\n       return createAmbiguousAttributeParametersResponse();\n@@ -118,14 +120,13 @@ public Response getById(String id, AttributeReferenceListWrapper attributes, Att\n       return createAttriubteProcessingErrorResponse(e);\n     }\n     \n-    \n   }\n \n   @Override\n   public Response query(AttributeReferenceListWrapper attributes, AttributeReferenceListWrapper excludedAttributes, Filter filter, AttributeReference sortBy, SortOrder sortOrder, Integer startIndex, Integer count) {\n     SearchRequest searchRequest = new SearchRequest();\n-    searchRequest.setAttributes(attributes.getAttributeReferences());\n-    searchRequest.setExcludedAttributes(excludedAttributes.getAttributeReferences());\n+    searchRequest.setAttributes(Optional.ofNullable(attributes).map(wrapper -> wrapper.getAttributeReferences()).orElse(Collections.emptySet()));\n+    searchRequest.setExcludedAttributes(Optional.ofNullable(excludedAttributes).map(wrapper -> wrapper.getAttributeReferences()).orElse(Collections.emptySet()));\n     searchRequest.setFilter(filter);\n     searchRequest.setSortBy(sortBy);\n     searchRequest.setSortOrder(sortOrder);",
+                "additions": 6,
+                "raw_url": "https://github.com/apache/directory-scimple/raw/dfe917fe02324ad94f47cc43c28d1796f6148ba6/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/rest/BaseResourceTypeResourceImpl.java",
+                "status": "modified",
+                "changes": 11,
+                "deletions": 5,
+                "sha": "c1b61dd622b01a137aa3172dc6185210b7b0da96",
+                "blob_url": "https://github.com/apache/directory-scimple/blob/dfe917fe02324ad94f47cc43c28d1796f6148ba6/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/rest/BaseResourceTypeResourceImpl.java",
+                "filename": "scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/rest/BaseResourceTypeResourceImpl.java",
+                "contents_url": "https://api.github.com/repos/apache/directory-scimple/contents/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/rest/BaseResourceTypeResourceImpl.java?ref=dfe917fe02324ad94f47cc43c28d1796f6148ba6"
+            }
+        ],
+        "bug_id": "directory-scimple_7",
+        "parent": "https://github.com/apache/directory-scimple/commit/59002728aa843690928cab2584fb97cc32ed816d",
+        "message": "Fixing NPE with attributes",
+        "repo": "directory-scimple"
+    },
+    {
+        "commit": "https://github.com/apache/directory-scimple/commit/dc18360a12d0423d2765c60479da897d267848ca",
+        "file": [
+            {
+                "patch": "@@ -150,7 +150,7 @@ private ResourceType generateResourceType(Class<? extends ScimResource> base, Pr\n \n         ScimExtensionType extensionType = se.getAnnotation(ScimExtensionType.class);\n \n-        if (extensionList == null) {\n+        if (extensionType == null) {\n           throw new InvalidProviderException(\"Missing annotation: ScimExtensionType must be at the top of scim extension classes\");\n         }\n ",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/directory-scimple/raw/dc18360a12d0423d2765c60479da897d267848ca/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/provider/ProviderRegistry.java",
+                "status": "modified",
+                "changes": 2,
+                "deletions": 1,
+                "sha": "b29af9abff6d8173d0912d2732f1ab56f1657a5b",
+                "blob_url": "https://github.com/apache/directory-scimple/blob/dc18360a12d0423d2765c60479da897d267848ca/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/provider/ProviderRegistry.java",
+                "filename": "scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/provider/ProviderRegistry.java",
+                "contents_url": "https://api.github.com/repos/apache/directory-scimple/contents/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/provider/ProviderRegistry.java?ref=dc18360a12d0423d2765c60479da897d267848ca"
+            }
+        ],
+        "bug_id": "directory-scimple_8",
+        "parent": "https://github.com/apache/directory-scimple/commit/2c19114ef1c6c6e0f8be46482211820fa048b5ab",
+        "message": "Fixing NPE on missing ScimExtensionType annotation",
+        "repo": "directory-scimple"
+    },
+    {
+        "commit": "https://github.com/apache/directory-scimple/commit/8e2b7d7905f7657307f68b5647288c5e4c6d8a31",
+        "file": [
+            {
+                "patch": "@@ -262,6 +262,10 @@ private EntityTag generateEtag(T resource) throws JAXBException {\n     StringWriter sw = new StringWriter();\n     \n     Meta meta = resource.getMeta();\n+    \n+    if (meta == null) {\n+      meta = new Meta();\n+    }\n \n     marshaller.setProperty(Marshaller.JAXB_ENCODING, \"UTF-8\");\n     resource.setMeta(null);",
+                "additions": 4,
+                "raw_url": "https://github.com/apache/directory-scimple/raw/8e2b7d7905f7657307f68b5647288c5e4c6d8a31/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/rest/BaseResourceTypeResourceImpl.java",
+                "status": "modified",
+                "changes": 4,
+                "deletions": 0,
+                "sha": "b68f404c0cb243ee068d3fb44b57ac33ed72e204",
+                "blob_url": "https://github.com/apache/directory-scimple/blob/8e2b7d7905f7657307f68b5647288c5e4c6d8a31/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/rest/BaseResourceTypeResourceImpl.java",
+                "filename": "scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/rest/BaseResourceTypeResourceImpl.java",
+                "contents_url": "https://api.github.com/repos/apache/directory-scimple/contents/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/rest/BaseResourceTypeResourceImpl.java?ref=8e2b7d7905f7657307f68b5647288c5e4c6d8a31"
+            }
+        ],
+        "bug_id": "directory-scimple_9",
+        "parent": "https://github.com/apache/directory-scimple/commit/1fea7c1370d5c2c0e0e19ca72d38bb80f88882c5",
+        "message": "Fixing NPE when no Meta exists",
+        "repo": "directory-scimple"
+    },
+    {
+        "commit": "https://github.com/apache/directory-scimple/commit/7edb6d7957ba115922814cceb5dca0853f63a87b",
+        "file": [
+            {
+                "patch": "@@ -7,6 +7,7 @@\n import java.io.ObjectOutputStream;\n import java.lang.reflect.Field;\n import java.util.Collection;\n+import java.util.Collections;\n import java.util.HashSet;\n import java.util.List;\n import java.util.Map.Entry;\n@@ -82,7 +83,6 @@ public void init() { // TODO move this to a CDI producer\n   }\n   \n   private <T extends ScimResource> T setAttributesForDisplayInternal(T resource, Returned ... removeAttributesOfTypes) throws IllegalArgumentException, IllegalAccessException, AttributeDoesNotExistException, IOException {\n-\n     T copy = cloneScimResource(resource);\n     String resourceType = copy.getResourceType();\n     Schema schema = registry.getBaseSchemaOfResourceType(resourceType);\n@@ -110,7 +110,7 @@ public void init() { // TODO move this to a CDI producer\n       return setAttributesForDisplay(resource);\n     } else {\n       T copy = cloneScimResource(resource);\n-\n+      \n       String resourceType = copy.getResourceType();\n       Schema schema = registry.getBaseSchemaOfResourceType(resourceType);\n \n@@ -198,7 +198,6 @@ private void removeAttributes(Object object, AttributeContainer attributeContain\n   }\n \n   private void processAttributes(Object object, AttributeContainer attributeContainer, Function<Attribute, Boolean> function) throws IllegalArgumentException, IllegalAccessException {\n-\n     if (attributeContainer != null && object != null) {\n       for (Attribute attribute : attributeContainer.getAttributes()) {\n         Field field = attribute.getField();\n@@ -276,7 +275,9 @@ private void processAttributes(Object object, AttributeContainer attributeContai\n \n     for (AttributeReference attributeReference : attributeReferences) {\n       Set<Attribute> findAttributes = findAttribute(attributeReference, includeAttributeChain);\n-      attributes.addAll(findAttributes);\n+      if (!findAttributes.isEmpty()) {\n+        attributes.addAll(findAttributes);\n+      }\n     }\n \n     return attributes;\n@@ -285,35 +286,42 @@ private void processAttributes(Object object, AttributeContainer attributeContai\n   private Set<Attribute> findAttribute(AttributeReference attributeReference, boolean includeAttributeChain) throws AttributeDoesNotExistException {\n     String schemaUrn = attributeReference.getUrn();\n     Schema schema = null;\n-\n+    Set<Attribute> attributes;\n+    \n     if (!StringUtils.isEmpty(schemaUrn)) {\n       schema = registry.getSchema(schemaUrn);\n \n-      Set<Attribute> attributes = findAttributeInSchema(schema, attributeReference, includeAttributeChain);\n-      if (attributes == null) {\n+      attributes = findAttributeInSchema(schema, attributeReference, includeAttributeChain);\n+      if (attributes.isEmpty()) {\n+        log.error(\"Attribute \" + attributeReference.getFullyQualifiedAttributeName() + \"not found in schema \" + schemaUrn);\n         throw new AttributeDoesNotExistException(attributeReference.getFullyQualifiedAttributeName());\n       }\n       return attributes;\n     }\n \n     // Handle unqualified attributes, look in the core schemas\n     schema = registry.getSchema(ScimUser.SCHEMA_URI);\n-    Set<Attribute> attributes = findAttributeInSchema(schema, attributeReference, includeAttributeChain);\n-    if (attributes != null) {\n+    attributes = findAttributeInSchema(schema, attributeReference, includeAttributeChain);\n+    if (!attributes.isEmpty()) {\n       return attributes;\n     }\n \n     schema = registry.getSchema(ScimGroup.SCHEMA_URI);\n     attributes = findAttributeInSchema(schema, attributeReference, includeAttributeChain);\n-    if (attributes != null) {\n+    if (!attributes.isEmpty()) {\n       return attributes;\n     }\n \n+    log.error(\"Attribute \" + attributeReference.getFullyQualifiedAttributeName() + \"not found in any schema.\");\n     throw new AttributeDoesNotExistException(attributeReference.getFullyQualifiedAttributeName());\n   }\n \n   private Set<Attribute> findAttributeInSchema(Schema schema, AttributeReference attributeReference, boolean includeAttributeChain) {\n     AttributeContainer attributeContainer = schema;\n+    if (attributeContainer == null) {\n+      return Collections.emptySet();\n+    }\n+    \n     String[] attributeNames = attributeReference.getAttributeName();\n \n     Set<Attribute> attributes = new HashSet<>();\n@@ -322,7 +330,7 @@ private void processAttributes(Object object, AttributeContainer attributeContai\n       attributeContainer = attributeContainer.getAttribute(attributeName);\n \n       if (attributeContainer == null) {\n-        return null;\n+        return Collections.emptySet();\n       }\n \n       if (includeAttributeChain) {",
+                "additions": 19,
+                "raw_url": "https://github.com/apache/directory-scimple/raw/7edb6d7957ba115922814cceb5dca0853f63a87b/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/utility/AttributeUtil.java",
+                "status": "modified",
+                "changes": 30,
+                "deletions": 11,
+                "sha": "f26dad2b8c76a5e9af95284cf7f555c082fc80b3",
+                "blob_url": "https://github.com/apache/directory-scimple/blob/7edb6d7957ba115922814cceb5dca0853f63a87b/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/utility/AttributeUtil.java",
+                "filename": "scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/utility/AttributeUtil.java",
+                "contents_url": "https://api.github.com/repos/apache/directory-scimple/contents/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/utility/AttributeUtil.java?ref=7edb6d7957ba115922814cceb5dca0853f63a87b"
+            }
+        ],
+        "bug_id": "directory-scimple_10",
+        "parent": "https://github.com/apache/directory-scimple/commit/7f4b40178721ed008c9b768c769a51a67232fea5",
+        "message": "Add null checks before processing schemas and attributes\n\nISSUE #45: The findAttributeInSchema method would throw a NPE if the\nattribute does not exist in the given schema. Added null checks to\nensure that the AttributeDoesNotExistException is thrown if an attribute\nthat does not belong to any known schema is encountered.",
+        "repo": "directory-scimple"
+    },
+    {
+        "commit": "https://github.com/apache/directory-scimple/commit/f713676bfb1abfc28e8e8e252b7821b243955a5f",
+        "file": [
+            {
+                "patch": "@@ -23,6 +23,9 @@\n import javax.ws.rs.core.Response.Status.Family;\n import javax.ws.rs.core.UriInfo;\n \n+import org.slf4j.Logger;\n+import org.slf4j.LoggerFactory;\n+\n import com.fasterxml.jackson.annotation.JsonInclude.Include;\n import com.fasterxml.jackson.core.JsonProcessingException;\n import com.fasterxml.jackson.databind.AnnotationIntrospector;\n@@ -59,6 +62,8 @@\n @Slf4j\n public abstract class BaseResourceTypeResourceImpl<T extends ScimResource> implements BaseResourceTypeResource<T> {\n \n+  private static final Logger LOG = LoggerFactory.getLogger(BaseResourceTypeResourceImpl.class);\n+  \n   public abstract Provider<T> getProvider();\n \n   @Context\n@@ -215,18 +220,18 @@ public Response create(T resource, AttributeReferenceListWrapper attributes, Att\n       }\n     } catch (IllegalArgumentException | IllegalAccessException | AttributeDoesNotExistException | IOException e) {\n       if (etag == null) {\n-        return Response.status(Status.CREATED).location(buildLocationTag(resource)).build();\n+        return Response.status(Status.CREATED).location(buildLocationTag(created)).build();\n       } else {\n-        Response.status(Status.CREATED).location(buildLocationTag(resource)).tag(etag).build();\n+        Response.status(Status.CREATED).location(buildLocationTag(created)).tag(etag).build();\n       }\n     }\n \n     // TODO - Is this the right behavior?\n     if (etag == null) {\n-      return Response.status(Status.CREATED).location(buildLocationTag(resource)).entity(created).build();\n+      return Response.status(Status.CREATED).location(buildLocationTag(created)).entity(created).build();\n     }\n \n-    return Response.status(Status.CREATED).location(buildLocationTag(resource)).tag(etag).entity(created).build();\n+    return Response.status(Status.CREATED).location(buildLocationTag(created)).tag(etag).entity(created).build();\n   }\n \n   @Override\n@@ -368,10 +373,10 @@ public Response update(T resource, String id, AttributeReferenceListWrapper attr\n \n     // TODO - Is this correct or should we support roll back semantics\n     if (etag == null) {\n-      return Response.ok(updated).location(buildLocationTag(resource)).build();\n+      return Response.ok(updated).location(buildLocationTag(updated)).build();\n     }\n \n-    return Response.ok(updated).location(buildLocationTag(resource)).tag(etag).build();\n+    return Response.ok(updated).location(buildLocationTag(updated)).tag(etag).build();\n   }\n \n   @Override\n@@ -442,7 +447,12 @@ public static EntityTag hash(String input) throws NoSuchAlgorithmException, Unsu\n   }\n \n   private URI buildLocationTag(T resource) {\n-    return uriInfo.getAbsolutePathBuilder().path(resource.getId()).build();\n+    String id = resource.getId();\n+    if (id == null) {\n+      LOG.warn(\"Provider must supply an id for a resource\");\n+      id = \"unknown\";\n+    }\n+    return uriInfo.getAbsolutePathBuilder().path(id).build();\n   }\n \n   private Response createGenericExceptionResponse(Exception e1, Status status) {",
+                "additions": 17,
+                "raw_url": "https://github.com/apache/directory-scimple/raw/f713676bfb1abfc28e8e8e252b7821b243955a5f/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/rest/BaseResourceTypeResourceImpl.java",
+                "status": "modified",
+                "changes": 24,
+                "deletions": 7,
+                "sha": "d360fb04cba1d50db069fe4219f87f9717d5be4e",
+                "blob_url": "https://github.com/apache/directory-scimple/blob/f713676bfb1abfc28e8e8e252b7821b243955a5f/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/rest/BaseResourceTypeResourceImpl.java",
+                "filename": "scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/rest/BaseResourceTypeResourceImpl.java",
+                "contents_url": "https://api.github.com/repos/apache/directory-scimple/contents/scim-server/scim-server-common/src/main/java/edu/psu/swe/scim/server/rest/BaseResourceTypeResourceImpl.java?ref=f713676bfb1abfc28e8e8e252b7821b243955a5f"
+            }
+        ],
+        "bug_id": "directory-scimple_11",
+        "parent": "https://github.com/apache/directory-scimple/commit/6104bbb7420aa431b9c8d0e5260807f9ab9ae308",
+        "message": "Fixing NPE when Provider is generating an id\n\nSee Issue #20",
+        "repo": "directory-scimple"
+    },
+    {
+        "commit": "https://github.com/apache/directory-scimple/commit/b97a7654b9b3ff79554cffe92b381a8ba8d6dfbf",
+        "file": [
+            {
+                "patch": "@@ -69,12 +69,12 @@ public ScimResource(String urn) {\n   }\n \n   public void addExtension(ScimExtension extension) throws InvalidExtensionException {\n-    ScimExtensionType [] se = extension.getClass().getAnnotationsByType(ScimExtensionType.class);\n-    \n+    ScimExtensionType[] se = extension.getClass().getAnnotationsByType(ScimExtensionType.class);\n+\n     if (se.length == 0 || se.length > 1) {\n       throw new InvalidExtensionException(\"Registered extensions must have an ScimExtensionType annotation\");\n     }\n-    \n+\n     extensions.put(se[0].id(), extension);\n   }\n \n@@ -103,21 +103,24 @@ public void setExtensions(String key, Object value) {\n     LOG.debug(\"Resource class: \" + resourceClass.getSimpleName());\n \n     Class<? extends ScimExtension> extensionClass = ScimExtensionRegistry.getInstance().getExtensionClass(resourceClass, key);\n-    LOG.debug(\"Extension class: \" + extensionClass.getSimpleName());\n \n-    ObjectMapper objectMapper = new ObjectMapper();\n-    JaxbAnnotationModule jaxbAnnotationModule = new JaxbAnnotationModule();\n-    objectMapper.registerModule(jaxbAnnotationModule);\n+    if (extensionClass != null) {\n+      LOG.debug(\"Extension class: \" + extensionClass.getSimpleName());\n+\n+      ObjectMapper objectMapper = new ObjectMapper();\n+      JaxbAnnotationModule jaxbAnnotationModule = new JaxbAnnotationModule();\n+      objectMapper.registerModule(jaxbAnnotationModule);\n \n-    AnnotationIntrospector jaxbIntrospector = new JaxbAnnotationIntrospector(objectMapper.getTypeFactory());\n-    AnnotationIntrospector jacksonIntrospector = new JacksonAnnotationIntrospector();\n-    AnnotationIntrospector pair = new AnnotationIntrospectorPair(jacksonIntrospector, jaxbIntrospector);\n-    objectMapper.setAnnotationIntrospector(pair);\n+      AnnotationIntrospector jaxbIntrospector = new JaxbAnnotationIntrospector(objectMapper.getTypeFactory());\n+      AnnotationIntrospector jacksonIntrospector = new JacksonAnnotationIntrospector();\n+      AnnotationIntrospector pair = new AnnotationIntrospectorPair(jacksonIntrospector, jaxbIntrospector);\n+      objectMapper.setAnnotationIntrospector(pair);\n \n-    ScimExtension extension = objectMapper.convertValue(value, extensionClass);\n-    if (extension != null) {\n-      LOG.debug(\"    ***** Added extension to the resource *****\");\n-      extensions.put(key, extension);\n+      ScimExtension extension = objectMapper.convertValue(value, extensionClass);\n+      if (extension != null) {\n+        LOG.debug(\"    ***** Added extension to the resource *****\");\n+        extensions.put(key, extension);\n+      }\n     }\n   }\n ",
+                "additions": 18,
+                "raw_url": "https://github.com/apache/directory-scimple/raw/b97a7654b9b3ff79554cffe92b381a8ba8d6dfbf/scim-spec/scim-spec-schema/src/main/java/edu/psu/swe/scim/spec/resources/ScimResource.java",
+                "status": "modified",
+                "changes": 33,
+                "deletions": 15,
+                "sha": "a65f6d3320eb5d3324f1dfaa420cb8daf66a6aa7",
+                "blob_url": "https://github.com/apache/directory-scimple/blob/b97a7654b9b3ff79554cffe92b381a8ba8d6dfbf/scim-spec/scim-spec-schema/src/main/java/edu/psu/swe/scim/spec/resources/ScimResource.java",
+                "filename": "scim-spec/scim-spec-schema/src/main/java/edu/psu/swe/scim/spec/resources/ScimResource.java",
+                "contents_url": "https://api.github.com/repos/apache/directory-scimple/contents/scim-spec/scim-spec-schema/src/main/java/edu/psu/swe/scim/spec/resources/ScimResource.java?ref=b97a7654b9b3ff79554cffe92b381a8ba8d6dfbf"
+            }
+        ],
+        "bug_id": "directory-scimple_12",
+        "parent": "https://github.com/apache/directory-scimple/commit/d1e381075c463e4853c55cc88afda4c51dc8ddfd",
+        "message": "Fixed an NPE that occurs if the ScimExtension is not registered.",
+        "repo": "directory-scimple"
+    }
+]

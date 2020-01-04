@@ -1,0 +1,533 @@
+[
+    {
+        "commit": "https://github.com/apache/maven-integration-testing/commit/310c4dfc71e1a052df428585b52b1a2fdecf7993",
+        "file": [
+            {
+                "patch": "@@ -123,9 +123,15 @@ public void execute()\n                     MavenProject project = builder.buildFromRepository( artifact, remoteRepositories, localRepository );\n \n                     String key = artifact.getId() + \".\";\n-                    props.setProperty( key + \"project.name\", project.getName() );\n-                    props.setProperty( key + \"project.description\", project.getDescription() );\n                     props.setProperty( key + \"project.id\", project.getId() );\n+                    if ( project.getName() != null )\n+                    {\n+                        props.setProperty( key + \"project.name\", project.getName() );\n+                    }\n+                    if ( project.getDescription() != null )\n+                    {\n+                        props.setProperty( key + \"project.description\", project.getDescription() );\n+                    }\n                     if ( project.getArtifact() != null )\n                     {\n                         props.setProperty( key + \"artifact.id\", project.getArtifact().getId() );",
+                "additions": 8,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/310c4dfc71e1a052df428585b52b1a2fdecf7993/core-it-support/core-it-plugins/maven-it-plugin-artifact/src/main/java/org/apache/maven/plugin/coreit/BuildPomMojo.java",
+                "status": "modified",
+                "changes": 10,
+                "deletions": 2,
+                "sha": "b19a9fd58cf5025aee67d66e73b142ee81bb9990",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/310c4dfc71e1a052df428585b52b1a2fdecf7993/core-it-support/core-it-plugins/maven-it-plugin-artifact/src/main/java/org/apache/maven/plugin/coreit/BuildPomMojo.java",
+                "filename": "core-it-support/core-it-plugins/maven-it-plugin-artifact/src/main/java/org/apache/maven/plugin/coreit/BuildPomMojo.java",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-it-support/core-it-plugins/maven-it-plugin-artifact/src/main/java/org/apache/maven/plugin/coreit/BuildPomMojo.java?ref=310c4dfc71e1a052df428585b52b1a2fdecf7993"
+            }
+        ],
+        "bug_id": "maven-integration-testing_1",
+        "parent": "https://github.com/apache/maven-integration-testing/commit/c6569b01959f5aebee725e5485affecdafc402fd",
+        "message": "o Fixed NPE\n\ngit-svn-id: https://svn.apache.org/repos/asf/maven/core-integration-testing/trunk@965100 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "maven-integration-testing"
+    },
+    {
+        "commit": "https://github.com/apache/maven-integration-testing/commit/8d38858d7ee5d10ab3640de1562cbad318c9e154",
+        "file": [
+            {
+                "patch": "@@ -67,13 +67,16 @@\n \n     private String matchPattern;\n \n+    private static final String DEFAULT_MATCH_PATTERN = \"(.*?)-(RC[0-9]+|SNAPSHOT|RC[0-9]+-SNAPSHOT)\";\n+\n     protected AbstractMavenIntegrationTestCase()\n     {\n+        this.matchPattern = DEFAULT_MATCH_PATTERN;\n     }\n \n     protected AbstractMavenIntegrationTestCase( String versionRangeStr )\n     {\n-        this( versionRangeStr, \"(.*?)-(RC[0-9]+|SNAPSHOT|RC[0-9]+-SNAPSHOT)\" );\n+        this( versionRangeStr, DEFAULT_MATCH_PATTERN );\n     }\n \n     protected AbstractMavenIntegrationTestCase( String versionRangeStr, String matchPattern )\n@@ -237,7 +240,7 @@ protected File setupLocalRepo()\n         return localRepo;\n     }\n \n-    protected ArtifactVersion removePattern( ArtifactVersion version )\n+    ArtifactVersion removePattern( ArtifactVersion version )\n     {\n         String v = version.toString();\n ",
+                "additions": 5,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/8d38858d7ee5d10ab3640de1562cbad318c9e154/core-it-support/maven-it-helper/src/main/java/org/apache/maven/it/AbstractMavenIntegrationTestCase.java",
+                "status": "modified",
+                "changes": 7,
+                "deletions": 2,
+                "sha": "7c6f965386270cafeef938532eedad392090c69e",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/8d38858d7ee5d10ab3640de1562cbad318c9e154/core-it-support/maven-it-helper/src/main/java/org/apache/maven/it/AbstractMavenIntegrationTestCase.java",
+                "filename": "core-it-support/maven-it-helper/src/main/java/org/apache/maven/it/AbstractMavenIntegrationTestCase.java",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-it-support/maven-it-helper/src/main/java/org/apache/maven/it/AbstractMavenIntegrationTestCase.java?ref=8d38858d7ee5d10ab3640de1562cbad318c9e154"
+            },
+            {
+                "patch": "@@ -19,34 +19,47 @@\n  * under the License.\n  */\n \n-import org.apache.maven.artifact.versioning.ArtifactVersion;\n-import org.apache.maven.artifact.versioning.DefaultArtifactVersion;\n-import org.apache.maven.artifact.versioning.InvalidVersionSpecificationException;\n-import org.apache.maven.artifact.versioning.VersionRange;\n-import org.apache.maven.it.util.FileUtils;\n-\n-import java.io.File;\n-import java.io.IOException;\n-import java.io.PrintStream;\n-import java.text.DecimalFormat;\n-import java.text.DecimalFormatSymbols;\n-import java.util.Locale;\n-\n import junit.framework.TestCase;\n \n+import org.apache.maven.artifact.versioning.DefaultArtifactVersion;\n+\n public class MavenIntegrationTestCaseTest\n     extends TestCase\n {\n-    public void testRemovePattern()\n+\n+    public void testRemovePatternForTestWithVersionRange()\n+    {\n+        AbstractMavenIntegrationTestCase test = new AbstractMavenIntegrationTestCase( \"[2.0,)\" )\n+        {\n+            // test case with version range\n+        };\n+        testRemovePattern( test );\n+    }\n+\n+    public void testRemovePatternForTestWithoutVersionRange()\n+    {\n+        AbstractMavenIntegrationTestCase test = new AbstractMavenIntegrationTestCase()\n+        {\n+            // test case without version range\n+        };\n+        testRemovePattern( test );\n+    }\n+\n+    private static void testRemovePattern( AbstractMavenIntegrationTestCase test )\n     {\n-        AbstractMavenIntegrationTestCase test = new AbstractMavenIntegrationTestCase( \"[2.0,)\" ) {};\n-        assertEquals( \"2.1.0-M1\", test.removePattern( new DefaultArtifactVersion( \"2.1.0-M1\" ) ).toString() );\n-        assertEquals( \"2.1.0-M1\", test.removePattern( new DefaultArtifactVersion( \"2.1.0-M1-SNAPSHOT\" ) ).toString() );\n-        assertEquals( \"2.1.0-M1\", test.removePattern( new DefaultArtifactVersion( \"2.1.0-M1-RC1\" ) ).toString() );\n-        assertEquals( \"2.1.0-M1\", test.removePattern( new DefaultArtifactVersion( \"2.1.0-M1-RC1-SNAPSHOT\" ) ).toString() );\n-        assertEquals( \"2.0.10\", test.removePattern( new DefaultArtifactVersion( \"2.0.10\" ) ).toString() );\n-        assertEquals( \"2.0.10\", test.removePattern( new DefaultArtifactVersion( \"2.0.10-SNAPSHOT\" ) ).toString() );\n-        assertEquals( \"2.0.10\", test.removePattern( new DefaultArtifactVersion( \"2.0.10-RC1\" ) ).toString() );\n-        assertEquals( \"2.0.10\", test.removePattern( new DefaultArtifactVersion( \"2.0.10-RC1-SNAPSHOT\" ) ).toString() );\n+        assertVersionEquals( \"2.1.0-M1\", \"2.1.0-M1\", test );\n+        assertVersionEquals( \"2.1.0-M1\", \"2.1.0-M1-SNAPSHOT\", test );\n+        assertVersionEquals( \"2.1.0-M1\", \"2.1.0-M1-RC1\", test );\n+        assertVersionEquals( \"2.1.0-M1\", \"2.1.0-M1-RC1-SNAPSHOT\", test );\n+        assertVersionEquals( \"2.0.10\", \"2.0.10\", test );\n+        assertVersionEquals( \"2.0.10\", \"2.0.10-SNAPSHOT\", test );\n+        assertVersionEquals( \"2.0.10\", \"2.0.10-RC1\", test );\n+        assertVersionEquals( \"2.0.10\", \"2.0.10-RC1-SNAPSHOT\", test );\n     }\n+\n+    private static void assertVersionEquals( String expected, String version, AbstractMavenIntegrationTestCase test )\n+    {\n+        assertEquals( expected, test.removePattern( new DefaultArtifactVersion( version ) ).toString() );\n+    }\n+\n }",
+                "additions": 36,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/8d38858d7ee5d10ab3640de1562cbad318c9e154/core-it-support/maven-it-helper/src/test/java/org/apache/maven/it/MavenIntegrationTestCaseTest.java",
+                "status": "modified",
+                "changes": 59,
+                "deletions": 23,
+                "sha": "87da6c4ba910033d5b2530db95b7d54a03c0a343",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/8d38858d7ee5d10ab3640de1562cbad318c9e154/core-it-support/maven-it-helper/src/test/java/org/apache/maven/it/MavenIntegrationTestCaseTest.java",
+                "filename": "core-it-support/maven-it-helper/src/test/java/org/apache/maven/it/MavenIntegrationTestCaseTest.java",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-it-support/maven-it-helper/src/test/java/org/apache/maven/it/MavenIntegrationTestCaseTest.java?ref=8d38858d7ee5d10ab3640de1562cbad318c9e154"
+            }
+        ],
+        "bug_id": "maven-integration-testing_2",
+        "parent": "https://github.com/apache/maven-integration-testing/commit/693b10995af68b0503222a7e12fb60ab879a0e02",
+        "message": "o Fixed NPE\n\ngit-svn-id: https://svn.apache.org/repos/asf/maven/core-integration-testing/trunk@739544 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "maven-integration-testing"
+    },
+    {
+        "commit": "https://github.com/apache/maven-integration-testing/commit/468b122273d3868413f8a52af71c5cf8f19602d4",
+        "file": [
+            {
+                "patch": "@@ -81,6 +81,7 @@ public static Test suite()\n         // -------------------------------------------------------------------------------------------------------------\n         // suite.addTestSuite( MavenIT0108SnapshotUpdateTest.class ); -- MNG-3137\n \n+        suite.addTestSuite( MavenITmng4779MultipleDepsWithVersionRangeFromLocalRepoTest.class );\n         suite.addTestSuite( MavenITmng4776ForkedReactorPluginVersionResolutionTest.class );\n         suite.addTestSuite( MavenITmng4772PluginVersionResolutionDoesntTouchDisabledRepoTest.class );\n         suite.addTestSuite( MavenITmng4771PluginPrefixResolutionDoesntTouchDisabledRepoTest.class );",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/468b122273d3868413f8a52af71c5cf8f19602d4/core-it-suite/src/test/java/org/apache/maven/it/IntegrationTestSuite.java",
+                "status": "modified",
+                "changes": 1,
+                "deletions": 0,
+                "sha": "8f43eb999395bd8c67aab17a058d59ece1c5b61e",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/468b122273d3868413f8a52af71c5cf8f19602d4/core-it-suite/src/test/java/org/apache/maven/it/IntegrationTestSuite.java",
+                "filename": "core-it-suite/src/test/java/org/apache/maven/it/IntegrationTestSuite.java",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-it-suite/src/test/java/org/apache/maven/it/IntegrationTestSuite.java?ref=468b122273d3868413f8a52af71c5cf8f19602d4"
+            },
+            {
+                "patch": "@@ -0,0 +1,64 @@\n+package org.apache.maven.it;\n+\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one\n+ * or more contributor license agreements.  See the NOTICE file\n+ * distributed with this work for additional information\n+ * regarding copyright ownership.  The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance\n+ * with the License.  You may obtain a copy of the License at\n+ *\n+ *   http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing,\n+ * software distributed under the License is distributed on an\n+ * \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+ * KIND, either express or implied.  See the License for the\n+ * specific language governing permissions and limitations\n+ * under the License.\n+ */\n+\n+import org.apache.maven.it.Verifier;\n+import org.apache.maven.it.util.ResourceExtractor;\n+\n+import java.io.File;\n+import java.util.List;\n+\n+/**\n+ * This is a test set for <a href=\"http://jira.codehaus.org/browse/MNG-4779\">MNG-4779</a>.\n+ * \n+ * @author Benjamin Bentmann\n+ */\n+public class MavenITmng4779MultipleDepsWithVersionRangeFromLocalRepoTest\n+    extends AbstractMavenIntegrationTestCase\n+{\n+\n+    public MavenITmng4779MultipleDepsWithVersionRangeFromLocalRepoTest()\n+    {\n+        super( \"[2.0.3,)\" );\n+    }\n+\n+    /**\n+     * Test that dependency resolution doesn't error out when a dependency with a range satisfied from the local repo\n+     * is seen more than once during the collection.\n+     */\n+    public void testit()\n+        throws Exception\n+    {\n+        File testDir = ResourceExtractor.simpleExtractResources( getClass(), \"/mng-4779\" );\n+\n+        Verifier verifier = newVerifier( testDir.getAbsolutePath() );\n+        verifier.setAutoclean( false );\n+        verifier.deleteDirectory( \"test/target\" );\n+        verifier.deleteArtifacts( \"org.apache.maven.its.mng4779\" );\n+        verifier.executeGoal( \"validate\" );\n+        verifier.verifyErrorFreeLog();\n+        verifier.resetStreams();\n+\n+        List classpath = verifier.loadLines( \"test/target/classpath.txt\", \"UTF-8\" );\n+\n+        assertEquals( classpath.toString(), 4, classpath.size() );\n+    }\n+\n+}",
+                "additions": 64,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/468b122273d3868413f8a52af71c5cf8f19602d4/core-it-suite/src/test/java/org/apache/maven/it/MavenITmng4779MultipleDepsWithVersionRangeFromLocalRepoTest.java",
+                "status": "added",
+                "changes": 64,
+                "deletions": 0,
+                "sha": "6ac95cc40a5ac6bd345fdc44fa1b42333abff7b3",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/468b122273d3868413f8a52af71c5cf8f19602d4/core-it-suite/src/test/java/org/apache/maven/it/MavenITmng4779MultipleDepsWithVersionRangeFromLocalRepoTest.java",
+                "filename": "core-it-suite/src/test/java/org/apache/maven/it/MavenITmng4779MultipleDepsWithVersionRangeFromLocalRepoTest.java",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-it-suite/src/test/java/org/apache/maven/it/MavenITmng4779MultipleDepsWithVersionRangeFromLocalRepoTest.java?ref=468b122273d3868413f8a52af71c5cf8f19602d4"
+            },
+            {
+                "patch": "@@ -0,0 +1,66 @@\n+<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n+\n+<!--\n+Licensed to the Apache Software Foundation (ASF) under one\n+or more contributor license agreements.  See the NOTICE file\n+distributed with this work for additional information\n+regarding copyright ownership.  The ASF licenses this file\n+to you under the Apache License, Version 2.0 (the\n+\"License\"); you may not use this file except in compliance\n+with the License.  You may obtain a copy of the License at\n+\n+  http://www.apache.org/licenses/LICENSE-2.0\n+\n+Unless required by applicable law or agreed to in writing,\n+software distributed under the License is distributed on an\n+\"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+KIND, either express or implied.  See the License for the\n+specific language governing permissions and limitations\n+under the License.\n+-->\n+\n+<project>\n+  <modelVersion>4.0.0</modelVersion>\n+\n+  <groupId>org.apache.maven.its.mng4779</groupId>\n+  <artifactId>a</artifactId>\n+  <version>1.0</version>\n+  <packaging>jar</packaging>\n+\n+  <name>Maven Integration Test :: MNG-4779 :: A</name> \n+  <description>\n+    Test that dependency resolution doesn't error out when a dependency with a range satisfied from the local repo\n+    is seen more than once during the collection.\n+  </description>\n+\n+  <dependencies>\n+    <dependency>\n+      <groupId>org.apache.maven.its.mng4779</groupId>\n+      <artifactId>c</artifactId>\n+      <version>[1.0,)</version>\n+    </dependency>\n+  </dependencies>\n+\n+  <build>\n+    <plugins>\n+      <plugin>\n+        <groupId>org.apache.maven.its.plugins</groupId>\n+        <artifactId>maven-it-plugin-artifact</artifactId>\n+        <version>2.1-SNAPSHOT</version>\n+        <configuration>\n+          <mainFile>pom.xml</mainFile>\n+        </configuration>\n+        <executions>\n+          <execution>\n+            <id>test</id>\n+            <phase>validate</phase>\n+            <goals>\n+              <goal>set</goal>\n+              <goal>install</goal>\n+            </goals>\n+          </execution>\n+        </executions>\n+      </plugin>\n+    </plugins>\n+  </build>\n+</project>",
+                "additions": 66,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/468b122273d3868413f8a52af71c5cf8f19602d4/core-it-suite/src/test/resources/mng-4779/a/pom.xml",
+                "status": "added",
+                "changes": 66,
+                "deletions": 0,
+                "sha": "d0c2dc4c981ee6f64e5a3933fabde2ae1364cd51",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/468b122273d3868413f8a52af71c5cf8f19602d4/core-it-suite/src/test/resources/mng-4779/a/pom.xml",
+                "filename": "core-it-suite/src/test/resources/mng-4779/a/pom.xml",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-it-suite/src/test/resources/mng-4779/a/pom.xml?ref=468b122273d3868413f8a52af71c5cf8f19602d4"
+            },
+            {
+                "patch": "@@ -0,0 +1,66 @@\n+<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n+\n+<!--\n+Licensed to the Apache Software Foundation (ASF) under one\n+or more contributor license agreements.  See the NOTICE file\n+distributed with this work for additional information\n+regarding copyright ownership.  The ASF licenses this file\n+to you under the Apache License, Version 2.0 (the\n+\"License\"); you may not use this file except in compliance\n+with the License.  You may obtain a copy of the License at\n+\n+  http://www.apache.org/licenses/LICENSE-2.0\n+\n+Unless required by applicable law or agreed to in writing,\n+software distributed under the License is distributed on an\n+\"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+KIND, either express or implied.  See the License for the\n+specific language governing permissions and limitations\n+under the License.\n+-->\n+\n+<project>\n+  <modelVersion>4.0.0</modelVersion>\n+\n+  <groupId>org.apache.maven.its.mng4779</groupId>\n+  <artifactId>b</artifactId>\n+  <version>1.0</version>\n+  <packaging>jar</packaging>\n+\n+  <name>Maven Integration Test :: MNG-4779 :: B</name> \n+  <description>\n+    Test that dependency resolution doesn't error out when a dependency with a range satisfied from the local repo\n+    is seen more than once during the collection.\n+  </description>\n+\n+  <dependencies>\n+    <dependency>\n+      <groupId>org.apache.maven.its.mng4779</groupId>\n+      <artifactId>c</artifactId>\n+      <version>[1.0,)</version>\n+    </dependency>\n+  </dependencies>\n+\n+  <build>\n+    <plugins>\n+      <plugin>\n+        <groupId>org.apache.maven.its.plugins</groupId>\n+        <artifactId>maven-it-plugin-artifact</artifactId>\n+        <version>2.1-SNAPSHOT</version>\n+        <configuration>\n+          <mainFile>pom.xml</mainFile>\n+        </configuration>\n+        <executions>\n+          <execution>\n+            <id>test</id>\n+            <phase>validate</phase>\n+            <goals>\n+              <goal>set</goal>\n+              <goal>install</goal>\n+            </goals>\n+          </execution>\n+        </executions>\n+      </plugin>\n+    </plugins>\n+  </build>\n+</project>",
+                "additions": 66,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/468b122273d3868413f8a52af71c5cf8f19602d4/core-it-suite/src/test/resources/mng-4779/b/pom.xml",
+                "status": "added",
+                "changes": 66,
+                "deletions": 0,
+                "sha": "12f2ea3d557d80eeac908f1db071149b9061c06a",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/468b122273d3868413f8a52af71c5cf8f19602d4/core-it-suite/src/test/resources/mng-4779/b/pom.xml",
+                "filename": "core-it-suite/src/test/resources/mng-4779/b/pom.xml",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-it-suite/src/test/resources/mng-4779/b/pom.xml?ref=468b122273d3868413f8a52af71c5cf8f19602d4"
+            },
+            {
+                "patch": "@@ -0,0 +1,58 @@\n+<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n+\n+<!--\n+Licensed to the Apache Software Foundation (ASF) under one\n+or more contributor license agreements.  See the NOTICE file\n+distributed with this work for additional information\n+regarding copyright ownership.  The ASF licenses this file\n+to you under the Apache License, Version 2.0 (the\n+\"License\"); you may not use this file except in compliance\n+with the License.  You may obtain a copy of the License at\n+\n+  http://www.apache.org/licenses/LICENSE-2.0\n+\n+Unless required by applicable law or agreed to in writing,\n+software distributed under the License is distributed on an\n+\"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+KIND, either express or implied.  See the License for the\n+specific language governing permissions and limitations\n+under the License.\n+-->\n+\n+<project>\n+  <modelVersion>4.0.0</modelVersion>\n+\n+  <groupId>org.apache.maven.its.mng4779</groupId>\n+  <artifactId>c</artifactId>\n+  <version>1.0</version>\n+  <packaging>jar</packaging>\n+\n+  <name>Maven Integration Test :: MNG-4779 :: C</name> \n+  <description>\n+    Test that dependency resolution doesn't error out when a dependency with a range satisfied from the local repo\n+    is seen more than once during the collection.\n+  </description>\n+\n+  <build>\n+    <plugins>\n+      <plugin>\n+        <groupId>org.apache.maven.its.plugins</groupId>\n+        <artifactId>maven-it-plugin-artifact</artifactId>\n+        <version>2.1-SNAPSHOT</version>\n+        <configuration>\n+          <mainFile>pom.xml</mainFile>\n+        </configuration>\n+        <executions>\n+          <execution>\n+            <id>test</id>\n+            <phase>validate</phase>\n+            <goals>\n+              <goal>set</goal>\n+              <goal>install</goal>\n+            </goals>\n+          </execution>\n+        </executions>\n+      </plugin>\n+    </plugins>\n+  </build>\n+</project>",
+                "additions": 58,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/468b122273d3868413f8a52af71c5cf8f19602d4/core-it-suite/src/test/resources/mng-4779/c/pom.xml",
+                "status": "added",
+                "changes": 58,
+                "deletions": 0,
+                "sha": "6a8c81d3ea3bdb92785c89a8fc9f9604a8ae5193",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/468b122273d3868413f8a52af71c5cf8f19602d4/core-it-suite/src/test/resources/mng-4779/c/pom.xml",
+                "filename": "core-it-suite/src/test/resources/mng-4779/c/pom.xml",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-it-suite/src/test/resources/mng-4779/c/pom.xml?ref=468b122273d3868413f8a52af71c5cf8f19602d4"
+            },
+            {
+                "patch": "@@ -0,0 +1,42 @@\n+<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n+\n+<!--\n+Licensed to the Apache Software Foundation (ASF) under one\n+or more contributor license agreements.  See the NOTICE file\n+distributed with this work for additional information\n+regarding copyright ownership.  The ASF licenses this file\n+to you under the Apache License, Version 2.0 (the\n+\"License\"); you may not use this file except in compliance\n+with the License.  You may obtain a copy of the License at\n+\n+  http://www.apache.org/licenses/LICENSE-2.0\n+\n+Unless required by applicable law or agreed to in writing,\n+software distributed under the License is distributed on an\n+\"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+KIND, either express or implied.  See the License for the\n+specific language governing permissions and limitations\n+under the License.\n+-->\n+\n+<project>\n+  <modelVersion>4.0.0</modelVersion>\n+\n+  <groupId>org.apache.maven.its.mng4779</groupId>\n+  <artifactId>aggregator</artifactId>\n+  <version>1.0</version>\n+  <packaging>pom</packaging>\n+\n+  <name>Maven Integration Test :: MNG-4779 :: Aggregator</name> \n+  <description>\n+    Test that dependency resolution doesn't error out when a dependency with a range satisfied from the local repo\n+    is seen more than once during the collection.\n+  </description>\n+\n+  <modules>\n+    <module>c</module>\n+    <module>a</module>\n+    <module>b</module>\n+    <module>test</module>\n+  </modules>\n+</project>",
+                "additions": 42,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/468b122273d3868413f8a52af71c5cf8f19602d4/core-it-suite/src/test/resources/mng-4779/pom.xml",
+                "status": "added",
+                "changes": 42,
+                "deletions": 0,
+                "sha": "574d1ce7101519df532a948961ef9971a81b50a2",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/468b122273d3868413f8a52af71c5cf8f19602d4/core-it-suite/src/test/resources/mng-4779/pom.xml",
+                "filename": "core-it-suite/src/test/resources/mng-4779/pom.xml",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-it-suite/src/test/resources/mng-4779/pom.xml?ref=468b122273d3868413f8a52af71c5cf8f19602d4"
+            },
+            {
+                "patch": "@@ -0,0 +1,78 @@\n+<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n+\n+<!--\n+Licensed to the Apache Software Foundation (ASF) under one\n+or more contributor license agreements.  See the NOTICE file\n+distributed with this work for additional information\n+regarding copyright ownership.  The ASF licenses this file\n+to you under the Apache License, Version 2.0 (the\n+\"License\"); you may not use this file except in compliance\n+with the License.  You may obtain a copy of the License at\n+\n+  http://www.apache.org/licenses/LICENSE-2.0\n+\n+Unless required by applicable law or agreed to in writing,\n+software distributed under the License is distributed on an\n+\"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+KIND, either express or implied.  See the License for the\n+specific language governing permissions and limitations\n+under the License.\n+-->\n+\n+<project>\n+  <modelVersion>4.0.0</modelVersion>\n+\n+  <groupId>org.apache.maven.its.mng4779</groupId>\n+  <artifactId>test</artifactId>\n+  <version>1.0</version>\n+  <packaging>jar</packaging>\n+\n+  <name>Maven Integration Test :: MNG-4779 :: Test</name> \n+  <description>\n+    Test that dependency resolution doesn't error out when a dependency with a range satisfied from the local repo\n+    is seen more than once during the collection.\n+  </description>\n+\n+  <dependencies>\n+    <!--\n+    test\n+    +- a:1.0\n+    |  \\- c:[1.0,)      <-\\\n+    \\- b:1.0              | same dependency with range satisfied from locally built artifact\n+       \\- c:[1.0,)      <-/\n+    -->\n+    <dependency>\n+      <groupId>org.apache.maven.its.mng4779</groupId>\n+      <artifactId>a</artifactId>\n+      <version>1.0</version>\n+    </dependency>\n+    <dependency>\n+      <groupId>org.apache.maven.its.mng4779</groupId>\n+      <artifactId>b</artifactId>\n+      <version>1.0</version>\n+    </dependency>\n+  </dependencies>\n+\n+  <build>\n+    <plugins>\n+      <plugin>\n+        <groupId>org.apache.maven.its.plugins</groupId>\n+        <artifactId>maven-it-plugin-dependency-resolution</artifactId>\n+        <version>2.1-SNAPSHOT</version>\n+        <configuration>\n+          <compileClassPath>target/classpath.txt</compileClassPath>\n+          <significantPathLevels>1</significantPathLevels>\n+        </configuration>\n+        <executions>\n+          <execution>\n+            <id>resolve</id>\n+            <phase>validate</phase>\n+            <goals>\n+              <goal>compile</goal>\n+            </goals>\n+          </execution>\n+        </executions>\n+      </plugin>\n+    </plugins>\n+  </build>\n+</project>",
+                "additions": 78,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/468b122273d3868413f8a52af71c5cf8f19602d4/core-it-suite/src/test/resources/mng-4779/test/pom.xml",
+                "status": "added",
+                "changes": 78,
+                "deletions": 0,
+                "sha": "d1d426d0dd307558a6657139e522ef925a1ef67b",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/468b122273d3868413f8a52af71c5cf8f19602d4/core-it-suite/src/test/resources/mng-4779/test/pom.xml",
+                "filename": "core-it-suite/src/test/resources/mng-4779/test/pom.xml",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-it-suite/src/test/resources/mng-4779/test/pom.xml?ref=468b122273d3868413f8a52af71c5cf8f19602d4"
+            }
+        ],
+        "bug_id": "maven-integration-testing_3",
+        "parent": "https://github.com/apache/maven-integration-testing/commit/c2a6e85fba2a7f540e75114c4325e666d5e0d450",
+        "message": "[MNG-4779] NullPointerException thrown during dependency resolution when dependency with range occurs more than once in the dirty tree\n\no Added IT\n\ngit-svn-id: https://svn.apache.org/repos/asf/maven/core-integration-testing/trunk@989638 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "maven-integration-testing"
+    },
+    {
+        "commit": "https://github.com/apache/maven-integration-testing/commit/3ba7e4cd739cfdf396ae4b822e85306ba6d2d9b1",
+        "file": [
+            {
+                "patch": "@@ -87,6 +87,7 @@ public static Test suite()\n         suite.addTestSuite( MavenITmng4789ScopeInheritanceMeetsConflictTest.class );\n         suite.addTestSuite( MavenITmng4788InstallationToCustomLocalRepoTest.class );\n         suite.addTestSuite( MavenITmng4786AntBased21xMojoSupportTest.class );\n+        suite.addTestSuite( MavenITmng4785TransitiveResolutionInForkedThreadTest.class );\n         suite.addTestSuite( MavenITmng4781DeploymentToNexusStagingRepoTest.class );\n         suite.addTestSuite( MavenITmng4779MultipleDepsWithVersionRangeFromLocalRepoTest.class );\n         suite.addTestSuite( MavenITmng4776ForkedReactorPluginVersionResolutionTest.class );",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/3ba7e4cd739cfdf396ae4b822e85306ba6d2d9b1/core-it-suite/src/test/java/org/apache/maven/it/IntegrationTestSuite.java",
+                "status": "modified",
+                "changes": 1,
+                "deletions": 0,
+                "sha": "c663e4c98e99282e21a6941bb425cd1acf7a403f",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/3ba7e4cd739cfdf396ae4b822e85306ba6d2d9b1/core-it-suite/src/test/java/org/apache/maven/it/IntegrationTestSuite.java",
+                "filename": "core-it-suite/src/test/java/org/apache/maven/it/IntegrationTestSuite.java",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-it-suite/src/test/java/org/apache/maven/it/IntegrationTestSuite.java?ref=3ba7e4cd739cfdf396ae4b822e85306ba6d2d9b1"
+            },
+            {
+                "patch": "@@ -0,0 +1,67 @@\n+package org.apache.maven.it;\n+\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one\n+ * or more contributor license agreements.  See the NOTICE file\n+ * distributed with this work for additional information\n+ * regarding copyright ownership.  The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance\n+ * with the License.  You may obtain a copy of the License at\n+ *\n+ *   http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing,\n+ * software distributed under the License is distributed on an\n+ * \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+ * KIND, either express or implied.  See the License for the\n+ * specific language governing permissions and limitations\n+ * under the License.\n+ */\n+\n+import org.apache.maven.it.Verifier;\n+import org.apache.maven.it.util.ResourceExtractor;\n+\n+import java.io.File;\n+import java.util.Properties;\n+\n+/**\n+ * This is a test set for <a href=\"http://jira.codehaus.org/browse/MNG-4785\">MNG-4785</a>.\n+ * \n+ * @author Benjamin Bentmann\n+ */\n+public class MavenITmng4785TransitiveResolutionInForkedThreadTest\n+    extends AbstractMavenIntegrationTestCase\n+{\n+\n+    public MavenITmng4785TransitiveResolutionInForkedThreadTest()\n+    {\n+        super( \"[2.0.3,3.0-alpha-1),[3.0-beta-4,)\" );\n+    }\n+\n+    /**\n+     * Verify that dependency resolution using the 2.x API in forked threads works (e.g. has access to any required\n+     * session state).\n+     */\n+    public void testit()\n+        throws Exception\n+    {\n+        File testDir = ResourceExtractor.simpleExtractResources( getClass(), \"/mng-4785\" );\n+\n+        Verifier verifier = newVerifier( testDir.getAbsolutePath() );\n+        verifier.setAutoclean( false );\n+        verifier.deleteDirectory( \"target\" );\n+        verifier.deleteArtifacts( \"org.apache.maven.its.mng4785\" );\n+        verifier.getCliOptions().add( \"-s\" );\n+        verifier.getCliOptions().add( \"settings.xml\" );\n+        verifier.filterFile( \"settings-template.xml\", \"settings.xml\", \"UTF-8\", verifier.newDefaultFilterProperties() );\n+        verifier.executeGoal( \"validate\" );\n+        verifier.verifyErrorFreeLog();\n+        verifier.resetStreams();\n+\n+        Properties props = verifier.loadProperties( \"target/artifacts.properties\" );\n+        String path = props.getProperty( \"org.apache.maven.its.mng4785:dep:jar:0.1-SNAPSHOT\", \"\" );\n+        assertTrue( path, path.endsWith( \"dep-0.1-SNAPSHOT.jar\" ) );\n+    }\n+\n+}",
+                "additions": 67,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/3ba7e4cd739cfdf396ae4b822e85306ba6d2d9b1/core-it-suite/src/test/java/org/apache/maven/it/MavenITmng4785TransitiveResolutionInForkedThreadTest.java",
+                "status": "added",
+                "changes": 67,
+                "deletions": 0,
+                "sha": "adc7f322cc9eb494075c0a33524beffa4d964961",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/3ba7e4cd739cfdf396ae4b822e85306ba6d2d9b1/core-it-suite/src/test/java/org/apache/maven/it/MavenITmng4785TransitiveResolutionInForkedThreadTest.java",
+                "filename": "core-it-suite/src/test/java/org/apache/maven/it/MavenITmng4785TransitiveResolutionInForkedThreadTest.java",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-it-suite/src/test/java/org/apache/maven/it/MavenITmng4785TransitiveResolutionInForkedThreadTest.java?ref=3ba7e4cd739cfdf396ae4b822e85306ba6d2d9b1"
+            },
+            {
+                "patch": "@@ -0,0 +1,64 @@\n+<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n+\n+<!--\n+Licensed to the Apache Software Foundation (ASF) under one\n+or more contributor license agreements.  See the NOTICE file\n+distributed with this work for additional information\n+regarding copyright ownership.  The ASF licenses this file\n+to you under the Apache License, Version 2.0 (the\n+\"License\"); you may not use this file except in compliance\n+with the License.  You may obtain a copy of the License at\n+\n+  http://www.apache.org/licenses/LICENSE-2.0\n+\n+Unless required by applicable law or agreed to in writing,\n+software distributed under the License is distributed on an\n+\"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+KIND, either express or implied.  See the License for the\n+specific language governing permissions and limitations\n+under the License.\n+-->\n+\n+<project>\n+  <modelVersion>4.0.0</modelVersion>\n+\n+  <groupId>org.apache.maven.its.mng4785</groupId>\n+  <artifactId>test</artifactId>\n+  <version>0.1</version>\n+  <packaging>jar</packaging>\n+\n+  <name>Maven Integration Test :: MNG-4785</name>\n+  <description>\n+    Verify that dependency resolution using 2.x API in forked threads works (e.g. has access to any required\n+    session state).\n+  </description>\n+\n+  <build>\n+    <plugins>\n+      <plugin>\n+        <groupId>org.apache.maven.its.plugins</groupId>\n+        <artifactId>maven-it-plugin-artifact</artifactId>\n+        <version>2.1-SNAPSHOT</version>\n+        <executions>\n+          <execution>\n+            <id>test</id>\n+            <phase>validate</phase>\n+            <goals>\n+              <goal>resolve-transitive</goal>\n+            </goals>\n+            <configuration>\n+              <propertiesFile>target/artifacts.properties</propertiesFile>\n+              <dependencies>\n+                <dependency>\n+                  <groupId>org.apache.maven.its.mng4785</groupId>\n+                  <artifactId>dep</artifactId>\n+                  <version>0.1-SNAPSHOT</version>\n+                </dependency>\n+              </dependencies>\n+            </configuration>\n+          </execution>\n+        </executions>\n+      </plugin>\n+    </plugins>\n+  </build>\n+</project>",
+                "additions": 64,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/3ba7e4cd739cfdf396ae4b822e85306ba6d2d9b1/core-it-suite/src/test/resources/mng-4785/pom.xml",
+                "status": "added",
+                "changes": 64,
+                "deletions": 0,
+                "sha": "eeebef90ba131bebf28ee60c5bea2279bfa5de61",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/3ba7e4cd739cfdf396ae4b822e85306ba6d2d9b1/core-it-suite/src/test/resources/mng-4785/pom.xml",
+                "filename": "core-it-suite/src/test/resources/mng-4785/pom.xml",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-it-suite/src/test/resources/mng-4785/pom.xml?ref=3ba7e4cd739cfdf396ae4b822e85306ba6d2d9b1"
+            },
+            {
+                "additions": 0,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/3ba7e4cd739cfdf396ae4b822e85306ba6d2d9b1/core-it-suite/src/test/resources/mng-4785/repo/org/apache/maven/its/mng4785/dep/0.1-SNAPSHOT/dep-0.1-20100909.144341-1.jar",
+                "status": "added",
+                "changes": 0,
+                "deletions": 0,
+                "sha": "921b12a0851088656bbb88bba51b2e2e957b3807",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/3ba7e4cd739cfdf396ae4b822e85306ba6d2d9b1/core-it-suite/src/test/resources/mng-4785/repo/org/apache/maven/its/mng4785/dep/0.1-SNAPSHOT/dep-0.1-20100909.144341-1.jar",
+                "filename": "core-it-suite/src/test/resources/mng-4785/repo/org/apache/maven/its/mng4785/dep/0.1-SNAPSHOT/dep-0.1-20100909.144341-1.jar",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-it-suite/src/test/resources/mng-4785/repo/org/apache/maven/its/mng4785/dep/0.1-SNAPSHOT/dep-0.1-20100909.144341-1.jar?ref=3ba7e4cd739cfdf396ae4b822e85306ba6d2d9b1"
+            },
+            {
+                "patch": "@@ -0,0 +1,36 @@\n+<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n+\r\n+<!--\r\n+Licensed to the Apache Software Foundation (ASF) under one\r\n+or more contributor license agreements.  See the NOTICE file\r\n+distributed with this work for additional information\r\n+regarding copyright ownership.  The ASF licenses this file\r\n+to you under the Apache License, Version 2.0 (the\r\n+\"License\"); you may not use this file except in compliance\r\n+with the License.  You may obtain a copy of the License at\r\n+\r\n+  http://www.apache.org/licenses/LICENSE-2.0\r\n+\r\n+Unless required by applicable law or agreed to in writing,\r\n+software distributed under the License is distributed on an\r\n+\"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\r\n+KIND, either express or implied.  See the License for the\r\n+specific language governing permissions and limitations\r\n+under the License.\r\n+-->\r\n+\r\n+<project>\r\n+  <modelVersion>4.0.0</modelVersion>\r\n+\r\n+  <groupId>org.apache.maven.its.mng4785</groupId>\r\n+  <artifactId>dep</artifactId>\r\n+  <version>0.1-SNAPSHOT</version>\r\n+  <packaging>jar</packaging>\r\n+\r\n+  <distributionManagement>\r\n+    <repository>\r\n+      <id>maven-core-it</id>\r\n+      <url>file:///${basedir}/repo</url>\r\n+    </repository>\r\n+  </distributionManagement>\r\n+</project>\r",
+                "additions": 36,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/3ba7e4cd739cfdf396ae4b822e85306ba6d2d9b1/core-it-suite/src/test/resources/mng-4785/repo/org/apache/maven/its/mng4785/dep/0.1-SNAPSHOT/dep-0.1-20100909.144341-1.pom",
+                "status": "added",
+                "changes": 36,
+                "deletions": 0,
+                "sha": "2c8dcecd8df3b3eac7311a2b180d76b78883229b",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/3ba7e4cd739cfdf396ae4b822e85306ba6d2d9b1/core-it-suite/src/test/resources/mng-4785/repo/org/apache/maven/its/mng4785/dep/0.1-SNAPSHOT/dep-0.1-20100909.144341-1.pom",
+                "filename": "core-it-suite/src/test/resources/mng-4785/repo/org/apache/maven/its/mng4785/dep/0.1-SNAPSHOT/dep-0.1-20100909.144341-1.pom",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-it-suite/src/test/resources/mng-4785/repo/org/apache/maven/its/mng4785/dep/0.1-SNAPSHOT/dep-0.1-20100909.144341-1.pom?ref=3ba7e4cd739cfdf396ae4b822e85306ba6d2d9b1"
+            },
+            {
+                "patch": "@@ -0,0 +1,13 @@\n+<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n+<metadata>\n+  <groupId>org.apache.maven.its.mng4785</groupId>\n+  <artifactId>dep</artifactId>\n+  <version>0.1-SNAPSHOT</version>\n+  <versioning>\n+    <snapshot>\n+      <timestamp>20100909.144341</timestamp>\n+      <buildNumber>1</buildNumber>\n+    </snapshot>\n+    <lastUpdated>20100909144341</lastUpdated>\n+  </versioning>\n+</metadata>",
+                "additions": 13,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/3ba7e4cd739cfdf396ae4b822e85306ba6d2d9b1/core-it-suite/src/test/resources/mng-4785/repo/org/apache/maven/its/mng4785/dep/0.1-SNAPSHOT/maven-metadata.xml",
+                "status": "added",
+                "changes": 13,
+                "deletions": 0,
+                "sha": "b586236f266994a86d2275335cd4abb21df5119c",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/3ba7e4cd739cfdf396ae4b822e85306ba6d2d9b1/core-it-suite/src/test/resources/mng-4785/repo/org/apache/maven/its/mng4785/dep/0.1-SNAPSHOT/maven-metadata.xml",
+                "filename": "core-it-suite/src/test/resources/mng-4785/repo/org/apache/maven/its/mng4785/dep/0.1-SNAPSHOT/maven-metadata.xml",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-it-suite/src/test/resources/mng-4785/repo/org/apache/maven/its/mng4785/dep/0.1-SNAPSHOT/maven-metadata.xml?ref=3ba7e4cd739cfdf396ae4b822e85306ba6d2d9b1"
+            },
+            {
+                "patch": "@@ -0,0 +1,43 @@\n+<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n+\n+<!--\n+Licensed to the Apache Software Foundation (ASF) under one\n+or more contributor license agreements.  See the NOTICE file\n+distributed with this work for additional information\n+regarding copyright ownership.  The ASF licenses this file\n+to you under the Apache License, Version 2.0 (the\n+\"License\"); you may not use this file except in compliance\n+with the License.  You may obtain a copy of the License at\n+\n+  http://www.apache.org/licenses/LICENSE-2.0\n+\n+Unless required by applicable law or agreed to in writing,\n+software distributed under the License is distributed on an\n+\"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+KIND, either express or implied.  See the License for the\n+specific language governing permissions and limitations\n+under the License.\n+-->\n+\n+<settings>\n+  <profiles>\n+    <profile>\n+      <id>maven-core-it-repo</id>\n+      <repositories>\n+        <repository>\n+          <id>maven-core-it</id>\n+          <url>@baseurl@/repo</url>\n+          <releases>\n+            <enabled>false</enabled>\n+          </releases>\n+          <snapshots>\n+            <checksumPolicy>ignore</checksumPolicy>\n+          </snapshots>\n+        </repository>\n+      </repositories>\n+    </profile>\n+  </profiles>\n+  <activeProfiles>\n+    <activeProfile>maven-core-it-repo</activeProfile>\n+  </activeProfiles>\n+</settings>",
+                "additions": 43,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/3ba7e4cd739cfdf396ae4b822e85306ba6d2d9b1/core-it-suite/src/test/resources/mng-4785/settings-template.xml",
+                "status": "added",
+                "changes": 43,
+                "deletions": 0,
+                "sha": "9f272b6611f0ee7c2af622ca1950e4152adbd4ca",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/3ba7e4cd739cfdf396ae4b822e85306ba6d2d9b1/core-it-suite/src/test/resources/mng-4785/settings-template.xml",
+                "filename": "core-it-suite/src/test/resources/mng-4785/settings-template.xml",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-it-suite/src/test/resources/mng-4785/settings-template.xml?ref=3ba7e4cd739cfdf396ae4b822e85306ba6d2d9b1"
+            },
+            {
+                "patch": "@@ -26,10 +26,8 @@\n import org.apache.maven.model.Dependency;\n import org.apache.maven.plugin.AbstractMojo;\n import org.apache.maven.plugin.MojoExecutionException;\n-import org.apache.maven.plugin.MojoFailureException;\n \n import java.io.File;\n-import java.io.FileNotFoundException;\n import java.io.FileOutputStream;\n import java.io.IOException;\n import java.util.List;\n@@ -96,10 +94,10 @@\n     /**\n      * Runs this mojo.\n      * \n-     * @throws MojoFailureException If the artifact file has not been set.\n+     * @throws MojoFailureException If the artifact could not be resolved\n      */\n     public void execute()\n-        throws MojoExecutionException, MojoFailureException\n+        throws MojoExecutionException\n     {\n         getLog().info( \"[MAVEN-CORE-IT-LOG] Resolving artifacts\" );\n \n@@ -163,6 +161,7 @@ public void execute()\n \n     private String getId( Artifact artifact )\n     {\n+        artifact.isSnapshot(); // decouple from MNG-2961\n         return artifact.getId();\n     }\n ",
+                "additions": 3,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/3ba7e4cd739cfdf396ae4b822e85306ba6d2d9b1/core-it-support/core-it-plugins/maven-it-plugin-artifact/src/main/java/org/apache/maven/plugin/coreit/ResolveMojo.java",
+                "status": "modified",
+                "changes": 7,
+                "deletions": 4,
+                "sha": "a3faf5afd95d1609dd87b998cd624feec4ffe306",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/3ba7e4cd739cfdf396ae4b822e85306ba6d2d9b1/core-it-support/core-it-plugins/maven-it-plugin-artifact/src/main/java/org/apache/maven/plugin/coreit/ResolveMojo.java",
+                "filename": "core-it-support/core-it-plugins/maven-it-plugin-artifact/src/main/java/org/apache/maven/plugin/coreit/ResolveMojo.java",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-it-support/core-it-plugins/maven-it-plugin-artifact/src/main/java/org/apache/maven/plugin/coreit/ResolveMojo.java?ref=3ba7e4cd739cfdf396ae4b822e85306ba6d2d9b1"
+            },
+            {
+                "patch": "@@ -0,0 +1,221 @@\n+package org.apache.maven.plugin.coreit;\n+\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one\n+ * or more contributor license agreements.  See the NOTICE file\n+ * distributed with this work for additional information\n+ * regarding copyright ownership.  The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance\n+ * with the License.  You may obtain a copy of the License at\n+ *\n+ *   http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing,\n+ * software distributed under the License is distributed on an\n+ * \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+ * KIND, either express or implied.  See the License for the\n+ * specific language governing permissions and limitations\n+ * under the License.\n+ */\n+\n+import org.apache.maven.artifact.Artifact;\n+import org.apache.maven.artifact.factory.ArtifactFactory;\n+import org.apache.maven.artifact.metadata.ArtifactMetadataSource;\n+import org.apache.maven.artifact.repository.ArtifactRepository;\n+import org.apache.maven.artifact.resolver.ArtifactResolver;\n+import org.apache.maven.model.Dependency;\n+import org.apache.maven.plugin.AbstractMojo;\n+import org.apache.maven.plugin.MojoExecutionException;\n+\n+import java.io.File;\n+import java.io.FileOutputStream;\n+import java.io.IOException;\n+import java.util.Iterator;\n+import java.util.LinkedHashSet;\n+import java.util.List;\n+import java.util.Properties;\n+import java.util.Set;\n+\n+/**\n+ * Resolves user-specified artifacts transitively. As an additional exercise, the resolution happens in a forked thread\n+ * to test access to any shared session state.\n+ * \n+ * @goal resolve-transitive\n+ * \n+ * @author Benjamin Bentmann\n+ */\n+public class ResolveTransitiveMojo\n+    extends AbstractMojo\n+{\n+\n+    /**\n+     * The local repository.\n+     * \n+     * @parameter default-value=\"${localRepository}\"\n+     * @readonly\n+     * @required\n+     */\n+    private ArtifactRepository localRepository;\n+\n+    /**\n+     * The remote repositories of the current Maven project.\n+     * \n+     * @parameter default-value=\"${project.remoteArtifactRepositories}\"\n+     * @readonly\n+     * @required\n+     */\n+    private List remoteRepositories;\n+\n+    /**\n+     * The artifact resolver.\n+     * \n+     * @component\n+     */\n+    private ArtifactResolver resolver;\n+\n+    /**\n+     * The artifact factory.\n+     * \n+     * @component\n+     */\n+    private ArtifactFactory factory;\n+\n+    /**\n+     * The metadata source.\n+     * \n+     * @component\n+     */\n+    private ArtifactMetadataSource metadataSource;\n+\n+    /**\n+     * The dependencies to resolve.\n+     * \n+     * @parameter\n+     */\n+    private Dependency[] dependencies;\n+\n+    /**\n+     * The path to a properties file to store the resolved artifact paths in.\n+     * \n+     * @parameter\n+     */\n+    private File propertiesFile;\n+\n+    /**\n+     * Runs this mojo.\n+     * \n+     * @throws MojoExecutionException If the artifacts couldn't be resolved.\n+     */\n+    public void execute()\n+        throws MojoExecutionException\n+    {\n+        getLog().info( \"[MAVEN-CORE-IT-LOG] Resolving artifacts\" );\n+\n+        ResolverThread thread = new ResolverThread();\n+        thread.start();\n+        while ( thread.isAlive() )\n+        {\n+            try\n+            {\n+                thread.join();\n+            }\n+            catch ( InterruptedException e )\n+            {\n+                e.printStackTrace();\n+            }\n+        }\n+\n+        if ( thread.error != null )\n+        {\n+            throw new MojoExecutionException( \"Failed to resolve artifacts: \" + thread.error.getMessage(), thread.error );\n+        }\n+\n+        if ( propertiesFile != null )\n+        {\n+            getLog().info( \"[MAVEN-CORE-IT-LOG] Creating properties file \" + propertiesFile );\n+\n+            try\n+            {\n+                propertiesFile.getParentFile().mkdirs();\n+\n+                FileOutputStream fos = new FileOutputStream( propertiesFile );\n+                try\n+                {\n+                    thread.props.store( fos, \"MAVEN-CORE-IT\" );\n+                }\n+                finally\n+                {\n+                    fos.close();\n+                }\n+            }\n+            catch ( IOException e )\n+            {\n+                throw new MojoExecutionException( \"Failed to create properties file: \" + e.getMessage(), e );\n+            }\n+        }\n+    }\n+\n+    private String getId( Artifact artifact )\n+    {\n+        artifact.isSnapshot(); // decouple from MNG-2961\n+        return artifact.getId();\n+    }\n+\n+    class ResolverThread\n+        extends Thread\n+    {\n+\n+        Properties props = new Properties();\n+\n+        Exception error;\n+\n+        public void run()\n+        {\n+            if ( dependencies != null )\n+            {\n+                try\n+                {\n+                    Set artifacts = new LinkedHashSet();\n+\n+                    for ( int i = 0; i < dependencies.length; i++ )\n+                    {\n+                        Dependency dependency = dependencies[i];\n+\n+                        Artifact artifact =\n+                            factory.createArtifactWithClassifier( dependency.getGroupId(), dependency.getArtifactId(),\n+                                                                  dependency.getVersion(), dependency.getType(),\n+                                                                  dependency.getClassifier() );\n+\n+                        getLog().info( \"[MAVEN-CORE-IT-LOG] Resolving \" + getId( artifact ) );\n+\n+                        artifacts.add( artifact );\n+                    }\n+\n+                    Artifact origin = factory.createArtifact( \"it\", \"it\", \"0.1\", null, \"pom\" );\n+\n+                    artifacts =\n+                        resolver.resolveTransitively( artifacts, origin, remoteRepositories, localRepository,\n+                                                      metadataSource ).getArtifacts();\n+\n+                    for ( Iterator it = artifacts.iterator(); it.hasNext(); )\n+                    {\n+                        Artifact artifact = (Artifact) it.next();\n+\n+                        if ( artifact.getFile() != null )\n+                        {\n+                            props.setProperty( getId( artifact ), artifact.getFile().getPath() );\n+                        }\n+\n+                        getLog().info( \"[MAVEN-CORE-IT-LOG]   \" + artifact.getFile() );\n+                    }\n+                }\n+                catch ( Exception e )\n+                {\n+                    error = e;\n+                }\n+            }\n+        }\n+    }\n+\n+}",
+                "additions": 221,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/3ba7e4cd739cfdf396ae4b822e85306ba6d2d9b1/core-it-support/core-it-plugins/maven-it-plugin-artifact/src/main/java/org/apache/maven/plugin/coreit/ResolveTransitiveMojo.java",
+                "status": "added",
+                "changes": 221,
+                "deletions": 0,
+                "sha": "33cc012f4156c2f47a0db84044bd6ef40673c2c4",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/3ba7e4cd739cfdf396ae4b822e85306ba6d2d9b1/core-it-support/core-it-plugins/maven-it-plugin-artifact/src/main/java/org/apache/maven/plugin/coreit/ResolveTransitiveMojo.java",
+                "filename": "core-it-support/core-it-plugins/maven-it-plugin-artifact/src/main/java/org/apache/maven/plugin/coreit/ResolveTransitiveMojo.java",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-it-support/core-it-plugins/maven-it-plugin-artifact/src/main/java/org/apache/maven/plugin/coreit/ResolveTransitiveMojo.java?ref=3ba7e4cd739cfdf396ae4b822e85306ba6d2d9b1"
+            }
+        ],
+        "bug_id": "maven-integration-testing_4",
+        "parent": "https://github.com/apache/maven-integration-testing/commit/8aa45d921770a7110f1a88375a34fc7020221e79",
+        "message": "[MNG-4785] NPE in dependency resolution code for TC plugin\n\no Added IT\n\ngit-svn-id: https://svn.apache.org/repos/asf/maven/core-integration-testing/trunk@995456 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "maven-integration-testing"
+    },
+    {
+        "commit": "https://github.com/apache/maven-integration-testing/commit/01b9250a0781b4292444c87c203785354e7c0fce",
+        "file": [
+            {
+                "patch": "@@ -81,6 +81,7 @@ public static Test suite()\n         // -------------------------------------------------------------------------------------------------------------\n         // suite.addTestSuite( MavenIT0108SnapshotUpdateTest.class ); -- MNG-3137\n \n+        suite.addTestSuite( MavenITmng4786AntBased21xMojoSupportTest.class );\n         suite.addTestSuite( MavenITmng4781DeploymentToNexusStagingRepoTest.class );\n         suite.addTestSuite( MavenITmng4779MultipleDepsWithVersionRangeFromLocalRepoTest.class );\n         suite.addTestSuite( MavenITmng4776ForkedReactorPluginVersionResolutionTest.class );\n@@ -158,7 +159,7 @@ public static Test suite()\n         suite.addTestSuite( MavenITmng4402DuplicateChildModuleTest.class );\n         suite.addTestSuite( MavenITmng4401RepositoryOrderForParentPomTest.class );\n         suite.addTestSuite( MavenITmng4400RepositoryOrderTest.class );\n-        suite.addTestSuite( MavenITmng4396AntBasedMojoSupportTest.class );\n+        suite.addTestSuite( MavenITmng4396AntBased20xMojoSupportTest.class );\n         suite.addTestSuite( MavenITmng4393ParseExternalParenPomLenientTest.class );\n         suite.addTestSuite( MavenITmng4387QuietLoggingTest.class );\n         suite.addTestSuite( MavenITmng4386DebugLoggingTest.class );",
+                "additions": 2,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/01b9250a0781b4292444c87c203785354e7c0fce/core-it-suite/src/test/java/org/apache/maven/it/IntegrationTestSuite.java",
+                "status": "modified",
+                "changes": 3,
+                "deletions": 1,
+                "sha": "5c2caf11d4b43411348c7261befa3e8817c461c7",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/01b9250a0781b4292444c87c203785354e7c0fce/core-it-suite/src/test/java/org/apache/maven/it/IntegrationTestSuite.java",
+                "filename": "core-it-suite/src/test/java/org/apache/maven/it/IntegrationTestSuite.java",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-it-suite/src/test/java/org/apache/maven/it/IntegrationTestSuite.java?ref=01b9250a0781b4292444c87c203785354e7c0fce"
+            },
+            {
+                "patch": "@@ -29,17 +29,18 @@\n  * \n  * @author Benjamin Bentmann\n  */\n-public class MavenITmng4396AntBasedMojoSupportTest\n+public class MavenITmng4396AntBased20xMojoSupportTest\n     extends AbstractMavenIntegrationTestCase\n {\n \n-    public MavenITmng4396AntBasedMojoSupportTest()\n+    public MavenITmng4396AntBased20xMojoSupportTest()\n     {\n         super( ALL_MAVEN_VERSIONS );\n     }\n \n     /**\n-     * Verify that plugins whose mojos are implemented as Ant scripts can be invoked.\n+     * Verify that plugins whose mojos are implemented as Ant scripts and use the Maven 2.0.x Ant support can be\n+     * invoked.\n      */\n     public void testit()\n         throws Exception",
+                "additions": 4,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/01b9250a0781b4292444c87c203785354e7c0fce/core-it-suite/src/test/java/org/apache/maven/it/MavenITmng4396AntBased20xMojoSupportTest.java",
+                "previous_filename": "core-it-suite/src/test/java/org/apache/maven/it/MavenITmng4396AntBasedMojoSupportTest.java",
+                "status": "renamed",
+                "changes": 7,
+                "deletions": 3,
+                "sha": "eba1c6b90973bc9cd7d2369512c6a628b88ee162",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/01b9250a0781b4292444c87c203785354e7c0fce/core-it-suite/src/test/java/org/apache/maven/it/MavenITmng4396AntBased20xMojoSupportTest.java",
+                "filename": "core-it-suite/src/test/java/org/apache/maven/it/MavenITmng4396AntBased20xMojoSupportTest.java",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-it-suite/src/test/java/org/apache/maven/it/MavenITmng4396AntBased20xMojoSupportTest.java?ref=01b9250a0781b4292444c87c203785354e7c0fce"
+            },
+            {
+                "patch": "@@ -0,0 +1,62 @@\n+package org.apache.maven.it;\n+\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one\n+ * or more contributor license agreements.  See the NOTICE file\n+ * distributed with this work for additional information\n+ * regarding copyright ownership.  The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance\n+ * with the License.  You may obtain a copy of the License at\n+ *\n+ *   http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing,\n+ * software distributed under the License is distributed on an\n+ * \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+ * KIND, either express or implied.  See the License for the\n+ * specific language governing permissions and limitations\n+ * under the License.\n+ */\n+\n+import org.apache.maven.it.Verifier;\n+import org.apache.maven.it.util.ResourceExtractor;\n+\n+import java.io.File;\n+\n+/**\n+ * This is a test set for <a href=\"http://jira.codehaus.org/browse/MNG-4786\">MNG-4786</a>.\n+ * \n+ * @author Benjamin Bentmann\n+ */\n+public class MavenITmng4786AntBased21xMojoSupportTest\n+    extends AbstractMavenIntegrationTestCase\n+{\n+\n+    public MavenITmng4786AntBased21xMojoSupportTest()\n+    {\n+        super( \"[2.0.3,3.0-alpha-1),[3.0-beta-4,)\" );\n+    }\n+\n+    /**\n+     * Verify that plugins whose mojos are implemented as Ant scripts and use the Maven 2.1.x Ant support can be\n+     * invoked. The essential bits here are that Ant-based mojos are instantiated via a custom component factory, yet\n+     * must undergo the same IoC as for regular Java components. And the 2.1.x Ant support actually requires injection\n+     * of a logger.\n+     */\n+    public void testit()\n+        throws Exception\n+    {\n+        File testDir = ResourceExtractor.simpleExtractResources( getClass(), \"/mng-4786\" );\n+\n+        Verifier verifier = newVerifier( testDir.getAbsolutePath() );\n+        verifier.setAutoclean( false );\n+        verifier.deleteDirectory( \"target\" );\n+        verifier.executeGoal( \"validate\" );\n+        verifier.verifyErrorFreeLog();\n+        verifier.resetStreams();\n+\n+        verifier.assertFilePresent( \"target/ant.txt\" );\n+    }\n+\n+}",
+                "additions": 62,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/01b9250a0781b4292444c87c203785354e7c0fce/core-it-suite/src/test/java/org/apache/maven/it/MavenITmng4786AntBased21xMojoSupportTest.java",
+                "status": "added",
+                "changes": 62,
+                "deletions": 0,
+                "sha": "f2fb6985a24e5874351b3ab5dc7271550f0620bd",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/01b9250a0781b4292444c87c203785354e7c0fce/core-it-suite/src/test/java/org/apache/maven/it/MavenITmng4786AntBased21xMojoSupportTest.java",
+                "filename": "core-it-suite/src/test/java/org/apache/maven/it/MavenITmng4786AntBased21xMojoSupportTest.java",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-it-suite/src/test/java/org/apache/maven/it/MavenITmng4786AntBased21xMojoSupportTest.java?ref=01b9250a0781b4292444c87c203785354e7c0fce"
+            },
+            {
+                "patch": "@@ -51,5 +51,21 @@ under the License.\n       <version>1.4</version>\n       <scope>runtime</scope>\n     </dependency>\n+    <dependency>\n+      <groupId>org.apache.maven</groupId>\n+      <artifactId>maven-script-ant</artifactId>\n+      <version>2.1.0</version>\n+      <scope>runtime</scope>\n+      <exclusions>\n+        <exclusion>\n+          <groupId>org.apache.maven</groupId>\n+          <artifactId>maven-project</artifactId>\n+        </exclusion>\n+        <exclusion>\n+          <groupId>org.apache.maven</groupId>\n+          <artifactId>maven-core</artifactId>\n+        </exclusion>\n+      </exclusions>\n+    </dependency>\n   </dependencies>\n </project>",
+                "additions": 16,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/01b9250a0781b4292444c87c203785354e7c0fce/core-it-suite/src/test/resources/bootstrap/group-6/pom.xml",
+                "status": "modified",
+                "changes": 16,
+                "deletions": 0,
+                "sha": "b858e6693330eaf9f10f9be9a4e71daf0a30347c",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/01b9250a0781b4292444c87c203785354e7c0fce/core-it-suite/src/test/resources/bootstrap/group-6/pom.xml",
+                "filename": "core-it-suite/src/test/resources/bootstrap/group-6/pom.xml",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-it-suite/src/test/resources/bootstrap/group-6/pom.xml?ref=01b9250a0781b4292444c87c203785354e7c0fce"
+            },
+            {
+                "patch": "@@ -0,0 +1,79 @@\n+<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n+\n+<!--\n+Licensed to the Apache Software Foundation (ASF) under one\n+or more contributor license agreements.  See the NOTICE file\n+distributed with this work for additional information\n+regarding copyright ownership.  The ASF licenses this file\n+to you under the Apache License, Version 2.0 (the\n+\"License\"); you may not use this file except in compliance\n+with the License.  You may obtain a copy of the License at\n+\n+  http://www.apache.org/licenses/LICENSE-2.0\n+\n+Unless required by applicable law or agreed to in writing,\n+software distributed under the License is distributed on an\n+\"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+KIND, either express or implied.  See the License for the\n+specific language governing permissions and limitations\n+under the License.\n+-->\n+\n+<project>\n+  <modelVersion>4.0.0</modelVersion>\n+\n+  <groupId>org.apache.maven.its.mng4786</groupId>\n+  <artifactId>test</artifactId>\n+  <version>0.1</version>\n+\n+  <name>Maven Integration Test :: MNG-4786</name>\n+  <description>\n+    Verify that plugins whose mojos are implemented as Ant scripts and use the Maven 2.1.x Ant support can be\n+    invoked. The essential bits here are that Ant-based mojos are instantiated via a custom component factory, yet\n+    must undergo the same IoC as for regular Java components. And the 2.1.x Ant support actually requires injection\n+    of a logger.\n+  </description>\n+\n+  <build>\n+    <plugins>\n+      <plugin>\n+        <groupId>org.apache.maven.its.plugins</groupId>\n+        <artifactId>maven-it-plugin-ant-based</artifactId>\n+        <version>2.1-SNAPSHOT</version>\n+        <configuration>\n+          <outputFile>target/ant.txt</outputFile>\n+        </configuration>\n+        <executions>\n+          <execution>\n+            <id>test</id>\n+            <phase>validate</phase>\n+            <goals>\n+              <goal>touch</goal>\n+            </goals>\n+          </execution>\n+        </executions>\n+        <dependencies>\n+          <dependency>\n+            <groupId>org.apache.maven</groupId>\n+            <artifactId>maven-script-ant</artifactId>\n+            <version>2.1.0</version>\n+            <exclusions>\n+              <exclusion>\n+                <groupId>org.apache.maven</groupId>\n+                <artifactId>maven-project</artifactId>\n+              </exclusion>\n+              <exclusion>\n+                <groupId>org.apache.maven</groupId>\n+                <artifactId>maven-core</artifactId>\n+              </exclusion>\n+              <exclusion>\n+                <groupId>org.codehaus.plexus</groupId>\n+                <artifactId>plexus-component-api</artifactId>\n+              </exclusion>\n+            </exclusions>\n+          </dependency>\n+        </dependencies>\n+      </plugin>\n+    </plugins>\n+  </build>\n+</project>",
+                "additions": 79,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/01b9250a0781b4292444c87c203785354e7c0fce/core-it-suite/src/test/resources/mng-4786/pom.xml",
+                "status": "added",
+                "changes": 79,
+                "deletions": 0,
+                "sha": "6a45677e1c7f1c8c743777d509babac574dbd78b",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/01b9250a0781b4292444c87c203785354e7c0fce/core-it-suite/src/test/resources/mng-4786/pom.xml",
+                "filename": "core-it-suite/src/test/resources/mng-4786/pom.xml",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-it-suite/src/test/resources/mng-4786/pom.xml?ref=01b9250a0781b4292444c87c203785354e7c0fce"
+            }
+        ],
+        "bug_id": "maven-integration-testing_5",
+        "parent": "https://github.com/apache/maven-integration-testing/commit/2ab39b4f3b269824a68bfb08bb0f42f90c887947",
+        "message": "[MNG-4786] [regression] Ant-based mojo using maven-script-ant:2.1.0+ causes NPE\n\no Added IT\n\ngit-svn-id: https://svn.apache.org/repos/asf/maven/core-integration-testing/trunk@991258 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "maven-integration-testing"
+    },
+    {
+        "commit": "https://github.com/apache/maven-integration-testing/commit/c2a6e85fba2a7f540e75114c4325e666d5e0d450",
+        "file": [
+            {
+                "patch": "@@ -81,6 +81,7 @@ public static Test suite()\n         // -------------------------------------------------------------------------------------------------------------\n         // suite.addTestSuite( MavenIT0108SnapshotUpdateTest.class ); -- MNG-3137\n \n+        suite.addTestSuite( MavenITmng4776ForkedReactorPluginVersionResolutionTest.class );\n         suite.addTestSuite( MavenITmng4772PluginVersionResolutionDoesntTouchDisabledRepoTest.class );\n         suite.addTestSuite( MavenITmng4771PluginPrefixResolutionDoesntTouchDisabledRepoTest.class );\n         suite.addTestSuite( MavenITmng4768NearestMatchConflictResolutionTest.class );",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/c2a6e85fba2a7f540e75114c4325e666d5e0d450/core-it-suite/src/test/java/org/apache/maven/it/IntegrationTestSuite.java",
+                "status": "modified",
+                "changes": 1,
+                "deletions": 0,
+                "sha": "37356cdb55d95f4d9353eaa339f9f2d1c7a0365c",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/c2a6e85fba2a7f540e75114c4325e666d5e0d450/core-it-suite/src/test/java/org/apache/maven/it/IntegrationTestSuite.java",
+                "filename": "core-it-suite/src/test/java/org/apache/maven/it/IntegrationTestSuite.java",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-it-suite/src/test/java/org/apache/maven/it/IntegrationTestSuite.java?ref=c2a6e85fba2a7f540e75114c4325e666d5e0d450"
+            },
+            {
+                "patch": "@@ -0,0 +1,85 @@\n+package org.apache.maven.it;\n+\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one\n+ * or more contributor license agreements.  See the NOTICE file\n+ * distributed with this work for additional information\n+ * regarding copyright ownership.  The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance\n+ * with the License.  You may obtain a copy of the License at\n+ *\n+ *   http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing,\n+ * software distributed under the License is distributed on an\n+ * \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+ * KIND, either express or implied.  See the License for the\n+ * specific language governing permissions and limitations\n+ * under the License.\n+ */\n+\n+import org.apache.maven.it.Verifier;\n+import org.apache.maven.it.util.ResourceExtractor;\n+\n+import java.io.File;\n+\n+/**\n+ * This is a test set for <a href=\"http://jira.codehaus.org/browse/MNG-4776\">MNG-4776</a>.\n+ * \n+ * @author Benjamin Bentmann\n+ */\n+public class MavenITmng4776ForkedReactorPluginVersionResolutionTest\n+    extends AbstractMavenIntegrationTestCase\n+{\n+\n+    public MavenITmng4776ForkedReactorPluginVersionResolutionTest()\n+    {\n+        super( \"[2.0.3,3.0-alpha-1),[3.0-beta-3,)\" );\n+    }\n+\n+    /**\n+     * Verify that missing plugin versions in the POM are resolved for all projects on which a forking aggregator mojo\n+     * will be run and not just the top-level project. This test checks the case of the mojo being invoked from a\n+     * lifecycle phase.\n+     */\n+    public void testitLifecycle()\n+        throws Exception\n+    {\n+        File testDir = ResourceExtractor.simpleExtractResources( getClass(), \"/mng-4776\" );\n+\n+        Verifier verifier = newVerifier( testDir.getAbsolutePath(), \"remote\" );\n+        verifier.setAutoclean( false );\n+        verifier.deleteDirectory( \"target\" );\n+        verifier.deleteDirectory( \"sub/target\" );\n+        verifier.setLogFileName( \"log-lifecycle.txt\" );\n+        verifier.executeGoal( \"test\" );\n+        verifier.verifyErrorFreeLog();\n+        verifier.resetStreams();\n+\n+        verifier.assertFilePresent( \"sub/target/log.txt\" );\n+    }\n+\n+    /**\n+     * Verify that missing plugin versions in the POM are resolved for all projects on which a forking aggregator mojo\n+     * will be run and not just the top-level project. This test checks the case of the mojo being invoked from the\n+     * command line\n+     */\n+    public void testitCmdLine()\n+        throws Exception\n+    {\n+        File testDir = ResourceExtractor.simpleExtractResources( getClass(), \"/mng-4776\" );\n+\n+        Verifier verifier = newVerifier( testDir.getAbsolutePath(), \"remote\" );\n+        verifier.setAutoclean( false );\n+        verifier.deleteDirectory( \"target\" );\n+        verifier.deleteDirectory( \"sub/target\" );\n+        verifier.setLogFileName( \"log-cli.txt\" );\n+        verifier.executeGoal( \"org.apache.maven.its.plugins:maven-it-plugin-fork:2.1-SNAPSHOT:fork-lifecycle-aggregator\" );\n+        verifier.verifyErrorFreeLog();\n+        verifier.resetStreams();\n+\n+        verifier.assertFilePresent( \"sub/target/log.txt\" );\n+    }\n+\n+}",
+                "additions": 85,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/c2a6e85fba2a7f540e75114c4325e666d5e0d450/core-it-suite/src/test/java/org/apache/maven/it/MavenITmng4776ForkedReactorPluginVersionResolutionTest.java",
+                "status": "added",
+                "changes": 85,
+                "deletions": 0,
+                "sha": "d0eb3cca2081f41daaa91d2a2c8b4b169d2d1595",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/c2a6e85fba2a7f540e75114c4325e666d5e0d450/core-it-suite/src/test/java/org/apache/maven/it/MavenITmng4776ForkedReactorPluginVersionResolutionTest.java",
+                "filename": "core-it-suite/src/test/java/org/apache/maven/it/MavenITmng4776ForkedReactorPluginVersionResolutionTest.java",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-it-suite/src/test/java/org/apache/maven/it/MavenITmng4776ForkedReactorPluginVersionResolutionTest.java?ref=c2a6e85fba2a7f540e75114c4325e666d5e0d450"
+            },
+            {
+                "patch": "@@ -0,0 +1,59 @@\n+<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n+\n+<!--\n+Licensed to the Apache Software Foundation (ASF) under one\n+or more contributor license agreements.  See the NOTICE file\n+distributed with this work for additional information\n+regarding copyright ownership.  The ASF licenses this file\n+to you under the Apache License, Version 2.0 (the\n+\"License\"); you may not use this file except in compliance\n+with the License.  You may obtain a copy of the License at\n+\n+  http://www.apache.org/licenses/LICENSE-2.0\n+\n+Unless required by applicable law or agreed to in writing,\n+software distributed under the License is distributed on an\n+\"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+KIND, either express or implied.  See the License for the\n+specific language governing permissions and limitations\n+under the License.\n+-->\n+\n+<project>\n+  <modelVersion>4.0.0</modelVersion>\n+\n+  <groupId>org.apache.maven.its.mng4776</groupId>\n+  <artifactId>parent</artifactId>\n+  <version>0.1</version>\n+  <packaging>pom</packaging>\n+\n+  <name>Maven Integration Test :: MNG-4776</name>\n+  <description>\n+    Verify that missing plugin versions in the POM are resolved for all projects on which a forking aggregator mojo\n+    will be run and not just the top-level project.\n+  </description>\n+\n+  <modules>\n+    <module>sub</module>\n+  </modules>\n+\n+  <build>\n+    <plugins>\n+      <plugin>\n+        <groupId>org.apache.maven.its.plugins</groupId>\n+        <artifactId>maven-it-plugin-fork</artifactId>\n+        <version>2.1-SNAPSHOT</version>\n+        <inherited>false</inherited>\n+        <executions>\n+          <execution>\n+            <id>fork</id>\n+            <phase>test</phase>\n+            <goals>\n+              <goal>fork-lifecycle-aggregator</goal>\n+            </goals>\n+          </execution>\n+        </executions>\n+      </plugin>\n+    </plugins>\n+  </build>\n+</project>",
+                "additions": 59,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/c2a6e85fba2a7f540e75114c4325e666d5e0d450/core-it-suite/src/test/resources/mng-4776/pom.xml",
+                "status": "added",
+                "changes": 59,
+                "deletions": 0,
+                "sha": "50139cf12686673ac7ba810aac390f55185095cb",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/c2a6e85fba2a7f540e75114c4325e666d5e0d450/core-it-suite/src/test/resources/mng-4776/pom.xml",
+                "filename": "core-it-suite/src/test/resources/mng-4776/pom.xml",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-it-suite/src/test/resources/mng-4776/pom.xml?ref=c2a6e85fba2a7f540e75114c4325e666d5e0d450"
+            },
+            {
+                "patch": "@@ -0,0 +1,63 @@\n+<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n+\n+<!--\n+Licensed to the Apache Software Foundation (ASF) under one\n+or more contributor license agreements.  See the NOTICE file\n+distributed with this work for additional information\n+regarding copyright ownership.  The ASF licenses this file\n+to you under the Apache License, Version 2.0 (the\n+\"License\"); you may not use this file except in compliance\n+with the License.  You may obtain a copy of the License at\n+\n+  http://www.apache.org/licenses/LICENSE-2.0\n+\n+Unless required by applicable law or agreed to in writing,\n+software distributed under the License is distributed on an\n+\"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+KIND, either express or implied.  See the License for the\n+specific language governing permissions and limitations\n+under the License.\n+-->\n+\n+<project>\n+  <modelVersion>4.0.0</modelVersion>\n+\n+  <parent>\n+    <groupId>org.apache.maven.its.mng4776</groupId>\n+    <artifactId>parent</artifactId>\n+    <version>0.1</version>\n+  </parent>\n+\n+  <groupId>org.apache.maven.its.mng4776</groupId>\n+  <artifactId>sub</artifactId>\n+  <version>0.1</version>\n+  <packaging>pom</packaging>\n+\n+  <name>Maven Integration Test :: MNG-4776 :: Sub</name>\n+  <description>\n+    Verify that missing plugin versions in the POM are resolved for all projects on which a forking aggregator mojo\n+    will be run and not just the top-level project.\n+  </description>\n+\n+  <build>\n+    <plugins>\n+      <plugin>\n+        <groupId>org.apache.maven.its.plugins</groupId>\n+        <artifactId>maven-it-plugin-log-file</artifactId>\n+        <!-- NOTE: version intentionally omitted, must be resolved automatically for this project as well -->\n+        <executions>\n+          <execution>\n+            <id>log</id>\n+            <phase>initialize</phase>\n+            <goals>\n+              <goal>reset</goal>\n+            </goals>\n+            <configuration>\n+              <logFile>target/log.txt</logFile>\n+            </configuration>\n+          </execution>\n+        </executions>\n+      </plugin>\n+    </plugins>\n+  </build>\n+</project>",
+                "additions": 63,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/c2a6e85fba2a7f540e75114c4325e666d5e0d450/core-it-suite/src/test/resources/mng-4776/sub/pom.xml",
+                "status": "added",
+                "changes": 63,
+                "deletions": 0,
+                "sha": "6d72d8009111b0ec3a0ede2b6a6984af82607718",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/c2a6e85fba2a7f540e75114c4325e666d5e0d450/core-it-suite/src/test/resources/mng-4776/sub/pom.xml",
+                "filename": "core-it-suite/src/test/resources/mng-4776/sub/pom.xml",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-it-suite/src/test/resources/mng-4776/sub/pom.xml?ref=c2a6e85fba2a7f540e75114c4325e666d5e0d450"
+            }
+        ],
+        "bug_id": "maven-integration-testing_6",
+        "parent": "https://github.com/apache/maven-integration-testing/commit/8ee35994e85447c84eba4549a1449741af883e84",
+        "message": "[MNG-4776] NPE during build from parent but not from child\n\no Added IT\n\ngit-svn-id: https://svn.apache.org/repos/asf/maven/core-integration-testing/trunk@989221 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "maven-integration-testing"
+    },
+    {
+        "commit": "https://github.com/apache/maven-integration-testing/commit/3f89465c90812199282a7beaad816c240c3b6371",
+        "file": [
+            {
+                "patch": "@@ -29,6 +29,11 @@\n   <name>Maven Integration Test Plugin :: Context Passing</name>\n   <version>1.0-SNAPSHOT</version>\n   <inceptionYear>2006</inceptionYear>\n+\n+  <properties>\n+    <maven.test.skip>true</maven.test.skip>\n+  </properties>\n+\n   <dependencies>\n     <dependency>\n       <groupId>org.apache.maven</groupId>",
+                "additions": 5,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/3f89465c90812199282a7beaad816c240c3b6371/core-integration-testing-plugins/maven-it-plugin-context-passing/pom.xml",
+                "status": "modified",
+                "changes": 5,
+                "deletions": 0,
+                "sha": "3f382e5cf3f2d52a47dc4c436366c06048adb0f0",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/3f89465c90812199282a7beaad816c240c3b6371/core-integration-testing-plugins/maven-it-plugin-context-passing/pom.xml",
+                "filename": "core-integration-testing-plugins/maven-it-plugin-context-passing/pom.xml",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-integration-testing-plugins/maven-it-plugin-context-passing/pom.xml?ref=3f89465c90812199282a7beaad816c240c3b6371"
+            },
+            {
+                "patch": "@@ -29,6 +29,11 @@\n   <name>Maven Integration Test Plugin :: Envar</name>\n   <version>1.0-SNAPSHOT</version>\n   <inceptionYear>2006</inceptionYear>\n+\n+  <properties>\n+    <maven.test.skip>true</maven.test.skip>\n+  </properties>\n+\n   <dependencies>\n     <dependency>\n       <groupId>org.apache.maven</groupId>",
+                "additions": 5,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/3f89465c90812199282a7beaad816c240c3b6371/core-integration-testing-plugins/maven-it-plugin-generate-envar-properties/pom.xml",
+                "status": "modified",
+                "changes": 5,
+                "deletions": 0,
+                "sha": "1e1c018f118b53c0c8fdf26eb7a490b722a00ab9",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/3f89465c90812199282a7beaad816c240c3b6371/core-integration-testing-plugins/maven-it-plugin-generate-envar-properties/pom.xml",
+                "filename": "core-integration-testing-plugins/maven-it-plugin-generate-envar-properties/pom.xml",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-integration-testing-plugins/maven-it-plugin-generate-envar-properties/pom.xml?ref=3f89465c90812199282a7beaad816c240c3b6371"
+            },
+            {
+                "patch": "@@ -29,6 +29,11 @@\n   <name>Maven Integration Test Plugin :: Interpolated POM Configuration</name>\n   <version>1.0-SNAPSHOT</version>\n   <inceptionYear>2006</inceptionYear>\n+\n+  <properties>\n+    <maven.test.skip>true</maven.test.skip>\n+  </properties>\n+\n   <dependencies>\n     <dependency>\n       <groupId>org.apache.maven</groupId>",
+                "additions": 5,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/3f89465c90812199282a7beaad816c240c3b6371/core-integration-testing-plugins/maven-it-plugin-generate-properties/pom.xml",
+                "status": "modified",
+                "changes": 5,
+                "deletions": 0,
+                "sha": "d982cad1d68fb59daf999f1abe04e903c72cdca1",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/3f89465c90812199282a7beaad816c240c3b6371/core-integration-testing-plugins/maven-it-plugin-generate-properties/pom.xml",
+                "filename": "core-integration-testing-plugins/maven-it-plugin-generate-properties/pom.xml",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-integration-testing-plugins/maven-it-plugin-generate-properties/pom.xml?ref=3f89465c90812199282a7beaad816c240c3b6371"
+            },
+            {
+                "patch": "@@ -29,6 +29,11 @@\n   <name>Maven Integration Test Plugin :: Loadable</name>\n   <version>1.0-SNAPSHOT</version>\n   <inceptionYear>2006</inceptionYear>\n+\n+  <properties>\n+    <maven.test.skip>true</maven.test.skip>\n+  </properties>\n+\n   <dependencies>\n     <dependency>\n       <groupId>org.apache.maven</groupId>",
+                "additions": 5,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/3f89465c90812199282a7beaad816c240c3b6371/core-integration-testing-plugins/maven-it-plugin-loadable/pom.xml",
+                "status": "modified",
+                "changes": 5,
+                "deletions": 0,
+                "sha": "8473acc0ae5b15ef08ccd01dacf32d25bfc07128",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/3f89465c90812199282a7beaad816c240c3b6371/core-integration-testing-plugins/maven-it-plugin-loadable/pom.xml",
+                "filename": "core-integration-testing-plugins/maven-it-plugin-loadable/pom.xml",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-integration-testing-plugins/maven-it-plugin-loadable/pom.xml?ref=3f89465c90812199282a7beaad816c240c3b6371"
+            },
+            {
+                "patch": "@@ -29,6 +29,11 @@\n   <name>Maven Core Integration Test Plugin</name>\n   <version>1.1-SNAPSHOT</version>\n   <inceptionYear>2001</inceptionYear>\n+\n+  <properties>\n+    <maven.test.skip>true</maven.test.skip>\n+  </properties>\n+\n   <dependencies>\n     <dependency>\n       <groupId>org.apache.maven</groupId>",
+                "additions": 5,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/3f89465c90812199282a7beaad816c240c3b6371/core-integration-testing-plugins/maven-it-plugin-no-project/pom.xml",
+                "status": "modified",
+                "changes": 5,
+                "deletions": 0,
+                "sha": "dcbb45af65d3c83c9725da6c7fb51a51259db50d",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/3f89465c90812199282a7beaad816c240c3b6371/core-integration-testing-plugins/maven-it-plugin-no-project/pom.xml",
+                "filename": "core-integration-testing-plugins/maven-it-plugin-no-project/pom.xml",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-integration-testing-plugins/maven-it-plugin-no-project/pom.xml?ref=3f89465c90812199282a7beaad816c240c3b6371"
+            },
+            {
+                "patch": "@@ -29,6 +29,11 @@\n   <name>Maven Integration Test Plugin :: Parameter Implementation</name>\n   <version>1.0-SNAPSHOT</version>\n   <inceptionYear>2006</inceptionYear>\n+\n+  <properties>\n+    <maven.test.skip>true</maven.test.skip>\n+  </properties>\n+\n   <dependencies>\n     <dependency>\n       <groupId>org.apache.maven</groupId>",
+                "additions": 5,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/3f89465c90812199282a7beaad816c240c3b6371/core-integration-testing-plugins/maven-it-plugin-parameter-implementation/pom.xml",
+                "status": "modified",
+                "changes": 5,
+                "deletions": 0,
+                "sha": "d6cc4a72dde2945c4ebf4ee6352a3243f3481951",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/3f89465c90812199282a7beaad816c240c3b6371/core-integration-testing-plugins/maven-it-plugin-parameter-implementation/pom.xml",
+                "filename": "core-integration-testing-plugins/maven-it-plugin-parameter-implementation/pom.xml",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-integration-testing-plugins/maven-it-plugin-parameter-implementation/pom.xml?ref=3f89465c90812199282a7beaad816c240c3b6371"
+            },
+            {
+                "patch": "@@ -29,6 +29,11 @@\n   <name>Maven Integration Test Plugin :: Setter</name>\n   <version>1.0-SNAPSHOT</version>\n   <inceptionYear>2006</inceptionYear>\n+\n+  <properties>\n+    <maven.test.skip>true</maven.test.skip>\n+  </properties>\n+\n   <dependencies>\n     <dependency>\n       <groupId>org.apache.maven</groupId>",
+                "additions": 5,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/3f89465c90812199282a7beaad816c240c3b6371/core-integration-testing-plugins/maven-it-plugin-setter/pom.xml",
+                "status": "modified",
+                "changes": 5,
+                "deletions": 0,
+                "sha": "cd87680bd62a11654b254f43d007d73d8e70f3ba",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/3f89465c90812199282a7beaad816c240c3b6371/core-integration-testing-plugins/maven-it-plugin-setter/pom.xml",
+                "filename": "core-integration-testing-plugins/maven-it-plugin-setter/pom.xml",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-integration-testing-plugins/maven-it-plugin-setter/pom.xml?ref=3f89465c90812199282a7beaad816c240c3b6371"
+            },
+            {
+                "patch": "@@ -29,6 +29,11 @@\n   <name>Maven Integration Test Plugin :: Uses Properties Plugin</name>\n   <version>1.0-SNAPSHOT</version>\n   <inceptionYear>2006</inceptionYear>\n+\n+  <properties>\n+    <maven.test.skip>true</maven.test.skip>\n+  </properties>\n+\n   <dependencies>\n     <dependency>\n       <groupId>org.apache.maven</groupId>",
+                "additions": 5,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/3f89465c90812199282a7beaad816c240c3b6371/core-integration-testing-plugins/maven-it-plugin-uses-properties/pom.xml",
+                "status": "modified",
+                "changes": 5,
+                "deletions": 0,
+                "sha": "8c01ef8bcf0ec055dfda43cdf7279c553a889254",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/3f89465c90812199282a7beaad816c240c3b6371/core-integration-testing-plugins/maven-it-plugin-uses-properties/pom.xml",
+                "filename": "core-integration-testing-plugins/maven-it-plugin-uses-properties/pom.xml",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-integration-testing-plugins/maven-it-plugin-uses-properties/pom.xml?ref=3f89465c90812199282a7beaad816c240c3b6371"
+            },
+            {
+                "patch": "@@ -23,4 +23,15 @@\n     <module>maven-it-plugin-touch</module>    \n     <module>maven-it-plugin-uses-properties</module>    \n   </modules>\n+  \n+  <build>\n+    <pluginManagement>\n+      <plugins>\n+        <plugin>\n+          <artifactId>maven-surefire-plugin</artifactId>\n+          <version>2.3</version>\n+        </plugin>\n+      </plugins>\n+    </pluginManagement>\n+  </build>\n </project>",
+                "additions": 11,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/3f89465c90812199282a7beaad816c240c3b6371/core-integration-testing-plugins/pom.xml",
+                "status": "modified",
+                "changes": 11,
+                "deletions": 0,
+                "sha": "2dbf0334ef47a0829ec5390e9b25ad0d2b8c394f",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/3f89465c90812199282a7beaad816c240c3b6371/core-integration-testing-plugins/pom.xml",
+                "filename": "core-integration-testing-plugins/pom.xml",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/core-integration-testing-plugins/pom.xml?ref=3f89465c90812199282a7beaad816c240c3b6371"
+            },
+            {
+                "patch": "@@ -3,7 +3,7 @@\n   <parent>\n     <groupId>org.apache.maven</groupId>\n     <artifactId>maven-parent</artifactId>\n-    <version>6-SNAPSHOT</version>\n+    <version>7-SNAPSHOT</version>\n   </parent>\n   <groupId>org.apache.maven.its</groupId>\n   <artifactId>maven-integration-test-helper</artifactId>",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/3f89465c90812199282a7beaad816c240c3b6371/maven-integration-test-helper/pom.xml",
+                "status": "modified",
+                "changes": 2,
+                "deletions": 1,
+                "sha": "a9969479602ec29cf81f1f091b1ffeec6cc9e5ec",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/3f89465c90812199282a7beaad816c240c3b6371/maven-integration-test-helper/pom.xml",
+                "filename": "maven-integration-test-helper/pom.xml",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/maven-integration-test-helper/pom.xml?ref=3f89465c90812199282a7beaad816c240c3b6371"
+            },
+            {
+                "patch": "@@ -27,7 +27,7 @@\n   <parent>\n     <groupId>org.apache.maven</groupId>\n     <artifactId>maven-parent</artifactId>\n-    <version>4</version>\n+    <version>7-SNAPSHOT</version>\n     <relativePath>../pom/maven/pom.xml</relativePath>\n   </parent>\n   <groupId>org.apache.maven.its</groupId>",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/maven-integration-testing/raw/3f89465c90812199282a7beaad816c240c3b6371/pom.xml",
+                "status": "modified",
+                "changes": 2,
+                "deletions": 1,
+                "sha": "503e91e84d34745447758366a2fd53dee1529c67",
+                "blob_url": "https://github.com/apache/maven-integration-testing/blob/3f89465c90812199282a7beaad816c240c3b6371/pom.xml",
+                "filename": "pom.xml",
+                "contents_url": "https://api.github.com/repos/apache/maven-integration-testing/contents/pom.xml?ref=3f89465c90812199282a7beaad816c240c3b6371"
+            }
+        ],
+        "bug_id": "maven-integration-testing_7",
+        "parent": "https://github.com/apache/maven-integration-testing/commit/14bf10117b1eced5936b53d68134e891aefa6d02",
+        "message": "Fixing core-it-plugins so they won't bomb on surefire:test with NPE if there is nothing under src/test/java.\n\ngit-svn-id: https://svn.apache.org/repos/asf/maven/core-integration-testing/trunk@573699 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "maven-integration-testing"
+    }
+]

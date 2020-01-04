@@ -1,0 +1,632 @@
+[
+    {
+        "commit": "https://github.com/apache/apex-core/commit/23ac9e672809bbcca5a0f2eb28b9a3ebef3d143a",
+        "file": [
+            {
+                "patch": "@@ -234,10 +234,13 @@ public String getLogicalId() {\n \n   /**\n    *\n-   * Representation of a container for physical objects of dag to be placed in<p>\n-   * <br>\n-   * This class directly maps to a hadoop container<br>\n+   * Representation of a container for physical objects of DAG to be placed in\n+   * <p>\n    * <br>\n+   * References the actual container assigned by the resource manager which\n+   * hosts the streaming operators in the execution layer.<br>\n+   * The container reference may change throughout the lifecycle of the\n+   * application due to failure/recovery or scheduler decisions in general. <br>\n    *\n    */\n \n@@ -333,21 +336,6 @@ public PhysicalPlan(DAG dag) {\n       }\n \n       boolean upstreamDeployed = true;\n-      // determine partitioning / number of operators\n-      List<Partition> partitions = null;\n-      boolean isSingleNodeInstance = true;\n-\n-      if (n.getOperator() instanceof PartitionableOperator) {\n-        // operator to provide initial partitioning\n-        PartitionableOperator partitionableOperator = (PartitionableOperator)n.getOperator();\n-        partitions = new ArrayList<Partition>(1);\n-        partitions.add(new PartitionImpl(partitionableOperator));\n-        partitions = partitionableOperator.definePartitions(partitions);\n-        if (partitions.isEmpty()) {\n-          throw new IllegalArgumentException(\"PartitionableOperator must return at least one partition: \" + n);\n-        }\n-        isSingleNodeInstance = false;\n-      }\n \n       for (StreamDecl s : n.getInputStreams().values()) {\n         if (s.getSource() != null && !inlineGroups.containsKey(s.getSource().getOperatorWrapper())) {\n@@ -359,6 +347,17 @@ public PhysicalPlan(DAG dag) {\n       }\n \n       if (upstreamDeployed) {\n+\n+        // determine partitioning / number of operators\n+        List<Partition> partitions = null;\n+        boolean isSingleNodeInstance = true;\n+\n+        if (n.getOperator() instanceof PartitionableOperator) {\n+          // operator to provide initial partitioning\n+          partitions = partition(n);\n+          isSingleNodeInstance = false;\n+        }\n+\n         // ready to look at this node\n         Set<PTOperator> inlineSet = new HashSet<PTOperator>();\n         if (isSingleNodeInstance) {\n@@ -421,6 +420,21 @@ public PhysicalPlan(DAG dag) {\n \n   }\n \n+  private List<Partition> partition(DAG.OperatorWrapper n) {\n+    PartitionableOperator partitionableOperator = (PartitionableOperator)n.getOperator();\n+    List<Partition> partitions = new ArrayList<Partition>(1);\n+    partitions.add(new PartitionImpl(partitionableOperator));\n+\n+    partitions = partitionableOperator.definePartitions(partitions);\n+    if (partitions == null || partitions.isEmpty()) {\n+      throw new IllegalArgumentException(\"PartitionableOperator must return at least one partition: \" + n);\n+    }\n+    return partitions;\n+  }\n+\n+\n+\n+\n   private PTOperator createPTOperator(OperatorWrapper nodeDecl, Partition partition, int instanceCount) {\n \n     PTOperator pOperator = new PTOperator();\n@@ -433,12 +447,12 @@ private PTOperator createPTOperator(OperatorWrapper nodeDecl, Partition partitio\n     if (partition != null) {\n       partitionKeys = new HashMap<DAG.InputPortMeta, List<byte[]>>(partition.getPartitionKeys().size());\n       Map<InputPort<?>, List<byte[]>> partKeys = partition.getPartitionKeys();\n-      for (Map.Entry<InputPort<?>, List<byte[]>> partitionPort : partKeys.entrySet()) {\n-        DAG.InputPortMeta pportMeta = nodeDecl.getInputPortMeta(partitionPort.getKey());\n+      for (Map.Entry<InputPort<?>, List<byte[]>> portEntry : partKeys.entrySet()) {\n+        DAG.InputPortMeta pportMeta = nodeDecl.getInputPortMeta(portEntry.getKey());\n         if (pportMeta == null) {\n-          throw new IllegalArgumentException(\"Invalid port reference \" + partitionPort);\n+          throw new IllegalArgumentException(\"Invalid port reference \" + portEntry);\n         }\n-        partitionKeys.put(pportMeta, partitionPort.getValue());\n+        partitionKeys.put(pportMeta, portEntry.getValue());\n       }\n     }\n ",
+                "additions": 36,
+                "raw_url": "https://github.com/apache/apex-core/raw/23ac9e672809bbcca5a0f2eb28b9a3ebef3d143a/engine/src/main/java/com/malhartech/stram/PhysicalPlan.java",
+                "status": "modified",
+                "changes": 58,
+                "deletions": 22,
+                "sha": "cdccc74c998f91941bc60ec6fed7d9b3c61f86d9",
+                "blob_url": "https://github.com/apache/apex-core/blob/23ac9e672809bbcca5a0f2eb28b9a3ebef3d143a/engine/src/main/java/com/malhartech/stram/PhysicalPlan.java",
+                "filename": "engine/src/main/java/com/malhartech/stram/PhysicalPlan.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/malhartech/stram/PhysicalPlan.java?ref=23ac9e672809bbcca5a0f2eb28b9a3ebef3d143a"
+            },
+            {
+                "patch": "@@ -7,7 +7,6 @@\n import java.io.ByteArrayOutputStream;\n import java.net.InetSocketAddress;\n import java.util.ArrayList;\n-import java.util.Arrays;\n import java.util.HashMap;\n import java.util.LinkedHashMap;\n import java.util.List;\n@@ -20,8 +19,8 @@\n import org.slf4j.Logger;\n import org.slf4j.LoggerFactory;\n \n-import com.malhartech.api.DAG.OperatorWrapper;\n import com.malhartech.api.DAG.StreamDecl;\n+import com.malhartech.api.Operator;\n import com.malhartech.api.OperatorCodec;\n import com.malhartech.bufferserver.util.Codec;\n import com.malhartech.stram.OperatorDeployInfo.InputDeployInfo;\n@@ -276,7 +275,7 @@ boolean isIdle() {\n     Map<String, OutputDeployInfo> publishers = new LinkedHashMap<String, OutputDeployInfo>();\n \n     for (PTOperator node : deployNodes) {\n-      OperatorDeployInfo ndi = createOperatorDeployInfo(node.id, node.getLogicalNode());\n+      OperatorDeployInfo ndi = createOperatorDeployInfo(node);\n       long checkpointWindowId = node.getRecoveryCheckpoint();\n       if (checkpointWindowId > 0) {\n         LOG.debug(\"Operator {} recovery checkpoint {}\", node.id, Codec.getStringWindowId(checkpointWindowId));\n@@ -342,8 +341,9 @@ boolean isIdle() {\n           // FIXME: address to come from upstream output port, should be assigned first\n           InetSocketAddress addr = in.source.container.bufferServerAddress;\n           if (addr == null) {\n-            LOG.warn(\"upstream address not assigned: \" + in.source);\n-            addr = container.bufferServerAddress;\n+            //LOG.warn(\"upstream address not assigned: \" + in.source);\n+            //addr = container.bufferServerAddress;\n+            throw new IllegalStateException(\"upstream address not assigned: \" + in.source);\n           }\n           inputInfo.bufferServerHost = addr.getHostName();\n           inputInfo.bufferServerPort = addr.getPort();\n@@ -366,19 +366,20 @@ boolean isIdle() {\n    * @return {@link com.malhartech.stram.OperatorDeployInfo}\n    *\n    */\n-  private OperatorDeployInfo createOperatorDeployInfo(String dnodeId, OperatorWrapper operator)\n+  private OperatorDeployInfo createOperatorDeployInfo(PTOperator node)\n   {\n+    Operator operator = node.getLogicalNode().getOperator();\n     OperatorDeployInfo ndi = new OperatorDeployInfo();\n     ByteArrayOutputStream os = new ByteArrayOutputStream();\n     try {\n-      this.nodeSerDe.write(operator.getOperator(), os);\n+      this.nodeSerDe.write(operator, os);\n       ndi.serializedNode = os.toByteArray();\n       os.close();\n     } catch (Exception e) {\n-      throw new RuntimeException(\"Failed to initialize \" + operator + \"(\" + operator.getOperator().getClass() + \")\", e);\n+      throw new RuntimeException(\"Failed to initialize \" + operator + \"(\" + operator.getClass() + \")\", e);\n     }\n-    ndi.declaredId = operator.getId();\n-    ndi.id = dnodeId;\n+    ndi.declaredId = node.getLogicalId();\n+    ndi.id = node.id;\n     return ndi;\n   }\n ",
+                "additions": 11,
+                "raw_url": "https://github.com/apache/apex-core/raw/23ac9e672809bbcca5a0f2eb28b9a3ebef3d143a/engine/src/main/java/com/malhartech/stram/StramChildAgent.java",
+                "status": "modified",
+                "changes": 21,
+                "deletions": 10,
+                "sha": "b32f84a0e421386970b23a44381ac2cafe8c7a57",
+                "blob_url": "https://github.com/apache/apex-core/blob/23ac9e672809bbcca5a0f2eb28b9a3ebef3d143a/engine/src/main/java/com/malhartech/stram/StramChildAgent.java",
+                "filename": "engine/src/main/java/com/malhartech/stram/StramChildAgent.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/malhartech/stram/StramChildAgent.java?ref=23ac9e672809bbcca5a0f2eb28b9a3ebef3d143a"
+            },
+            {
+                "patch": "@@ -34,7 +34,7 @@\n       List<Partition> newPartitions = new ArrayList<Partition>(3);\n       Partition templatePartition = partitions.get(0);\n       for (int i=0; i<3; i++) {\n-        Partition p = templatePartition.getInstance(templatePartition.getOperator());\n+        Partition p = templatePartition.getInstance(new PartitiongTestOperator());\n         p.getPartitionKeys().put(this.inport1, Arrays.asList(PARTITION_KEYS[i]));\n         newPartitions.add(p);\n       }",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/apex-core/raw/23ac9e672809bbcca5a0f2eb28b9a3ebef3d143a/engine/src/test/java/com/malhartech/stram/PhysicalPlanTest.java",
+                "status": "modified",
+                "changes": 2,
+                "deletions": 1,
+                "sha": "20b8f6420fec45e8440211608ed4a57dabe7fb57",
+                "blob_url": "https://github.com/apache/apex-core/blob/23ac9e672809bbcca5a0f2eb28b9a3ebef3d143a/engine/src/test/java/com/malhartech/stram/PhysicalPlanTest.java",
+                "filename": "engine/src/test/java/com/malhartech/stram/PhysicalPlanTest.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/test/java/com/malhartech/stram/PhysicalPlanTest.java?ref=23ac9e672809bbcca5a0f2eb28b9a3ebef3d143a"
+            }
+        ],
+        "bug_id": "apex-core_1",
+        "parent": "https://github.com/apache/apex-core/commit/50cdf7fab9b48a227e181b0130934af93765bee9",
+        "message": "seemingly random NullPointerException when running demo for longer",
+        "repo": "apex-core"
+    },
+    {
+        "commit": "https://github.com/apache/apex-core/commit/0fc84b57ce92a28e9fef425e84a52134482b9a73",
+        "file": [
+            {
+                "patch": "@@ -359,7 +359,7 @@ private void processOperatorPartFile(BufferedReader partBr, Long startTime, Long\n       os.timestamp = Long.valueOf(partLine.substring(cursor, cursor2));\n       cursor = cursor2 + 1;\n       os.stats = new ObjectMapperString(partLine.substring(cursor));\n-      if ((startTime != null || os.timestamp >= startTime) && (endTime != null || os.timestamp <= endTime)) {\n+      if ((startTime == null || os.timestamp >= startTime) && (endTime == null || os.timestamp <= endTime)) {\n         result.add(os);\n       }\n     }",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/apex-core/raw/0fc84b57ce92a28e9fef425e84a52134482b9a73/engine/src/main/java/com/datatorrent/stram/client/StatsAgent.java",
+                "status": "modified",
+                "changes": 2,
+                "deletions": 1,
+                "sha": "b5f7b42dedbe285c03b427b57744cf7ff9f22c14",
+                "blob_url": "https://github.com/apache/apex-core/blob/0fc84b57ce92a28e9fef425e84a52134482b9a73/engine/src/main/java/com/datatorrent/stram/client/StatsAgent.java",
+                "filename": "engine/src/main/java/com/datatorrent/stram/client/StatsAgent.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/datatorrent/stram/client/StatsAgent.java?ref=0fc84b57ce92a28e9fef425e84a52134482b9a73"
+            }
+        ],
+        "bug_id": "apex-core_2",
+        "parent": "https://github.com/apache/apex-core/commit/a61b4125e937be4ffe58e16a33a4914910ec0363",
+        "message": "SPOI-5634 Fix potential NPE",
+        "repo": "apex-core"
+    },
+    {
+        "commit": "https://github.com/apache/apex-core/commit/12b745db4625cd9f1f12dc2b27637065bccbe742",
+        "file": [
+            {
+                "patch": "@@ -397,6 +397,11 @@ public void setClassNode(CompactClassNode classNode)\n \n   public Set<String> getInitializableDescendants(String clazz, int limit, String filter, String packagePrefix)\n   {\n+    TypeGraphVertex tgv = typeGraph.get(clazz);\n+    if(tgv == null) {\n+      return null;\n+    }\n+    \n     Set<String> result = new TreeSet<String>(new Comparator<String>() {\n \n       @Override\n@@ -414,7 +419,7 @@ public int compare(String o1, String o2)\n         return n1.compareTo(n2);\n       }\n     });\n-    TypeGraphVertex tgv = typeGraph.get(clazz);\n+\n \n     if (tgv.numberOfInitializableDescendants() > limit) {\n       throw new RuntimeException(\"Too many public concrete sub types!\");",
+                "additions": 6,
+                "raw_url": "https://github.com/apache/apex-core/raw/12b745db4625cd9f1f12dc2b27637065bccbe742/engine/src/main/java/com/datatorrent/stram/webapp/TypeGraph.java",
+                "status": "modified",
+                "changes": 7,
+                "deletions": 1,
+                "sha": "672191262a02655241ba393c20df6d916f2488e1",
+                "blob_url": "https://github.com/apache/apex-core/blob/12b745db4625cd9f1f12dc2b27637065bccbe742/engine/src/main/java/com/datatorrent/stram/webapp/TypeGraph.java",
+                "filename": "engine/src/main/java/com/datatorrent/stram/webapp/TypeGraph.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/datatorrent/stram/webapp/TypeGraph.java?ref=12b745db4625cd9f1f12dc2b27637065bccbe742"
+            }
+        ],
+        "bug_id": "apex-core_3",
+        "parent": "https://github.com/apache/apex-core/commit/55826a98a7fc1b048be2eb9ccb800864f2d09811",
+        "message": "SPOI-3929 #comment fix NPE",
+        "repo": "apex-core"
+    },
+    {
+        "commit": "https://github.com/apache/apex-core/commit/64883c83161d39ae1b81a6893988b8148dcf0f38",
+        "file": [
+            {
+                "patch": "@@ -644,9 +644,16 @@ protected void serviceStop() throws Exception\n     if (delegationTokenManager != null) {\n       delegationTokenManager.stopThreads();\n     }\n-    nmClient.stop();\n-    amRmClient.stop();\n-    dnmgr.teardown();\n+    if (nmClient != null) {\n+      nmClient.stop();\n+    }\n+    if (amRmClient != null) {\n+      amRmClient.stop();\n+    }\n+\n+    if (dnmgr != null) {\n+      dnmgr.teardown();\n+    }\n   }\n \n   /**",
+                "additions": 10,
+                "raw_url": "https://github.com/apache/apex-core/raw/64883c83161d39ae1b81a6893988b8148dcf0f38/engine/src/main/java/com/datatorrent/stram/StramAppMaster.java",
+                "status": "modified",
+                "changes": 13,
+                "deletions": 3,
+                "sha": "d79a94d377f881cdd60d743c2410d7e3f0d7dd89",
+                "blob_url": "https://github.com/apache/apex-core/blob/64883c83161d39ae1b81a6893988b8148dcf0f38/engine/src/main/java/com/datatorrent/stram/StramAppMaster.java",
+                "filename": "engine/src/main/java/com/datatorrent/stram/StramAppMaster.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/datatorrent/stram/StramAppMaster.java?ref=64883c83161d39ae1b81a6893988b8148dcf0f38"
+            }
+        ],
+        "bug_id": "apex-core_4",
+        "parent": "https://github.com/apache/apex-core/commit/339ff55c6349f97efa55f9d29aa90fd8399097d1",
+        "message": "avoid NPE.",
+        "repo": "apex-core"
+    },
+    {
+        "commit": "https://github.com/apache/apex-core/commit/73c6701b664b748dfe066b8ed9220cf60ad88412",
+        "file": [
+            {
+                "patch": "@@ -1212,7 +1212,9 @@ public void deploy(Set<PTContainer> releaseContainers, Collection<PTOperator> un\n   @Override\n   public void recordEventAsync(StramEvent ev)\n   {\n-    eventBus.publishAsync(ev);\n+    if (eventBus != null) {\n+      eventBus.publishAsync(ev);\n+    }\n   }\n \n   @Override",
+                "additions": 3,
+                "raw_url": "https://github.com/apache/apex-core/raw/73c6701b664b748dfe066b8ed9220cf60ad88412/engine/src/main/java/com/datatorrent/stram/StreamingContainerManager.java",
+                "status": "modified",
+                "changes": 4,
+                "deletions": 1,
+                "sha": "1619ec9b7896619d04f6469d8d6a6da6a9b12a1b",
+                "blob_url": "https://github.com/apache/apex-core/blob/73c6701b664b748dfe066b8ed9220cf60ad88412/engine/src/main/java/com/datatorrent/stram/StreamingContainerManager.java",
+                "filename": "engine/src/main/java/com/datatorrent/stram/StreamingContainerManager.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/datatorrent/stram/StreamingContainerManager.java?ref=73c6701b664b748dfe066b8ed9220cf60ad88412"
+            }
+        ],
+        "bug_id": "apex-core_5",
+        "parent": "https://github.com/apache/apex-core/commit/ae9f3195eb7202257cdb8c7f3e184a914357afd7",
+        "message": "fix NPE",
+        "repo": "apex-core"
+    },
+    {
+        "commit": "https://github.com/apache/apex-core/commit/efd4cdf222258854dcc67e2797477fdc11946617",
+        "file": [
+            {
+                "patch": "@@ -143,8 +143,8 @@ public void writeEvent(StramEvent event) throws Exception\n       eventInfo.id = event.getId();\n       eventInfo.timestamp = event.getTimestamp();\n       eventInfo.type = event.getType();\n-      eventInfo.data.remove(\"id\");\n       eventInfo.data = data;\n+      eventInfo.data.remove(\"id\");\n       wsClient.publish(pubSubTopic, eventInfo);\n     }\n   }",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/apex-core/raw/efd4cdf222258854dcc67e2797477fdc11946617/engine/src/main/java/com/datatorrent/stram/FSEventRecorder.java",
+                "status": "modified",
+                "changes": 2,
+                "deletions": 1,
+                "sha": "5d4b92ca11f73b27f4732cf638b94a324bfc4931",
+                "blob_url": "https://github.com/apache/apex-core/blob/efd4cdf222258854dcc67e2797477fdc11946617/engine/src/main/java/com/datatorrent/stram/FSEventRecorder.java",
+                "filename": "engine/src/main/java/com/datatorrent/stram/FSEventRecorder.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/datatorrent/stram/FSEventRecorder.java?ref=efd4cdf222258854dcc67e2797477fdc11946617"
+            }
+        ],
+        "bug_id": "apex-core_6",
+        "parent": "https://github.com/apache/apex-core/commit/bb93454425524b6e2f42244e9dfa8f1240aab333",
+        "message": "fixed writeEvent NPE",
+        "repo": "apex-core"
+    },
+    {
+        "commit": "https://github.com/apache/apex-core/commit/b41da22de461a53f806300016bdb6fb29908b98e",
+        "file": [
+            {
+                "patch": "@@ -712,7 +712,7 @@ private void execute() throws YarnException, IOException\n         }\n \n         if (alreadyAllocated) {\n-          LOG.info(\"Releasing {} as resource with priority {} was already assigned to {}\", allocatedContainer.getId(), allocatedContainer.getPriority(), csr.container.toIdStateString());\n+          LOG.info(\"Releasing {} as resource with priority {} was already assigned\", allocatedContainer.getId(), allocatedContainer.getPriority());\n           releasedContainers.add(allocatedContainer.getId());\n           continue;\n         }",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/apex-core/raw/b41da22de461a53f806300016bdb6fb29908b98e/engine/src/main/java/com/datatorrent/stram/StramAppMasterService.java",
+                "status": "modified",
+                "changes": 2,
+                "deletions": 1,
+                "sha": "8f88550bf84e195c41974cc736c1209721ee8930",
+                "blob_url": "https://github.com/apache/apex-core/blob/b41da22de461a53f806300016bdb6fb29908b98e/engine/src/main/java/com/datatorrent/stram/StramAppMasterService.java",
+                "filename": "engine/src/main/java/com/datatorrent/stram/StramAppMasterService.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/datatorrent/stram/StramAppMasterService.java?ref=b41da22de461a53f806300016bdb6fb29908b98e"
+            }
+        ],
+        "bug_id": "apex-core_7",
+        "parent": "https://github.com/apache/apex-core/commit/010d7149ae0c9d5dd0d63a7484875634a9c24287",
+        "message": "SPOI-1883 Fix NPE",
+        "repo": "apex-core"
+    },
+    {
+        "commit": "https://github.com/apache/apex-core/commit/69b2ca3b313c488124d750ea9fc6b70a855cac4f",
+        "file": [
+            {
+                "patch": "@@ -52,10 +52,10 @@ public void changeLoggersLevel(@Nonnull Map<String, String> targetChanges)\n     }\n \n     if (!patternLevel.isEmpty()) {\n-      for (Logger classLogger : loggerMap.values()) {\n+      for (DTLoggerAdapter classLogger : loggerMap.values()) {\n         Level level = getLevelFor(classLogger.getName());\n         if(level!=null){\n-          loggerMap.get(classLogger).setLogLevel(level);\n+          classLogger.setLogLevel(level);\n         }\n       }\n     }",
+                "additions": 2,
+                "raw_url": "https://github.com/apache/apex-core/raw/69b2ca3b313c488124d750ea9fc6b70a855cac4f/engine/src/main/java/org/slf4j/impl/DTLoggerFactory.java",
+                "status": "modified",
+                "changes": 4,
+                "deletions": 2,
+                "sha": "e69b57aab47a21c5db13703597a8f954a43e2196",
+                "blob_url": "https://github.com/apache/apex-core/blob/69b2ca3b313c488124d750ea9fc6b70a855cac4f/engine/src/main/java/org/slf4j/impl/DTLoggerFactory.java",
+                "filename": "engine/src/main/java/org/slf4j/impl/DTLoggerFactory.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/org/slf4j/impl/DTLoggerFactory.java?ref=69b2ca3b313c488124d750ea9fc6b70a855cac4f"
+            }
+        ],
+        "bug_id": "apex-core_8",
+        "parent": "https://github.com/apache/apex-core/commit/004981743b036951ec7ad77fc1f91cda9dab0426",
+        "message": "SPOI-2606: NPE in DTLoggerFactory",
+        "repo": "apex-core"
+    },
+    {
+        "commit": "https://github.com/apache/apex-core/commit/74884441e642f06f3f3576291c23796d6cddc57e",
+        "file": [
+            {
+                "patch": "@@ -194,7 +194,7 @@ private synchronized void subscribe(PubSubWebSocket webSocket, String topic)\n       return;\n     }\n     else {\n-      LOG.info(\"Subscribe is allowed for topic {}, user {}\", topic, webSocket.getPrincipal());\n+      LOG.debug(\"Subscribe is allowed for topic {}, user {}\", topic, webSocket.getPrincipal());\n     }\n \n     HashSet<PubSubWebSocket> wsSet;",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/apex-core/raw/74884441e642f06f3f3576291c23796d6cddc57e/PubSubWebSocketServlet.java",
+                "status": "modified",
+                "changes": 2,
+                "deletions": 1,
+                "sha": "b039f4415a684f41bc6812712e99709b58439d9a",
+                "blob_url": "https://github.com/apache/apex-core/blob/74884441e642f06f3f3576291c23796d6cddc57e/PubSubWebSocketServlet.java",
+                "filename": "PubSubWebSocketServlet.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/PubSubWebSocketServlet.java?ref=74884441e642f06f3f3576291c23796d6cddc57e"
+            }
+        ],
+        "bug_id": "apex-core_9",
+        "parent": "https://github.com/apache/apex-core/commit/091345688a1b95bf3071f604058a9ebfc9f688f2",
+        "message": "SPOI-5559 fixed NPE in auto publish of apps",
+        "repo": "apex-core"
+    },
+    {
+        "commit": "https://github.com/apache/apex-core/commit/202895914e927eff8bfa46236d7fd818ed9e7f1a",
+        "file": [
+            {
+                "patch": "@@ -60,6 +60,7 @@\n import com.datatorrent.stram.plan.logical.LogicalPlan.OperatorMeta;\n import com.datatorrent.stram.plan.logical.LogicalPlanConfiguration;\n import com.datatorrent.stram.plan.logical.Operators;\n+import com.datatorrent.stram.plan.logical.Operators.PortContextPair;\n import com.datatorrent.stram.plan.logical.requests.LogicalPlanRequest;\n import com.datatorrent.stram.plan.physical.*;\n import com.datatorrent.stram.plan.physical.OperatorStatus.PortStatus;\n@@ -2182,16 +2183,16 @@ public void setLoggersLevel(Map<String, String> changedLoggers)\n \n     Operators.PortMappingDescriptor portMap = new Operators.PortMappingDescriptor();\n     Operators.describe(logicalOperator.getOperator(), portMap);\n-    InputPort<?> inputPort = portMap.inputPorts.get(portName).component;\n+    PortContextPair<InputPort<?>> inputPort = portMap.inputPorts.get(portName);\n     if (inputPort != null) {\n-      return logicalOperator.getMeta(inputPort).getAttributes().clone();\n+      return logicalOperator.getMeta(inputPort.component).getAttributes().clone();\n     }\n     else {\n-      OutputPort<?> outputPort = portMap.outputPorts.get(portName).component;\n+      PortContextPair<OutputPort<?>> outputPort = portMap.outputPorts.get(portName);\n       if (outputPort == null) {\n         throw new IllegalArgumentException(\"Invalid port name \" + portName);\n       }\n-      return logicalOperator.getMeta(outputPort).getAttributes().clone();\n+      return logicalOperator.getMeta(outputPort.component).getAttributes().clone();\n     }\n   }\n ",
+                "additions": 5,
+                "raw_url": "https://github.com/apache/apex-core/raw/202895914e927eff8bfa46236d7fd818ed9e7f1a/engine/src/main/java/com/datatorrent/stram/StreamingContainerManager.java",
+                "status": "modified",
+                "changes": 9,
+                "deletions": 4,
+                "sha": "3538abb6075f044f911ffb2931049712ff2a5289",
+                "blob_url": "https://github.com/apache/apex-core/blob/202895914e927eff8bfa46236d7fd818ed9e7f1a/engine/src/main/java/com/datatorrent/stram/StreamingContainerManager.java",
+                "filename": "engine/src/main/java/com/datatorrent/stram/StreamingContainerManager.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/datatorrent/stram/StreamingContainerManager.java?ref=202895914e927eff8bfa46236d7fd818ed9e7f1a"
+            }
+        ],
+        "bug_id": "apex-core_10",
+        "parent": "https://github.com/apache/apex-core/commit/08c6e68fa04b043fc941ce0f869de3e8dba9b673",
+        "message": "Fixed NPE for getting port attributes",
+        "repo": "apex-core"
+    },
+    {
+        "commit": "https://github.com/apache/apex-core/commit/cb2fa622de5a9c9672eb11882f24b2091ef933eb",
+        "file": [
+            {
+                "patch": "@@ -170,10 +170,12 @@ public boolean isReadyTurnoverPartFile()\n \n   public boolean flushData() throws IOException\n   {\n-    partOutStr.hflush();\n-    if (isReadyTurnoverPartFile()) {\n-      turnover();\n-      return true;\n+    if (partOutStr != null) {\n+      partOutStr.hflush();\n+      if (isReadyTurnoverPartFile()) {\n+        turnover();\n+        return true;\n+      }\n     }\n     return false;\n   }",
+                "additions": 6,
+                "raw_url": "https://github.com/apache/apex-core/raw/cb2fa622de5a9c9672eb11882f24b2091ef933eb/engine/src/main/java/com/datatorrent/stram/util/FSPartFileCollection.java",
+                "status": "modified",
+                "changes": 10,
+                "deletions": 4,
+                "sha": "477e0bc26331442d4fa183970884cd4e2b5b7c74",
+                "blob_url": "https://github.com/apache/apex-core/blob/cb2fa622de5a9c9672eb11882f24b2091ef933eb/engine/src/main/java/com/datatorrent/stram/util/FSPartFileCollection.java",
+                "filename": "engine/src/main/java/com/datatorrent/stram/util/FSPartFileCollection.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/datatorrent/stram/util/FSPartFileCollection.java?ref=cb2fa622de5a9c9672eb11882f24b2091ef933eb"
+            }
+        ],
+        "bug_id": "apex-core_11",
+        "parent": "https://github.com/apache/apex-core/commit/12a09cd43776faa945d174a10b1f23a2b09e7096",
+        "message": "SPOI-3319 #resolve fixed NPE within FSStatsRecorder",
+        "repo": "apex-core"
+    },
+    {
+        "commit": "https://github.com/apache/apex-core/commit/0ce507e2b00df95e4394bb452439c57849eec62b",
+        "file": [
+            {
+                "patch": "@@ -1006,7 +1006,7 @@ public ContainerHeartbeatResponse processHeartbeat(ContainerHeartbeat heartbeat)\n       PTOperator oper = this.plan.getAllOperators().get(shb.getNodeId());\n \n       if (oper == null) {\n-        LOG.error(\"Heartbeat for unknown operator {} (container {})\", shb.getNodeId(), heartbeat.getContainerId());\n+        LOG.info(\"Heartbeat for unknown operator {} (container {})\", shb.getNodeId(), heartbeat.getContainerId());\n         sca.undeployOpers.add(shb.nodeId);\n         continue;\n       }\n@@ -1817,9 +1817,11 @@ private LogicalOperatorInfo fillLogicalOperatorInfo(OperatorMeta operator)\n         loi.status.put(physicalOperator.getState().toString(), count);\n       }\n       count.increment();\n-      long recoveryWindowId = toWsWindowId(physicalOperator.getRecoveryCheckpoint().windowId);\n-      if (loi.recoveryWindowId == 0 || loi.recoveryWindowId > recoveryWindowId) {\n-        loi.recoveryWindowId = recoveryWindowId;\n+      if (physicalOperator.getRecoveryCheckpoint() != null) {\n+        long recoveryWindowId = toWsWindowId(physicalOperator.getRecoveryCheckpoint().windowId);\n+        if (loi.recoveryWindowId == 0 || loi.recoveryWindowId > recoveryWindowId) {\n+          loi.recoveryWindowId = recoveryWindowId;\n+        }\n       }\n       PTContainer container = physicalOperator.getContainer();\n       if (container != null) {",
+                "additions": 6,
+                "raw_url": "https://github.com/apache/apex-core/raw/0ce507e2b00df95e4394bb452439c57849eec62b/engine/src/main/java/com/datatorrent/stram/StreamingContainerManager.java",
+                "status": "modified",
+                "changes": 10,
+                "deletions": 4,
+                "sha": "68bfd47c5923f4d336d2b1028163fd5bc97644ae",
+                "blob_url": "https://github.com/apache/apex-core/blob/0ce507e2b00df95e4394bb452439c57849eec62b/engine/src/main/java/com/datatorrent/stram/StreamingContainerManager.java",
+                "filename": "engine/src/main/java/com/datatorrent/stram/StreamingContainerManager.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/datatorrent/stram/StreamingContainerManager.java?ref=0ce507e2b00df95e4394bb452439c57849eec62b"
+            }
+        ],
+        "bug_id": "apex-core_12",
+        "parent": "https://github.com/apache/apex-core/commit/a2137e6c7c323e79ec019b67d9701cc1132d23ea",
+        "message": "SPOI-3288: fixed npe in fillLogicalPlanInfo",
+        "repo": "apex-core"
+    },
+    {
+        "commit": "https://github.com/apache/apex-core/commit/9df827df9fe4005d166d4e8223f64e0d5c474e3f",
+        "file": [
+            {
+                "patch": "@@ -210,11 +210,13 @@ public JSONObject getOperatorClasses(@QueryParam(\"parent\") String parent)\n     JSONObject result = new JSONObject();\n     JSONArray classNames = new JSONArray();\n \n-    if (parent.equals(\"chart\")) {\n-      parent = \"com.datatorrent.lib.chart.ChartOperator\";\n-    }\n-    else if (parent.equals(\"filter\")) {\n-      parent = \"com.datatorrent.lib.util.SimpleFilterOperator\";\n+    if (parent != null) {\n+      if (parent.equals(\"chart\")) {\n+        parent = \"com.datatorrent.lib.chart.ChartOperator\";\n+      }\n+      else if (parent.equals(\"filter\")) {\n+        parent = \"com.datatorrent.lib.util.SimpleFilterOperator\";\n+      }\n     }\n \n     try {",
+                "additions": 7,
+                "raw_url": "https://github.com/apache/apex-core/raw/9df827df9fe4005d166d4e8223f64e0d5c474e3f/engine/src/main/java/com/datatorrent/stram/webapp/StramWebServices.java",
+                "status": "modified",
+                "changes": 12,
+                "deletions": 5,
+                "sha": "082a005b98abb58cfaf405ca498524e01539321a",
+                "blob_url": "https://github.com/apache/apex-core/blob/9df827df9fe4005d166d4e8223f64e0d5c474e3f/engine/src/main/java/com/datatorrent/stram/webapp/StramWebServices.java",
+                "filename": "engine/src/main/java/com/datatorrent/stram/webapp/StramWebServices.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/datatorrent/stram/webapp/StramWebServices.java?ref=9df827df9fe4005d166d4e8223f64e0d5c474e3f"
+            }
+        ],
+        "bug_id": "apex-core_13",
+        "parent": "https://github.com/apache/apex-core/commit/5a6e1b1030aa315cb8f503a9beba40d8855a7a6a",
+        "message": "fixed NPE in operatorClasses call",
+        "repo": "apex-core"
+    },
+    {
+        "commit": "https://github.com/apache/apex-core/commit/9040cb4118c497acba409b5f2208b7687153ad29",
+        "file": [
+            {
+                "patch": "@@ -541,9 +541,15 @@ protected void serviceStop() throws Exception\n     if (delegationTokenManager != null) {\n       delegationTokenManager.stopThreads();\n     }\n-    nmClient.stop();\n-    amRmClient.stop();\n-    dnmgr.teardown();\n+    if (nmClient != null) {\n+      nmClient.stop();\n+    }\n+    if (amRmClient != null) {\n+      amRmClient.stop();\n+    }\n+    if (dnmgr != null) {\n+      dnmgr.teardown();\n+    }\n   }\n \n   public boolean run() throws Exception",
+                "additions": 9,
+                "raw_url": "https://github.com/apache/apex-core/raw/9040cb4118c497acba409b5f2208b7687153ad29/engine/src/main/java/com/datatorrent/stram/StreamingAppMasterService.java",
+                "status": "modified",
+                "changes": 12,
+                "deletions": 3,
+                "sha": "b979c684c9263de574e28d4ff79d401c0e3f6757",
+                "blob_url": "https://github.com/apache/apex-core/blob/9040cb4118c497acba409b5f2208b7687153ad29/engine/src/main/java/com/datatorrent/stram/StreamingAppMasterService.java",
+                "filename": "engine/src/main/java/com/datatorrent/stram/StreamingAppMasterService.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/datatorrent/stram/StreamingAppMasterService.java?ref=9040cb4118c497acba409b5f2208b7687153ad29"
+            }
+        ],
+        "bug_id": "apex-core_14",
+        "parent": "https://github.com/apache/apex-core/commit/86f6ded9ac2693b632e1c7b0d1623193ceec41fc",
+        "message": "added in null check because of NPE",
+        "repo": "apex-core"
+    },
+    {
+        "commit": "https://github.com/apache/apex-core/commit/9b7e5b9460ce7a2b540864bcc613544d27d7cc4d",
+        "file": [
+            {
+                "patch": "@@ -25,9 +25,9 @@\n {\n   public static final String LAST_INDEX_TOPIC_PREFIX = PubSubMessage.INTERNAL_TOPIC_PREFIX + \".lastIndex\";\n   private static final Logger LOG = LoggerFactory.getLogger(SharedPubSubWebSocketClient.class);\n-  private Map<String, List<Handler>> topicHandlers = new HashMap<String, List<Handler>>();\n+  private final Map<String, List<Handler>> topicHandlers = new HashMap<String, List<Handler>>();\n   private long lastConnectTryTime;\n-  private long minWaitConnectionRetry = 5000;\n+  private final long minWaitConnectionRetry = 5000;\n \n   public interface Handler\n   {",
+                "additions": 2,
+                "raw_url": "https://github.com/apache/apex-core/raw/9b7e5b9460ce7a2b540864bcc613544d27d7cc4d/engine/src/main/java/com/datatorrent/stram/util/SharedPubSubWebSocketClient.java",
+                "status": "modified",
+                "changes": 4,
+                "deletions": 2,
+                "sha": "73b0d43b9c6d15ae4f2cc3fa489f3eed171257c6",
+                "blob_url": "https://github.com/apache/apex-core/blob/9b7e5b9460ce7a2b540864bcc613544d27d7cc4d/engine/src/main/java/com/datatorrent/stram/util/SharedPubSubWebSocketClient.java",
+                "filename": "engine/src/main/java/com/datatorrent/stram/util/SharedPubSubWebSocketClient.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/datatorrent/stram/util/SharedPubSubWebSocketClient.java?ref=9b7e5b9460ce7a2b540864bcc613544d27d7cc4d"
+            }
+        ],
+        "bug_id": "apex-core_15",
+        "parent": "https://github.com/apache/apex-core/commit/73036c40e1435ddb7186aa16f3380d825170ed58",
+        "message": "fixed NPE when auth is not configured",
+        "repo": "apex-core"
+    },
+    {
+        "commit": "https://github.com/apache/apex-core/commit/0a28738efb0c5db79c3b31448e0a08f45909cffb",
+        "file": [
+            {
+                "patch": "@@ -272,8 +272,10 @@ public void run() throws IOException\n       processLine(line, reader, true);\n       out.flush();\n     }\n-    topLevelHistory.flush();\n-    changingLogicalPlanHistory.flush();\n+    if (topLevelHistory != null && changingLogicalPlanHistory != null) {\n+      topLevelHistory.flush();\n+      changingLogicalPlanHistory.flush();\n+    }\n     System.out.println(\"exit\");\n   }\n \n@@ -878,8 +880,10 @@ public void execute(String[] args, ConsoleReader reader) throws Exception\n     @Override\n     public void execute(String[] args, ConsoleReader reader) throws Exception\n     {\n-      topLevelHistory.flush();\n-      changingLogicalPlanHistory.flush();\n+      if (topLevelHistory != null && changingLogicalPlanHistory != null) {\n+        topLevelHistory.flush();\n+        changingLogicalPlanHistory.flush();\n+      }\n       System.exit(0);\n     }\n ",
+                "additions": 8,
+                "raw_url": "https://github.com/apache/apex-core/raw/0a28738efb0c5db79c3b31448e0a08f45909cffb/engine/src/main/java/com/datatorrent/stram/cli/StramCli.java",
+                "status": "modified",
+                "changes": 12,
+                "deletions": 4,
+                "sha": "3e53f4510e357c958afec9294e90dc231af5451d",
+                "blob_url": "https://github.com/apache/apex-core/blob/0a28738efb0c5db79c3b31448e0a08f45909cffb/engine/src/main/java/com/datatorrent/stram/cli/StramCli.java",
+                "filename": "engine/src/main/java/com/datatorrent/stram/cli/StramCli.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/datatorrent/stram/cli/StramCli.java?ref=0a28738efb0c5db79c3b31448e0a08f45909cffb"
+            }
+        ],
+        "bug_id": "apex-core_16",
+        "parent": "https://github.com/apache/apex-core/commit/14e9d6d7965d4ce21cb0869050ece29160c23674",
+        "message": "fixed NPE when exiting in batch mode",
+        "repo": "apex-core"
+    },
+    {
+        "commit": "https://github.com/apache/apex-core/commit/7dd2d50b59e066907f42f6121c556404ac81f46f",
+        "file": [
+            {
+                "patch": "@@ -82,7 +82,11 @@ public AppBundle(File file, boolean processAppDirectory) throws IOException, Zip\n     appBundleName = attr.getValue(ATTRIBUTE_DT_APP_BUNDLE_NAME);\n     appBundleVersion = attr.getValue(ATTRIBUTE_DT_APP_BUNDLE_VERSION);\n     dtEngineVersion = attr.getValue(ATTRIBUTE_DT_ENGINE_VERSION);\n-    classPath.addAll(Arrays.asList(StringUtils.split(attr.getValue(ATTRIBUTE_CLASS_PATH), \" \")));\n+    String classPathString = attr.getValue(ATTRIBUTE_CLASS_PATH);\n+    if (classPathString == null) {\n+      throw new IOException(\"Not a valid app bundle.  Class-Path is missing from MANIFEST.MF\");\n+    }\n+    classPath.addAll(Arrays.asList(StringUtils.split(classPathString, \" \")));\n \n     ZipFile zipFile = new ZipFile(file);\n     if (zipFile.isEncrypted()) {",
+                "additions": 5,
+                "raw_url": "https://github.com/apache/apex-core/raw/7dd2d50b59e066907f42f6121c556404ac81f46f/engine/src/main/java/com/datatorrent/stram/client/AppBundle.java",
+                "status": "modified",
+                "changes": 6,
+                "deletions": 1,
+                "sha": "3196f23999f17ed4691292baebad67524a87847d",
+                "blob_url": "https://github.com/apache/apex-core/blob/7dd2d50b59e066907f42f6121c556404ac81f46f/engine/src/main/java/com/datatorrent/stram/client/AppBundle.java",
+                "filename": "engine/src/main/java/com/datatorrent/stram/client/AppBundle.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/datatorrent/stram/client/AppBundle.java?ref=7dd2d50b59e066907f42f6121c556404ac81f46f"
+            }
+        ],
+        "bug_id": "apex-core_17",
+        "parent": "https://github.com/apache/apex-core/commit/c585bdd81d6b806882a4e4a118956dcedc87e3b0",
+        "message": "don't throw NPE if classpath is not present",
+        "repo": "apex-core"
+    },
+    {
+        "commit": "https://github.com/apache/apex-core/commit/e914fc9ae8cc0389554c1cbbf69780130e963686",
+        "file": [
+            {
+                "patch": "@@ -808,14 +808,17 @@ public void buildAdditionalPortInfo(JSONObject oper, JSONObject portClassHierarc\n           continue;\n         }\n         boolean hasSchemaClasses = false;\n-        for (String descendant : typeGraph.getInstantiableDescendants(portType)) {\n-          try {\n-            if (typeGraph.isInstantiableBean(descendant)) {\n-              hasSchemaClasses = true;\n-              break;\n+        List<String> instantiableDescendants = typeGraph.getInstantiableDescendants(portType);\n+        if (instantiableDescendants != null) {\n+          for (String descendant : instantiableDescendants) {\n+            try {\n+              if (typeGraph.isInstantiableBean(descendant)) {\n+                hasSchemaClasses = true;\n+                break;\n+              }\n+            } catch (JSONException ex) {\n+              LOG.warn(\"checking descendant is instantiable {}\", descendant);\n             }\n-          } catch (JSONException ex) {\n-            LOG.warn(\"checking descendant is instantiable {}\", descendant);\n           }\n         }\n         portTypesWithSchemaClasses.put(portType, hasSchemaClasses);",
+                "additions": 10,
+                "raw_url": "https://github.com/apache/apex-core/raw/e914fc9ae8cc0389554c1cbbf69780130e963686/engine/src/main/java/com/datatorrent/stram/webapp/OperatorDiscoverer.java",
+                "status": "modified",
+                "changes": 17,
+                "deletions": 7,
+                "sha": "b35efe6f1a306adce82c1d70da4c3b659f87f6f8",
+                "blob_url": "https://github.com/apache/apex-core/blob/e914fc9ae8cc0389554c1cbbf69780130e963686/engine/src/main/java/com/datatorrent/stram/webapp/OperatorDiscoverer.java",
+                "filename": "engine/src/main/java/com/datatorrent/stram/webapp/OperatorDiscoverer.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/datatorrent/stram/webapp/OperatorDiscoverer.java?ref=e914fc9ae8cc0389554c1cbbf69780130e963686"
+            }
+        ],
+        "bug_id": "apex-core_18",
+        "parent": "https://github.com/apache/apex-core/commit/9d08532a7127bf57d8d0ace45c0a165581d17daf",
+        "message": "SPOI-6002: NPE while finding if a port type has schema classes",
+        "repo": "apex-core"
+    },
+    {
+        "commit": "https://github.com/apache/apex-core/commit/f92d4ee4e3717cdba545013020551f4f558bb156",
+        "file": [
+            {
+                "patch": "@@ -317,6 +317,7 @@ final public void activate(NodeContext ctx)\n     long currentWindowId = 0;\n     alive = true;\n \n+    logger.debug(\"activating \" + this);\n     do {\n       shouldWait = true;\n \n@@ -439,7 +440,7 @@ else if (t.getWindowId() == currentWindowId) {\n                  * We need to make sure that the END_STREAM comes outside of the window.\n                  */\n                 totalQueues--;\n-                activeQueues.remove(activePort);\n+                inputs.remove(activePort.id);\n                 if (totalQueues == 0) {\n                   alive = false;\n                 }",
+                "additions": 2,
+                "raw_url": "https://github.com/apache/apex-core/raw/f92d4ee4e3717cdba545013020551f4f558bb156/engine/src/main/java/com/malhartech/dag/AbstractNode.java",
+                "status": "modified",
+                "changes": 3,
+                "deletions": 1,
+                "sha": "1ae63a892ff3658cf9e25109dfe324080e833354",
+                "blob_url": "https://github.com/apache/apex-core/blob/f92d4ee4e3717cdba545013020551f4f558bb156/engine/src/main/java/com/malhartech/dag/AbstractNode.java",
+                "filename": "engine/src/main/java/com/malhartech/dag/AbstractNode.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/malhartech/dag/AbstractNode.java?ref=f92d4ee4e3717cdba545013020551f4f558bb156"
+            },
+            {
+                "patch": "@@ -60,8 +60,10 @@ public void setup(NodeConfiguration config)  {\n \n   @Override\n   public void teardown() {\n+    if (wsClient != null) {\n+      wsClient.destroy();\n+    }\n     super.teardown();\n-    wsClient.destroy();\n   }\n \n   @Override",
+                "additions": 3,
+                "raw_url": "https://github.com/apache/apex-core/raw/f92d4ee4e3717cdba545013020551f4f558bb156/engine/src/main/java/com/malhartech/lib/io/HttpOutputNode.java",
+                "status": "modified",
+                "changes": 4,
+                "deletions": 1,
+                "sha": "eb99c3ef998a553c64edad86187d32bb7fe25f53",
+                "blob_url": "https://github.com/apache/apex-core/blob/f92d4ee4e3717cdba545013020551f4f558bb156/engine/src/main/java/com/malhartech/lib/io/HttpOutputNode.java",
+                "filename": "engine/src/main/java/com/malhartech/lib/io/HttpOutputNode.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/malhartech/lib/io/HttpOutputNode.java?ref=f92d4ee4e3717cdba545013020551f4f558bb156"
+            },
+            {
+                "patch": "@@ -116,7 +116,9 @@ public StramToNodeRequest processPartioningDetails() {\n     public LocalStramChild(String containerId, StreamingNodeUmbilicalProtocol umbilical, WindowGenerator wgen)\n     {\n       super(containerId, new Configuration(), umbilical);\n-      super.addWindowGenerator(containerId, wgen);\n+      if (wgen != null) {\n+        super.addWindowGenerator(containerId, wgen);\n+      }\n     }\n \n     @Override",
+                "additions": 3,
+                "raw_url": "https://github.com/apache/apex-core/raw/f92d4ee4e3717cdba545013020551f4f558bb156/engine/src/main/java/com/malhartech/stram/StramLocalCluster.java",
+                "status": "modified",
+                "changes": 4,
+                "deletions": 1,
+                "sha": "add6a11e778c14869629d02f0a87478cd41e075c",
+                "blob_url": "https://github.com/apache/apex-core/blob/f92d4ee4e3717cdba545013020551f4f558bb156/engine/src/main/java/com/malhartech/stram/StramLocalCluster.java",
+                "filename": "engine/src/main/java/com/malhartech/stram/StramLocalCluster.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/malhartech/stram/StramLocalCluster.java?ref=f92d4ee4e3717cdba545013020551f4f558bb156"
+            },
+            {
+                "patch": "@@ -12,10 +12,13 @@ stram.node.node2.template=nt1\n stram.node.inputNode.classname=com.malhartech.stram.NumberGeneratorInputAdapter\n stram.node.inputNode.maxTuples=10\n \n+stram.node.httpOut.classname=com.malhartech.lib.io.HttpOutputNode\n+stram.node.httpOut.resourceUrl=http://localhost:9999/resourcecontext\n+\n stram.stream.input1.source=inputNode.outputPort\n stram.stream.input1.sinks=node1.input1\n stram.stream.input1.template=streamtempl1\n \n stram.stream.n1n2.source=node1.output1\n-stram.stream.n1n2.sinks=node2.input1\n+stram.stream.n1n2.sinks=node2.input1,httpOut.input\n stram.stream.n1n2.template=streamtempl1",
+                "additions": 4,
+                "raw_url": "https://github.com/apache/apex-core/raw/f92d4ee4e3717cdba545013020551f4f558bb156/engine/src/test/resources/clusterTest.tplg.properties",
+                "status": "modified",
+                "changes": 5,
+                "deletions": 1,
+                "sha": "00e7fcaa3e6d0f9925460d2d5074afebecba4d64",
+                "blob_url": "https://github.com/apache/apex-core/blob/f92d4ee4e3717cdba545013020551f4f558bb156/engine/src/test/resources/clusterTest.tplg.properties",
+                "filename": "engine/src/test/resources/clusterTest.tplg.properties",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/test/resources/clusterTest.tplg.properties?ref=f92d4ee4e3717cdba545013020551f4f558bb156"
+            }
+        ],
+        "bug_id": "apex-core_19",
+        "parent": "https://github.com/apache/apex-core/commit/17d1b57292de7743d9b66a6a46fd8af9ad53d12b",
+        "message": "fix npe in local mode and concurrent modification in AbstractNode",
+        "repo": "apex-core"
+    },
+    {
+        "commit": "https://github.com/apache/apex-core/commit/bd67f3d11ca688c2cfc3d985166ab766edcf8fee",
+        "file": [
+            {
+                "patch": "@@ -41,6 +41,7 @@\n import com.datatorrent.bufferserver.storage.DiskStorage;\n import com.datatorrent.bufferserver.util.Codec;\n import com.datatorrent.common.util.ScheduledThreadPoolExecutor;\n+import com.datatorrent.common.util.Slice;\n import com.datatorrent.netlet.DefaultEventLoop;\n import com.datatorrent.stram.ComponentContextPair;\n import com.datatorrent.stram.RecoverableRpcProxy;\n@@ -1114,7 +1115,7 @@ private void deployInputStreams(List<OperatorDeployInfo> operatorList, HashMap<S\n                * generally speaking we do not have partitions on the inline streams so the control should not\n                * come here but if it comes, then we are ready to handle it using the partition aware streams.\n                */\n-              PartitionAwareSink<Object> pas = new PartitionAwareSink<Object>((StreamCodec<Object>)streamCodec, nidi.partitionKeys, nidi.partitionMask, stream);\n+              PartitionAwareSink<Object> pas = new PartitionAwareSink<Object>(streamCodec == null ? nonSerializingStreamCodec : (StreamCodec<Object>) streamCodec, nidi.partitionKeys, nidi.partitionMask, stream);\n               ((Stream.MultiSinkCapableStream)pair.component).setSink(sinkIdentifier, pas);\n             }\n \n@@ -1514,5 +1515,26 @@ private void handleChangeLoggersRequest(StramToNodeChangeLoggersRequest request)\n     DTLoggerFactory.getInstance().changeLoggersLevel(request.getTargetChanges());\n   }\n \n+  private final StreamCodec<Object> nonSerializingStreamCodec = new StreamCodec<Object>()\n+  {\n+    @Override\n+    public Object fromByteArray(Slice fragment)\n+    {\n+      return null;\n+    }\n+\n+    @Override\n+    public Slice toByteArray(Object o)\n+    {\n+      return null;\n+    }\n+\n+    @Override\n+    public int getPartition(Object o)\n+    {\n+      return o.hashCode();\n+    }\n+  };\n+\n   private static final Logger logger = LoggerFactory.getLogger(StreamingContainer.class);\n }",
+                "additions": 23,
+                "raw_url": "https://github.com/apache/apex-core/raw/bd67f3d11ca688c2cfc3d985166ab766edcf8fee/engine/src/main/java/com/datatorrent/stram/engine/StreamingContainer.java",
+                "status": "modified",
+                "changes": 24,
+                "deletions": 1,
+                "sha": "f60bd222d8141a9b49c2cd69e6f3c175359000cc",
+                "blob_url": "https://github.com/apache/apex-core/blob/bd67f3d11ca688c2cfc3d985166ab766edcf8fee/engine/src/main/java/com/datatorrent/stram/engine/StreamingContainer.java",
+                "filename": "engine/src/main/java/com/datatorrent/stram/engine/StreamingContainer.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/datatorrent/stram/engine/StreamingContainer.java?ref=bd67f3d11ca688c2cfc3d985166ab766edcf8fee"
+            },
+            {
+                "patch": "@@ -27,13 +27,15 @@\n import com.datatorrent.stram.engine.DefaultUnifier;\n import com.datatorrent.stram.engine.GenericTestOperator;\n import com.datatorrent.stram.engine.TestGeneratorInputOperator;\n+import com.datatorrent.stram.plan.TestPlanContext;\n import com.datatorrent.stram.plan.logical.LogicalPlan;\n import com.datatorrent.stram.plan.logical.LogicalPlan.OperatorMeta;\n import com.datatorrent.stram.plan.physical.OperatorStatus.PortStatus;\n import com.datatorrent.stram.plan.physical.PTContainer;\n import com.datatorrent.stram.plan.physical.PTOperator;\n import com.datatorrent.stram.plan.physical.PhysicalPlan;\n import com.datatorrent.stram.plan.physical.PhysicalPlanTest;\n+import com.datatorrent.stram.support.StramTestSupport;\n import com.datatorrent.stram.support.StramTestSupport.MemoryStorageAgent;\n import com.datatorrent.stram.support.StramTestSupport.TestMeta;\n import com.datatorrent.stram.tuple.Tuple;\n@@ -678,4 +680,38 @@ public void testValidInputOperatorDeployInfoType()\n     OperatorDeployInfo o1DeployInfo = getDeployInfo(scm.getContainerAgent(containerId)).get(0);\n     Assert.assertEquals(\"type \" + o1DeployInfo, OperatorDeployInfo.OperatorType.INPUT, o1DeployInfo.type);\n   }\n+\n+\n+  private void testDownStreamPartition(Locality locality) throws Exception\n+  {\n+    LogicalPlan dag = new LogicalPlan();\n+    TestGeneratorInputOperator o1 = dag.addOperator(\"o1\", TestGeneratorInputOperator.class);\n+    GenericTestOperator o2 = dag.addOperator(\"o2\", GenericTestOperator.class);\n+    dag.setAttribute(o2, OperatorContext.PARTITIONER, new StatelessPartitioner<GenericTestOperator>(2));\n+    dag.addStream(\"o1Output1\", o1.outport, o2.inport1).setLocality(locality);\n+\n+    int maxContainers = 5;\n+    dag.setAttribute(LogicalPlan.CONTAINERS_MAX_COUNT, maxContainers);\n+    dag.setAttribute(OperatorContext.STORAGE_AGENT, new StramTestSupport.MemoryStorageAgent());\n+    dag.validate();\n+    PhysicalPlan plan = new PhysicalPlan(dag, new TestPlanContext());\n+    Assert.assertEquals(\"number of containers\", 1, plan.getContainers().size());\n+\n+    PTContainer container1 = plan.getContainers().get(0);\n+    Assert.assertEquals(\"number operators \" + container1, 3, container1.getOperators().size());\n+    StramLocalCluster slc = new StramLocalCluster(dag);\n+    slc.run(5000);\n+  }\n+\n+  @Test\n+  public void testOIODownstreamPartition() throws Exception\n+  {\n+    testDownStreamPartition(Locality.THREAD_LOCAL);\n+  }\n+\n+  @Test\n+  public void testContainerLocalDownstreamPartition() throws Exception\n+  {\n+    testDownStreamPartition(Locality.CONTAINER_LOCAL);\n+  }\n }",
+                "additions": 36,
+                "raw_url": "https://github.com/apache/apex-core/raw/bd67f3d11ca688c2cfc3d985166ab766edcf8fee/engine/src/test/java/com/datatorrent/stram/StreamingContainerManagerTest.java",
+                "status": "modified",
+                "changes": 36,
+                "deletions": 0,
+                "sha": "bc9a42bd5b636f3defb78b7eb4b9a757f4947582",
+                "blob_url": "https://github.com/apache/apex-core/blob/bd67f3d11ca688c2cfc3d985166ab766edcf8fee/engine/src/test/java/com/datatorrent/stram/StreamingContainerManagerTest.java",
+                "filename": "engine/src/test/java/com/datatorrent/stram/StreamingContainerManagerTest.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/test/java/com/datatorrent/stram/StreamingContainerManagerTest.java?ref=bd67f3d11ca688c2cfc3d985166ab766edcf8fee"
+            }
+        ],
+        "bug_id": "apex-core_20",
+        "parent": "https://github.com/apache/apex-core/commit/bee52bd61700e2ea49da6541ddf628de2bac83d0",
+        "message": "SPOI-3752 #comment Fixed NPE due to null streamcodec by setting non serializing streamcodec",
+        "repo": "apex-core"
+    },
+    {
+        "commit": "https://github.com/apache/apex-core/commit/7459993cb82f057c679ac261e5517af810da9d09",
+        "file": [
+            {
+                "patch": "@@ -41,6 +41,7 @@\n import com.datatorrent.bufferserver.storage.DiskStorage;\n import com.datatorrent.bufferserver.util.Codec;\n import com.datatorrent.common.util.ScheduledThreadPoolExecutor;\n+import com.datatorrent.common.util.Slice;\n import com.datatorrent.netlet.DefaultEventLoop;\n import com.datatorrent.stram.ComponentContextPair;\n import com.datatorrent.stram.RecoverableRpcProxy;\n@@ -1115,7 +1116,7 @@ private void deployInputStreams(List<OperatorDeployInfo> operatorList, HashMap<S\n                * generally speaking we do not have partitions on the inline streams so the control should not\n                * come here but if it comes, then we are ready to handle it using the partition aware streams.\n                */\n-              PartitionAwareSink<Object> pas = new PartitionAwareSink<Object>((StreamCodec<Object>)streamCodec, nidi.partitionKeys, nidi.partitionMask, stream);\n+              PartitionAwareSink<Object> pas = new PartitionAwareSink<Object>(streamCodec == null ? nonSerializingStreamCodec : (StreamCodec<Object>) streamCodec, nidi.partitionKeys, nidi.partitionMask, stream);\n               ((Stream.MultiSinkCapableStream)pair.component).setSink(sinkIdentifier, pas);\n             }\n \n@@ -1515,5 +1516,26 @@ private void handleChangeLoggersRequest(StramToNodeChangeLoggersRequest request)\n     DTLoggerFactory.getInstance().changeLoggersLevel(request.getTargetChanges());\n   }\n \n+  private final StreamCodec<Object> nonSerializingStreamCodec = new StreamCodec<Object>()\n+  {\n+    @Override\n+    public Object fromByteArray(Slice fragment)\n+    {\n+      return null;\n+    }\n+\n+    @Override\n+    public Slice toByteArray(Object o)\n+    {\n+      return null;\n+    }\n+\n+    @Override\n+    public int getPartition(Object o)\n+    {\n+      return o.hashCode();\n+    }\n+  };\n+\n   private static final Logger logger = LoggerFactory.getLogger(StreamingContainer.class);\n }",
+                "additions": 23,
+                "raw_url": "https://github.com/apache/apex-core/raw/7459993cb82f057c679ac261e5517af810da9d09/engine/src/main/java/com/datatorrent/stram/engine/StreamingContainer.java",
+                "status": "modified",
+                "changes": 24,
+                "deletions": 1,
+                "sha": "9b0f581522ad864991d5390aa85f6d7752b0bb20",
+                "blob_url": "https://github.com/apache/apex-core/blob/7459993cb82f057c679ac261e5517af810da9d09/engine/src/main/java/com/datatorrent/stram/engine/StreamingContainer.java",
+                "filename": "engine/src/main/java/com/datatorrent/stram/engine/StreamingContainer.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/datatorrent/stram/engine/StreamingContainer.java?ref=7459993cb82f057c679ac261e5517af810da9d09"
+            },
+            {
+                "patch": "@@ -44,13 +44,15 @@\n import com.datatorrent.stram.engine.DefaultUnifier;\n import com.datatorrent.stram.engine.GenericTestOperator;\n import com.datatorrent.stram.engine.TestGeneratorInputOperator;\n+import com.datatorrent.stram.plan.TestPlanContext;\n import com.datatorrent.stram.plan.logical.LogicalPlan;\n import com.datatorrent.stram.plan.logical.LogicalPlan.OperatorMeta;\n import com.datatorrent.stram.plan.physical.OperatorStatus.PortStatus;\n import com.datatorrent.stram.plan.physical.PTContainer;\n import com.datatorrent.stram.plan.physical.PTOperator;\n import com.datatorrent.stram.plan.physical.PhysicalPlan;\n import com.datatorrent.stram.plan.physical.PhysicalPlanTest;\n+import com.datatorrent.stram.support.StramTestSupport;\n import com.datatorrent.stram.support.StramTestSupport.MemoryStorageAgent;\n import com.datatorrent.stram.support.StramTestSupport.TestMeta;\n import com.datatorrent.stram.tuple.Tuple;\n@@ -686,4 +688,38 @@ public void testValidInputOperatorDeployInfoType()\n     OperatorDeployInfo o1DeployInfo = getDeployInfo(scm.getContainerAgent(containerId)).get(0);\n     Assert.assertEquals(\"type \" + o1DeployInfo, OperatorDeployInfo.OperatorType.INPUT, o1DeployInfo.type);\n   }\n+\n+\n+  private void testDownStreamPartition(Locality locality) throws Exception\n+  {\n+    LogicalPlan dag = new LogicalPlan();\n+    TestGeneratorInputOperator o1 = dag.addOperator(\"o1\", TestGeneratorInputOperator.class);\n+    GenericTestOperator o2 = dag.addOperator(\"o2\", GenericTestOperator.class);\n+    dag.setAttribute(o2, OperatorContext.PARTITIONER, new StatelessPartitioner<GenericTestOperator>(2));\n+    dag.addStream(\"o1Output1\", o1.outport, o2.inport1).setLocality(locality);\n+\n+    int maxContainers = 5;\n+    dag.setAttribute(LogicalPlan.CONTAINERS_MAX_COUNT, maxContainers);\n+    dag.setAttribute(OperatorContext.STORAGE_AGENT, new StramTestSupport.MemoryStorageAgent());\n+    dag.validate();\n+    PhysicalPlan plan = new PhysicalPlan(dag, new TestPlanContext());\n+    Assert.assertEquals(\"number of containers\", 1, plan.getContainers().size());\n+\n+    PTContainer container1 = plan.getContainers().get(0);\n+    Assert.assertEquals(\"number operators \" + container1, 3, container1.getOperators().size());\n+    StramLocalCluster slc = new StramLocalCluster(dag);\n+    slc.run(5000);\n+  }\n+\n+  @Test\n+  public void testOIODownstreamPartition() throws Exception\n+  {\n+    testDownStreamPartition(Locality.THREAD_LOCAL);\n+  }\n+\n+  @Test\n+  public void testContainerLocalDownstreamPartition() throws Exception\n+  {\n+    testDownStreamPartition(Locality.CONTAINER_LOCAL);\n+  }\n }",
+                "additions": 36,
+                "raw_url": "https://github.com/apache/apex-core/raw/7459993cb82f057c679ac261e5517af810da9d09/engine/src/test/java/com/datatorrent/stram/StreamingContainerManagerTest.java",
+                "status": "modified",
+                "changes": 36,
+                "deletions": 0,
+                "sha": "d4b04ba0846dcd743d0f00631b145d12fa5df5f2",
+                "blob_url": "https://github.com/apache/apex-core/blob/7459993cb82f057c679ac261e5517af810da9d09/engine/src/test/java/com/datatorrent/stram/StreamingContainerManagerTest.java",
+                "filename": "engine/src/test/java/com/datatorrent/stram/StreamingContainerManagerTest.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/test/java/com/datatorrent/stram/StreamingContainerManagerTest.java?ref=7459993cb82f057c679ac261e5517af810da9d09"
+            }
+        ],
+        "bug_id": "apex-core_21",
+        "parent": "https://github.com/apache/apex-core/commit/4d1a5d4324e7ab5d7dab5a09b4840d03ed80ff41",
+        "message": "SPOI-3752 #comment Fixed NPE due to null streamcodec by setting non serializing streamcodec",
+        "repo": "apex-core"
+    },
+    {
+        "commit": "https://github.com/apache/apex-core/commit/2d1ff2e0d1a769f20e56ad7ea2ca65f0c13a21a4",
+        "file": [
+            {
+                "patch": "@@ -68,8 +68,8 @@ public void put(Tuple t)\n           break;\n \n         case END_WINDOW:\n+          endWindowDequeueTimes.put(reservoir, System.currentTimeMillis());\n           if (--expectingEndWindows == 0) {\n-            endWindowDequeueTimes.put(reservoir, System.currentTimeMillis());\n             processEndWindow(t);\n           }\n           break;\n@@ -104,7 +104,7 @@ public void put(Tuple t)\n         case END_STREAM:\n           if (lastEndStreamWindowId != t.getWindowId()) {\n             lastEndStreamWindowId = t.getWindowId();\n-            for (Entry<String, SweepableReservoir> e : inputs.entrySet()) {\n+            for (Entry<String, SweepableReservoir> e: inputs.entrySet()) {\n               PortContextPair<InputPort<?>> pcpair = descriptor.inputPorts.get(e.getKey());\n               if (pcpair != null) {\n                 pcpair.component.setConnected(false);",
+                "additions": 2,
+                "raw_url": "https://github.com/apache/apex-core/raw/2d1ff2e0d1a769f20e56ad7ea2ca65f0c13a21a4/engine/src/main/java/com/datatorrent/stram/engine/OiONode.java",
+                "status": "modified",
+                "changes": 4,
+                "deletions": 2,
+                "sha": "83338ba81302ebda53738573beab0b34f7a069cc",
+                "blob_url": "https://github.com/apache/apex-core/blob/2d1ff2e0d1a769f20e56ad7ea2ca65f0c13a21a4/engine/src/main/java/com/datatorrent/stram/engine/OiONode.java",
+                "filename": "engine/src/main/java/com/datatorrent/stram/engine/OiONode.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/datatorrent/stram/engine/OiONode.java?ref=2d1ff2e0d1a769f20e56ad7ea2ca65f0c13a21a4"
+            }
+        ],
+        "bug_id": "apex-core_22",
+        "parent": "https://github.com/apache/apex-core/commit/cea93451f2d78ad16ba530bb17fe5b4431b80c6f",
+        "message": "SPOI-3075 #resolve fix NPE when more than one inputs are connected as OiO",
+        "repo": "apex-core"
+    },
+    {
+        "commit": "https://github.com/apache/apex-core/commit/7bbb4cfd2af6d5c5c99c58222c44a848bc6534b2",
+        "file": [
+            {
+                "patch": "@@ -1700,8 +1700,12 @@ public void run()\n           if (stats.windowId > currentEndWindowStatsWindowId) {\n             Map<Integer, EndWindowStats> endWindowStatsMap = endWindowStatsOperatorMap.get(stats.windowId);\n             if (endWindowStatsMap == null) {\n-              endWindowStatsOperatorMap.putIfAbsent(stats.windowId, new ConcurrentSkipListMap<Integer, EndWindowStats>());\n-              endWindowStatsMap = endWindowStatsOperatorMap.get(stats.windowId);\n+              endWindowStatsMap = new ConcurrentSkipListMap<Integer, EndWindowStats>();\n+              Map<Integer, EndWindowStats> endWindowStatsMapPrevious =\n+                  endWindowStatsOperatorMap.putIfAbsent(stats.windowId, endWindowStatsMap);\n+              if (endWindowStatsMapPrevious != null) {\n+                endWindowStatsMap = endWindowStatsMapPrevious;\n+              }\n             }\n             endWindowStatsMap.put(shb.getNodeId(), endWindowStats);\n ",
+                "additions": 6,
+                "raw_url": "https://github.com/apache/apex-core/raw/7bbb4cfd2af6d5c5c99c58222c44a848bc6534b2/engine/src/main/java/com/datatorrent/stram/StreamingContainerManager.java",
+                "status": "modified",
+                "changes": 8,
+                "deletions": 2,
+                "sha": "aa79243c1db5f3e54ae6c1fb7d7d6b32362aeecd",
+                "blob_url": "https://github.com/apache/apex-core/blob/7bbb4cfd2af6d5c5c99c58222c44a848bc6534b2/engine/src/main/java/com/datatorrent/stram/StreamingContainerManager.java",
+                "filename": "engine/src/main/java/com/datatorrent/stram/StreamingContainerManager.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/datatorrent/stram/StreamingContainerManager.java?ref=7bbb4cfd2af6d5c5c99c58222c44a848bc6534b2"
+            }
+        ],
+        "bug_id": "apex-core_23",
+        "parent": "https://github.com/apache/apex-core/commit/00939d54b32541766319a105badbb611a6843111",
+        "message": "APEXCORE-362 - NPE in StreamingContainerManager. Fixed race condition between the thread that insert into endWindowStatsOperatorMap and the thread that removes entries when  endWindowStatsOperatorMap exceeds 1000 entries.",
+        "repo": "apex-core"
+    },
+    {
+        "commit": "https://github.com/apache/apex-core/commit/c6b3a925a408e767796230ff54055fd2d9f19480",
+        "file": [
+            {
+                "patch": "@@ -1570,6 +1570,10 @@ public void run()\n           entry.getValue().recordingId = null;\n         }\n         for (ContainerStats.OperatorStats stats : statsList) {\n+          if (stats == null) {\n+            LOG.warn(\"Operator {} statistics list contains null element\", shb.getNodeId());\n+            continue;\n+          }\n \n           /* report checkpoint-ed WindowId status of the operator */\n           if (stats.checkpoint instanceof Checkpoint) {",
+                "additions": 4,
+                "raw_url": "https://github.com/apache/apex-core/raw/c6b3a925a408e767796230ff54055fd2d9f19480/engine/src/main/java/com/datatorrent/stram/StreamingContainerManager.java",
+                "status": "modified",
+                "changes": 4,
+                "deletions": 0,
+                "sha": "ae7972821adf77a2ad1c8f1b620b1dd3b7b00b17",
+                "blob_url": "https://github.com/apache/apex-core/blob/c6b3a925a408e767796230ff54055fd2d9f19480/engine/src/main/java/com/datatorrent/stram/StreamingContainerManager.java",
+                "filename": "engine/src/main/java/com/datatorrent/stram/StreamingContainerManager.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/datatorrent/stram/StreamingContainerManager.java?ref=c6b3a925a408e767796230ff54055fd2d9f19480"
+            }
+        ],
+        "bug_id": "apex-core_24",
+        "parent": "https://github.com/apache/apex-core/commit/c2eb06c686e93419764140a0e07b046a73d172be",
+        "message": "APEXCORE-363 - NPE in StreamingContainerManager. Skip null in the statistics list in case it was inserted as a result of incorrect CircularBuffer usage in the OperatorContext.",
+        "repo": "apex-core"
+    },
+    {
+        "commit": "https://github.com/apache/apex-core/commit/ffedce9b6752e4c38a2c1ee469f5a85803ab14be",
+        "file": [
+            {
+                "patch": "@@ -808,14 +808,17 @@ public void buildAdditionalPortInfo(JSONObject oper, JSONObject portClassHierarc\n           continue;\n         }\n         boolean hasSchemaClasses = false;\n-        for (String descendant : typeGraph.getInstantiableDescendants(portType)) {\n-          try {\n-            if (typeGraph.isInstantiableBean(descendant)) {\n-              hasSchemaClasses = true;\n-              break;\n+        List<String> instantiableDescendants = typeGraph.getInstantiableDescendants(portType);\n+        if (instantiableDescendants != null) {\n+          for (String descendant : instantiableDescendants) {\n+            try {\n+              if (typeGraph.isInstantiableBean(descendant)) {\n+                hasSchemaClasses = true;\n+                break;\n+              }\n+            } catch (JSONException ex) {\n+              LOG.warn(\"checking descendant is instantiable {}\", descendant);\n             }\n-          } catch (JSONException ex) {\n-            LOG.warn(\"checking descendant is instantiable {}\", descendant);\n           }\n         }\n         portTypesWithSchemaClasses.put(portType, hasSchemaClasses);",
+                "additions": 10,
+                "raw_url": "https://github.com/apache/apex-core/raw/ffedce9b6752e4c38a2c1ee469f5a85803ab14be/engine/src/main/java/com/datatorrent/stram/webapp/OperatorDiscoverer.java",
+                "status": "modified",
+                "changes": 17,
+                "deletions": 7,
+                "sha": "b35efe6f1a306adce82c1d70da4c3b659f87f6f8",
+                "blob_url": "https://github.com/apache/apex-core/blob/ffedce9b6752e4c38a2c1ee469f5a85803ab14be/engine/src/main/java/com/datatorrent/stram/webapp/OperatorDiscoverer.java",
+                "filename": "engine/src/main/java/com/datatorrent/stram/webapp/OperatorDiscoverer.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/datatorrent/stram/webapp/OperatorDiscoverer.java?ref=ffedce9b6752e4c38a2c1ee469f5a85803ab14be"
+            }
+        ],
+        "bug_id": "apex-core_25",
+        "parent": "https://github.com/apache/apex-core/commit/3c5b88c227b40824c9635dd2d7bb77c9937486d3",
+        "message": "Merge pull request #134 from chandnisingh/v3.1.0\n\nSPOI-6002: NPE while finding if a port type has schema classes",
+        "repo": "apex-core"
+    },
+    {
+        "commit": "https://github.com/apache/apex-core/commit/8b4daf3b62ac58a185030f2cc3d5d8330b0e54bf",
+        "file": [
+            {
+                "patch": "@@ -41,6 +41,7 @@\n import java.util.List;\n import java.util.Map;\n import java.util.Map.Entry;\n+import java.util.Set;\n import java.util.concurrent.ConcurrentHashMap;\n import java.util.concurrent.atomic.AtomicInteger;\n import org.apache.hadoop.conf.Configuration;\n@@ -257,7 +258,8 @@ private synchronized void disconnectNode(String nodeid)\n     Node node = nodes.get(nodeid).component;\n     disconnectWindowGenerator(nodeid, node);\n \n-    List<String> removableSocketOutputStreams = new ArrayList<String>();\n+    Set<String> removableSocketOutputStreams = new HashSet<String>(); // temporary fix - find out why List does not work.\n+    // with the logic i have in here, the list should not contain repeated streams. but it does and that causes problem.\n     for (Entry<String, ComponentContextPair<Stream, StreamContext>> entry: streams.entrySet()) {\n       String indexingKey = entry.getKey();\n       Stream stream = entry.getValue().component;",
+                "additions": 3,
+                "raw_url": "https://github.com/apache/apex-core/raw/8b4daf3b62ac58a185030f2cc3d5d8330b0e54bf/engine/src/main/java/com/malhartech/stram/StramChild.java",
+                "status": "modified",
+                "changes": 4,
+                "deletions": 1,
+                "sha": "1c1e1e676ac793ab25a3ade28b812f20b09f246d",
+                "blob_url": "https://github.com/apache/apex-core/blob/8b4daf3b62ac58a185030f2cc3d5d8330b0e54bf/engine/src/main/java/com/malhartech/stram/StramChild.java",
+                "filename": "engine/src/main/java/com/malhartech/stram/StramChild.java",
+                "contents_url": "https://api.github.com/repos/apache/apex-core/contents/engine/src/main/java/com/malhartech/stram/StramChild.java?ref=8b4daf3b62ac58a185030f2cc3d5d8330b0e54bf"
+            }
+        ],
+        "bug_id": "apex-core_26",
+        "parent": "https://github.com/apache/apex-core/commit/eebb48e4e46a7b3a48de31cc994ffc387ee6caf7",
+        "message": "Temporary relief from NPE while disconnecting node. need to look at the logic again since it was not supposed to happen.",
+        "repo": "apex-core"
+    }
+]

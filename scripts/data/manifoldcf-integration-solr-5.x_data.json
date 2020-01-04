@@ -1,0 +1,849 @@
+[
+    {
+        "commit": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/5c4438a67b6d4e0c5bb85e727d1d3fe2b961253a",
+        "file": [
+            {
+                "patch": "@@ -342,6 +342,8 @@ Bug Fixes\n   could commit too frequently and could block adds until a new seaercher was\n   registered. (yonik)\n \n+* SOLR-2726: Fixed NullPointerException when using spellcheck.q with Suggester.\n+  (Bernd Fehling, valentin via rmuir)\n \n  Other Changes\n ----------------------",
+                "additions": 2,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/5c4438a67b6d4e0c5bb85e727d1d3fe2b961253a/solr/CHANGES.txt",
+                "status": "modified",
+                "changes": 2,
+                "deletions": 0,
+                "sha": "4358217495aeea2529a4adf11980ed1428080f65",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/5c4438a67b6d4e0c5bb85e727d1d3fe2b961253a/solr/CHANGES.txt",
+                "filename": "solr/CHANGES.txt",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/CHANGES.txt?ref=5c4438a67b6d4e0c5bb85e727d1d3fe2b961253a"
+            },
+            {
+                "patch": "@@ -68,14 +68,11 @@\n   public static final String INDEX_DIR = \"spellcheckIndexDir\";\n   public static final String ACCURACY = \"accuracy\";\n   public static final String STRING_DISTANCE = \"distanceMeasure\";\n-  public static final String FIELD_TYPE = \"fieldType\";\n   public static final String COMPARATOR_CLASS = \"comparatorClass\";\n \n   public static final String SCORE_COMP = \"score\";\n   public static final String FREQ_COMP = \"freq\";\n \n-  protected String field;\n-  protected String fieldTypeName;\n   protected org.apache.lucene.search.spell.SpellChecker spellChecker;\n \n   protected String sourceLocation;\n@@ -117,7 +114,6 @@ public String init(NamedList config, SolrCore core) {\n     } else {\n       comp = SuggestWordQueue.DEFAULT_COMPARATOR;\n     }\n-    field = (String) config.get(FIELD);\n     String strDistanceName = (String)config.get(STRING_DISTANCE);\n     if (strDistanceName != null) {\n       sd = (StringDistance) core.getResourceLoader().newInstance(strDistanceName);\n@@ -140,18 +136,6 @@ public String init(NamedList config, SolrCore core) {\n                 \"Unparseable accuracy given for dictionary: \" + name, e);\n       }\n     }\n-    if (field != null && core.getSchema().getFieldTypeNoEx(field) != null)  {\n-      analyzer = core.getSchema().getFieldType(field).getQueryAnalyzer();\n-    }\n-    fieldTypeName = (String) config.get(FIELD_TYPE);\n-    if (core.getSchema().getFieldTypes().containsKey(fieldTypeName))  {\n-      FieldType fieldType = core.getSchema().getFieldTypes().get(fieldTypeName);\n-      analyzer = fieldType.getQueryAnalyzer();\n-    }\n-    if (analyzer == null)   {\n-      log.info(\"Using WhitespaceAnalzyer for dictionary: \" + name);\n-      analyzer = new WhitespaceAnalyzer(core.getSolrConfig().luceneMatchVersion);\n-    }\n     return name;\n   }\n   ",
+                "additions": 0,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/5c4438a67b6d4e0c5bb85e727d1d3fe2b961253a/solr/core/src/java/org/apache/solr/spelling/AbstractLuceneSpellChecker.java",
+                "status": "modified",
+                "changes": 16,
+                "deletions": 16,
+                "sha": "efd42b6ab25cf56f307eb27c3cbae79b9bb6a7d1",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/5c4438a67b6d4e0c5bb85e727d1d3fe2b961253a/solr/core/src/java/org/apache/solr/spelling/AbstractLuceneSpellChecker.java",
+                "filename": "solr/core/src/java/org/apache/solr/spelling/AbstractLuceneSpellChecker.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/core/src/java/org/apache/solr/spelling/AbstractLuceneSpellChecker.java?ref=5c4438a67b6d4e0c5bb85e727d1d3fe2b961253a"
+            },
+            {
+                "patch": "@@ -67,8 +67,6 @@\n   public static final String COMPARATOR_CLASS = AbstractLuceneSpellChecker.COMPARATOR_CLASS;\n   public static final String SCORE_COMP = AbstractLuceneSpellChecker.SCORE_COMP;\n   public static final String FREQ_COMP = AbstractLuceneSpellChecker.FREQ_COMP;\n-  public static final String FIELD = AbstractLuceneSpellChecker.FIELD;\n-  public static final String FIELD_TYPE = AbstractLuceneSpellChecker.FIELD_TYPE;\n   public static final String STRING_DISTANCE = AbstractLuceneSpellChecker.STRING_DISTANCE;\n   public static final String ACCURACY = AbstractLuceneSpellChecker.ACCURACY;\n   public static final String THRESHOLD_TOKEN_FREQUENCY = IndexBasedSpellChecker.THRESHOLD_TOKEN_FREQUENCY;\n@@ -94,8 +92,6 @@\n   public static final float DEFAULT_MAXQUERYFREQUENCY = 0.01f;\n   \n   private DirectSpellChecker checker = new DirectSpellChecker();\n-  private String field;\n-  private String fieldTypeName;\n   \n   @Override\n   public String init(NamedList config, SolrCore core) {\n@@ -118,21 +114,6 @@ else if (compClass.equalsIgnoreCase(FREQ_COMP))\n     if (distClass != null && !distClass.equalsIgnoreCase(INTERNAL_DISTANCE))\n       sd = (StringDistance) core.getResourceLoader().newInstance(distClass);\n \n-    field = (String) config.get(FIELD);\n-    // setup analyzer for field\n-    if (field != null && core.getSchema().getFieldTypeNoEx(field) != null)  {\n-      analyzer = core.getSchema().getFieldType(field).getQueryAnalyzer();\n-    }\n-    fieldTypeName = (String) config.get(FIELD_TYPE);\n-    if (core.getSchema().getFieldTypes().containsKey(fieldTypeName))  {\n-      FieldType fieldType = core.getSchema().getFieldTypes().get(fieldTypeName);\n-      analyzer = fieldType.getQueryAnalyzer();\n-    }\n-    if (analyzer == null)   {\n-      LOG.info(\"Using WhitespaceAnalyzer for dictionary: \" + name);\n-      analyzer = new WhitespaceAnalyzer(core.getSolrConfig().luceneMatchVersion);\n-    }\n-    \n     float minAccuracy = DEFAULT_ACCURACY;\n     Float accuracy = (Float) config.get(ACCURACY);\n     if (accuracy != null)",
+                "additions": 0,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/5c4438a67b6d4e0c5bb85e727d1d3fe2b961253a/solr/core/src/java/org/apache/solr/spelling/DirectSolrSpellChecker.java",
+                "status": "modified",
+                "changes": 19,
+                "deletions": 19,
+                "sha": "b047522647d30592bd43e845c57e9327710d0d22",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/5c4438a67b6d4e0c5bb85e727d1d3fe2b961253a/solr/core/src/java/org/apache/solr/spelling/DirectSolrSpellChecker.java",
+                "filename": "solr/core/src/java/org/apache/solr/spelling/DirectSolrSpellChecker.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/core/src/java/org/apache/solr/spelling/DirectSolrSpellChecker.java?ref=5c4438a67b6d4e0c5bb85e727d1d3fe2b961253a"
+            },
+            {
+                "patch": "@@ -17,8 +17,10 @@\n  */\n \n import org.apache.lucene.analysis.Analyzer;\n+import org.apache.lucene.analysis.core.WhitespaceAnalyzer;\n import org.apache.solr.common.util.NamedList;\n import org.apache.solr.core.SolrCore;\n+import org.apache.solr.schema.FieldType;\n import org.apache.solr.search.SolrIndexSearcher;\n \n import java.io.IOException;\n@@ -35,15 +37,31 @@\n public abstract class SolrSpellChecker {\n   public static final String DICTIONARY_NAME = \"name\";\n   public static final String DEFAULT_DICTIONARY_NAME = \"default\";\n+  public static final String FIELD = \"field\";\n+  public static final String FIELD_TYPE = \"fieldType\";\n   /** Dictionary name */\n   protected String name;\n   protected Analyzer analyzer;\n+  protected String field;\n+  protected String fieldTypeName;\n \n   public String init(NamedList config, SolrCore core) {\n     name = (String) config.get(DICTIONARY_NAME);\n     if (name == null) {\n       name = DEFAULT_DICTIONARY_NAME;\n     }\n+    field = (String)config.get(FIELD);\n+    if (field != null && core.getSchema().getFieldTypeNoEx(field) != null)  {\n+      analyzer = core.getSchema().getFieldType(field).getQueryAnalyzer();\n+    }\n+    fieldTypeName = (String) config.get(FIELD_TYPE);\n+    if (core.getSchema().getFieldTypes().containsKey(fieldTypeName))  {\n+      FieldType fieldType = core.getSchema().getFieldTypes().get(fieldTypeName);\n+      analyzer = fieldType.getQueryAnalyzer();\n+    }\n+    if (analyzer == null)   {\n+      analyzer = new WhitespaceAnalyzer(core.getSolrConfig().luceneMatchVersion);\n+    }\n     return name;\n   }\n   ",
+                "additions": 18,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/5c4438a67b6d4e0c5bb85e727d1d3fe2b961253a/solr/core/src/java/org/apache/solr/spelling/SolrSpellChecker.java",
+                "status": "modified",
+                "changes": 18,
+                "deletions": 0,
+                "sha": "a115303d0e5683d6166f80bf7501f878abb32236",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/5c4438a67b6d4e0c5bb85e727d1d3fe2b961253a/solr/core/src/java/org/apache/solr/spelling/SolrSpellChecker.java",
+                "filename": "solr/core/src/java/org/apache/solr/spelling/SolrSpellChecker.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/core/src/java/org/apache/solr/spelling/SolrSpellChecker.java?ref=5c4438a67b6d4e0c5bb85e727d1d3fe2b961253a"
+            },
+            {
+                "patch": "@@ -51,8 +51,6 @@\n    * current IndexReader.\n    */\n   public static final String LOCATION = \"sourceLocation\";\n-  /** Field to use as the source of terms if using IndexReader. */\n-  public static final String FIELD = \"field\";\n   /** Fully-qualified class of the {@link Lookup} implementation. */\n   public static final String LOOKUP_IMPL = \"lookupImpl\";\n   /**\n@@ -68,7 +66,6 @@\n   \n   protected String sourceLocation;\n   protected File storeDir;\n-  protected String field;\n   protected float threshold;\n   protected Dictionary dictionary;\n   protected IndexReader reader;\n@@ -83,7 +80,6 @@ public String init(NamedList config, SolrCore core) {\n     threshold = config.get(THRESHOLD_TOKEN_FREQUENCY) == null ? 0.0f\n             : (Float)config.get(THRESHOLD_TOKEN_FREQUENCY);\n     sourceLocation = (String) config.get(LOCATION);\n-    field = (String)config.get(FIELD);\n     lookupImpl = (String)config.get(LOOKUP_IMPL);\n \n     // support the old classnames without -Factory for config file backwards compatibility.",
+                "additions": 0,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/5c4438a67b6d4e0c5bb85e727d1d3fe2b961253a/solr/core/src/java/org/apache/solr/spelling/suggest/Suggester.java",
+                "status": "modified",
+                "changes": 4,
+                "deletions": 4,
+                "sha": "c19b8d3cae9386fe8657df4f7d402513fa79ccfe",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/5c4438a67b6d4e0c5bb85e727d1d3fe2b961253a/solr/core/src/java/org/apache/solr/spelling/suggest/Suggester.java",
+                "filename": "solr/core/src/java/org/apache/solr/spelling/suggest/Suggester.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/core/src/java/org/apache/solr/spelling/suggest/Suggester.java?ref=5c4438a67b6d4e0c5bb85e727d1d3fe2b961253a"
+            },
+            {
+                "patch": "@@ -21,6 +21,7 @@\n \n import org.apache.solr.SolrTestCaseJ4;\n import org.apache.solr.common.params.SpellingParams;\n+import org.apache.solr.common.util.NamedList;\n import org.junit.BeforeClass;\n import org.junit.Test;\n \n@@ -95,4 +96,13 @@ public void testRebuild() throws Exception {\n     assertQ(req(\"qt\", requestUri, \"q\", \"ac\", SpellingParams.SPELLCHECK_COUNT, \"2\", SpellingParams.SPELLCHECK_ONLY_MORE_POPULAR, \"true\"),\n       \"//lst[@name='spellcheck']/lst[@name='suggestions']/lst[@name='ac']/int[@name='numFound'][.='2']\");\n   }\n+  \n+  // SOLR-2726\n+  public void testAnalyzer() throws Exception {\n+    Suggester suggester = new Suggester();\n+    NamedList params = new NamedList();\n+    params.add(\"lookupImpl\", \"org.apache.solr.spelling.suggest.tst.TSTLookupFactory\");\n+    suggester.init(params, h.getCore());\n+    assertTrue(suggester.getQueryAnalyzer() != null);\n+  }\n }",
+                "additions": 10,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/5c4438a67b6d4e0c5bb85e727d1d3fe2b961253a/solr/core/src/test/org/apache/solr/spelling/suggest/SuggesterTest.java",
+                "status": "modified",
+                "changes": 10,
+                "deletions": 0,
+                "sha": "600c598a745e87b73b6543a4bc86c671a64173d3",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/5c4438a67b6d4e0c5bb85e727d1d3fe2b961253a/solr/core/src/test/org/apache/solr/spelling/suggest/SuggesterTest.java",
+                "filename": "solr/core/src/test/org/apache/solr/spelling/suggest/SuggesterTest.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/core/src/test/org/apache/solr/spelling/suggest/SuggesterTest.java?ref=5c4438a67b6d4e0c5bb85e727d1d3fe2b961253a"
+            }
+        ],
+        "bug_id": "manifoldcf-integration-solr-5.x_1",
+        "parent": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/1a45ef00a9dcb4e7e2b7da6cbd492273562758e0",
+        "message": "SOLR-2726: Fixed NullPointerException when using spellcheck.q with Suggester\n\ngit-svn-id: https://svn.apache.org/repos/asf/lucene/dev/trunk@1171597 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "manifoldcf-integration-solr-5.x"
+    },
+    {
+        "commit": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/52e12f1b0f3eea5efa808212afc088ac2ffef7f3",
+        "file": [
+            {
+                "patch": "@@ -124,6 +124,8 @@ New Features\n * SOLR-1379: Add RAMDirectoryFactory for non-persistent in memory index storage.\n   (Alex Baranov via yonik)\n \n+* SOLR-1769: Solr 1.4 Replication - Repeater throwing NullPointerException (J\u00f6rgen Rydenius via noble)  \n+\n \n Optimizations\n ----------------------",
+                "additions": 2,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/52e12f1b0f3eea5efa808212afc088ac2ffef7f3/solr/CHANGES.txt",
+                "status": "modified",
+                "changes": 2,
+                "deletions": 0,
+                "sha": "9b0bd8ef1a0948778679151d35b5a34104c792da",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/52e12f1b0f3eea5efa808212afc088ac2ffef7f3/solr/CHANGES.txt",
+                "filename": "solr/CHANGES.txt",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/CHANGES.txt?ref=52e12f1b0f3eea5efa808212afc088ac2ffef7f3"
+            },
+            {
+                "patch": "@@ -920,7 +920,9 @@ public void postCommit() {\n         if (getCommit) {\n           IndexCommit oldCommitPoint = indexCommitPoint;\n           indexCommitPoint = core.getDeletionPolicy().getLatestCommit();\n-          core.getDeletionPolicy().saveCommitPoint(indexCommitPoint.getVersion());\n+          if (indexCommitPoint != null) {\n+            core.getDeletionPolicy().saveCommitPoint(indexCommitPoint.getVersion());\n+          }\n           if(oldCommitPoint != null){\n             core.getDeletionPolicy().releaseCommitPoint(oldCommitPoint.getVersion());\n           }",
+                "additions": 3,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/52e12f1b0f3eea5efa808212afc088ac2ffef7f3/solr/src/java/org/apache/solr/handler/ReplicationHandler.java",
+                "status": "modified",
+                "changes": 4,
+                "deletions": 1,
+                "sha": "d2ed3698fa44922b232bc57dac77d79aea5d39d3",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/52e12f1b0f3eea5efa808212afc088ac2ffef7f3/solr/src/java/org/apache/solr/handler/ReplicationHandler.java",
+                "filename": "solr/src/java/org/apache/solr/handler/ReplicationHandler.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/src/java/org/apache/solr/handler/ReplicationHandler.java?ref=52e12f1b0f3eea5efa808212afc088ac2ffef7f3"
+            }
+        ],
+        "bug_id": "manifoldcf-integration-solr-5.x_2",
+        "parent": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/b85ab5c2b99f397994c8e97d9f5aa44f029fb8fa",
+        "message": "SOLR-1853 Solr 1.4 Replication - Repeater throwing NullPointerException\n\ngit-svn-id: https://svn.apache.org/repos/asf/lucene/dev/trunk@929454 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "manifoldcf-integration-solr-5.x"
+    },
+    {
+        "commit": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/5eacef9247b54596f6bc2bd13b0abf928f391af5",
+        "file": [
+            {
+                "patch": "@@ -45,7 +45,10 @@ API Changes\n \n ======================= Lucene 3.x (not yet released) =======================\n \n-(No changes)\n+Bug fixes\n+\n+ * LUCENE-3026: SmartChineseAnalyzer's WordTokenFilter threw NullPointerException\n+   on sentences longer than 32,767 characters.  (wangzhenghang via Robert Muir)\n \n ======================= Lucene 3.1.0 =======================\n ",
+                "additions": 4,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/5eacef9247b54596f6bc2bd13b0abf928f391af5/lucene/contrib/CHANGES.txt",
+                "status": "modified",
+                "changes": 5,
+                "deletions": 1,
+                "sha": "ee5eddd829fdae7c3ca34d0bf1f8a369e446dca0",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/5eacef9247b54596f6bc2bd13b0abf928f391af5/lucene/contrib/CHANGES.txt",
+                "filename": "lucene/contrib/CHANGES.txt",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/lucene/contrib/CHANGES.txt?ref=5eacef9247b54596f6bc2bd13b0abf928f391af5"
+            },
+            {
+                "patch": "@@ -75,7 +75,7 @@ public int getMaxStart() {\n     List<SegToken> result = new ArrayList<SegToken>();\n     int s = -1, count = 0, size = tokenListTable.size();\n     List<SegToken> tokenList;\n-    short index = 0;\n+    int index = 0;\n     while (count < size) {\n       if (isStartExist(s)) {\n         tokenList = tokenListTable.get(s);",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/5eacef9247b54596f6bc2bd13b0abf928f391af5/modules/analysis/smartcn/src/java/org/apache/lucene/analysis/cn/smart/hhmm/SegGraph.java",
+                "status": "modified",
+                "changes": 2,
+                "deletions": 1,
+                "sha": "f7b40d54c5ba2074615edfa1b553b517a960637d",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/5eacef9247b54596f6bc2bd13b0abf928f391af5/modules/analysis/smartcn/src/java/org/apache/lucene/analysis/cn/smart/hhmm/SegGraph.java",
+                "filename": "modules/analysis/smartcn/src/java/org/apache/lucene/analysis/cn/smart/hhmm/SegGraph.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/modules/analysis/smartcn/src/java/org/apache/lucene/analysis/cn/smart/hhmm/SegGraph.java?ref=5eacef9247b54596f6bc2bd13b0abf928f391af5"
+            },
+            {
+                "patch": "@@ -17,8 +17,11 @@\n \n package org.apache.lucene.analysis.cn.smart;\n \n+import java.io.StringReader;\n+\n import org.apache.lucene.analysis.BaseTokenStreamTestCase;\n import org.apache.lucene.analysis.Analyzer;\n+import org.apache.lucene.analysis.TokenStream;\n import org.apache.lucene.util.Version;\n \n public class TestSmartChineseAnalyzer extends BaseTokenStreamTestCase {\n@@ -166,4 +169,30 @@ public void testReusableTokenStream() throws Exception {\n         new int[] { 0, 1, 3, 4, 6, 7 },\n         new int[] { 1, 3, 4, 6, 7, 9 });\n   }\n+  \n+  // LUCENE-3026\n+  public void testLargeDocument() throws Exception {\n+    StringBuilder sb = new StringBuilder();\n+    for (int i = 0; i < 5000; i++) {\n+      sb.append(\"\u6211\u8d2d\u4e70\u4e86\u9053\u5177\u548c\u670d\u88c5\u3002\");\n+    }\n+    Analyzer analyzer = new SmartChineseAnalyzer(TEST_VERSION_CURRENT);\n+    TokenStream stream = analyzer.reusableTokenStream(\"\", new StringReader(sb.toString()));\n+    stream.reset();\n+    while (stream.incrementToken()) {\n+    }\n+  }\n+  \n+  // LUCENE-3026\n+  public void testLargeSentence() throws Exception {\n+    StringBuilder sb = new StringBuilder();\n+    for (int i = 0; i < 5000; i++) {\n+      sb.append(\"\u6211\u8d2d\u4e70\u4e86\u9053\u5177\u548c\u670d\u88c5\");\n+    }\n+    Analyzer analyzer = new SmartChineseAnalyzer(TEST_VERSION_CURRENT);\n+    TokenStream stream = analyzer.reusableTokenStream(\"\", new StringReader(sb.toString()));\n+    stream.reset();\n+    while (stream.incrementToken()) {\n+    }\n+  }\n }",
+                "additions": 29,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/5eacef9247b54596f6bc2bd13b0abf928f391af5/modules/analysis/smartcn/src/test/org/apache/lucene/analysis/cn/smart/TestSmartChineseAnalyzer.java",
+                "status": "modified",
+                "changes": 29,
+                "deletions": 0,
+                "sha": "6c61d45d27b2d38bd18ff3fcae010e86b993489b",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/5eacef9247b54596f6bc2bd13b0abf928f391af5/modules/analysis/smartcn/src/test/org/apache/lucene/analysis/cn/smart/TestSmartChineseAnalyzer.java",
+                "filename": "modules/analysis/smartcn/src/test/org/apache/lucene/analysis/cn/smart/TestSmartChineseAnalyzer.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/modules/analysis/smartcn/src/test/org/apache/lucene/analysis/cn/smart/TestSmartChineseAnalyzer.java?ref=5eacef9247b54596f6bc2bd13b0abf928f391af5"
+            }
+        ],
+        "bug_id": "manifoldcf-integration-solr-5.x_3",
+        "parent": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/aaa3dc45f7ef0d5d44fd1ce2c70dfca248866d16",
+        "message": "LUCENE-3026: SmartChineseAnalyzer's WordTokenFilter threw NullPointerException on sentences longer than 32,767 characters\n\ngit-svn-id: https://svn.apache.org/repos/asf/lucene/dev/trunk@1092328 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "manifoldcf-integration-solr-5.x"
+    },
+    {
+        "commit": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/59ce81c73856cb88fd897e35c7af75f94e84b8cd",
+        "file": [
+            {
+                "patch": "@@ -403,12 +403,20 @@ public void preClose(SolrCore core) {}\n         @Override\n         public void postClose(SolrCore core) {\n           File dataDir = new File(core.getIndexDir());\n-          for (File file : dataDir.listFiles()) {\n-            if (!file.delete()) {\n-              log.error(file.getAbsolutePath() + \" could not be deleted on core unload\");\n+          File[] files = dataDir.listFiles();\n+          if (files != null) {\n+            for (File file : files) {\n+              if (!file.delete()) {\n+                log.error(file.getAbsolutePath()\n+                    + \" could not be deleted on core unload\");\n+              }\n             }\n+            if (!dataDir.delete()) log.error(dataDir.getAbsolutePath()\n+                + \" could not be deleted on core unload\");\n+          } else {\n+            log.error(dataDir.getAbsolutePath()\n+                + \" could not be deleted on core unload\");\n           }\n-          if (!dataDir.delete()) log.error(dataDir.getAbsolutePath() + \" could not be deleted on core unload\");\n         }\n       });\n     }",
+                "additions": 12,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/59ce81c73856cb88fd897e35c7af75f94e84b8cd/solr/core/src/java/org/apache/solr/handler/admin/CoreAdminHandler.java",
+                "status": "modified",
+                "changes": 16,
+                "deletions": 4,
+                "sha": "4d325b727447651e7d33f4002c9528e6e5ba846e",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/59ce81c73856cb88fd897e35c7af75f94e84b8cd/solr/core/src/java/org/apache/solr/handler/admin/CoreAdminHandler.java",
+                "filename": "solr/core/src/java/org/apache/solr/handler/admin/CoreAdminHandler.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/core/src/java/org/apache/solr/handler/admin/CoreAdminHandler.java?ref=59ce81c73856cb88fd897e35c7af75f94e84b8cd"
+            }
+        ],
+        "bug_id": "manifoldcf-integration-solr-5.x_4",
+        "parent": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/06a3c3d255d264b2d6881cd12d9359266de0d233",
+        "message": "defense against NPE\n\ngit-svn-id: https://svn.apache.org/repos/asf/lucene/dev/trunk@1156201 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "manifoldcf-integration-solr-5.x"
+    },
+    {
+        "commit": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/7d133ba2c9788df897a1a69c1dff5f170f8f852c",
+        "file": [
+            {
+                "patch": "@@ -211,7 +211,7 @@ private void extractGroupedInfo( NamedList<Object> info ) {\n             SimpleOrderedMap grpMap = (SimpleOrderedMap) oGrp;\n             Object sGroupValue = grpMap.get( \"groupValue\");\n             SolrDocumentList doclist = (SolrDocumentList) grpMap.get( \"doclist\");\n-            Group group = new Group(sGroupValue.toString(), doclist) ;\n+            Group group = new Group(sGroupValue != null ? sGroupValue.toString() : null, doclist) ;\n             groupedCommand.add(group);\n           }\n ",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/7d133ba2c9788df897a1a69c1dff5f170f8f852c/solr/solrj/src/java/org/apache/solr/client/solrj/response/QueryResponse.java",
+                "status": "modified",
+                "changes": 2,
+                "deletions": 1,
+                "sha": "6d52482f1d27d6733fb26437db7f360d28c8a29c",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/7d133ba2c9788df897a1a69c1dff5f170f8f852c/solr/solrj/src/java/org/apache/solr/client/solrj/response/QueryResponse.java",
+                "filename": "solr/solrj/src/java/org/apache/solr/client/solrj/response/QueryResponse.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/solrj/src/java/org/apache/solr/client/solrj/response/QueryResponse.java?ref=7d133ba2c9788df897a1a69c1dff5f170f8f852c"
+            }
+        ],
+        "bug_id": "manifoldcf-integration-solr-5.x_5",
+        "parent": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/353c98c26829763c12e6ef6b7b1a50c00e8904f4",
+        "message": "Fixed NPE when group value is null\n\ngit-svn-id: https://svn.apache.org/repos/asf/lucene/dev/trunk@1154739 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "manifoldcf-integration-solr-5.x"
+    },
+    {
+        "commit": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/82315e8b1b36076948769fd01611aa977b303d05",
+        "file": [
+            {
+                "patch": "@@ -28,6 +28,7 @@\n import org.apache.lucene.index.IndexReader;\n import org.apache.lucene.index.MultiFields;\n import org.apache.lucene.index.Term;\n+import org.apache.lucene.index.Terms;\n import org.apache.lucene.search.FuzzyTermsEnum;\n import org.apache.lucene.search.BoostAttribute;\n import org.apache.lucene.search.MaxNonCompetitiveBoostAttribute;\n@@ -395,7 +396,11 @@ public void setDistance(StringDistance distance) {\n     AttributeSource atts = new AttributeSource();\n     MaxNonCompetitiveBoostAttribute maxBoostAtt =\n       atts.addAttribute(MaxNonCompetitiveBoostAttribute.class);\n-    FuzzyTermsEnum e = new FuzzyTermsEnum(MultiFields.getTerms(ir, term.field()).iterator(), atts, term, editDistance, Math.max(minPrefix, editDistance-1));\n+    Terms terms = MultiFields.getTerms(ir, term.field());\n+    if (terms == null) {\n+      return Collections.emptyList();\n+    }\n+    FuzzyTermsEnum e = new FuzzyTermsEnum(terms.iterator(), atts, term, editDistance, Math.max(minPrefix, editDistance-1));\n     final PriorityQueue<ScoreTerm> stQueue = new PriorityQueue<ScoreTerm>();\n     \n     BytesRef queryTerm = new BytesRef(term.text());",
+                "additions": 6,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/82315e8b1b36076948769fd01611aa977b303d05/modules/suggest/src/java/org/apache/lucene/search/spell/DirectSpellChecker.java",
+                "status": "modified",
+                "changes": 7,
+                "deletions": 1,
+                "sha": "36804eed92a63cfbe97e6f9b0b9ee32f7aa43905",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/82315e8b1b36076948769fd01611aa977b303d05/modules/suggest/src/java/org/apache/lucene/search/spell/DirectSpellChecker.java",
+                "filename": "modules/suggest/src/java/org/apache/lucene/search/spell/DirectSpellChecker.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/modules/suggest/src/java/org/apache/lucene/search/spell/DirectSpellChecker.java?ref=82315e8b1b36076948769fd01611aa977b303d05"
+            },
+            {
+                "patch": "@@ -141,4 +141,25 @@ public void testOptions() throws Exception {\n     writer.close();\n     dir.close();\n   }\n+  \n+  public void testBogusField() throws Exception {\n+    DirectSpellChecker spellChecker = new DirectSpellChecker();\n+    Directory dir = newDirectory();\n+    RandomIndexWriter writer = new RandomIndexWriter(random, dir, \n+        new MockAnalyzer(random, MockTokenizer.SIMPLE, true));\n+\n+    for (int i = 0; i < 20; i++) {\n+      Document doc = new Document();\n+      doc.add(newField(\"numbers\", English.intToEnglish(i), Field.Store.NO, Field.Index.ANALYZED));\n+      writer.addDocument(doc);\n+    }\n+\n+    IndexReader ir = writer.getReader();\n+\n+    SuggestWord[] similar = spellChecker.suggestSimilar(new Term(\"bogusFieldBogusField\", \"fvie\"), 2, ir, false);\n+    assertEquals(0, similar.length);\n+    ir.close();\n+    writer.close();\n+    dir.close();\n+  }\n }",
+                "additions": 21,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/82315e8b1b36076948769fd01611aa977b303d05/modules/suggest/src/test/org/apache/lucene/search/spell/TestDirectSpellChecker.java",
+                "status": "modified",
+                "changes": 21,
+                "deletions": 0,
+                "sha": "6685af41ba302b6844e8e3c422b71cd0f062ef49",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/82315e8b1b36076948769fd01611aa977b303d05/modules/suggest/src/test/org/apache/lucene/search/spell/TestDirectSpellChecker.java",
+                "filename": "modules/suggest/src/test/org/apache/lucene/search/spell/TestDirectSpellChecker.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/modules/suggest/src/test/org/apache/lucene/search/spell/TestDirectSpellChecker.java?ref=82315e8b1b36076948769fd01611aa977b303d05"
+            },
+            {
+                "patch": "@@ -136,6 +136,20 @@ public void testComparator() throws Exception {\n       compareSP.close();\n     compIdx.close();\n   }\n+  \n+  public void testBogusField() throws Exception {\n+    IndexReader r = IndexReader.open(userindex, true);\n+    Directory compIdx = newDirectory();\n+    SpellChecker compareSP = new SpellCheckerMock(compIdx, new LevensteinDistance(), new SuggestWordFrequencyComparator());\n+    addwords(r, compareSP, \"field3\");\n+\n+    String[] similar = compareSP.suggestSimilar(\"fvie\", 2, r, \"bogusFieldBogusField\", false);\n+    assertEquals(0, similar.length);\n+    r.close();\n+    if (!compareSP.isClosed())\n+      compareSP.close();\n+    compIdx.close();\n+  }\n \n   private void checkCommonSuggestions(IndexReader r) throws IOException {\n     String[] similar = spellChecker.suggestSimilar(\"fvie\", 2);",
+                "additions": 14,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/82315e8b1b36076948769fd01611aa977b303d05/modules/suggest/src/test/org/apache/lucene/search/spell/TestSpellChecker.java",
+                "status": "modified",
+                "changes": 14,
+                "deletions": 0,
+                "sha": "8da6cd4466aaf2b58639364af995c59a1f21bae9",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/82315e8b1b36076948769fd01611aa977b303d05/modules/suggest/src/test/org/apache/lucene/search/spell/TestSpellChecker.java",
+                "filename": "modules/suggest/src/test/org/apache/lucene/search/spell/TestSpellChecker.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/modules/suggest/src/test/org/apache/lucene/search/spell/TestSpellChecker.java?ref=82315e8b1b36076948769fd01611aa977b303d05"
+            }
+        ],
+        "bug_id": "manifoldcf-integration-solr-5.x_6",
+        "parent": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/6340317e89b2e8f41b63f40f9dc257996a2837fa",
+        "message": "LUCENE-3351: DirectSpellChecker throws NPE if field doesn't exist\n\ngit-svn-id: https://svn.apache.org/repos/asf/lucene/dev/trunk@1152669 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "manifoldcf-integration-solr-5.x"
+    },
+    {
+        "commit": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/3d77673fd2e6d6b0a2bba32f89a390d927d41d3f",
+        "file": [
+            {
+                "patch": "@@ -18,36 +18,66 @@\n \n import org.junit.BeforeClass;\n import org.junit.Test;\n+import org.w3c.dom.Document;\n+import org.w3c.dom.Element;\n+import org.xml.sax.InputSource;\n+\n+import javax.xml.parsers.DocumentBuilder;\n+import javax.xml.parsers.DocumentBuilderFactory;\n+import javax.xml.transform.Transformer;\n+import javax.xml.transform.TransformerFactory;\n+import javax.xml.transform.dom.DOMSource;\n+import javax.xml.transform.stream.StreamResult;\n+import java.io.StringReader;\n+import java.io.StringWriter;\n \n /**Testcase for TikaEntityProcessor\n  *\n- * @since solr 1.5 \n+ * @since solr 3.1\n  */\n public class TestTikaEntityProcessor extends AbstractDataImportHandlerTestCase {\n+  private String conf =\n+  \"<dataConfig>\" +\n+  \"  <dataSource type=\\\"BinFileDataSource\\\"/>\" +\n+  \"  <document>\" +\n+  \"    <entity processor=\\\"TikaEntityProcessor\\\" url=\\\"\" + getFile(\"solr-word.pdf\").getAbsolutePath() + \"\\\" >\" +\n+  \"      <field column=\\\"Author\\\" meta=\\\"true\\\" name=\\\"author\\\"/>\" +\n+  \"      <field column=\\\"title\\\" meta=\\\"true\\\" name=\\\"title\\\"/>\" +\n+  \"      <field column=\\\"text\\\"/>\" +\n+  \"     </entity>\" +\n+  \"  </document>\" +\n+  \"</dataConfig>\";\n+\n+  private String[] tests = {\n+      \"//*[@numFound='1']\"\n+      ,\"//str[@name='author'][.='Grant Ingersoll']\"\n+      ,\"//str[@name='title'][.='solr-word']\"\n+      ,\"//str[@name='text']\"\n+  };\n+\n+\n   @BeforeClass\n   public static void beforeClass() throws Exception {\n     initCore(\"dataimport-solrconfig.xml\", \"dataimport-schema-no-unique-key.xml\", getFile(\"solr-dihextras\").getAbsolutePath());\n   }\n \n   @Test\n   public void testIndexingWithTikaEntityProcessor() throws Exception {\n-    String conf =\n-            \"<dataConfig>\" +\n-                    \"  <dataSource type=\\\"BinFileDataSource\\\"/>\" +\n-                    \"  <document>\" +\n-                    \"    <entity processor=\\\"TikaEntityProcessor\\\" url=\\\"\" + getFile(\"solr-word.pdf\").getAbsolutePath() + \"\\\" >\" +\n-                    \"      <field column=\\\"Author\\\" meta=\\\"true\\\" name=\\\"author\\\"/>\" +\n-                    \"      <field column=\\\"title\\\" meta=\\\"true\\\" name=\\\"title\\\"/>\" +\n-                    \"      <field column=\\\"text\\\"/>\" +\n-                    \"     </entity>\" +\n-                    \"  </document>\" +\n-                    \"</dataConfig>\";\n     runFullImport(conf);\n-    assertQ(req(\"*:*\")\n-            ,\"//*[@numFound='1']\"\n-            ,\"//str[@name='author'][.='Grant Ingersoll']\"\n-            ,\"//str[@name='title'][.='solr-word']\"\n-            ,\"//str[@name='text']\"\n-            );\n+    assertQ(req(\"*:*\"), tests );\n   }\n+\n+  @Test\n+  public void testIndexingWithTikaEntityProcessorThreaded() throws Exception {\n+    DocumentBuilder builder = DocumentBuilderFactory.newInstance().newDocumentBuilder();\n+    Document doc = builder.parse(new InputSource(new StringReader(conf)));\n+    ((Element) doc.getElementsByTagName(\"entity\").item(0)).setAttribute(\"threads\", \"1\");\n+    Transformer trans = TransformerFactory.newInstance().newTransformer();\n+    StringWriter writer = new StringWriter();\n+    trans.transform(new DOMSource(doc), new StreamResult(writer));\n+\n+    runFullImport(writer.toString());\n+    assertQ(req(\"*:*\"), tests );\n+  }\n+\n }",
+                "additions": 48,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/3d77673fd2e6d6b0a2bba32f89a390d927d41d3f/solr/contrib/dataimporthandler-extras/src/test/org/apache/solr/handler/dataimport/TestTikaEntityProcessor.java",
+                "status": "modified",
+                "changes": 66,
+                "deletions": 18,
+                "sha": "7912c5f92d844d6bd060ce05ec0882a03255c38f",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/3d77673fd2e6d6b0a2bba32f89a390d927d41d3f/solr/contrib/dataimporthandler-extras/src/test/org/apache/solr/handler/dataimport/TestTikaEntityProcessor.java",
+                "filename": "solr/contrib/dataimporthandler-extras/src/test/org/apache/solr/handler/dataimport/TestTikaEntityProcessor.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/contrib/dataimporthandler-extras/src/test/org/apache/solr/handler/dataimport/TestTikaEntityProcessor.java?ref=3d77673fd2e6d6b0a2bba32f89a390d927d41d3f"
+            },
+            {
+                "patch": "@@ -18,6 +18,7 @@ Bug Fixes\n ----------------------\n * SOLR-2644: When using threads=2 the default logging is set too high (Bill Bell via shalin)\n * SOLR-2492: DIH does not commit if only deletes are processed (James Dyer via shalin)\n+* SOLR-2186: DataImportHandler's multi-threaded option throws NPE (Lance Norskog, Frank Wesemann, shalin)\n \n ==================  3.3.0 ==================\n ",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/3d77673fd2e6d6b0a2bba32f89a390d927d41d3f/solr/contrib/dataimporthandler/CHANGES.txt",
+                "status": "modified",
+                "changes": 1,
+                "deletions": 0,
+                "sha": "150a15c7e56b9a1036cbb7e6e5479cc1538eea5b",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/3d77673fd2e6d6b0a2bba32f89a390d927d41d3f/solr/contrib/dataimporthandler/CHANGES.txt",
+                "filename": "solr/contrib/dataimporthandler/CHANGES.txt",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/contrib/dataimporthandler/CHANGES.txt?ref=3d77673fd2e6d6b0a2bba32f89a390d927d41d3f"
+            },
+            {
+                "patch": "@@ -33,7 +33,7 @@\n  * @since solr 1.3\n  */\n public class ContextImpl extends Context {\n-  private DataConfig.Entity entity;\n+  protected DataConfig.Entity entity;\n \n   private ContextImpl parent;\n ",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/3d77673fd2e6d6b0a2bba32f89a390d927d41d3f/solr/contrib/dataimporthandler/src/java/org/apache/solr/handler/dataimport/ContextImpl.java",
+                "status": "modified",
+                "changes": 2,
+                "deletions": 1,
+                "sha": "1b32005ff6902d4840eb64b634e05c17d80bc704",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/3d77673fd2e6d6b0a2bba32f89a390d927d41d3f/solr/contrib/dataimporthandler/src/java/org/apache/solr/handler/dataimport/ContextImpl.java",
+                "filename": "solr/contrib/dataimporthandler/src/java/org/apache/solr/handler/dataimport/ContextImpl.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/contrib/dataimporthandler/src/java/org/apache/solr/handler/dataimport/ContextImpl.java?ref=3d77673fd2e6d6b0a2bba32f89a390d927d41d3f"
+            },
+            {
+                "patch": "@@ -28,7 +28,7 @@\n \n   public ThreadedContext(DocBuilder.EntityRunner entityRunner, DocBuilder docBuilder) {\n     super(entityRunner.entity,\n-            null,//to be fethed realtime\n+            null,//to be fetched realtime\n             null,\n             null,\n             docBuilder.session,\n@@ -75,7 +75,7 @@ private void checkLimited() {\n   @Override\n   public String getResolvedEntityAttribute(String name) {\n     checkLimited();\n-    return super.getResolvedEntityAttribute(name);\n+    return entity == null ? null : getVariableResolver().replaceTokens(entity.allAttributes.get(name));\n   }\n \n   @Override",
+                "additions": 2,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/3d77673fd2e6d6b0a2bba32f89a390d927d41d3f/solr/contrib/dataimporthandler/src/java/org/apache/solr/handler/dataimport/ThreadedContext.java",
+                "status": "modified",
+                "changes": 4,
+                "deletions": 2,
+                "sha": "0386e76f1a67685ee6a02f4f4bd3c26eb175a349",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/3d77673fd2e6d6b0a2bba32f89a390d927d41d3f/solr/contrib/dataimporthandler/src/java/org/apache/solr/handler/dataimport/ThreadedContext.java",
+                "filename": "solr/contrib/dataimporthandler/src/java/org/apache/solr/handler/dataimport/ThreadedContext.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/contrib/dataimporthandler/src/java/org/apache/solr/handler/dataimport/ThreadedContext.java?ref=3d77673fd2e6d6b0a2bba32f89a390d927d41d3f"
+            }
+        ],
+        "bug_id": "manifoldcf-integration-solr-5.x_7",
+        "parent": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/a4fb2868cc9faa058ad1ceb8d7a7da4479e736b1",
+        "message": "SOLR-2186 -- DataImportHandler's multi-threaded option throws NPE\n\ngit-svn-id: https://svn.apache.org/repos/asf/lucene/dev/trunk@1147023 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "manifoldcf-integration-solr-5.x"
+    },
+    {
+        "commit": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/b39a9ca6dc4a2730ef3c5243a2bcdee3f2292b33",
+        "file": [
+            {
+                "patch": "@@ -185,8 +185,7 @@ private void closeInternal(Collection<? extends Closeable> closeables) throws IO\n       list.add(cfs);\n       toClose = list; \n     } else {\n-      toClose = docValues.values();\n-    \n+      toClose = closeables;\n     } \n     IOUtils.closeSafely(false, toClose);\n   }",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/b39a9ca6dc4a2730ef3c5243a2bcdee3f2292b33/lucene/src/java/org/apache/lucene/index/codecs/DefaultDocValuesProducer.java",
+                "status": "modified",
+                "changes": 3,
+                "deletions": 2,
+                "sha": "074770867846ee132f6fa79fd8058ec94cb21e17",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/b39a9ca6dc4a2730ef3c5243a2bcdee3f2292b33/lucene/src/java/org/apache/lucene/index/codecs/DefaultDocValuesProducer.java",
+                "filename": "lucene/src/java/org/apache/lucene/index/codecs/DefaultDocValuesProducer.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/lucene/src/java/org/apache/lucene/index/codecs/DefaultDocValuesProducer.java?ref=b39a9ca6dc4a2730ef3c5243a2bcdee3f2292b33"
+            }
+        ],
+        "bug_id": "manifoldcf-integration-solr-5.x_8",
+        "parent": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/ff7d6fb5f3fcce1ee24d9c97cf3b6045fe87791e",
+        "message": "fixed possible NPE if called during initialization\n\ngit-svn-id: https://svn.apache.org/repos/asf/lucene/dev/trunk@1143814 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "manifoldcf-integration-solr-5.x"
+    },
+    {
+        "commit": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/9592710e3efb4e399046fc8498beb78044ecb125",
+        "file": [
+            {
+                "patch": "@@ -28,45 +28,50 @@\n import javax.xml.stream.XMLReporter;\n \n public final class XMLErrorLogger implements ErrorHandler,ErrorListener,XMLReporter {\n-  \n+\n   private final Logger log;\n \n   public XMLErrorLogger(Logger log) {\n     this.log = log;\n   }\n-  \n+\n   // ErrorHandler\n-  \n-\tpublic void warning(SAXParseException e) {\n-\t\tlog.warn(\"XML parse warning in \\\"\"+e.getSystemId()+\"\\\", line \"+e.getLineNumber()+\", column \"+e.getColumnNumber()+\": \"+e.getMessage());\n-\t}\n-\n-\tpublic void error(SAXParseException e) throws SAXException {\n-\t\tthrow e;\n-\t}\n-\n-\tpublic void fatalError(SAXParseException e) throws SAXException {\n-\t\tthrow e;\n-\t}\n-  \n+\n+  public void warning(SAXParseException e) {\n+    log.warn(\"XML parse warning in \\\"\"+e.getSystemId()+\"\\\", line \"+e.getLineNumber()+\", column \"+e.getColumnNumber()+\": \"+e.getMessage());\n+  }\n+\n+  public void error(SAXParseException e) throws SAXException {\n+    throw e;\n+  }\n+\n+  public void fatalError(SAXParseException e) throws SAXException {\n+    throw e;\n+  }\n+\n   // ErrorListener\n-  \n-\tpublic void warning(TransformerException e) {\n-\t\tlog.warn(e.getMessageAndLocation());\n-\t}\n-\n-\tpublic void error(TransformerException e) throws TransformerException {\n-\t\tthrow e;\n-\t}\n-\n-\tpublic void fatalError(TransformerException e) throws TransformerException {\n-\t\tthrow e;\n-\t}\n-  \n+\n+  public void warning(TransformerException e) {\n+    log.warn(e.getMessageAndLocation());\n+  }\n+\n+  public void error(TransformerException e) throws TransformerException {\n+    throw e;\n+  }\n+\n+  public void fatalError(TransformerException e) throws TransformerException {\n+    throw e;\n+  }\n+\n   // XMLReporter\n-  \n+\n   public void report(String message, String errorType, Object relatedInformation, Location loc) {\n-\t\tlog.warn(\"XML parse warning in \\\"\"+loc.getSystemId()+\"\\\", line \"+loc.getLineNumber()+\", column \"+loc.getColumnNumber()+\": \"+message);\n+    final StringBuilder sb = new StringBuilder(\"XML parser reported \").append(errorType);\n+    if (loc !=  null) {\n+      sb.append(\" in \\\"\").append(loc.getSystemId()).append(\"\\\", line \")\n+        .append(loc.getLineNumber()).append(\", column \").append(loc.getColumnNumber());\n+    }\n+    log.warn(sb.append(\": \").append(message).toString());\n   }\n-  \n+\n }",
+                "additions": 36,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/9592710e3efb4e399046fc8498beb78044ecb125/solr/src/common/org/apache/solr/common/util/XMLErrorLogger.java",
+                "status": "modified",
+                "changes": 67,
+                "deletions": 31,
+                "sha": "5b2ed7ac89d39b6e119e1026847ac37c8214c4c2",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/9592710e3efb4e399046fc8498beb78044ecb125/solr/src/common/org/apache/solr/common/util/XMLErrorLogger.java",
+                "filename": "solr/src/common/org/apache/solr/common/util/XMLErrorLogger.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/src/common/org/apache/solr/common/util/XMLErrorLogger.java?ref=9592710e3efb4e399046fc8498beb78044ecb125"
+            }
+        ],
+        "bug_id": "manifoldcf-integration-solr-5.x_9",
+        "parent": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/74e204253d09207ea2548eb5b8615e0e2f472bff",
+        "message": "SOLR-2388: Fix possible NPE, fix indent\n\ngit-svn-id: https://svn.apache.org/repos/asf/lucene/dev/trunk@1075287 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "manifoldcf-integration-solr-5.x"
+    },
+    {
+        "commit": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/ef8b6da23b8a15f0344cb8e0876c86c4c9e9ace8",
+        "file": [
+            {
+                "patch": "@@ -71,6 +71,10 @@ public synchronized void onCommit(List<? extends IndexCommit> commits) throws IO\n    *  consume an extra 1X of your total index size, until\n    *  you release the snapshot. */\n   public synchronized IndexCommit snapshot() {\n+    if (lastCommit == null) {\n+      throw new IllegalStateException(\"no index commits to snapshot !\");\n+    }\n+    \n     if (snapshot == null)\n       snapshot = lastCommit.getSegmentsFileName();\n     else",
+                "additions": 4,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/ef8b6da23b8a15f0344cb8e0876c86c4c9e9ace8/lucene/src/java/org/apache/lucene/index/SnapshotDeletionPolicy.java",
+                "status": "modified",
+                "changes": 4,
+                "deletions": 0,
+                "sha": "e067e70ecf17cb39048bd6e23e43b5d48ad8db10",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/ef8b6da23b8a15f0344cb8e0876c86c4c9e9ace8/lucene/src/java/org/apache/lucene/index/SnapshotDeletionPolicy.java",
+                "filename": "lucene/src/java/org/apache/lucene/index/SnapshotDeletionPolicy.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/lucene/src/java/org/apache/lucene/index/SnapshotDeletionPolicy.java?ref=ef8b6da23b8a15f0344cb8e0876c86c4c9e9ace8"
+            },
+            {
+                "patch": "@@ -1,6 +1,4 @@\n-package org.apache.lucene;\n-// Intentionally not in org.apache.lucene.index, to assert\n-// that we do not require any package private access.\n+package org.apache.lucene.index;\n \n /**\n  * Licensed to the Apache Software Foundation (ASF) under one or more\n@@ -19,6 +17,8 @@\n  * limitations under the License.\n  */\n \n+import static org.junit.Assert.*;\n+\n import java.util.Collection;\n import java.io.File;\n import java.io.IOException;\n@@ -34,21 +34,22 @@\n import org.apache.lucene.index.IndexWriterConfig;\n import org.apache.lucene.index.KeepOnlyLastCommitDeletionPolicy;\n import org.apache.lucene.index.IndexWriter;\n-import org.apache.lucene.index.TestIndexWriter;\n import org.apache.lucene.index.SnapshotDeletionPolicy;\n+import org.apache.lucene.util.LuceneTestCaseJ4;\n import org.apache.lucene.util.ThreadInterruptedException;\n-import org.apache.lucene.util.LuceneTestCase;\n import org.apache.lucene.util._TestUtil;\n+import org.junit.Test;\n \n //\n // This was developed for Lucene In Action,\n // http://lucenebook.com\n //\n \n-public class TestSnapshotDeletionPolicy extends LuceneTestCase {\n+public class TestSnapshotDeletionPolicy extends LuceneTestCaseJ4 {\n   \n   public static final String INDEX_PATH = \"test.snapshots\";\n \n+  @Test\n   public void testSnapshotDeletionPolicy() throws Exception {\n     File dir = _TestUtil.getTempDir(INDEX_PATH);\n     try {\n@@ -64,6 +65,7 @@ public void testSnapshotDeletionPolicy() throws Exception {\n     dir2.close();\n   }\n \n+  @Test\n   public void testReuseAcrossWriters() throws Exception {\n     Directory dir = new MockRAMDirectory();\n \n@@ -235,5 +237,13 @@ private void readFile(Directory dir, String name) throws Exception {\n       input.close();\n     }\n   }\n+  \n+  @Test(expected=IllegalStateException.class)\n+  public void testNoCommits() throws Exception {\n+    // Tests that if there were no commits when snapshot() is called, then\n+    // IllegalStateException is thrown rather than NPE.\n+    SnapshotDeletionPolicy sdp = new SnapshotDeletionPolicy(new KeepOnlyLastCommitDeletionPolicy());\n+    sdp.snapshot();\n+  }\n+  \n }\n-",
+                "additions": 17,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/ef8b6da23b8a15f0344cb8e0876c86c4c9e9ace8/lucene/src/test/org/apache/lucene/index/TestSnapshotDeletionPolicy.java",
+                "previous_filename": "lucene/src/test/org/apache/lucene/TestSnapshotDeletionPolicy.java",
+                "status": "renamed",
+                "changes": 24,
+                "deletions": 7,
+                "sha": "9e9464364e01fdbc9f9cf30141224de2fd68a789",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/ef8b6da23b8a15f0344cb8e0876c86c4c9e9ace8/lucene/src/test/org/apache/lucene/index/TestSnapshotDeletionPolicy.java",
+                "filename": "lucene/src/test/org/apache/lucene/index/TestSnapshotDeletionPolicy.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/lucene/src/test/org/apache/lucene/index/TestSnapshotDeletionPolicy.java?ref=ef8b6da23b8a15f0344cb8e0876c86c4c9e9ace8"
+            }
+        ],
+        "bug_id": "manifoldcf-integration-solr-5.x_10",
+        "parent": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/5b046f5f9418437459bc08c8809beaa5044cd47f",
+        "message": "LUCENE-2397: SnapshotDeletionPolicy.snapshot() throws NPE if no commits happened\n\ngit-svn-id: https://svn.apache.org/repos/asf/lucene/dev/trunk@935522 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "manifoldcf-integration-solr-5.x"
+    },
+    {
+        "commit": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/f67c21959e48f2aa555a7dfa26e53ae016ac07d6",
+        "file": [
+            {
+                "patch": "@@ -317,6 +317,11 @@ New Features\n   handler, as long as you also provide a XSL to transform them to a valid\n   Solr input document.  (Upayavira, Uwe Schindler)\n \n+* SOLR-2615: Log individual updates (adds and deletes) at the FINE level\n+  before adding to the index.  Fix a null pointer exception in logging\n+  when there was no unique key. (David Smiley via yonik)\n+\n+\n Optimizations\n ----------------------\n ",
+                "additions": 5,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/f67c21959e48f2aa555a7dfa26e53ae016ac07d6/solr/CHANGES.txt",
+                "status": "modified",
+                "changes": 5,
+                "deletions": 0,
+                "sha": "61f80061b297b3f681fc8e85c632803c1d58b44b",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/f67c21959e48f2aa555a7dfa26e53ae016ac07d6/solr/CHANGES.txt",
+                "filename": "solr/CHANGES.txt",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/CHANGES.txt?ref=f67c21959e48f2aa555a7dfa26e53ae016ac07d6"
+            },
+            {
+                "patch": "@@ -659,8 +659,8 @@ private CodecProvider initCodecProvider(SolrConfig solrConfig, IndexSchema schem\n     if (def == null) {\n       // construct the default chain\n       UpdateRequestProcessorFactory[] factories = new UpdateRequestProcessorFactory[]{\n-              new RunUpdateProcessorFactory(),\n-              new LogUpdateProcessorFactory()\n+              new LogUpdateProcessorFactory(),\n+              new RunUpdateProcessorFactory()\n       };\n       def = new UpdateRequestProcessorChain(factories, this);\n     }",
+                "additions": 2,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/f67c21959e48f2aa555a7dfa26e53ae016ac07d6/solr/core/src/java/org/apache/solr/core/SolrCore.java",
+                "status": "modified",
+                "changes": 4,
+                "deletions": 2,
+                "sha": "de6837122c0d8973078d6873753ddb57aafc479e",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/f67c21959e48f2aa555a7dfa26e53ae016ac07d6/solr/core/src/java/org/apache/solr/core/SolrCore.java",
+                "filename": "solr/core/src/java/org/apache/solr/core/SolrCore.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/core/src/java/org/apache/solr/core/SolrCore.java?ref=f67c21959e48f2aa555a7dfa26e53ae016ac07d6"
+            },
+            {
+                "patch": "@@ -90,15 +90,15 @@ public String getIndexedId(IndexSchema schema) {\n \n    public String getPrintableId(IndexSchema schema) {\n      SchemaField sf = schema.getUniqueKeyField();\n-     if (indexedId != null) {\n-       return schema.getUniqueKeyField().getType().indexedToReadable(indexedId);\n+     if (indexedId != null && sf != null) {\n+       return sf.getType().indexedToReadable(indexedId);\n      }\n \n      if (doc != null) {\n        return schema.printableUniqueKey(doc);\n      }\n \n-     if (solrDoc != null) {\n+     if (solrDoc != null && sf != null) {\n        SolrInputField field = solrDoc.getField(sf.getName());\n        if (field != null) {\n          return field.getFirstValue().toString();",
+                "additions": 3,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/f67c21959e48f2aa555a7dfa26e53ae016ac07d6/solr/core/src/java/org/apache/solr/update/AddUpdateCommand.java",
+                "status": "modified",
+                "changes": 6,
+                "deletions": 3,
+                "sha": "cf6ce93083e39866d65dfd4011c90348ae9a1138",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/f67c21959e48f2aa555a7dfa26e53ae016ac07d6/solr/core/src/java/org/apache/solr/update/AddUpdateCommand.java",
+                "filename": "solr/core/src/java/org/apache/solr/update/AddUpdateCommand.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/core/src/java/org/apache/solr/update/AddUpdateCommand.java?ref=f67c21959e48f2aa555a7dfa26e53ae016ac07d6"
+            },
+            {
+                "patch": "@@ -31,12 +31,15 @@\n import org.apache.solr.update.DeleteUpdateCommand;\n import org.apache.solr.update.MergeIndexesCommand;\n import org.apache.solr.update.RollbackUpdateCommand;\n+import org.slf4j.Logger;\n+import org.slf4j.LoggerFactory;\n \n /**\n  * A logging processor.  This keeps track of all commands that have passed through\n- * the chain and prints them on finish();\n+ * the chain and prints them on finish().  At the Debug (FINE) level, a message\n+ * will be logged for each command prior to the next stage in the chain.\n  * \n- * If the Log level is not INFO the processor will not be created or added to the chain\n+ * If the Log level is not >= INFO the processor will not be created or added to the chain.\n  * \n  * @since solr 1.3\n  */\n@@ -54,11 +57,14 @@ public void init( final NamedList args ) {\n \n   @Override\n   public UpdateRequestProcessor getInstance(SolrQueryRequest req, SolrQueryResponse rsp, UpdateRequestProcessor next) {\n-    boolean doLog = LogUpdateProcessor.log.isInfoEnabled();\n+    final Logger logger = LoggerFactory.getLogger(LogUpdateProcessor.class);\n+    boolean doLog = logger.isInfoEnabled();\n     // LogUpdateProcessor.log.error(\"Will Log=\" + doLog);\n     if( doLog ) {\n       // only create the log processor if we will use it\n-      return new LogUpdateProcessor(req, rsp, this, next);\n+      final LogUpdateProcessor processor = new LogUpdateProcessor(req, rsp, this, next);\n+      assert processor.log == logger;\n+      return processor;\n     }\n     return null;\n   }\n@@ -78,6 +84,8 @@ public UpdateRequestProcessor getInstance(SolrQueryRequest req, SolrQueryRespons\n \n   private final int maxNumToLog;\n \n+  private final boolean logDebug = log.isDebugEnabled();//cache to avoid volatile-read\n+\n   public LogUpdateProcessor(SolrQueryRequest req, SolrQueryResponse rsp, LogUpdateProcessorFactory factory, UpdateRequestProcessor next) {\n     super( next );\n     this.req = req;\n@@ -91,8 +99,6 @@ public LogUpdateProcessor(SolrQueryRequest req, SolrQueryResponse rsp, LogUpdate\n   \n   @Override\n   public void processAdd(AddUpdateCommand cmd) throws IOException {\n-    if (next != null) next.processAdd(cmd);\n-\n     // Add a list of added id's to the response\n     if (adds == null) {\n       adds = new ArrayList<String>();\n@@ -102,14 +108,15 @@ public void processAdd(AddUpdateCommand cmd) throws IOException {\n     if (adds.size() < maxNumToLog) {\n       adds.add(cmd.getPrintableId(req.getSchema()));\n     }\n+    if (logDebug) { log.debug(\"add {}\", cmd.getPrintableId(req.getSchema())); }\n \n     numAdds++;\n+\n+    if (next != null) next.processAdd(cmd);\n   }\n \n   @Override\n   public void processDelete( DeleteUpdateCommand cmd ) throws IOException {\n-    if (next != null) next.processDelete(cmd);\n-\n     if (cmd.id != null) {\n       if (deletes == null) {\n         deletes = new ArrayList<String>();\n@@ -118,42 +125,52 @@ public void processDelete( DeleteUpdateCommand cmd ) throws IOException {\n       if (deletes.size() < maxNumToLog) {\n         deletes.add(cmd.id);\n       }\n+      if (logDebug) { log.debug(\"delete {}\", cmd.id); }\n     } else {\n       if (toLog.size() < maxNumToLog) {\n         toLog.add(\"deleteByQuery\", cmd.query);\n       }\n+      if (logDebug) { log.debug(\"deleteByQuery {}\", cmd.query); }\n     }\n     numDeletes++;\n+\n+    if (next != null) next.processDelete(cmd);\n   }\n \n   @Override\n   public void processMergeIndexes(MergeIndexesCommand cmd) throws IOException {\n-    if (next != null) next.processMergeIndexes(cmd);\n-\n     toLog.add(\"mergeIndexes\", cmd.toString());\n+    if (logDebug) { log.debug(\"mergeIndexes {}\",cmd.toString()); }\n+\n+    if (next != null) next.processMergeIndexes(cmd);\n   }\n \n   @Override\n   public void processCommit( CommitUpdateCommand cmd ) throws IOException {\n+    final String msg = cmd.optimize ? \"optimize\" : \"commit\";\n+    toLog.add(msg, \"\");\n+    if (logDebug) { log.debug(msg); }\n+\n     if (next != null) next.processCommit(cmd);\n-    \n-    toLog.add(cmd.optimize ? \"optimize\" : \"commit\", \"\");\n   }\n \n   /**\n    * @since Solr 1.4\n    */\n   @Override\n   public void processRollback( RollbackUpdateCommand cmd ) throws IOException {\n-    if (next != null) next.processRollback(cmd);\n-    \n     toLog.add(\"rollback\", \"\");\n+    if (logDebug) { log.debug(\"rollback\"); }\n+\n+    if (next != null) next.processRollback(cmd);\n   }\n \n \n   @Override\n   public void finish() throws IOException {\n     if (next != null) next.finish();\n+\n+    // LOG A SUMMARY WHEN ALL DONE (INFO LEVEL)\n     \n     // TODO: right now, update requests are logged twice...\n     // this will slow down things compared to Solr 1.2",
+                "additions": 31,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/f67c21959e48f2aa555a7dfa26e53ae016ac07d6/solr/core/src/java/org/apache/solr/update/processor/LogUpdateProcessorFactory.java",
+                "status": "modified",
+                "changes": 45,
+                "deletions": 14,
+                "sha": "16df29e66b2c7ffb720a266ba0dc8d36bfabed93",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/f67c21959e48f2aa555a7dfa26e53ae016ac07d6/solr/core/src/java/org/apache/solr/update/processor/LogUpdateProcessorFactory.java",
+                "filename": "solr/core/src/java/org/apache/solr/update/processor/LogUpdateProcessorFactory.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/core/src/java/org/apache/solr/update/processor/LogUpdateProcessorFactory.java?ref=f67c21959e48f2aa555a7dfa26e53ae016ac07d6"
+            },
+            {
+                "patch": "@@ -41,7 +41,7 @@\n  * @since solr 1.3\n  */\n public abstract class UpdateRequestProcessor {\n-  protected static Logger log = LoggerFactory.getLogger(UpdateRequestProcessor.class);\n+  protected final Logger log = LoggerFactory.getLogger(getClass());\n \n   protected final UpdateRequestProcessor next;\n ",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/f67c21959e48f2aa555a7dfa26e53ae016ac07d6/solr/core/src/java/org/apache/solr/update/processor/UpdateRequestProcessor.java",
+                "status": "modified",
+                "changes": 2,
+                "deletions": 1,
+                "sha": "99dff327ca4c21d0d10990252c15f7fdab82c7b0",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/f67c21959e48f2aa555a7dfa26e53ae016ac07d6/solr/core/src/java/org/apache/solr/update/processor/UpdateRequestProcessor.java",
+                "filename": "solr/core/src/java/org/apache/solr/update/processor/UpdateRequestProcessor.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/core/src/java/org/apache/solr/update/processor/UpdateRequestProcessor.java?ref=f67c21959e48f2aa555a7dfa26e53ae016ac07d6"
+            }
+        ],
+        "bug_id": "manifoldcf-integration-solr-5.x_11",
+        "parent": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/94a86f213c444d16575b3f09dbee4cd583e2e1cc",
+        "message": "SOLR-2615: log individual updates at DEBUG level, fix NPE when no unique key\n\ngit-svn-id: https://svn.apache.org/repos/asf/lucene/dev/trunk@1145198 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "manifoldcf-integration-solr-5.x"
+    },
+    {
+        "commit": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/02d8046042700a29c3aff2a6151227e45cf2cca6",
+        "file": [
+            {
+                "patch": "@@ -41,7 +41,9 @@ public QuerySenderListener(SolrCore core) {\n   public void newSearcher(SolrIndexSearcher newSearcher, SolrIndexSearcher currentSearcher) {\n     final SolrIndexSearcher searcher = newSearcher;\n     log.info(\"QuerySenderListener sending requests to \" + newSearcher);\n-    for (NamedList nlst : (List<NamedList>)args.get(\"queries\")) {\n+    List<NamedList> allLists = (List<NamedList>)args.get(\"queries\");\n+    if (allLists == null) return;\n+    for (NamedList nlst : allLists) {\n       SolrQueryRequest req = null;\n \n       try {",
+                "additions": 3,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/02d8046042700a29c3aff2a6151227e45cf2cca6/solr/src/java/org/apache/solr/core/QuerySenderListener.java",
+                "status": "modified",
+                "changes": 4,
+                "deletions": 1,
+                "sha": "d363005df56bb92f57c6e9448409a8c4b6689eed",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/02d8046042700a29c3aff2a6151227e45cf2cca6/solr/src/java/org/apache/solr/core/QuerySenderListener.java",
+                "filename": "solr/src/java/org/apache/solr/core/QuerySenderListener.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/src/java/org/apache/solr/core/QuerySenderListener.java?ref=02d8046042700a29c3aff2a6151227e45cf2cca6"
+            },
+            {
+                "patch": "@@ -0,0 +1,79 @@\n+<?xml version=\"1.0\" ?>\n+\n+<!--\n+ Licensed to the Apache Software Foundation (ASF) under one or more\n+ contributor license agreements.  See the NOTICE file distributed with\n+ this work for additional information regarding copyright ownership.\n+ The ASF licenses this file to You under the Apache License, Version 2.0\n+ (the \"License\"); you may not use this file except in compliance with\n+ the License.  You may obtain a copy of the License at\n+\n+     http://www.apache.org/licenses/LICENSE-2.0\n+\n+ Unless required by applicable law or agreed to in writing, software\n+ distributed under the License is distributed on an \"AS IS\" BASIS,\n+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n+ See the License for the specific language governing permissions and\n+ limitations under the License.\n+-->\n+\n+<!-- $Id: solrconfig-querysender.xml 1048886 2010-12-14 01:10:52Z hossman $\n+     $Source$\n+     $Name$\n+  -->\n+\n+<config>\n+  <luceneMatchVersion>${tests.luceneMatchVersion:LUCENE_CURRENT}</luceneMatchVersion>\n+    <!--  The DirectoryFactory to use for indexes.\n+        solr.StandardDirectoryFactory, the default, is filesystem based.\n+        solr.RAMDirectoryFactory is memory based and not persistent. -->\n+  <directoryFactory name=\"DirectoryFactory\" class=\"${solr.directoryFactory:solr.RAMDirectoryFactory}\"/>\n+  \n+  <updateHandler class=\"solr.DirectUpdateHandler2\">\n+    <listener event=\"postCommit\" \n+              class=\"org.apache.solr.core.MockEventListener\" />\n+    <listener event=\"postOptimize\" \n+              class=\"org.apache.solr.core.MockEventListener\" />\n+  </updateHandler>\n+  \n+  <query>\n+  \n+  \n+    <!-- a newSearcher event is fired whenever a new searcher is being prepared\n+         and there is a current searcher handling requests (aka registered). -->\n+    <!-- QuerySenderListener takes an array of NamedList and executes a\n+         local query request for each NamedList in sequence. -->\n+    <listener event=\"newSearcher\" class=\"solr.QuerySenderListener\">\n+      <!--\n+      <arr name=\"queries\">\n+        <lst> <str name=\"q\">solr</str> <str name=\"start\">0</str> <str name=\"rows\">10</str> <str name=\"qt\">mock</str></lst>\n+        <lst> <str name=\"q\">rocks</str> <str name=\"start\">0</str> <str name=\"rows\">10</str> <str name=\"qt\">mock</str></lst>\n+      </arr>\n+      -->\n+    </listener>\n+    <listener event=\"newSearcher\"\n+              class=\"org.apache.solr.core.MockEventListener\" />\n+\n+\n+    <!-- a firstSearcher event is fired whenever a new searcher is being\n+         prepared but there is no current registered searcher to handle\n+         requests or to gain prewarming data from. -->\n+    <listener event=\"firstSearcher\" class=\"solr.QuerySenderListener\">\n+      <!--\n+      <arr name=\"queries\">\n+        <lst> <str name=\"q\">fast_warm</str> <str name=\"start\">0</str> <str name=\"rows\">10</str>\n+          <str name=\"qt\">mock</str>\n+        </lst>\n+      </arr>\n+      -->\n+    </listener>\n+    <listener event=\"firstSearcher\"\n+              class=\"org.apache.solr.core.MockEventListener\" />\n+\n+  \n+  </query>\n+  <requestHandler name=\"mock\" class=\"org.apache.solr.core.MockQuerySenderListenerReqHandler\" default=\"true\">\n+    <!-- default values for query parameters -->\n+\n+  </requestHandler>\n+</config>",
+                "additions": 79,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/02d8046042700a29c3aff2a6151227e45cf2cca6/solr/src/test-files/solr/conf/solrconfig-querysender-noquery.xml",
+                "status": "added",
+                "changes": 79,
+                "deletions": 0,
+                "sha": "206350d360313a7309d441b82d000d5b388a8794",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/02d8046042700a29c3aff2a6151227e45cf2cca6/solr/src/test-files/solr/conf/solrconfig-querysender-noquery.xml",
+                "filename": "solr/src/test-files/solr/conf/solrconfig-querysender-noquery.xml",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/src/test-files/solr/conf/solrconfig-querysender-noquery.xml?ref=02d8046042700a29c3aff2a6151227e45cf2cca6"
+            },
+            {
+                "patch": "@@ -0,0 +1,90 @@\n+package org.apache.solr.core;\n+\n+/**\n+ * Licensed to the Apache Software Foundation (ASF) under one or more\n+ * contributor license agreements.  See the NOTICE file distributed with\n+ * this work for additional information regarding copyright ownership.\n+ * The ASF licenses this file to You under the Apache License, Version 2.0\n+ * (the \"License\"); you may not use this file except in compliance with\n+ * the License.  You may obtain a copy of the License at\n+ *\n+ *     http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing, software\n+ * distributed under the License is distributed on an \"AS IS\" BASIS,\n+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n+ * See the License for the specific language governing permissions and\n+ * limitations under the License.\n+ */\n+\n+import org.apache.lucene.store.Directory;\n+import org.apache.solr.SolrTestCaseJ4;\n+import org.apache.solr.common.params.EventParams;\n+import org.apache.solr.search.SolrIndexSearcher;\n+import org.apache.solr.search.TestExtendedDismaxParser;\n+import org.apache.solr.util.RefCounted;\n+import org.junit.BeforeClass;\n+import org.junit.Test;\n+\n+public class TestQuerySenderNoQuery extends SolrTestCaseJ4 {\n+\n+  // number of instances configured in the solrconfig.xml\n+  private static final int EXPECTED_MOCK_LISTENER_INSTANCES = 4;\n+\n+  private static int preInitMockListenerCount = 0;\n+\n+  @BeforeClass\n+  public static void beforeClass() throws Exception {\n+    // record current value prior to core initialization\n+    // so we can verify the correct number of instances later\n+    // NOTE: this won't work properly if concurrent tests run\n+    // in the same VM\n+    preInitMockListenerCount = MockEventListener.getCreateCount();\n+\n+    initCore(\"solrconfig-querysender-noquery.xml\",\"schema.xml\");\n+  }\n+\n+  public void testListenerCreationCounts() {\n+    SolrCore core = h.getCore();\n+\n+    assertEquals(\"Unexpected number of listeners created\",\n+                 EXPECTED_MOCK_LISTENER_INSTANCES,\n+                 MockEventListener.getCreateCount() - preInitMockListenerCount);\n+  }\n+\n+  @Test\n+  public void testRequestHandlerRegistry() {\n+    // property values defined in build.xml\n+    SolrCore core = h.getCore();\n+\n+    assertEquals( 2, core.firstSearcherListeners.size() );\n+    assertEquals( 2, core.newSearcherListeners.size() );\n+  }\n+\n+  // Determine that when the query lists are commented out of both new and\n+  // first searchers in the config, we don't throw an NPE\n+  @Test\n+  public void testSearcherEvents() throws Exception {\n+    SolrCore core = h.getCore();\n+    SolrEventListener newSearcherListener = core.newSearcherListeners.get(0);\n+    assertTrue(\"Not an instance of QuerySenderListener\", newSearcherListener instanceof QuerySenderListener);\n+    QuerySenderListener qsl = (QuerySenderListener) newSearcherListener;\n+\n+    RefCounted<SolrIndexSearcher> currentSearcherRef = core.getSearcher();\n+    SolrIndexSearcher currentSearcher = currentSearcherRef.get();\n+    SolrIndexSearcher dummy = null;\n+    qsl.newSearcher(currentSearcher, dummy);//test first Searcher (since param is null)\n+    MockQuerySenderListenerReqHandler mock = (MockQuerySenderListenerReqHandler) core.getRequestHandler(\"mock\");\n+    assertNotNull(\"Mock is null\", mock);\n+    assertNull(\"Req (firstsearcher) is not null\", mock.req);\n+\n+    Directory dir = currentSearcher.getIndexReader().directory();\n+    SolrIndexSearcher newSearcher = new SolrIndexSearcher(core, core.getSchema(), \"testQuerySenderNoQuery\", dir, true, false);\n+\n+    qsl.newSearcher(newSearcher, currentSearcher); // get newSearcher.\n+    assertNull(\"Req (newsearcher) is not null\", mock.req);\n+    newSearcher.close();\n+    currentSearcherRef.decref();\n+  }\n+\n+}",
+                "additions": 90,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/02d8046042700a29c3aff2a6151227e45cf2cca6/solr/src/test/org/apache/solr/core/TestQuerySenderNoQuery.java",
+                "status": "added",
+                "changes": 90,
+                "deletions": 0,
+                "sha": "b23e4bdde5f3185a952de8cc7d917a5a2e7868ed",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/02d8046042700a29c3aff2a6151227e45cf2cca6/solr/src/test/org/apache/solr/core/TestQuerySenderNoQuery.java",
+                "filename": "solr/src/test/org/apache/solr/core/TestQuerySenderNoQuery.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/src/test/org/apache/solr/core/TestQuerySenderNoQuery.java?ref=02d8046042700a29c3aff2a6151227e45cf2cca6"
+            }
+        ],
+        "bug_id": "manifoldcf-integration-solr-5.x_12",
+        "parent": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/f844694f5b78f67b85544d76720e151f1eef288f",
+        "message": "Solr-2598 (Commenting out the <arr name=\"queries\"> section in firstSearcher generates an NPE)\n\ngit-svn-id: https://svn.apache.org/repos/asf/lucene/dev/trunk@1137092 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "manifoldcf-integration-solr-5.x"
+    },
+    {
+        "commit": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/a5cab1f9ad212997772161e60de5cec07216a991",
+        "file": [
+            {
+                "patch": "@@ -32,6 +32,8 @@\n import org.apache.lucene.search.TermQuery;\n import org.apache.lucene.search.TermRangeQuery;\n import org.apache.lucene.search.WildcardQuery;\n+import org.apache.lucene.util.BytesRef;\n+import org.apache.lucene.util.CharsRef;\n import org.apache.solr.common.SolrException;\n import org.apache.solr.common.params.MapSolrParams;\n import org.apache.solr.common.params.SolrParams;\n@@ -382,6 +384,22 @@ static void writeFieldVal(String val, FieldType ft, Appendable out, int flags) t\n     }\n   }\n \n+  static void writeFieldVal(BytesRef val, FieldType ft, Appendable out, int flags) throws IOException {\n+    if (ft != null) {\n+      try {\n+        CharsRef readable = new CharsRef();\n+        ft.indexedToReadable(val, readable);\n+        out.append(readable);\n+      } catch (Exception e) {\n+        out.append(\"EXCEPTION(val=\");\n+        out.append(val.utf8ToString());\n+        out.append(\")\");\n+      }\n+    } else {\n+      out.append(val.utf8ToString());\n+    }\n+  }\n+\n   /**\n    * @see #toString(Query,IndexSchema)\n    */\n@@ -392,14 +410,14 @@ public static void toString(Query query, IndexSchema schema, Appendable out, int\n       TermQuery q = (TermQuery) query;\n       Term t = q.getTerm();\n       FieldType ft = writeFieldName(t.field(), schema, out, flags);\n-      writeFieldVal(t.text(), ft, out, flags);\n+      writeFieldVal(t.bytes(), ft, out, flags);\n     } else if (query instanceof TermRangeQuery) {\n       TermRangeQuery q = (TermRangeQuery) query;\n       String fname = q.getField();\n       FieldType ft = writeFieldName(fname, schema, out, flags);\n       out.append(q.includesLower() ? '[' : '{');\n-      String lt = q.getLowerTerm().utf8ToString();\n-      String ut = q.getUpperTerm().utf8ToString();\n+      BytesRef lt = q.getLowerTerm();\n+      BytesRef ut = q.getUpperTerm();\n       if (lt == null) {\n         out.append('*');\n       } else {",
+                "additions": 21,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/a5cab1f9ad212997772161e60de5cec07216a991/solr/src/java/org/apache/solr/search/QueryParsing.java",
+                "status": "modified",
+                "changes": 24,
+                "deletions": 3,
+                "sha": "22a68f8266a438b257a7bdd1f1885f4782931cf2",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/a5cab1f9ad212997772161e60de5cec07216a991/solr/src/java/org/apache/solr/search/QueryParsing.java",
+                "filename": "solr/src/java/org/apache/solr/search/QueryParsing.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/src/java/org/apache/solr/search/QueryParsing.java?ref=a5cab1f9ad212997772161e60de5cec07216a991"
+            }
+        ],
+        "bug_id": "manifoldcf-integration-solr-5.x_13",
+        "parent": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/23fa95fb5fb905c5d93b6f19bf0901edab3b6de2",
+        "message": "LUCENE-2514: fix NPE in solr's toString when range endpoints are null\n\ngit-svn-id: https://svn.apache.org/repos/asf/lucene/dev/trunk@1131029 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "manifoldcf-integration-solr-5.x"
+    },
+    {
+        "commit": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/bffb5b537ff719f485e74df22a3f342b6963aeaa",
+        "file": [
+            {
+                "patch": "@@ -679,6 +679,13 @@ Bug Fixes\n   DocumentAnalysisRequestHandler to respect charset from XML file and only\n   use HTTP header's \"Content-Type\" as a \"hint\". (Uwe Schindler)\n \n+* SOLR-1191: resolve DataImportHandler deltaQuery column against pk when pk\n+  has a prefix (e.g. pk=\"book.id\" deltaQuery=\"select id from ...\"). More\n+  useful error reporting when no match found (previously failed with a\n+  NullPointerException in log and no clear user feedback). (gthb via yonik)\n+\n+\n+\n Other Changes\n ----------------------\n ",
+                "additions": 7,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/bffb5b537ff719f485e74df22a3f342b6963aeaa/solr/CHANGES.txt",
+                "status": "modified",
+                "changes": 7,
+                "deletions": 0,
+                "sha": "455fd961047f4122a1ebe2db2c35da1fd3d97064",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/bffb5b537ff719f485e74df22a3f342b6963aeaa/solr/CHANGES.txt",
+                "filename": "solr/CHANGES.txt",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/CHANGES.txt?ref=bffb5b537ff719f485e74df22a3f342b6963aeaa"
+            },
+            {
+                "patch": "@@ -318,7 +318,11 @@ private void deleteAll(Set<Map<String, Object>> deletedKeys) {\n       String keyName = root.isDocRoot ? root.getPk() : root.getSchemaPk();\n       Object key = map.get(keyName);\n       if(key == null) {\n-        LOG.warn(\"no key was available for deleteted pk query. keyName = \" + keyName);\n+        keyName = findMatchingPkColumn(keyName, map);\n+        key = map.get(keyName);\n+      }\n+      if(key == null) {\n+        LOG.warn(\"no key was available for deleted pk query. keyName = \" + keyName);\n         continue;\n       }\n       writer.deleteDoc(key);\n@@ -816,6 +820,28 @@ private EntityProcessorWrapper getEntityProcessor(DataConfig.Entity entity) {\n     return entity.processor = new EntityProcessorWrapper(entityProcessor, this);\n   }\n \n+  private String findMatchingPkColumn(String pk, Map<String, Object> row) {\n+    if (row.containsKey(pk))\n+      throw new IllegalArgumentException(\n+        String.format(\"deltaQuery returned a row with null for primary key %s\", pk));\n+    String resolvedPk = null;\n+    for (String columnName : row.keySet()) {\n+      if (columnName.endsWith(\".\" + pk) || pk.endsWith(\".\" + columnName)) {\n+        if (resolvedPk != null)\n+          throw new IllegalArgumentException(\n+            String.format(\n+              \"deltaQuery has more than one column (%s and %s) that might resolve to declared primary key pk='%s'\",\n+              resolvedPk, columnName, pk));\n+        resolvedPk = columnName;\n+      }\n+    }\n+    if (resolvedPk == null)\n+      throw new IllegalArgumentException(\n+        String.format(\"deltaQuery has no column to resolve to declared primary key pk='%s'\", pk));\n+    LOG.info(String.format(\"Resolving deltaQuery column '%s' to match entity's declared pk '%s'\", resolvedPk, pk));\n+    return resolvedPk;\n+  }\n+\n   /**\n    * <p> Collects unique keys of all Solr documents for whom one or more source tables have been changed since the last\n    * indexed time. </p> <p> Note: In our definition, unique key of Solr document is the primary key of the top level\n@@ -852,13 +878,20 @@ private EntityProcessorWrapper getEntityProcessor(DataConfig.Entity entity) {\n     Map<String, Map<String, Object>> deltaSet = new HashMap<String, Map<String, Object>>();\n     LOG.info(\"Running ModifiedRowKey() for Entity: \" + entity.name);\n     //get the modified rows in this entity\n+    String pk = entity.getPk();\n     while (true) {\n       Map<String, Object> row = entityProcessor.nextModifiedRowKey();\n \n       if (row == null)\n         break;\n \n-      deltaSet.put(row.get(entity.getPk()).toString(), row);\n+      Object pkValue = row.get(pk);\n+      if (pkValue == null) {\n+        pk = findMatchingPkColumn(pk, row);\n+        pkValue = row.get(pk);\n+      }\n+\n+      deltaSet.put(pkValue.toString(), row);\n       importStatistics.rowsCount.incrementAndGet();\n       // check for abort\n       if (stop.get())\n@@ -873,8 +906,14 @@ private EntityProcessorWrapper getEntityProcessor(DataConfig.Entity entity) {\n \n       deletedSet.add(row);\n       \n+      Object pkValue = row.get(pk);\n+      if (pkValue == null) {\n+        pk = findMatchingPkColumn(pk, row);\n+        pkValue = row.get(pk);\n+      }\n+\n       // Remove deleted rows from the delta rows\n-      String deletedRowPk = row.get(entity.getPk()).toString();\n+      String deletedRowPk = pkValue.toString();\n       if (deltaSet.containsKey(deletedRowPk)) {\n         deltaSet.remove(deletedRowPk);\n       }",
+                "additions": 42,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/bffb5b537ff719f485e74df22a3f342b6963aeaa/solr/contrib/dataimporthandler/src/main/java/org/apache/solr/handler/dataimport/DocBuilder.java",
+                "status": "modified",
+                "changes": 45,
+                "deletions": 3,
+                "sha": "858d688976ec2c68ef18b595c201a43a3cd3dd2f",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/bffb5b537ff719f485e74df22a3f342b6963aeaa/solr/contrib/dataimporthandler/src/main/java/org/apache/solr/handler/dataimport/DocBuilder.java",
+                "filename": "solr/contrib/dataimporthandler/src/main/java/org/apache/solr/handler/dataimport/DocBuilder.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/contrib/dataimporthandler/src/main/java/org/apache/solr/handler/dataimport/DocBuilder.java?ref=bffb5b537ff719f485e74df22a3f342b6963aeaa"
+            },
+            {
+                "patch": "@@ -0,0 +1,145 @@\n+/**\n+ * Licensed to the Apache Software Foundation (ASF) under one or more\n+ * contributor license agreements.  See the NOTICE file distributed with\n+ * this work for additional information regarding copyright ownership.\n+ * The ASF licenses this file to You under the Apache License, Version 2.0\n+ * (the \"License\"); you may not use this file except in compliance with\n+ * the License.  You may obtain a copy of the License at\n+ *\n+ *     http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing, software\n+ * distributed under the License is distributed on an \"AS IS\" BASIS,\n+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n+ * See the License for the specific language governing permissions and\n+ * limitations under the License.\n+ */\n+package org.apache.solr.handler.dataimport;\n+\n+import org.junit.Before;\n+import org.junit.BeforeClass;\n+import org.junit.Test;\n+\n+import java.util.ArrayList;\n+import java.util.Collections;\n+import java.util.List;\n+import java.util.logging.*;\n+\n+/**\n+ * <p>\n+ * Test for SqlEntityProcessorDelta verifying fix for SOLR-1191\n+ * </p>\n+ * \n+ *\n+ * @version $Id$\n+ * @since solr 3.1\n+ */\n+public class TestSqlEntityProcessorDeltaPrefixedPk extends AbstractDataImportHandlerTestCase {\n+  private static final String FULLIMPORT_QUERY = \"select * from x\";\n+\n+  private static final String DELTA_QUERY = \"select id from x where last_modified > NOW\";\n+\n+  private static final String DELETED_PK_QUERY = \"select id from x where last_modified > NOW AND deleted='true'\";\n+\n+  private static final String dataConfig_delta =\n+    \"<dataConfig>\" +\n+    \"  <dataSource  type=\\\"MockDataSource\\\"/>\\n\" +\n+    \"  <document>\\n\" +\n+    \"    <entity name=\\\"x\\\" transformer=\\\"TemplateTransformer\\\" pk=\\\"x.id\\\"\" +\n+    \"            query=\\\"\" + FULLIMPORT_QUERY + \"\\\"\" +\n+    \"            deletedPkQuery=\\\"\" + DELETED_PK_QUERY + \"\\\"\" +\n+    \"            deltaImportQuery=\\\"select * from x where id='${dih.delta.id}'\\\"\" +\n+    \"            deltaQuery=\\\"\" + DELTA_QUERY + \"\\\">\\n\" +\n+    \"      <field column=\\\"id\\\" name=\\\"id\\\"/>\\n\" +\n+    \"      <field column=\\\"desc\\\" name=\\\"desc\\\"/>\\n\" +\n+    \"    </entity>\\n\" +\n+    \"  </document>\\n\" +\n+    \"</dataConfig>\\n\";\n+  \n+  private static final List EMPTY_LIST = Collections.EMPTY_LIST;\n+\n+  @BeforeClass\n+  public static void beforeClass() throws Exception {\n+    initCore(\"dataimport-solrconfig.xml\", \"dataimport-schema.xml\");\n+  }\n+\n+  @Before @Override\n+  public void setUp() throws Exception {\n+    super.setUp();\n+    clearIndex();\n+    assertU(commit());\n+    //Logger.getLogger(\"\").setLevel(Level.ALL);\n+  }\n+\n+  @SuppressWarnings(\"unchecked\")\n+  private void add1document() throws Exception {\n+    List row = new ArrayList();\n+    row.add(createMap(\"id\", \"1\", \"desc\", \"bar\"));\n+    MockDataSource.setIterator(FULLIMPORT_QUERY, row.iterator());\n+\n+    runFullImport(dataConfig_delta);\n+\n+    assertQ(req(\"*:* OR add1document\"), \"//*[@numFound='1']\");\n+    assertQ(req(\"id:1\"), \"//*[@numFound='1']\");\n+    assertQ(req(\"desc:bar\"), \"//*[@numFound='1']\");\n+  }\n+\n+  @Test\n+  @SuppressWarnings(\"unchecked\")\n+  public void testDeltaImport_deleteResolvesUnprefixedPk() throws Exception {\n+    add1document();\n+    MockDataSource.clearCache();\n+    List deletedRows = new ArrayList();\n+    deletedRows.add(createMap(\"id\", \"1\"));\n+    MockDataSource.setIterator(DELETED_PK_QUERY, deletedRows.iterator());\n+    MockDataSource.setIterator(DELTA_QUERY, EMPTY_LIST.iterator());\n+    runDeltaImport(dataConfig_delta);\n+\n+    assertQ(req(\"*:* OR testDeltaImport_deleteResolvesUnprefixedPk\"), \"//*[@numFound='0']\");\n+  }\n+\n+  @Test\n+  @SuppressWarnings(\"unchecked\")\n+  public void testDeltaImport_replace_resolvesUnprefixedPk() throws Exception {\n+    add1document();\n+    MockDataSource.clearCache();\n+    List deltaRows = new ArrayList();\n+    deltaRows.add(createMap(\"id\", \"1\"));\n+    MockDataSource.setIterator(DELTA_QUERY, deltaRows.iterator());\n+    MockDataSource.setIterator(DELETED_PK_QUERY, EMPTY_LIST.iterator());\n+    List rows = new ArrayList();\n+    rows.add(createMap(\"id\", \"1\", \"desc\", \"baz\"));\n+    MockDataSource.setIterator(\"select * from x where id='1'\", rows.iterator());\n+\n+    runDeltaImport(dataConfig_delta);\n+\n+    assertQ(req(\"*:* OR testDeltaImport_replace_resolvesUnprefixedPk\"), \"//*[@numFound='1']\");\n+    assertQ(req(\"id:1\"), \"//*[@numFound='1']\");\n+    assertQ(req(\"desc:bar\"), \"//*[@numFound='0']\");\n+    assertQ(req(\"desc:baz\"), \"//*[@numFound='1']\");\n+  }\n+\n+  @Test\n+  @SuppressWarnings(\"unchecked\")\n+  public void testDeltaImport_addResolvesUnprefixedPk() throws Exception {\n+    add1document();\n+    MockDataSource.clearCache();\n+\n+    List deltaRows = new ArrayList();\n+    deltaRows.add(createMap(\"id\", \"2\"));\n+    MockDataSource.setIterator(DELTA_QUERY, deltaRows.iterator());\n+\n+    List rows = new ArrayList();\n+    rows.add(createMap(\"id\", \"2\", \"desc\", \"xyzzy\"));\n+    MockDataSource.setIterator(\"select * from x where id='2'\", rows.iterator());\n+\n+    runDeltaImport(dataConfig_delta);\n+\n+    assertQ(req(\"*:* OR testDeltaImport_addResolvesUnprefixedPk\"), \"//*[@numFound='2']\");\n+    assertQ(req(\"id:1\"), \"//*[@numFound='1']\");\n+    assertQ(req(\"id:2\"), \"//*[@numFound='1']\");\n+    assertQ(req(\"desc:bar\"), \"//*[@numFound='1']\");\n+    assertQ(req(\"desc:xyzzy\"), \"//*[@numFound='1']\");\n+  }\n+\n+}",
+                "additions": 145,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/bffb5b537ff719f485e74df22a3f342b6963aeaa/solr/contrib/dataimporthandler/src/test/java/org/apache/solr/handler/dataimport/TestSqlEntityProcessorDeltaPrefixedPk.java",
+                "status": "added",
+                "changes": 145,
+                "deletions": 0,
+                "sha": "51fc50b9f1a88718a3b339c35e47309a667cc09f",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/bffb5b537ff719f485e74df22a3f342b6963aeaa/solr/contrib/dataimporthandler/src/test/java/org/apache/solr/handler/dataimport/TestSqlEntityProcessorDeltaPrefixedPk.java",
+                "filename": "solr/contrib/dataimporthandler/src/test/java/org/apache/solr/handler/dataimport/TestSqlEntityProcessorDeltaPrefixedPk.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/contrib/dataimporthandler/src/test/java/org/apache/solr/handler/dataimport/TestSqlEntityProcessorDeltaPrefixedPk.java?ref=bffb5b537ff719f485e74df22a3f342b6963aeaa"
+            }
+        ],
+        "bug_id": "manifoldcf-integration-solr-5.x_14",
+        "parent": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/4019ab5f5050a99296cdc1c79cf12792c2c32f49",
+        "message": "SOLR-1191: fix DIH deltaQyery when pk has prefix, change NPE to better error reporting\n\ngit-svn-id: https://svn.apache.org/repos/asf/lucene/dev/trunk@1071435 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "manifoldcf-integration-solr-5.x"
+    },
+    {
+        "commit": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/eb2bff05d171851cd7920723436b36554bad5b65",
+        "file": [
+            {
+                "patch": "@@ -99,7 +99,9 @@ Object getInnerArray() {\n   /*(non-Javadoc) @see java.lang.Object#equals(java.lang.Object) */\n   @Override\n   public boolean equals(Object o) {\n-    if (o.getClass() !=  OrdFieldSource.class) return false;\n+    if (o == this) return true;\n+    if (o == null) return false;\n+    if (o.getClass() != OrdFieldSource.class) return false;\n     OrdFieldSource other = (OrdFieldSource)o;\n     return this.field.equals(other.field);\n   }",
+                "additions": 3,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/eb2bff05d171851cd7920723436b36554bad5b65/lucene/src/java/org/apache/lucene/search/function/OrdFieldSource.java",
+                "status": "modified",
+                "changes": 4,
+                "deletions": 1,
+                "sha": "4a23a1c5d9e43497afe1d1f0bdf1aae9104aced1",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/eb2bff05d171851cd7920723436b36554bad5b65/lucene/src/java/org/apache/lucene/search/function/OrdFieldSource.java",
+                "filename": "lucene/src/java/org/apache/lucene/search/function/OrdFieldSource.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/lucene/src/java/org/apache/lucene/search/function/OrdFieldSource.java?ref=eb2bff05d171851cd7920723436b36554bad5b65"
+            },
+            {
+                "patch": "@@ -107,7 +107,9 @@ Object getInnerArray() {\n   /*(non-Javadoc) @see java.lang.Object#equals(java.lang.Object) */\n   @Override\n   public boolean equals(Object o) {\n-    if (o.getClass() !=  ReverseOrdFieldSource.class) return false;\n+    if (o == this) return true;\n+    if (o == null) return false;\n+    if (o.getClass() != ReverseOrdFieldSource.class) return false;\n     ReverseOrdFieldSource other = (ReverseOrdFieldSource)o;\n     return this.field.equals(other.field); \n   }",
+                "additions": 3,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/eb2bff05d171851cd7920723436b36554bad5b65/lucene/src/java/org/apache/lucene/search/function/ReverseOrdFieldSource.java",
+                "status": "modified",
+                "changes": 4,
+                "deletions": 1,
+                "sha": "bb01ca4a4b5703c9a96eeb33858704ac24e2c223",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/eb2bff05d171851cd7920723436b36554bad5b65/lucene/src/java/org/apache/lucene/search/function/ReverseOrdFieldSource.java",
+                "filename": "lucene/src/java/org/apache/lucene/search/function/ReverseOrdFieldSource.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/lucene/src/java/org/apache/lucene/search/function/ReverseOrdFieldSource.java?ref=eb2bff05d171851cd7920723436b36554bad5b65"
+            },
+            {
+                "patch": "@@ -253,5 +253,14 @@ private void doTestCaching(String field, boolean inOrder) throws CorruptIndexExc\n   private String testName() {\n     return getClass().getName() + \".\" + getName();\n   }\n+  \n+  // LUCENE-1250\n+  public void testEqualsNull() throws Exception {\n+    OrdFieldSource ofs = new OrdFieldSource(\"f\");\n+    assertFalse(ofs.equals(null));\n+    \n+    ReverseOrdFieldSource rofs = new ReverseOrdFieldSource(\"f\");\n+    assertFalse(rofs.equals(null));\n+  }\n \n }",
+                "additions": 9,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/eb2bff05d171851cd7920723436b36554bad5b65/lucene/src/test/org/apache/lucene/search/function/TestOrdValues.java",
+                "status": "modified",
+                "changes": 9,
+                "deletions": 0,
+                "sha": "07b07f1c317c9725c82d2449b58a0a3c3c040943",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/eb2bff05d171851cd7920723436b36554bad5b65/lucene/src/test/org/apache/lucene/search/function/TestOrdValues.java",
+                "filename": "lucene/src/test/org/apache/lucene/search/function/TestOrdValues.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/lucene/src/test/org/apache/lucene/search/function/TestOrdValues.java?ref=eb2bff05d171851cd7920723436b36554bad5b65"
+            }
+        ],
+        "bug_id": "manifoldcf-integration-solr-5.x_15",
+        "parent": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/11d15941b9889a458aed091a1cc41539a2ea3ab9",
+        "message": "LUCENE-1250: fix equals() to check for null and not fail on NPE (trunk)\n\ngit-svn-id: https://svn.apache.org/repos/asf/lucene/dev/trunk@1063272 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "manifoldcf-integration-solr-5.x"
+    },
+    {
+        "commit": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/160c5c830776eb1d4fd15a873532335f3537d204",
+        "file": [
+            {
+                "patch": "@@ -263,6 +263,8 @@ protected synchronized void formatError(String type, Test test,\n   }\n \n   public LuceneJUnitResultFormatter append(String s) {\n+    if (s == null)\n+      s = \"(null)\";\n     try {\n       sb.write(s.getBytes()); // intentionally use default charset, its a console.\n     } catch (IOException e) {",
+                "additions": 2,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/160c5c830776eb1d4fd15a873532335f3537d204/lucene/src/test/org/apache/lucene/util/LuceneJUnitResultFormatter.java",
+                "status": "modified",
+                "changes": 2,
+                "deletions": 0,
+                "sha": "1f6c76d640188c2a782915cfcf58471c8f9749ef",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/160c5c830776eb1d4fd15a873532335f3537d204/lucene/src/test/org/apache/lucene/util/LuceneJUnitResultFormatter.java",
+                "filename": "lucene/src/test/org/apache/lucene/util/LuceneJUnitResultFormatter.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/lucene/src/test/org/apache/lucene/util/LuceneJUnitResultFormatter.java?ref=160c5c830776eb1d4fd15a873532335f3537d204"
+            }
+        ],
+        "bug_id": "manifoldcf-integration-solr-5.x_16",
+        "parent": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/4d02ef1a721982e8042c097c0a2882022d83b42d",
+        "message": "the string can be null, for example failed assertions getMessage(), dont throw NPE\n\ngit-svn-id: https://svn.apache.org/repos/asf/lucene/dev/trunk@1042359 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "manifoldcf-integration-solr-5.x"
+    },
+    {
+        "commit": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/6feab36380c17430a3c0d7095dd6d1a26221455c",
+        "file": [
+            {
+                "patch": "@@ -307,7 +307,7 @@ void prepareFields() {\n         String encStr = params.getFieldParam(fname,ENCAPSULATOR);\n         char fenc = encStr==null || encStr.length()==0 ? (char)-2 : encStr.charAt(0);\n         String escStr = params.getFieldParam(fname,ESCAPE);\n-        char fesc = escStr==null || encStr.length()==0 ? CSVStrategy.ESCAPE_DISABLED : escStr.charAt(0);\n+        char fesc = escStr==null || escStr.length()==0 ? CSVStrategy.ESCAPE_DISABLED : escStr.charAt(0);\n \n         CSVStrategy fstrat = new CSVStrategy(fsep,fenc,CSVStrategy.COMMENTS_DISABLED,fesc, false, false, false, false);\n         adders[i] = new CSVLoader.FieldSplitter(fstrat, adders[i]);",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/6feab36380c17430a3c0d7095dd6d1a26221455c/solr/src/java/org/apache/solr/handler/CSVRequestHandler.java",
+                "status": "modified",
+                "changes": 2,
+                "deletions": 1,
+                "sha": "b46eb41cb9fd6daf52e66fdd250b8ad933dd69cc",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/6feab36380c17430a3c0d7095dd6d1a26221455c/solr/src/java/org/apache/solr/handler/CSVRequestHandler.java",
+                "filename": "solr/src/java/org/apache/solr/handler/CSVRequestHandler.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/src/java/org/apache/solr/handler/CSVRequestHandler.java?ref=6feab36380c17430a3c0d7095dd6d1a26221455c"
+            }
+        ],
+        "bug_id": "manifoldcf-integration-solr-5.x_17",
+        "parent": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/cd69de4aa1acc5e1cc5f5c4e8b8474550c921f29",
+        "message": "SOLR-2264: CSVRequestHandler can throw NPE when no escape parameter is specified for splitting\n\ngit-svn-id: https://svn.apache.org/repos/asf/lucene/dev/trunk@1041963 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "manifoldcf-integration-solr-5.x"
+    },
+    {
+        "commit": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/a69149493c3c2c322303060fd85c11e92ed6b891",
+        "file": [
+            {
+                "patch": "@@ -19,10 +19,14 @@\n \n import org.apache.lucene.index.IndexReader;\n import org.apache.lucene.search.*;\n+import org.apache.lucene.util.BytesRef;\n import org.apache.solr.common.util.NamedList;\n import org.apache.solr.common.util.SimpleOrderedMap;\n+import org.apache.solr.schema.StrFieldSource;\n import org.apache.solr.search.function.DocValues;\n+import org.apache.solr.search.function.StringIndexDocValues;\n import org.apache.solr.search.function.ValueSource;\n+import org.apache.solr.util.SentinelIntSet;\n \n import java.io.IOException;\n import java.util.*;\n@@ -141,6 +145,9 @@ void prepare() throws IOException {\n     Collector createCollector() throws IOException {\n       maxGroupToFind = getMax(offset, numGroups, maxDoc);\n \n+      // if we aren't going to return any groups, disregard the offset \n+      if (numGroups == 0) maxGroupToFind = 0;\n+\n       if (compareSorts(sort, groupSort)) {\n         collector = new TopGroupCollector(groupBy, context, normalizeSort(sort), maxGroupToFind);\n       } else {\n@@ -151,22 +158,32 @@ Collector createCollector() throws IOException {\n \n     @Override\n     Collector createNextCollector() throws IOException {\n+      if (numGroups == 0) return null;\n+\n       int docsToCollect = getMax(groupOffset, docsPerGroup, maxDoc);\n-      if (docsToCollect < 0 || docsToCollect > maxDoc) docsToCollect = maxDoc;\n \n-      collector2 = new Phase2GroupCollector(collector, groupBy, context, groupSort, docsToCollect, needScores, offset);\n+      if (false && groupBy instanceof StrFieldSource) {\n+        collector2 = new Phase2StringGroupCollector(collector, groupBy, context, groupSort, docsToCollect, needScores, offset);\n+      } else {\n+        collector2 = new Phase2GroupCollector(collector, groupBy, context, groupSort, docsToCollect, needScores, offset);\n+      }\n       return collector2;\n     }\n \n     @Override\n     void finish() throws IOException {\n       NamedList groupResult = commonResponse();\n \n-      if (collector.orderedGroups == null) collector.buildSet();\n-\n       List groupList = new ArrayList();\n       groupResult.add(\"groups\", groupList);        // grouped={ key={ groups=[\n \n+      // handle case of rows=0\n+      if (numGroups == 0) return;\n+\n+      if (collector.orderedGroups == null) collector.buildSet();\n+\n+\n+\n       int skipCount = offset;\n       for (SearchGroup group : collector.orderedGroups) {\n         if (skipCount > 0) {\n@@ -411,7 +428,7 @@ Collector getCollector() {\n   public TopGroupCollector(ValueSource groupByVS, Map vsContext, Sort sort, int nGroups) throws IOException {\n     this.vs = groupByVS;\n     this.context = vsContext;\n-    this.nGroups = nGroups;\n+    this.nGroups = nGroups = Math.max(1,nGroups);  // we need a minimum of 1 for this collector\n \n     SortField[] sortFields = sort.getSort();\n     this.comparators = new FieldComparator[sortFields.length];\n@@ -839,3 +856,52 @@ public boolean acceptsDocsOutOfOrder() {\n   TopDocsCollector collector;\n }\n \n+\n+\n+class Phase2StringGroupCollector extends Phase2GroupCollector {\n+  FieldCache.DocTermsIndex index;\n+  SentinelIntSet ordSet;\n+  SearchGroupDocs[] groups;\n+  BytesRef spare;\n+\n+  public Phase2StringGroupCollector(TopGroupCollector topGroups, ValueSource groupByVS, Map vsContext, Sort sort, int docsPerGroup, boolean getScores, int offset) throws IOException {\n+    super(topGroups, groupByVS, vsContext,sort,docsPerGroup,getScores,offset);\n+    ordSet = new SentinelIntSet(groupMap.size(), -1);\n+    groups = new SearchGroupDocs[ordSet.keys.length];\n+  }\n+\n+  @Override\n+  public void setScorer(Scorer scorer) throws IOException {\n+    this.scorer = scorer;\n+    for (SearchGroupDocs group : groupMap.values())\n+      group.collector.setScorer(scorer);\n+  }\n+\n+  @Override\n+  public void collect(int doc) throws IOException {\n+    int slot = ordSet.find(index.getOrd(doc));\n+    if (slot >= 0) {\n+      groups[slot].collector.collect(doc);\n+    }\n+  }\n+\n+  @Override\n+  public void setNextReader(IndexReader reader, int docBase) throws IOException {\n+    super.setNextReader(reader, docBase);\n+    index = ((StringIndexDocValues)docValues).getDocTermsIndex();\n+\n+    ordSet.clear();\n+    for (SearchGroupDocs group : groupMap.values()) {\n+      int ord = index.binarySearchLookup(((MutableValueStr)group.groupValue).value, spare);\n+      if (ord > 0) {\n+        int slot = ordSet.put(ord);\n+        groups[slot] = group;\n+      }\n+    }\n+  }\n+\n+  @Override\n+  public boolean acceptsDocsOutOfOrder() {\n+    return false;\n+  }\n+}\n\\ No newline at end of file",
+                "additions": 71,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/a69149493c3c2c322303060fd85c11e92ed6b891/solr/src/java/org/apache/solr/search/Grouping.java",
+                "status": "modified",
+                "changes": 76,
+                "deletions": 5,
+                "sha": "f8dc1f5e92d17ae38714a0e01829fae2aeb6ed80",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/a69149493c3c2c322303060fd85c11e92ed6b891/solr/src/java/org/apache/solr/search/Grouping.java",
+                "filename": "solr/src/java/org/apache/solr/search/Grouping.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/src/java/org/apache/solr/search/Grouping.java?ref=a69149493c3c2c322303060fd85c11e92ed6b891"
+            },
+            {
+                "patch": "@@ -41,6 +41,10 @@ public StringIndexDocValues(ValueSource vs, IndexReader reader, String field) th\n       }\n       this.vs = vs;\n     }\n+\n+    public FieldCache.DocTermsIndex getDocTermsIndex() {\n+      return termsIndex;\n+    }\n   \n     protected abstract String toTerm(String readableValue);\n ",
+                "additions": 4,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/a69149493c3c2c322303060fd85c11e92ed6b891/solr/src/java/org/apache/solr/search/function/StringIndexDocValues.java",
+                "status": "modified",
+                "changes": 4,
+                "deletions": 0,
+                "sha": "fb22cfd3aef62d773a4e2290bab766d7751ad77e",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/a69149493c3c2c322303060fd85c11e92ed6b891/solr/src/java/org/apache/solr/search/function/StringIndexDocValues.java",
+                "filename": "solr/src/java/org/apache/solr/search/function/StringIndexDocValues.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/src/java/org/apache/solr/search/function/StringIndexDocValues.java?ref=a69149493c3c2c322303060fd85c11e92ed6b891"
+            },
+            {
+                "patch": "@@ -0,0 +1,132 @@\n+/**\r\n+ * Licensed to the Apache Software Foundation (ASF) under one or more\r\n+ * contributor license agreements.  See the NOTICE file distributed with\r\n+ * this work for additional information regarding copyright ownership.\r\n+ * The ASF licenses this file to You under the Apache License, Version 2.0\r\n+ * (the \"License\"); you may not use this file except in compliance with\r\n+ * the License.  You may obtain a copy of the License at\r\n+ *\r\n+ *     http://www.apache.org/licenses/LICENSE-2.0\r\n+ *\r\n+ * Unless required by applicable law or agreed to in writing, software\r\n+ * distributed under the License is distributed on an \"AS IS\" BASIS,\r\n+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\r\n+ * See the License for the specific language governing permissions and\r\n+ * limitations under the License.\r\n+ */\r\n+\r\n+package org.apache.solr.util;\r\n+\r\n+import java.util.Arrays;\r\n+\r\n+/** A native int set where one value is reserved to mean \"EMPTY\" */\r\n+public class SentinelIntSet {\r\n+  public int[] keys;\r\n+  public int count;\r\n+  public final int emptyVal;\r\n+  public int rehashCount;   // the count at which a rehash should be done\r\n+\r\n+  public SentinelIntSet(int size, int emptyVal) {\r\n+    this.emptyVal = emptyVal;\r\n+    int tsize = Math.max(org.apache.lucene.util.BitUtil.nextHighestPowerOfTwo(size), 1);\r\n+    rehashCount = tsize - (tsize>>2);\r\n+    if (tsize <= rehashCount) {\r\n+      tsize <<= 1;\r\n+      rehashCount = tsize - (tsize>>2);\r\n+    }\r\n+    keys = new int[tsize];\r\n+    if (emptyVal != 0)\r\n+      clear();\r\n+  }\r\n+\r\n+  public void clear() {\r\n+    Arrays.fill(keys, emptyVal);\r\n+    count = 0;\r\n+  }\r\n+\r\n+  public int hash(int key) {\r\n+    return key;\r\n+  }\r\n+\r\n+  public int size() { return count; }\r\n+\r\n+  /** returns the slot for this key */\r\n+  public int getSlot(int key) {\r\n+    assert key != emptyVal;\r\n+    int h = hash(key);\r\n+    int s = h & (keys.length-1);\r\n+    if (keys[s] == key || keys[s]== emptyVal) return s;\r\n+\r\n+    int increment = (h>>7)|1;\r\n+    do {\r\n+      s = (s + increment) & (keys.length-1);\r\n+    } while (keys[s] != key && keys[s] != emptyVal);\r\n+    return s;\r\n+  }\r\n+\r\n+  /** returns the slot for this key, or -slot-1 if not found */\r\n+  public int find(int key) {\r\n+    assert key != emptyVal;\r\n+    int h = hash(key);\r\n+    int s = h & (keys.length-1);\r\n+    if (keys[s] == key) return s;\r\n+    if (keys[s] == emptyVal) return -s-1;\r\n+\r\n+    int increment = (h>>7)|1;\r\n+    for(;;) {\r\n+      s = (s + increment) & (keys.length-1);\r\n+      if (keys[s] == key) return s;\r\n+      if (keys[s] == emptyVal) return -s-1;\r\n+    }\r\n+  }\r\n+\r\n+\r\n+  public boolean exists(int key) {\r\n+    return find(key) >= 0;\r\n+  }\r\n+\r\n+\r\n+  public int put(int key) {\r\n+    int s = find(key);\r\n+    if (s < 0) {\r\n+      if (count >= rehashCount) {\r\n+        rehash();\r\n+        s = getSlot(key);\r\n+      } else {\r\n+        s = -s-1;\r\n+      }\r\n+      count++;\r\n+      keys[s] = key;\r\n+      putKey(key, s);\r\n+    } else {\r\n+      overwriteKey(key, s);\r\n+    }\r\n+    return s;\r\n+  }\r\n+\r\n+\r\n+  protected void putKey(int key, int slot) {}\r\n+  protected void overwriteKey(int key, int slot) {}\r\n+\r\n+  protected void startRehash(int newSize) {}\r\n+  protected void moveKey(int key, int oldSlot, int newSlot) {}\r\n+  protected void endRehash() {}\r\n+\r\n+  public void rehash() {\r\n+    int newSize = keys.length << 1;\r\n+    startRehash(newSize);\r\n+    int[] oldKeys = keys;\r\n+    keys = new int[newSize];\r\n+    for (int i=0; i<oldKeys.length; i++) {\r\n+      int key = oldKeys[i];\r\n+      if (key == emptyVal) continue;\r\n+      int newSlot = getSlot(key);\r\n+      keys[newSlot] = key;\r\n+      moveKey(key, i, newSlot);\r\n+    }\r\n+    endRehash();\r\n+    rehashCount = newSize - (newSize>>2);\r\n+\r\n+  }\r\n+\r\n+}\r",
+                "additions": 132,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/a69149493c3c2c322303060fd85c11e92ed6b891/solr/src/java/org/apache/solr/util/SentinelIntSet.java",
+                "status": "added",
+                "changes": 132,
+                "deletions": 0,
+                "sha": "28ed7eba81fb0060dded42d34a4feb068143632c",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/a69149493c3c2c322303060fd85c11e92ed6b891/solr/src/java/org/apache/solr/util/SentinelIntSet.java",
+                "filename": "solr/src/java/org/apache/solr/util/SentinelIntSet.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/solr/src/java/org/apache/solr/util/SentinelIntSet.java?ref=a69149493c3c2c322303060fd85c11e92ed6b891"
+            }
+        ],
+        "bug_id": "manifoldcf-integration-solr-5.x_18",
+        "parent": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/3c825e2e800a36f0082e69136793b6eb3cd9714f",
+        "message": "SOLR-236: grouping - fix NPE if rows=0, add prototype string grouping speedup\n\ngit-svn-id: https://svn.apache.org/repos/asf/lucene/dev/trunk@1035074 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "manifoldcf-integration-solr-5.x"
+    },
+    {
+        "commit": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/48fe173ff5a7480b361e0f674c8202103d35b497",
+        "file": [
+            {
+                "patch": "@@ -474,6 +474,9 @@ New features\n   to wrap any other Analyzer and provide the same functionality as\n   MaxFieldLength provided on IndexWriter.  This patch also fixes a bug\n   in the offset calculation in CharTokenizer. (Uwe Schindler, Shai Erera)\n+\n+* LUCENE-2526: Don't throw NPE from MultiPhraseQuery.toString when\n+  it's empty.  (Ross Woolf via Mike McCandless)\n   \n Optimizations\n ",
+                "additions": 3,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/48fe173ff5a7480b361e0f674c8202103d35b497/lucene/CHANGES.txt",
+                "status": "modified",
+                "changes": 3,
+                "deletions": 0,
+                "sha": "4279fffb43acfa1eae5cbb7738938c053b715daf",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/48fe173ff5a7480b361e0f674c8202103d35b497/lucene/CHANGES.txt",
+                "filename": "lucene/CHANGES.txt",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/lucene/CHANGES.txt?ref=48fe173ff5a7480b361e0f674c8202103d35b497"
+            },
+            {
+                "patch": "@@ -336,7 +336,7 @@ public Weight createWeight(Searcher searcher) throws IOException {\n   @Override\n   public final String toString(String f) {\n     StringBuilder buffer = new StringBuilder();\n-    if (!field.equals(f)) {\n+    if (field == null || !field.equals(f)) {\n       buffer.append(field);\n       buffer.append(\":\");\n     }",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/48fe173ff5a7480b361e0f674c8202103d35b497/lucene/src/java/org/apache/lucene/search/MultiPhraseQuery.java",
+                "status": "modified",
+                "changes": 2,
+                "deletions": 1,
+                "sha": "330089c805299b4312fb0bc1f0a680f03456bd9a",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/48fe173ff5a7480b361e0f674c8202103d35b497/lucene/src/java/org/apache/lucene/search/MultiPhraseQuery.java",
+                "filename": "lucene/src/java/org/apache/lucene/search/MultiPhraseQuery.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/lucene/src/java/org/apache/lucene/search/MultiPhraseQuery.java?ref=48fe173ff5a7480b361e0f674c8202103d35b497"
+            },
+            {
+                "patch": "@@ -263,4 +263,9 @@ private void add(String s, String type, IndexWriter writer) throws IOException {\n     writer.addDocument(doc);\n   }\n \n+  // LUCENE-2526\n+  public void testEmptyToString() {\n+    new MultiPhraseQuery().toString();\n+  }\n+\n }",
+                "additions": 5,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/48fe173ff5a7480b361e0f674c8202103d35b497/lucene/src/test/org/apache/lucene/search/TestMultiPhraseQuery.java",
+                "status": "modified",
+                "changes": 5,
+                "deletions": 0,
+                "sha": "c10d4fee86b921b049d18720b188070273b397d2",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/48fe173ff5a7480b361e0f674c8202103d35b497/lucene/src/test/org/apache/lucene/search/TestMultiPhraseQuery.java",
+                "filename": "lucene/src/test/org/apache/lucene/search/TestMultiPhraseQuery.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/lucene/src/test/org/apache/lucene/search/TestMultiPhraseQuery.java?ref=48fe173ff5a7480b361e0f674c8202103d35b497"
+            }
+        ],
+        "bug_id": "manifoldcf-integration-solr-5.x_19",
+        "parent": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/fd40ad7b7c037ce558f6dda0e3b640530696be95",
+        "message": "LUCENE-2526: don't throw NPE from MultiPhraseQuery.toString if it has no terms\n\ngit-svn-id: https://svn.apache.org/repos/asf/lucene/dev/trunk@960367 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "manifoldcf-integration-solr-5.x"
+    },
+    {
+        "commit": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/f4f7f62ddb734fab29e19bc3acec782d97045adc",
+        "file": [
+            {
+                "patch": "@@ -481,6 +481,10 @@ Bug fixes\n   files when a mergedSegmentWarmer is set on IndexWriter.  (Mike\n   McCandless)\n \n+* LUCENE-2496: Don't throw NPE if IndexWriter is opened with CREATE on\n+  a prior (corrupt) index missing its segments_N file.  (Mike\n+  McCandless)\n+\n New features\n \n * LUCENE-2128: Parallelized fetching document frequencies during weight",
+                "additions": 4,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/f4f7f62ddb734fab29e19bc3acec782d97045adc/lucene/CHANGES.txt",
+                "status": "modified",
+                "changes": 4,
+                "deletions": 0,
+                "sha": "cf623a3abaeb100ea6290f87605025ba027efc86",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/f4f7f62ddb734fab29e19bc3acec782d97045adc/lucene/CHANGES.txt",
+                "filename": "lucene/CHANGES.txt",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/lucene/CHANGES.txt?ref=f4f7f62ddb734fab29e19bc3acec782d97045adc"
+            },
+            {
+                "patch": "@@ -134,8 +134,10 @@ public IndexFileDeleter(Directory directory, IndexDeletionPolicy policy, Segment\n     this.docWriter = docWriter;\n     this.infoStream = infoStream;\n \n+    final String currentSegmentsFile = segmentInfos.getCurrentSegmentFileName();\n+\n     if (infoStream != null)\n-      message(\"init: current segments file is \\\"\" + segmentInfos.getCurrentSegmentFileName() + \"\\\"; deletionPolicy=\" + policy);\n+      message(\"init: current segments file is \\\"\" + currentSegmentsFile + \"\\\"; deletionPolicy=\" + policy);\n \n     this.policy = policy;\n     this.directory = directory;\n@@ -146,7 +148,6 @@ public IndexFileDeleter(Directory directory, IndexDeletionPolicy policy, Segment\n     indexFilenameFilter = new IndexFileNameFilter(codecs);\n     \n     CommitPoint currentCommitPoint = null;\n-    boolean seenIndexFiles = false;\n     String[] files = null;\n     try {\n       files = directory.listAll();\n@@ -158,7 +159,6 @@ public IndexFileDeleter(Directory directory, IndexDeletionPolicy policy, Segment\n     for (String fileName : files) {\n \n       if ((indexFilenameFilter.accept(null, fileName)) && !fileName.endsWith(\"write.lock\") && !fileName.equals(IndexFileNames.SEGMENTS_GEN)) {\n-        seenIndexFiles = true;\n         \n         // Add this file to refCounts with initial count 0:\n         getRefCount(fileName);\n@@ -201,10 +201,7 @@ public IndexFileDeleter(Directory directory, IndexDeletionPolicy policy, Segment\n       }\n     }\n \n-    // If we haven't seen any Lucene files, then currentCommitPoint is expected\n-    // to be null, because it means it's a fresh Directory. Therefore it cannot\n-    // be any NFS cache issues - so just ignore.\n-    if (currentCommitPoint == null && seenIndexFiles) {\n+    if (currentCommitPoint == null && currentSegmentsFile != null) {\n       // We did not in fact see the segments_N file\n       // corresponding to the segmentInfos that was passed\n       // in.  Yet, it must exist, because our caller holds\n@@ -214,7 +211,7 @@ public IndexFileDeleter(Directory directory, IndexDeletionPolicy policy, Segment\n       // try now to explicitly open this commit point:\n       SegmentInfos sis = new SegmentInfos();\n       try {\n-        sis.read(directory, segmentInfos.getCurrentSegmentFileName(), codecs);\n+        sis.read(directory, currentSegmentsFile, codecs);\n       } catch (IOException e) {\n         throw new CorruptIndexException(\"failed to locate current segments_N file\");\n       }\n@@ -244,7 +241,7 @@ public IndexFileDeleter(Directory directory, IndexDeletionPolicy policy, Segment\n \n     // Finally, give policy a chance to remove things on\n     // startup:\n-    if (seenIndexFiles) {\n+    if (currentSegmentsFile != null) {\n       policy.onInit(commits);\n     }\n ",
+                "additions": 6,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/f4f7f62ddb734fab29e19bc3acec782d97045adc/lucene/src/java/org/apache/lucene/index/IndexFileDeleter.java",
+                "status": "modified",
+                "changes": 15,
+                "deletions": 9,
+                "sha": "5b5c9d2f800e4feda57adebe7f9da42623c62d10",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/f4f7f62ddb734fab29e19bc3acec782d97045adc/lucene/src/java/org/apache/lucene/index/IndexFileDeleter.java",
+                "filename": "lucene/src/java/org/apache/lucene/index/IndexFileDeleter.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/lucene/src/java/org/apache/lucene/index/IndexFileDeleter.java?ref=f4f7f62ddb734fab29e19bc3acec782d97045adc"
+            },
+            {
+                "patch": "@@ -4954,5 +4954,32 @@ public void testEmptyDirRollback() throws Exception {\n     writer.close();\n     assertEquals(\"expected a no-op close after IW.rollback()\", 0, dir.listAll().length);\n   }\n-  \n+\n+  public void testNoSegmentFile() throws IOException {\n+    File tempDir = _TestUtil.getTempDir(\"noSegmentFile\");\n+    try {\n+      Directory dir = FSDirectory.open(tempDir);\n+      dir.setLockFactory(new NoLockFactory());\n+      IndexWriter w = new IndexWriter(dir, new IndexWriterConfig(\n+                                                                 TEST_VERSION_CURRENT, new MockAnalyzer())\n+                                      .setMaxBufferedDocs(2));\n+\n+      Document doc = new Document();\n+      doc.add(new Field(\"c\", \"val\", Store.YES, Index.ANALYZED, TermVector.WITH_POSITIONS_OFFSETS));\n+      w.addDocument(doc);\n+      w.addDocument(doc);\n+      String[] files = dir.listAll();\n+      for(String file : files) {\n+        System.out.println(\"file=\" + file);\n+      }\n+      IndexWriter w2 = new IndexWriter(dir, new IndexWriterConfig(\n+                                                                  TEST_VERSION_CURRENT, new MockAnalyzer())\n+                                       .setMaxBufferedDocs(2).setOpenMode(OpenMode.CREATE));\n+\n+      w2.close();\n+      dir.close();\n+    } finally {\n+      _TestUtil.rmDir(tempDir);\n+    }\n+  }\n }",
+                "additions": 28,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/f4f7f62ddb734fab29e19bc3acec782d97045adc/lucene/src/test/org/apache/lucene/index/TestIndexWriter.java",
+                "status": "modified",
+                "changes": 29,
+                "deletions": 1,
+                "sha": "a3d12032b1f433f3f10ebc579635054b378bd1a2",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/f4f7f62ddb734fab29e19bc3acec782d97045adc/lucene/src/test/org/apache/lucene/index/TestIndexWriter.java",
+                "filename": "lucene/src/test/org/apache/lucene/index/TestIndexWriter.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/lucene/src/test/org/apache/lucene/index/TestIndexWriter.java?ref=f4f7f62ddb734fab29e19bc3acec782d97045adc"
+            }
+        ],
+        "bug_id": "manifoldcf-integration-solr-5.x_20",
+        "parent": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/e0df325f4da162f8e8272c3b4ecfe18af5fc4430",
+        "message": "LUCENE-2496: don't throw NPE on trying to CREATE over a corrupt index\n\ngit-svn-id: https://svn.apache.org/repos/asf/lucene/dev/trunk@953628 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "manifoldcf-integration-solr-5.x"
+    },
+    {
+        "commit": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/9181c066588a174c13a29476e6c6e95a1801c83e",
+        "file": [
+            {
+                "patch": "@@ -406,6 +406,9 @@ Bug fixes\n   lock (previously we only released on IOException).  (Tamas Cservenak\n   via Mike McCandless)\n \n+* LUCENE-2478: Fix CachingWrapperFilter to not throw NPE when\n+  Filter.getDocIdSet() returns null.  (Uwe Schindler, Daniel Noll)\n+\n New features\n \n * LUCENE-2128: Parallelized fetching document frequencies during weight",
+                "additions": 3,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/9181c066588a174c13a29476e6c6e95a1801c83e/lucene/CHANGES.txt",
+                "status": "modified",
+                "changes": 3,
+                "deletions": 0,
+                "sha": "df46c4a8fddd4e3c10f028070c7a682d1e9c93f4",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/9181c066588a174c13a29476e6c6e95a1801c83e/lucene/CHANGES.txt",
+                "filename": "lucene/CHANGES.txt",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/lucene/CHANGES.txt?ref=9181c066588a174c13a29476e6c6e95a1801c83e"
+            },
+            {
+                "patch": "@@ -53,7 +53,10 @@ public CachingWrapperFilter(Filter filter) {\n    *  an {@link OpenBitSetDISI}.\n    */\n   protected DocIdSet docIdSetToCache(DocIdSet docIdSet, IndexReader reader) throws IOException {\n-    if (docIdSet.isCacheable()) {\n+    if (docIdSet == null) {\n+      // this is better than returning null, as the nonnull result can be cached\n+      return DocIdSet.EMPTY_DOCIDSET;\n+    } else if (docIdSet.isCacheable()) {\n       return docIdSet;\n     } else {\n       final DocIdSetIterator it = docIdSet.iterator();",
+                "additions": 4,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/9181c066588a174c13a29476e6c6e95a1801c83e/lucene/src/java/org/apache/lucene/search/CachingWrapperFilter.java",
+                "status": "modified",
+                "changes": 5,
+                "deletions": 1,
+                "sha": "5e277e1b6ccacea9aaa37b06bd277c0c8641bb1d",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/9181c066588a174c13a29476e6c6e95a1801c83e/lucene/src/java/org/apache/lucene/search/CachingWrapperFilter.java",
+                "filename": "lucene/src/java/org/apache/lucene/search/CachingWrapperFilter.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/lucene/src/java/org/apache/lucene/search/CachingWrapperFilter.java?ref=9181c066588a174c13a29476e6c6e95a1801c83e"
+            },
+            {
+                "patch": "@@ -57,6 +57,55 @@ public void testCachingWorks() throws Exception {\n     reader.close();\n   }\n   \n+  public void testNullDocIdSet() throws Exception {\n+    Directory dir = new RAMDirectory();\n+    IndexWriter writer = new IndexWriter(dir, new IndexWriterConfig(\n+        TEST_VERSION_CURRENT, new MockAnalyzer()));\n+    writer.close();\n+\n+    IndexReader reader = IndexReader.open(dir, true);\n+\n+    final Filter filter = new Filter() {\n+      @Override\n+      public DocIdSet getDocIdSet(IndexReader reader) {\n+        return null;\n+      }\n+    };\n+    CachingWrapperFilter cacher = new CachingWrapperFilter(filter);\n+\n+    // the caching filter should return the empty set constant\n+    assertSame(DocIdSet.EMPTY_DOCIDSET, cacher.getDocIdSet(reader));\n+    \n+    reader.close();\n+  }\n+  \n+  public void testNullDocIdSetIterator() throws Exception {\n+    Directory dir = new RAMDirectory();\n+    IndexWriter writer = new IndexWriter(dir, new IndexWriterConfig(\n+        TEST_VERSION_CURRENT, new MockAnalyzer()));\n+    writer.close();\n+\n+    IndexReader reader = IndexReader.open(dir, true);\n+\n+    final Filter filter = new Filter() {\n+      @Override\n+      public DocIdSet getDocIdSet(IndexReader reader) {\n+        return new DocIdSet() {\n+          @Override\n+          public DocIdSetIterator iterator() {\n+            return null;\n+          }\n+        };\n+      }\n+    };\n+    CachingWrapperFilter cacher = new CachingWrapperFilter(filter);\n+\n+    // the caching filter should return the empty set constant\n+    assertSame(DocIdSet.EMPTY_DOCIDSET, cacher.getDocIdSet(reader));\n+    \n+    reader.close();\n+  }\n+  \n   private static void assertDocIdSetCacheable(IndexReader reader, Filter filter, boolean shouldCacheable) throws IOException {\n     final CachingWrapperFilter cacher = new CachingWrapperFilter(filter);\n     final DocIdSet originalSet = filter.getDocIdSet(reader);",
+                "additions": 49,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/9181c066588a174c13a29476e6c6e95a1801c83e/lucene/src/test/org/apache/lucene/search/TestCachingWrapperFilter.java",
+                "status": "modified",
+                "changes": 49,
+                "deletions": 0,
+                "sha": "96738e0ca7a6cc4f58e913fd78810814e340d85b",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/9181c066588a174c13a29476e6c6e95a1801c83e/lucene/src/test/org/apache/lucene/search/TestCachingWrapperFilter.java",
+                "filename": "lucene/src/test/org/apache/lucene/search/TestCachingWrapperFilter.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/lucene/src/test/org/apache/lucene/search/TestCachingWrapperFilter.java?ref=9181c066588a174c13a29476e6c6e95a1801c83e"
+            }
+        ],
+        "bug_id": "manifoldcf-integration-solr-5.x_21",
+        "parent": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/728f7c24c17f2801e41d2681e63eba15811aaa0f",
+        "message": "LUCENE-2478: Fix CachingWrapperFilter to not throw NPE when Filter.getDocIdSet() returns null\n\ngit-svn-id: https://svn.apache.org/repos/asf/lucene/dev/trunk@948429 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "manifoldcf-integration-solr-5.x"
+    },
+    {
+        "commit": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/522f3358635775f6fcf6879ca592907918927194",
+        "file": [
+            {
+                "patch": "@@ -75,7 +75,8 @@ public AutomatonQuery(Term term, Automaton automaton) {\n     MinimizationOperations.minimize(automaton);\n   }\n \n-  private void compileAutomaton() {\n+  private synchronized void compileAutomaton() {\n+    // this method must be synchronized, as setting the three transient fields is not atomic:\n     if (runAutomaton == null) {\n       runAutomaton = new ByteRunAutomaton(automaton);\n       isFinite = SpecialOperations.isFinite(automaton);",
+                "additions": 2,
+                "raw_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/raw/522f3358635775f6fcf6879ca592907918927194/lucene/src/java/org/apache/lucene/search/AutomatonQuery.java",
+                "status": "modified",
+                "changes": 3,
+                "deletions": 1,
+                "sha": "0d2d5ee2b20d3401594fccaf8bfaeb7b7ee4ab71",
+                "blob_url": "https://github.com/apache/manifoldcf-integration-solr-5.x/blob/522f3358635775f6fcf6879ca592907918927194/lucene/src/java/org/apache/lucene/search/AutomatonQuery.java",
+                "filename": "lucene/src/java/org/apache/lucene/search/AutomatonQuery.java",
+                "contents_url": "https://api.github.com/repos/apache/manifoldcf-integration-solr-5.x/contents/lucene/src/java/org/apache/lucene/search/AutomatonQuery.java?ref=522f3358635775f6fcf6879ca592907918927194"
+            }
+        ],
+        "bug_id": "manifoldcf-integration-solr-5.x_22",
+        "parent": "https://github.com/apache/manifoldcf-integration-solr-5.x/commit/ad32d6bf799c48b1ac88eda9491d364d7a603c64",
+        "message": "Make compileAutomaton synchronized, as it can break for queries that are shared constants (like a drop down list in a web interface that provides predefined query constraints. These types of queries are in most places somewhere predefined in your code and then used by different threads/servlets/whatever). As the three transient vars cannot be set atomically, a parallel running thread may see half of the fields assigned and will get NPE).\n\ngit-svn-id: https://svn.apache.org/repos/asf/lucene/dev/trunk@987118 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "manifoldcf-integration-solr-5.x"
+    }
+]

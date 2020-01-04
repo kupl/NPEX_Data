@@ -12,12 +12,22 @@ from multiprocessing import Pool
 ROOT_DIR = os.getcwd()
 APACHE_URL = "https://github.com/apache"
 
-## global repository dictonary
-repo_dict = {}
+def get_compile_command():
+    if os.path.isfile('pom.xml'):
+        return 'mvn clean install -DskipTests'
+    elif os.path.isfile('maven.xml'):
+        return 'maven clean install -DskipTests'
+    else:
+        return None
 
-## log files
-starttime = time.strftime("%m%d_%I%M", time.localtime())
-logfile = open("logs/%s.log" % starttime, 'w')
+## find unittests for NPE class
+def find_file_path(filenames):
+    # TODO: how to select NPE file?
+    file_paths = []
+    for file_name in filenames:
+        file_paths.extend(glob.glob("**/%s" % file_name, recursive=True))
+        
+    return file_paths
 
 def has_outdated_urls():
     urls = ['nexus.codehaus.org', 'vm094.oxylos.org']
@@ -35,176 +45,132 @@ def get_test_command(testClass, project):
     else:
         return None
 
+class clone_and_compile:
 
-def get_compile_command():
-    if os.path.isfile('pom.xml'):
-        return 'mvn clean install -DskipTests'
-    elif os.path.isfile('maven.xml'):
-        return 'maven clean install -DskipTests'
-    else:
-        return None 
+    def __init__(self, repos):
+        ## global repository dictonary
+        self.repo_dict = {}
+        for repo in repos:
+            with open("data/%s_test.json" % repo, 'r') as repo_data_file:
+                repo_json = json.loads(repo_data_file.read())
+            
+            if len(repo_json.keys()) is 0:
+                continue
+            
+            repo_info = {}
+            repo_info['n_commits'] = len(repo_json.keys())
+            repo_info['commits'] = repo_json
+            self.repo_dict[repo] = repo_info
 
-## Load repo data into a repo_dict
-def load_repository_data(repos): 
-    for repo in repos:
-        repo_data_file = open("data/%s.json" % repo, 'r')
-        repo_json = json.loads(repo_data_file.read())
-        repo_data_file.close()
+        ## log files
+        starttime = time.strftime("%m%d_%I%M", time.localtime())
+        self.logfile = open("logs/%s.log" % starttime, 'w')
+    
+    def unittest(self, commit, testFilename, non_testing_files):
+        #TODO: we only consider a single class to test.
+        ret = {}
+        ret['buggy_class'] = None 
         
-        if len(repo_json.keys()) is 0:
-          continue
+        #a) Is fixed code correct w.r.t. test-cases?
+            #TODO: we do not consider package.class, but class only.
+        testFile = testFilename.split('/')[-1]
+        testClass = testFile.split('.')[0]
+
+        test_cmd = get_test_command(testClass, testFilename.split('/')[1])
+        if test_cmd is None:
+            self.logfile.writelines(" - not maven project\n")
+            ret['fixed'] = False
+            ret['buggy'] = False
+            ret['buggy_class'] = None
+            return ret
         
-        repo_info = {}
-        repo_info['n_commits'] = len(repo_json.keys())
-        repo_info['commits'] = repo_json
-        repo_dict[repo] = repo_info
 
-
-## find unittests for NPE class
-def find_test_classes(commit):
-    # TODO: how to select NPE file?
-    test_files = []
-    for file_data in commit['file']:
-        filename = file_data['filename']
-        classname = filename.split('/')[-1].split('.')[0]
-
-        test_patterns = \
-            [   '%sTest.java' % classname, '%sTests.java' % classname, \
-                '%stest.java' % classname, '%stests.java' % classname, \
-                'Test%s.java' % classname, 'Tests%s.java' % classname, \
-                'test%s.java' % classname, 'tests%s.java' % classname ]
-
-        for tp in test_patterns:
-            #glob_patterns = [ '**/%s' % tp for tp in test_patterns ]
-            found = glob.glob('**/%s' % tp, recursive=True)
-            test_files.extend(found)
+        self.logfile.writelines(" - test command: %s\n" % test_cmd)
         
-    return test_files
+        test_ret = EasyProcess(test_cmd).call(timeout=300)
+        ret['fixed'] = True if test_ret.return_code is 0 else False
 
+        #b) Is buggy code incorrect w.r.t. test-cases?
+        parent_commit = commit['parent'].split('/')[-1]
 
-## make a directory for repo. and iterate commits until succeed count reaches limit
-def do_repo(repo, limit=500, dir=ROOT_DIR):
-    os.chdir(dir) 
-    repo_path = os.path.abspath("benchmarks/%s" % repo)
-    os.makedirs(repo_path, exist_ok=True)
+        checkout_cmd = 'git checkout %s -- %s' % (parent_commit, ' '.join(non_testing_files))
+        self.logfile.writelines(" - git checkout command for buggy version: %s\n" % checkout_cmd)
+        checkout_ret = EasyProcess(checkout_cmd).call()
 
-    commits = repo_dict[repo]['commits']
-    for bug_id in commits:
+        test_ret = EasyProcess(test_cmd).call(timeout=300)
+        ret['buggy'] = True if test_ret.return_code is 0 else False
+
+        #TODO: parse error message of test_ret.stderr / .stdout
+        ret['buggy_class'] = testFile.split('.')[0] 
+        
+        return ret 
+
+    def do_commit(self, commit):
+        repo = commit['repo']
+        os.chdir(ROOT_DIR)
+        repo_path = os.path.abspath("benchmarks/%s" % repo)
+        os.makedirs(repo_path, exist_ok=True)
         os.chdir(repo_path)
 
-        if (do_commit(commits[bug_id], repo_path) == False):
-            os.chdir(repo_path)
-            commit_id = commits[bug_id]['commit'].split('/')[-1][:6]
-            os.system('rm -rf %s' % commit_id)
-        logfile.flush()
+        print("doing %s ..." % commit['bug_id'])
+        repo_url = "%s/%s" % (APACHE_URL, repo)
 
+        patchedfiles = commit['patched_files']
+        unittests = commit['unit_tests']
+        
+        commit_url = commit['commit']
+        # 6-digit commit hash, which is used as the name of a directory
+        commit_id = commit['commit'].split('/')[-1][:6]
 
-def unittest(commit, testFile):
-    #TODO: we only consider a single class to test.
-    ret = {}
-    ret['buggy_class'] = None 
-    
-    #a) Is fixed code correct w.r.t. test-cases?
-        #TODO: we do not consider package.class, but class only.
-    testClass = testFile.split('.')[0]
-    testFilename = (EasyProcess('find . -name %s' % testFile).call()).stdout.split('\n')[0]
-    # Testcase exists for latest version, but not for this version.
-    if testFilename is '':
-        logfile.writelines(" - no testfile found for %s\n" % testFile)
-        ret['fixed'] = False
-        ret['buggy'] = False
-        ret['buggy_class'] = None
-        return ret
-    
-    test_cmd = get_test_command(testClass, testFilename.split('/')[1])
-    if test_cmd is None:
-        logfile.writelines(" - not maven project\n")
-        ret['fixed'] = False
-        ret['buggy'] = False
-        ret['buggy_class'] = None
-        return ret
-    
-    non_testing_names = [changed_file['filename'] for changed_file in commit['file'] \
-        if changed_file['filename'].split('/')[-1] != testFile ]
+        ## 1. clone repo and checkout commit
+        git_clone_command = "git clone %s %s" % (repo_url, commit_id)
+        git_checkout_command = "git checkout -f %s" % commit_id
+        
+        ret_clone = EasyProcess(git_clone_command).call()
+        os.makedirs(commit_id, exist_ok=True)
+        os.chdir(commit_id)
+        ret_checkout = EasyProcess(git_checkout_command).call()
 
-    logfile.writelines(" - test command: %s\n" % test_cmd)
-    
-    test_ret = EasyProcess(test_cmd).call(timeout=300)
-    ret['fixed'] = True if test_ret.return_code is 0 else False
+        # Do not log in the repository. Some repos require no additional files in the repo.
+        if os.path.isfile('commands.log'):
+            os.system('rm commands.log')
 
-    #b) Is buggy code incorrect w.r.t. test-cases?
-    parent_commit = commit['parent'].split('/')[-1]
-   
-    non_testing_names = [changed_file['filename'] for changed_file in commit['file'] \
-        if changed_file['filename'].split('/')[-1] != testFile ]
-    checkout_cmd = 'git checkout %s -- %s' % (parent_commit, ' '.join(non_testing_names))
-    logfile.writelines(" - git checkout command for buggy version: %s\n" % checkout_cmd)
-    checkout_ret = EasyProcess(checkout_cmd).call()
-   
-    test_ret = EasyProcess(test_cmd).call(timeout=300)
-    ret['buggy'] = True if test_ret.return_code is 0 else False
-  
-    #TODO: parse error message of test_ret.stderr / .stdout
-    ret['buggy_class'] = testFile.split('.')[0] 
-    
-    return ret 
+        ## 2. build repo if unit-test exists
+        compile_cmd = get_compile_command()
+        non_testing_files = find_file_path(patchedfiles)
+        test_files = find_file_path(unittest)
+        if compile_cmd is None:
+            self.logfile.writelines("# %s IS NOT MAVEN PROJECT\n" % commit['bug_id'])
+            return False
+        elif not test_files:
+            self.logfile.writelines("# %s HAS NO TESTCASE \n" % commit['bug_id'])
+            return False
+        elif not non_testing_files:
+            self.logfile.writelines("# %s HAS NO PATCHED FILE\n" % commit['bug_id'])
+            return False
+        elif has_outdated_urls():
+            self.logfile.writelines("# %s HAS OUTDATED URLS \n" % commit['bug_id'])
+            return False
+        ##### HEURISTIC: test only if testfile is commited #####
+        changed_files = set(changed_file['filename'].split('/')[-1] for changed_file in commit['file'])
+        if len(changed_files - set(unittests)) == len(changed_files): 
+            self.logfile.writelines("# %s HAS NO TESTCASE COMMITED \n" % commit['bug_id'])
+            return False
 
-def do_commit(commit, dir):
-    print("doing %s ..." % commit['bug_id'])
-    repo = commit['repo']
-    repo_url = "%s/%s" % (APACHE_URL, repo)
+        ret_compile = EasyProcess(compile_cmd).call(timeout=300)
 
-    unittests = commit['unit_tests']
-    
-    commit_url = commit['commit']
-    # 6-digit commit hash, which is used as the name of a directory
-    commit_id = commit['commit'].split('/')[-1][:6]
+        ## 3. Testing
+        status = ""
+        for test in test_files:
+            ret = self.unittest(commit, test, non_testing_files)
+            status = "Bug: %s, Compiled: %d, Fixed: %s, Buggy: %s, BuggyClass: %s\n" \
+            % (commit['bug_id'], ret_compile.return_code, ret['fixed'], ret['buggy'], ret['buggy_class'])
 
-    ## 1. clone repo and checkout commit
-    git_clone_command = "git clone %s %s" % (repo_url, commit_id)
-    git_checkout_command = "git checkout -f %s" % commit_id
-    
-    ret_clone = EasyProcess(git_clone_command).call()
-    os.makedirs(commit_id, exist_ok=True)
-    os.chdir(commit_id)
-    ret_checkout = EasyProcess(git_checkout_command).call()
-  
-    # Do not log in the repository. Some repos require no additional files in the repo.
-    if os.path.isfile('commands.log'):
-        os.system('rm commands.log')
-
-    ## 2. build repo if unit-test exists
-    compile_cmd = get_compile_command()
-    if compile_cmd is None:
-        logfile.writelines("# %s IS NOT MAVEN PROJECT\n" % commit['bug_id'])
+            if (ret['fixed'] & (not ret['buggy'])):
+                self.logfile.writelines(status)
+                return True
+        self.logfile.writelines(status) 
         return False
-    elif not find_test_classes(commit):
-        logfile.writelines("# %s HAS NO TESTCASE \n" % commit['bug_id'])
-        return False
-    elif has_outdated_urls(): 
-        logfile.writelines("# %s HAS OUTDATED URLS \n" % commit['bug_id'])
-        return False
-    ##### HEURISTIC: test only if testfile is commited #####
-    changed_files = set(changed_file['filename'].split('/')[-1] for changed_file in commit['file'])
-    if len(changed_files - set(unittests)) == len(changed_files): 
-        logfile.writelines("# %s HAS NO TESTCASE COMMITED \n" % commit['bug_id'])
-        return False
-
-    ret_compile = EasyProcess(compile_cmd).call(timeout=300)
-
-    ## 3. Testing
-    status = ""
-    for test in unittests:
-        ret = unittest(commit, test)
-        status = "Bug: %s, Compiled: %d, Fixed: %s, Buggy: %s, BuggyClass: %s\n" \
-          % (commit['bug_id'], ret_compile.return_code, ret['fixed'], ret['buggy'], ret['buggy_class'])
-
-        if (ret['fixed'] & (not ret['buggy'])):
-            logfile.writelines(status)
-            return True
-    logfile.writelines(status) 
-    return False
-
 
 
 ## main function
@@ -221,16 +187,14 @@ if __name__ == '__main__':
 
     repos = []
     if repo is None:
-        repo_file = open("repo_with_pom.txt", 'r')
-        repos = [repo.split('\n')[0] for repo in repo_file.readlines()]
-        repo_file.close()
+        with open("repo_with_pom.txt", 'r') as repo_file:
+            repos = [repo.split('\n')[0] for repo in repo_file.readlines()]
     else:
         repos = [repo]
-    load_repository_data(repos)
+    cnc = clone_and_compile(repos)
 
     p = Pool(16)
-    args = [[k] for k in sorted(repo_dict, key=lambda k: repo_dict[k]['n_commits'], reverse=True)]
-    p.starmap(do_repo, args)
-
-
-
+    commits = []
+    for repo in repos:
+        commits += cnc.repo_dict[repo]['commits'].values()
+    p.starmap(cnc.do_commit, commits)
