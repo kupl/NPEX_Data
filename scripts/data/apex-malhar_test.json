@@ -1,0 +1,255 @@
+{
+    "apex-malhar_208ad9d": {
+        "bug_id": "apex-malhar_208ad9d",
+        "commit": "https://github.com/apache/apex-malhar/commit/208ad9d933f8395177099fec473dc57e9ba32b26",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/apex-malhar/blob/208ad9d933f8395177099fec473dc57e9ba32b26/library/src/main/java/com/datatorrent/lib/io/block/AbstractBlockReader.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/apex-malhar/contents/library/src/main/java/com/datatorrent/lib/io/block/AbstractBlockReader.java?ref=208ad9d933f8395177099fec473dc57e9ba32b26",
+                "deletions": 1,
+                "filename": "library/src/main/java/com/datatorrent/lib/io/block/AbstractBlockReader.java",
+                "patch": "@@ -226,7 +226,7 @@ public void endWindow()\n   protected void processBlockMetadata(B block) throws IOException\n   {\n     long blockStartTime = System.currentTimeMillis();\n-    if (block.getPreviousBlockId() == -1 || block.getPreviousBlockId() != lastProcessedBlock.getBlockId()) {\n+    if (block.getPreviousBlockId() == -1 || lastProcessedBlock == null || block.getPreviousBlockId() != lastProcessedBlock.getBlockId()) {\n       teardownStream(lastProcessedBlock);\n       consecutiveBlock = false;\n       lastBlockOpenTime = System.currentTimeMillis();",
+                "raw_url": "https://github.com/apache/apex-malhar/raw/208ad9d933f8395177099fec473dc57e9ba32b26/library/src/main/java/com/datatorrent/lib/io/block/AbstractBlockReader.java",
+                "sha": "14b8b19b08b413668910db7f8de3e1aeb7f5b289",
+                "status": "modified"
+            }
+        ],
+        "message": "fixed the NPE in BlockReader which happens after recovery",
+        "parent": "https://github.com/apache/apex-malhar/commit/10519bb6890862e639fd0c124e599660b92a1bc6",
+        "patched_files": [
+            "AbstractBlockReader.java"
+        ],
+        "repo": "apex-malhar",
+        "unit_tests": [
+            "AbstractBlockReaderTest.java"
+        ]
+    },
+    "apex-malhar_289dad7": {
+        "bug_id": "apex-malhar_289dad7",
+        "commit": "https://github.com/apache/apex-malhar/commit/289dad7426ade1779733cead614d52946154211f",
+        "file": [
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/apex-malhar/blob/289dad7426ade1779733cead614d52946154211f/library/src/main/java/com/datatorrent/lib/io/fs/AbstractFileSplitter.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/apex-malhar/contents/library/src/main/java/com/datatorrent/lib/io/fs/AbstractFileSplitter.java?ref=289dad7426ade1779733cead614d52946154211f",
+                "deletions": 3,
+                "filename": "library/src/main/java/com/datatorrent/lib/io/fs/AbstractFileSplitter.java",
+                "patch": "@@ -285,7 +285,7 @@ public int getBlocksThreshold()\n     private long pos;\n     private int blockNumber;\n \n-    private final transient AbstractFileSplitter splitter;\n+    private final AbstractFileSplitter splitter;\n \n     protected BlockMetadataIterator()\n     {\n@@ -319,8 +319,8 @@ public boolean hasNext()\n       }\n       boolean isLast = length >= fileMetadata.getFileLength();\n       long lengthOfFileInBlock = isLast ? fileMetadata.getFileLength() : length;\n-      BlockMetadata.FileBlockMetadata fileBlock = splitter\n-          .buildBlockMetadata(pos, lengthOfFileInBlock, blockNumber, fileMetadata, isLast);\n+      BlockMetadata.FileBlockMetadata fileBlock = splitter.buildBlockMetadata(pos, lengthOfFileInBlock, blockNumber,\n+          fileMetadata, isLast);\n       pos = lengthOfFileInBlock;\n       return fileBlock;\n     }",
+                "raw_url": "https://github.com/apache/apex-malhar/raw/289dad7426ade1779733cead614d52946154211f/library/src/main/java/com/datatorrent/lib/io/fs/AbstractFileSplitter.java",
+                "sha": "cd47d480b54bce43380e0622134afd8db6aaefd4",
+                "status": "modified"
+            },
+            {
+                "additions": 44,
+                "blob_url": "https://github.com/apache/apex-malhar/blob/289dad7426ade1779733cead614d52946154211f/library/src/test/java/com/datatorrent/lib/io/fs/FileSplitterInputTest.java",
+                "changes": 44,
+                "contents_url": "https://api.github.com/repos/apache/apex-malhar/contents/library/src/test/java/com/datatorrent/lib/io/fs/FileSplitterInputTest.java?ref=289dad7426ade1779733cead614d52946154211f",
+                "deletions": 0,
+                "filename": "library/src/test/java/com/datatorrent/lib/io/fs/FileSplitterInputTest.java",
+                "patch": "@@ -51,6 +51,7 @@\n import com.datatorrent.lib.io.IdempotentStorageManager;\n import com.datatorrent.lib.io.block.BlockMetadata;\n import com.datatorrent.lib.testbench.CollectorTestSink;\n+import com.datatorrent.lib.util.KryoCloneUtils;\n import com.datatorrent.lib.util.TestUtils;\n \n /**\n@@ -455,6 +456,49 @@ public void testSingleFile() throws InterruptedException, IOException\n         testMeta.fileMetadataSink.collectedTuples.get(0).getFilePath());\n   }\n \n+  @Test\n+  public void testRecoveryOfBlockMetadataIterator() throws InterruptedException\n+  {\n+    IdempotentStorageManager.FSIdempotentStorageManager fsIdempotentStorageManager =\n+        new IdempotentStorageManager.FSIdempotentStorageManager();\n+\n+    testMeta.fileSplitterInput.setIdempotentStorageManager(fsIdempotentStorageManager);\n+    testMeta.fileSplitterInput.setBlockSize(2L);\n+    testMeta.fileSplitterInput.setBlocksThreshold(2);\n+    testMeta.fileSplitterInput.getScanner().setScanIntervalMillis(500);\n+\n+\n+    testMeta.fileSplitterInput.setup(testMeta.context);\n+\n+    testMeta.fileSplitterInput.beginWindow(1);\n+\n+    ((MockScanner)testMeta.fileSplitterInput.getScanner()).semaphore.acquire();\n+    testMeta.fileSplitterInput.emitTuples();\n+    testMeta.fileSplitterInput.endWindow();\n+\n+    //file0.txt has just 5 blocks. Since blocks threshold is 2, only 2 are emitted.\n+    Assert.assertEquals(\"Files\", 1, testMeta.fileMetadataSink.collectedTuples.size());\n+    Assert.assertEquals(\"Blocks\", 2, testMeta.blockMetadataSink.collectedTuples.size());\n+\n+    testMeta.fileMetadataSink.clear();\n+    testMeta.blockMetadataSink.clear();\n+\n+    //At this point the operator was check-pointed and then there was a failure.\n+    testMeta.fileSplitterInput.teardown();\n+\n+    //The operator was restored from persisted state and re-deployed.\n+    testMeta.fileSplitterInput = KryoCloneUtils.cloneObject(testMeta.fileSplitterInput);\n+    TestUtils.setSink(testMeta.fileSplitterInput.blocksMetadataOutput, testMeta.blockMetadataSink);\n+    TestUtils.setSink(testMeta.fileSplitterInput.filesMetadataOutput, testMeta.fileMetadataSink);\n+\n+    testMeta.fileSplitterInput.setup(testMeta.context);\n+    testMeta.fileSplitterInput.beginWindow(1);\n+\n+    Assert.assertEquals(\"Recovered Files\", 1, testMeta.fileMetadataSink.collectedTuples.size());\n+    Assert.assertEquals(\"Recovered Blocks\", 2, testMeta.blockMetadataSink.collectedTuples.size());\n+  }\n+\n+\n   private static class MockScanner extends FileSplitterInput.TimeBasedDirectoryScanner\n   {\n     transient Semaphore semaphore;",
+                "raw_url": "https://github.com/apache/apex-malhar/raw/289dad7426ade1779733cead614d52946154211f/library/src/test/java/com/datatorrent/lib/io/fs/FileSplitterInputTest.java",
+                "sha": "cd0de2de87a11850dec3f6237eb9f113bbe24c06",
+                "status": "modified"
+            }
+        ],
+        "message": "APEXMALHAR-2003 NPE in blockMetaDataIterator after recovery",
+        "parent": "https://github.com/apache/apex-malhar/commit/d23e283453a37e8f2385f6ca9bf46683ecf926e6",
+        "patched_files": [
+            "FileSplitterInput.java",
+            "AbstractFileSplitter.java"
+        ],
+        "repo": "apex-malhar",
+        "unit_tests": [
+            "FileSplitterInputTest.java"
+        ]
+    },
+    "apex-malhar_712027a": {
+        "bug_id": "apex-malhar_712027a",
+        "commit": "https://github.com/apache/apex-malhar/commit/712027aec6388cb2af7709c63c6c59fa82a94307",
+        "file": [
+            {
+                "additions": 20,
+                "blob_url": "https://github.com/apache/apex-malhar/blob/712027aec6388cb2af7709c63c6c59fa82a94307/contrib/src/main/java/com/datatorrent/contrib/enrich/AbstractEnricher.java",
+                "changes": 27,
+                "contents_url": "https://api.github.com/repos/apache/apex-malhar/contents/contrib/src/main/java/com/datatorrent/contrib/enrich/AbstractEnricher.java?ref=712027aec6388cb2af7709c63c6c59fa82a94307",
+                "deletions": 7,
+                "filename": "contrib/src/main/java/com/datatorrent/contrib/enrich/AbstractEnricher.java",
+                "patch": "@@ -25,11 +25,13 @@\n import org.apache.hadoop.classification.InterfaceStability;\n \n import com.esotericsoftware.kryo.NotNull;\n+\n import com.datatorrent.api.Context;\n import com.datatorrent.api.Operator;\n import com.datatorrent.common.util.BaseOperator;\n import com.datatorrent.lib.db.cache.CacheManager;\n import com.datatorrent.lib.db.cache.CacheStore;\n+import com.datatorrent.lib.db.cache.CacheStore.ExpiryType;\n import com.datatorrent.lib.util.FieldInfo;\n import com.datatorrent.lib.util.FieldInfo.SupportType;\n \n@@ -66,8 +68,9 @@\n   /**\n    * Optional parameters for enricher.\n    */\n-  private int cacheExpirationInterval = 1 * 60 * 60 * 1000;  // 1 hour\n-  private int cacheCleanupInterval = 1 * 60 * 60 * 1000; // 1 hour\n+  private long cacheExpirationInterval = 1 * 60 * 60 * 1000;  // 1 hour\n+  private long cacheCleanupInterval = 1 * 60 * 60 * 1000; // 1 hour\n+  private ExpiryType expiryType = ExpiryType.EXPIRE_AFTER_WRITE;\n   private int cacheSize = 1024; // 1024 records\n \n   /**\n@@ -160,7 +163,7 @@ public void setup(Context.OperatorContext context)\n     // set expiration to one day.\n     primaryCache.setEntryExpiryDurationInMillis(cacheExpirationInterval);\n     primaryCache.setCacheCleanupInMillis(cacheCleanupInterval);\n-    primaryCache.setEntryExpiryStrategy(CacheStore.ExpiryType.EXPIRE_AFTER_WRITE);\n+    primaryCache.setEntryExpiryStrategy(expiryType);\n     primaryCache.setMaxCacheSize(cacheSize);\n \n     cacheManager.setPrimary(primaryCache);\n@@ -268,7 +271,7 @@ public void setStore(BackendLoader store)\n    *\n    * @return Cache entry expiration interval in ms\n    */\n-  public int getCacheExpirationInterval()\n+  public long getCacheExpirationInterval()\n   {\n     return cacheExpirationInterval;\n   }\n@@ -279,7 +282,7 @@ public int getCacheExpirationInterval()\n    *\n    * @param cacheExpirationInterval Cache entry expiration interval in ms\n    */\n-  public void setCacheExpirationInterval(int cacheExpirationInterval)\n+  public void setCacheExpirationInterval(long cacheExpirationInterval)\n   {\n     this.cacheExpirationInterval = cacheExpirationInterval;\n   }\n@@ -290,7 +293,7 @@ public void setCacheExpirationInterval(int cacheExpirationInterval)\n    *\n    * @return cache cleanup interval in ms.\n    */\n-  public int getCacheCleanupInterval()\n+  public long getCacheCleanupInterval()\n   {\n     return cacheCleanupInterval;\n   }\n@@ -301,7 +304,7 @@ public int getCacheCleanupInterval()\n    *\n    * @param cacheCleanupInterval cache cleanup interval in ms.\n    */\n-  public void setCacheCleanupInterval(int cacheCleanupInterval)\n+  public void setCacheCleanupInterval(long cacheCleanupInterval)\n   {\n     this.cacheCleanupInterval = cacheCleanupInterval;\n   }\n@@ -326,6 +329,16 @@ public void setCacheSize(int cacheSize)\n     this.cacheSize = cacheSize;\n   }\n \n+  public ExpiryType getExpiryType()\n+  {\n+    return expiryType;\n+  }\n+\n+  public void setExpiryType(ExpiryType expiryType)\n+  {\n+    this.expiryType = expiryType;\n+  }\n+\n   public CacheManager getCacheManager()\n   {\n     return cacheManager;",
+                "raw_url": "https://github.com/apache/apex-malhar/raw/712027aec6388cb2af7709c63c6c59fa82a94307/contrib/src/main/java/com/datatorrent/contrib/enrich/AbstractEnricher.java",
+                "sha": "c377b96260726d1a6d29859ee56afd30422d82e2",
+                "status": "modified"
+            },
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/apex-malhar/blob/712027aec6388cb2af7709c63c6c59fa82a94307/library/src/main/java/com/datatorrent/lib/db/cache/CacheStore.java",
+                "changes": 8,
+                "contents_url": "https://api.github.com/repos/apache/apex-malhar/contents/library/src/main/java/com/datatorrent/lib/db/cache/CacheStore.java?ref=712027aec6388cb2af7709c63c6c59fa82a94307",
+                "deletions": 4,
+                "filename": "library/src/main/java/com/datatorrent/lib/db/cache/CacheStore.java",
+                "patch": "@@ -58,10 +58,10 @@\n   protected long maxCacheSize = 2000;\n \n   @Min(0)\n-  protected int entryExpiryDurationInMillis = 60000; //1 minute\n+  protected long entryExpiryDurationInMillis = 60000; //1 minute\n \n   @Min(0)\n-  protected int cacheCleanupIntervalInMillis = 60500; //.5 seconds after entries are expired\n+  protected long cacheCleanupIntervalInMillis = 60500; //.5 seconds after entries are expired\n \n   @NotNull\n   protected ExpiryType entryExpiryStrategy = ExpiryType.EXPIRE_AFTER_ACCESS;\n@@ -190,7 +190,7 @@ public void setEntryExpiryStrategy(ExpiryType expiryType)\n    *\n    * @param durationInMillis the duration after which a cache entry is expired.\n    */\n-  public void setEntryExpiryDurationInMillis(int durationInMillis)\n+  public void setEntryExpiryDurationInMillis(long durationInMillis)\n   {\n     this.entryExpiryDurationInMillis = durationInMillis;\n   }\n@@ -200,7 +200,7 @@ public void setEntryExpiryDurationInMillis(int durationInMillis)\n    *\n    * @param durationInMillis the duration after which cache is cleaned up regularly.\n    */\n-  public void setCacheCleanupInMillis(int durationInMillis)\n+  public void setCacheCleanupInMillis(long durationInMillis)\n   {\n     this.cacheCleanupIntervalInMillis = durationInMillis;\n   }",
+                "raw_url": "https://github.com/apache/apex-malhar/raw/712027aec6388cb2af7709c63c6c59fa82a94307/library/src/main/java/com/datatorrent/lib/db/cache/CacheStore.java",
+                "sha": "c073affc4a1fd2b82bcd174e1fb6b57aa6ade1d8",
+                "status": "modified"
+            }
+        ],
+        "message": "APEXMALHAR-2535: change type of timeout variables from int to long\nFix NPE during teardown, when refreshtime is not set\nAllow setting expiration type",
+        "parent": "https://github.com/apache/apex-malhar/commit/d3f7faf58bff06a3c670241542476d1d4a07386f",
+        "patched_files": [
+            "CacheStore.java"
+        ],
+        "repo": "apex-malhar",
+        "unit_tests": [
+            "CacheStoreTest.java"
+        ]
+    },
+    "apex-malhar_7b019fa": {
+        "bug_id": "apex-malhar_7b019fa",
+        "commit": "https://github.com/apache/apex-malhar/commit/7b019fa1ba2cac60565c5ee0d9ebdcf396cd93b6",
+        "file": [
+            {
+                "additions": 27,
+                "blob_url": "https://github.com/apache/apex-malhar/blob/7b019fa1ba2cac60565c5ee0d9ebdcf396cd93b6/library/src/main/java/org/apache/apex/malhar/lib/state/managed/AbstractManagedStateImpl.java",
+                "changes": 42,
+                "contents_url": "https://api.github.com/repos/apache/apex-malhar/contents/library/src/main/java/org/apache/apex/malhar/lib/state/managed/AbstractManagedStateImpl.java?ref=7b019fa1ba2cac60565c5ee0d9ebdcf396cd93b6",
+                "deletions": 15,
+                "filename": "library/src/main/java/org/apache/apex/malhar/lib/state/managed/AbstractManagedStateImpl.java",
+                "patch": "@@ -144,7 +144,7 @@\n   protected transient ExecutorService readerService;\n \n   @NotNull\n-  protected IncrementalCheckpointManager checkpointManager = new IncrementalCheckpointManager();\n+  private IncrementalCheckpointManager checkpointManager = new IncrementalCheckpointManager();\n \n   @NotNull\n   protected BucketsFileSystem bucketsFileSystem = new BucketsFileSystem();\n@@ -203,22 +203,24 @@ public void setup(OperatorContext context)\n       //delete all the wal files with windows > activationWindow.\n       //All the wal files with windows <= activationWindow are loaded and kept separately as recovered data.\n       try {\n-        for (long recoveredWindow : checkpointManager.getWindowIds(operatorContext.getId())) {\n-          if (recoveredWindow <= activationWindow) {\n-            @SuppressWarnings(\"unchecked\")\n-            Map<Long, Map<Slice, Bucket.BucketedValue>> recoveredData = (Map<Long, Map<Slice, Bucket.BucketedValue>>)\n-                checkpointManager.load(operatorContext.getId(), recoveredWindow);\n-            if (recoveredData != null && !recoveredData.isEmpty()) {\n-              for (Map.Entry<Long, Map<Slice, Bucket.BucketedValue>> entry : recoveredData.entrySet()) {\n-                int bucketIdx = prepareBucket(entry.getKey());\n-                buckets[bucketIdx].recoveredData(recoveredWindow, entry.getValue());\n+        long[] recoveredWindows = checkpointManager.getWindowIds(operatorContext.getId());\n+        if (recoveredWindows != null) {\n+          for (long recoveredWindow : recoveredWindows) {\n+            if (recoveredWindow <= activationWindow) {\n+              @SuppressWarnings(\"unchecked\")\n+              Map<Long, Map<Slice, Bucket.BucketedValue>> recoveredData = (Map<Long, Map<Slice, Bucket.BucketedValue>>)\n+                  checkpointManager.load(operatorContext.getId(), recoveredWindow);\n+              if (recoveredData != null && !recoveredData.isEmpty()) {\n+                for (Map.Entry<Long, Map<Slice, Bucket.BucketedValue>> entry : recoveredData.entrySet()) {\n+                  int bucketIdx = prepareBucket(entry.getKey());\n+                  buckets[bucketIdx].recoveredData(recoveredWindow, entry.getValue());\n+                }\n               }\n+              checkpointManager.save(recoveredData, operatorContext.getId(), recoveredWindow,\n+                  true /*skipWritingToWindowFile*/);\n+            } else {\n+              checkpointManager.delete(operatorContext.getId(), recoveredWindow);\n             }\n-            checkpointManager.save(recoveredData, operatorContext.getId(), recoveredWindow,\n-                true /*skipWritingToWindowFile*/);\n-\n-          } else {\n-            checkpointManager.delete(operatorContext.getId(), recoveredWindow);\n           }\n         }\n       } catch (IOException e) {\n@@ -536,6 +538,16 @@ public void setDurationPreventingFreeingSpace(Duration durationPreventingFreeing\n     this.durationPreventingFreeingSpace = durationPreventingFreeingSpace;\n   }\n \n+  public IncrementalCheckpointManager getCheckpointManager()\n+  {\n+    return checkpointManager;\n+  }\n+\n+  public void setCheckpointManager(@NotNull IncrementalCheckpointManager checkpointManager)\n+  {\n+    this.checkpointManager = Preconditions.checkNotNull(checkpointManager);\n+  }\n+\n   static class ValueFetchTask implements Callable<Slice>\n   {\n     private final Bucket bucket;",
+                "raw_url": "https://github.com/apache/apex-malhar/raw/7b019fa1ba2cac60565c5ee0d9ebdcf396cd93b6/library/src/main/java/org/apache/apex/malhar/lib/state/managed/AbstractManagedStateImpl.java",
+                "sha": "b5b9f8ccc017b335563d34463791e3fb304b5214",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/apex-malhar/blob/7b019fa1ba2cac60565c5ee0d9ebdcf396cd93b6/library/src/main/java/org/apache/apex/malhar/lib/state/managed/StateTracker.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/apex-malhar/contents/library/src/main/java/org/apache/apex/malhar/lib/state/managed/StateTracker.java?ref=7b019fa1ba2cac60565c5ee0d9ebdcf396cd93b6",
+                "deletions": 1,
+                "filename": "library/src/main/java/org/apache/apex/malhar/lib/state/managed/StateTracker.java",
+                "patch": "@@ -122,7 +122,7 @@ public void run()\n             synchronized (bucket) {\n               long sizeFreed;\n               try {\n-                sizeFreed = bucket.freeMemory(managedStateImpl.checkpointManager.getLastTransferredWindow());\n+                sizeFreed = bucket.freeMemory(managedStateImpl.getCheckpointManager().getLastTransferredWindow());\n                 LOG.debug(\"bucket freed {} {}\", bucketId, sizeFreed);\n               } catch (IOException e) {\n                 managedStateImpl.throwable.set(e);",
+                "raw_url": "https://github.com/apache/apex-malhar/raw/7b019fa1ba2cac60565c5ee0d9ebdcf396cd93b6/library/src/main/java/org/apache/apex/malhar/lib/state/managed/StateTracker.java",
+                "sha": "56781074a925e76bccf871a4f0ec0e6ebec9092a",
+                "status": "modified"
+            }
+        ],
+        "message": "Merge branch 'APEXMALHAR-2136-NPE-RecoverWindows'",
+        "parent": "https://github.com/apache/apex-malhar/commit/0a87bc0a526e7355bc2764c83f6c9ed092b6f228",
+        "patched_files": [
+            "StateTracker.java"
+        ],
+        "repo": "apex-malhar",
+        "unit_tests": [
+            "StateTrackerTest.java"
+        ]
+    },
+    "apex-malhar_c4f788d": {
+        "bug_id": "apex-malhar_c4f788d",
+        "commit": "https://github.com/apache/apex-malhar/commit/c4f788d5a140bcc14bf9782f4021c0af4712f075",
+        "file": [
+            {
+                "additions": 12,
+                "blob_url": "https://github.com/apache/apex-malhar/blob/c4f788d5a140bcc14bf9782f4021c0af4712f075/library/src/main/java/com/datatorrent/lib/io/fs/FileSplitterInput.java",
+                "changes": 12,
+                "contents_url": "https://api.github.com/repos/apache/apex-malhar/contents/library/src/main/java/com/datatorrent/lib/io/fs/FileSplitterInput.java?ref=c4f788d5a140bcc14bf9782f4021c0af4712f075",
+                "deletions": 0,
+                "filename": "library/src/main/java/com/datatorrent/lib/io/fs/FileSplitterInput.java",
+                "patch": "@@ -393,6 +393,18 @@ private boolean isIterationCompleted()\n       if (lastScannedInfo == null) { // first iteration started\n         return true;\n       }\n+\n+      LOG.debug(\"Directory path: {} Sub-Directory or File path: {}\", lastScannedInfo.getDirectoryPath(), lastScannedInfo.getFilePath());\n+\n+      /*\n+       * As referenceTimes is now concurrentHashMap, it throws exception if key passed is null.\n+       * So in case where the last scanned directory is null which likely possible when\n+       * only file name is specified instead of directory path.\n+       */\n+      if (lastScannedInfo.getDirectoryPath() == null) {\n+        return true;\n+      }\n+\n       Map<String, Long> referenceTime = referenceTimes.get(lastScannedInfo.getDirectoryPath());\n       if (referenceTime != null) {\n         return referenceTime.get(lastScannedInfo.getFilePath()) != null;",
+                "raw_url": "https://github.com/apache/apex-malhar/raw/c4f788d5a140bcc14bf9782f4021c0af4712f075/library/src/main/java/com/datatorrent/lib/io/fs/FileSplitterInput.java",
+                "sha": "985c6678f7072e197c59d6611475ab8b00a31e65",
+                "status": "modified"
+            }
+        ],
+        "message": "APEXMALHAR-2312 Fix NullPointerException for FileSplitterInput Operator if filepath is specified.\n\nProblem Description:\n-------------------\n1) TimeBasedDirectoryScanner threads part of scanservice tries to scan the directories/files.\n2) Each thread checks with help of isIterationCompleted() [referenceTimes] method whether scanned of last iteration are processed by operator thread.\n3) Previously it used to work because HashMap (referenceTimes) used to return null even if last scanned directory path is null.\n4) Recently referenceTimes is changed to ConcurrentHashMap, so get() doesn't allow null key's passed to ConcurrentHashMap get() method.\n5) Hence NullPointerException is seen as if only file path is provided directory path would be empty hence key would be empty.\n\nSolution:\n---------\nPre-check that directory path is null then we have completed last iterations if only filepath is provided.",
+        "parent": "https://github.com/apache/apex-malhar/commit/ea1b58f72e69ce0e1bfd35eb8b4b6756b1a5e0a0",
+        "patched_files": [
+            "FileSplitterInput.java"
+        ],
+        "repo": "apex-malhar",
+        "unit_tests": [
+            "FileSplitterInputTest.java"
+        ]
+    },
+    "apex-malhar_de430a9": {
+        "bug_id": "apex-malhar_de430a9",
+        "commit": "https://github.com/apache/apex-malhar/commit/de430a95f614696a0c00746d6a721f4b3b9b34eb",
+        "file": [
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/apex-malhar/blob/de430a95f614696a0c00746d6a721f4b3b9b34eb/library/src/main/java/com/datatorrent/lib/appdata/datastructs/DimensionalTable.java",
+                "changes": 5,
+                "contents_url": "https://api.github.com/repos/apache/apex-malhar/contents/library/src/main/java/com/datatorrent/lib/appdata/datastructs/DimensionalTable.java?ref=de430a95f614696a0c00746d6a721f4b3b9b34eb",
+                "deletions": 1,
+                "filename": "library/src/main/java/com/datatorrent/lib/appdata/datastructs/DimensionalTable.java",
+                "patch": "@@ -318,8 +318,11 @@ public DATA getDataPoint(Map<String, ?> keys)\n           columnIndex < tempKeys.size();\n           columnIndex++) {\n         Object key = tempKeys.get(columnIndex);\n+        Object keyColumn = keyColumns.get(columnIndex).get(rowIndex);\n \n-        if(!keyColumns.get(columnIndex).get(rowIndex).equals(key)) {\n+        if((key == null && keyColumn != null) ||\n+           (key != null && keyColumn == null) ||\n+           (key != null && keyColumn != null && !keyColumn.equals(key))) {\n           allEqual = false;\n           break;\n         }",
+                "raw_url": "https://github.com/apache/apex-malhar/raw/de430a95f614696a0c00746d6a721f4b3b9b34eb/library/src/main/java/com/datatorrent/lib/appdata/datastructs/DimensionalTable.java",
+                "sha": "75e206f5b0c23d36382f8374f61ec9742af6581f",
+                "status": "modified"
+            }
+        ],
+        "message": "Merge pull request #1480 from ilooner/MLHR-1763\n\nFix NPE",
+        "parent": "https://github.com/apache/apex-malhar/commit/16922f245414e4fb709a14312dee17f8aa93a7a6",
+        "patched_files": [
+            "DimensionalTable.java"
+        ],
+        "repo": "apex-malhar",
+        "unit_tests": [
+            "DimensionalTableTest.java"
+        ]
+    },
+    "apex-malhar_ebfffd6": {
+        "bug_id": "apex-malhar_ebfffd6",
+        "commit": "https://github.com/apache/apex-malhar/commit/ebfffd6f03e665aff3a56ae46328019b7387411e",
+        "file": [
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/apex-malhar/blob/ebfffd6f03e665aff3a56ae46328019b7387411e/library/src/main/java/com/malhartech/lib/testbench/SeedEventGenerator.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/apex-malhar/contents/library/src/main/java/com/malhartech/lib/testbench/SeedEventGenerator.java?ref=ebfffd6f03e665aff3a56ae46328019b7387411e",
+                "deletions": 2,
+                "filename": "library/src/main/java/com/malhartech/lib/testbench/SeedEventGenerator.java",
+                "patch": "@@ -113,16 +113,18 @@ public void emitTuples()\n    */\n   public void emitTuple(int i)\n   {\n-    HashMap<String, String> stuple = null;\n-    HashMap<String, ArrayList<OneKeyValPair>> atuple = null;\n+    HashMap<String, String> stuple;\n+    HashMap<String, ArrayList<OneKeyValPair>> atuple;\n     String key = Integer.toString(i);\n \n     if (keys == null) {\n       if (string_data.isConnected()) {\n+        stuple = new HashMap<String, String>(1);\n         stuple.put(key, null);\n         string_data.emit(stuple);\n       }\n       if (keyvalpair_list.isConnected()) {\n+        atuple = new HashMap<String, ArrayList<OneKeyValPair>>(1);\n         atuple.put(key, null);\n         keyvalpair_list.emit(atuple);\n       }",
+                "raw_url": "https://github.com/apache/apex-malhar/raw/ebfffd6f03e665aff3a56ae46328019b7387411e/library/src/main/java/com/malhartech/lib/testbench/SeedEventGenerator.java",
+                "sha": "6212e7dd01b19293dceefe12d4eed1a467c083e8",
+                "status": "modified"
+            }
+        ],
+        "message": "Fixed an NPE",
+        "parent": "https://github.com/apache/apex-malhar/commit/5d7b399473f77cd52cd898f3ad9bd338ff5aa94c",
+        "patched_files": [
+            "SeedEventGenerator.java"
+        ],
+        "repo": "apex-malhar",
+        "unit_tests": [
+            "SeedEventGeneratorTest.java"
+        ]
+    },
+    "apex-malhar_ed25960": {
+        "bug_id": "apex-malhar_ed25960",
+        "commit": "https://github.com/apache/apex-malhar/commit/ed25960e142872827da06f2756bcf6d2adae3a4d",
+        "file": [
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/apex-malhar/blob/ed25960e142872827da06f2756bcf6d2adae3a4d/library/src/main/java/com/datatorrent/lib/appdata/datastructs/DimensionalTable.java",
+                "changes": 5,
+                "contents_url": "https://api.github.com/repos/apache/apex-malhar/contents/library/src/main/java/com/datatorrent/lib/appdata/datastructs/DimensionalTable.java?ref=ed25960e142872827da06f2756bcf6d2adae3a4d",
+                "deletions": 1,
+                "filename": "library/src/main/java/com/datatorrent/lib/appdata/datastructs/DimensionalTable.java",
+                "patch": "@@ -318,8 +318,11 @@ public DATA getDataPoint(Map<String, ?> keys)\n           columnIndex < tempKeys.size();\n           columnIndex++) {\n         Object key = tempKeys.get(columnIndex);\n+        Object keyColumn = keyColumns.get(columnIndex).get(rowIndex);\n \n-        if(!keyColumns.get(columnIndex).get(rowIndex).equals(key)) {\n+        if((key == null && keyColumn != null) ||\n+           (key != null && keyColumn == null) ||\n+           (key != null && keyColumn != null && !keyColumn.equals(key))) {\n           allEqual = false;\n           break;\n         }",
+                "raw_url": "https://github.com/apache/apex-malhar/raw/ed25960e142872827da06f2756bcf6d2adae3a4d/library/src/main/java/com/datatorrent/lib/appdata/datastructs/DimensionalTable.java",
+                "sha": "75e206f5b0c23d36382f8374f61ec9742af6581f",
+                "status": "modified"
+            }
+        ],
+        "message": "Fix NPE",
+        "parent": "https://github.com/apache/apex-malhar/commit/212a8af39175099d8ee4035121e9ca9b95cf3d52",
+        "patched_files": [
+            "DimensionalTable.java"
+        ],
+        "repo": "apex-malhar",
+        "unit_tests": [
+            "DimensionalTableTest.java"
+        ]
+    }
+}

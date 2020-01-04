@@ -1,0 +1,149 @@
+{
+    "sling-org-apache-sling-installer-core_38bf8de": {
+        "bug_id": "sling-org-apache-sling-installer-core_38bf8de",
+        "commit": "https://github.com/apache/sling-org-apache-sling-installer-core/commit/38bf8de798ad1992d19c803c4fcc98942da19c32",
+        "file": [
+            {
+                "additions": 70,
+                "blob_url": "https://github.com/apache/sling-org-apache-sling-installer-core/blob/38bf8de798ad1992d19c803c4fcc98942da19c32/src/main/java/org/apache/sling/installer/core/impl/OsgiInstallerImpl.java",
+                "changes": 80,
+                "contents_url": "https://api.github.com/repos/apache/sling-org-apache-sling-installer-core/contents/src/main/java/org/apache/sling/installer/core/impl/OsgiInstallerImpl.java?ref=38bf8de798ad1992d19c803c4fcc98942da19c32",
+                "deletions": 10,
+                "filename": "src/main/java/org/apache/sling/installer/core/impl/OsgiInstallerImpl.java",
+                "patch": "@@ -232,6 +232,8 @@ public void run() {\n                 this.logger.debug(\"Starting new installer cycle\");\n                 this.listener.start();\n \n+                processUpdateInfos();\n+\n                 // merge potential new resources\n                 this.mergeNewlyRegisteredResources();\n \n@@ -821,6 +823,16 @@ public void scheduleRetry() {\n         this.wakeUp();\n     }\n \n+    private static final class UpdateInfo {\n+        public ResourceData data;\n+        public Dictionary<String, Object> dict;\n+        public String resourceType;\n+        public String entityId;\n+        public Map<String, Object> attributes;\n+    }\n+\n+    private final List<UpdateInfo> updateInfos = new ArrayList<OsgiInstallerImpl.UpdateInfo>();\n+\n     /**\n      * @see org.apache.sling.installer.api.ResourceChangeListener#resourceAddedOrUpdated(java.lang.String, java.lang.String, java.io.InputStream, java.util.Dictionary, Map)\n      */\n@@ -829,9 +841,54 @@ public void resourceAddedOrUpdated(final String resourceType,\n             final InputStream is,\n             final Dictionary<String, Object> dict,\n             final Map<String, Object> attributes) {\n+        try {\n+            final UpdateInfo ui = new UpdateInfo();\n+            ui.data = ResourceData.create(is, dict);\n+            ui.resourceType = resourceType;\n+            ui.dict = dict;\n+            ui.entityId = entityId;\n+            ui.attributes = attributes;\n+\n+            synchronized ( this.resourcesLock ) {\n+                updateInfos.add(ui);\n+                this.wakeUp();\n+            }\n+        } catch (final IOException ioe) {\n+            logger.error(\"Unable to handle resource add or update of \" + resourceType + ':' + entityId, ioe);\n+        } finally {\n+            // always close the input stream!\n+            if ( is != null ) {\n+                try {\n+                    is.close();\n+                } catch (final IOException ignore) {\n+                    // ignore\n+                }\n+            }\n+        }\n+    }\n+\n+\n+    private void processUpdateInfos() {\n+        final List<UpdateInfo> infos = new ArrayList<OsgiInstallerImpl.UpdateInfo>();\n+        synchronized ( this.resourcesLock ) {\n+            infos.addAll(this.updateInfos);\n+            this.updateInfos.clear();\n+        }\n+        for(final UpdateInfo info : infos) {\n+            if ( info.data != null ) {\n+                this.internalResourceAddedOrUpdated(info.resourceType, info.entityId, info.data, info.dict, info.attributes);\n+            } else {\n+                this.internalResourceRemoved(info.resourceType, info.entityId);\n+            }\n+        }\n+    }\n+    private void internalResourceAddedOrUpdated(final String resourceType,\n+            final String entityId,\n+            final ResourceData data,\n+            final Dictionary<String, Object> dict,\n+            final Map<String, Object> attributes) {\n         final String key = resourceType + ':' + entityId;\n         try {\n-            final ResourceData data = ResourceData.create(is, dict);\n             synchronized ( this.resourcesLock ) {\n                 final EntityResourceList erl = this.persistentList.getEntityResourceList(key);\n                 logger.debug(\"Added or updated {} : {}\", key, erl);\n@@ -969,22 +1026,25 @@ public void resourceAddedOrUpdated(final String resourceType,\n             }\n         } catch (final IOException ioe) {\n             logger.error(\"Unable to handle resource add or update of \" + key, ioe);\n-        } finally {\n-            // always close the input stream!\n-            if ( is != null ) {\n-                try {\n-                    is.close();\n-                } catch (final IOException ignore) {\n-                    // ignore\n-                }\n-            }\n         }\n     }\n \n     /**\n      * @see org.apache.sling.installer.api.ResourceChangeListener#resourceRemoved(java.lang.String, java.lang.String)\n      */\n     public void resourceRemoved(final String resourceType, String resourceId) {\n+        final UpdateInfo ui = new UpdateInfo();\n+        ui.resourceType = resourceType;\n+        ui.entityId = resourceId;\n+\n+        synchronized ( this.resourcesLock ) {\n+            updateInfos.add(ui);\n+            this.wakeUp();\n+        }\n+    }\n+\n+    private void internalResourceRemoved(final String resourceType, String resourceId) {\n+\n         String key = resourceType + ':' + resourceId;\n         synchronized ( this.resourcesLock ) {\n             final EntityResourceList erl = this.persistentList.getEntityResourceList(key);",
+                "raw_url": "https://github.com/apache/sling-org-apache-sling-installer-core/raw/38bf8de798ad1992d19c803c4fcc98942da19c32/src/main/java/org/apache/sling/installer/core/impl/OsgiInstallerImpl.java",
+                "sha": "5d6d7990f7db9323c033f7bb53522240c6c3dfb5",
+                "status": "modified"
+            }
+        ],
+        "message": "SLING-3522 : NPE on startup in ChangeStateTask.getSortKey\n\ngit-svn-id: https://svn.apache.org/repos/asf/sling/trunk@1590644 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/sling-org-apache-sling-installer-core/commit/7532eeab87402b5cd331dd7fe04c89f20e3616c5",
+        "patched_files": [
+            "OsgiInstallerImpl.java"
+        ],
+        "repo": "sling-org-apache-sling-installer-core",
+        "unit_tests": [
+            "OsgiInstallerImplTest.java"
+        ]
+    },
+    "sling-org-apache-sling-installer-core_4779786": {
+        "bug_id": "sling-org-apache-sling-installer-core_4779786",
+        "commit": "https://github.com/apache/sling-org-apache-sling-installer-core/commit/477978682712e3481001eac5d8c93b2827b6593b",
+        "file": [
+            {
+                "additions": 0,
+                "blob_url": "https://github.com/apache/sling-org-apache-sling-installer-core/blob/477978682712e3481001eac5d8c93b2827b6593b/src/main/java/org/apache/sling/installer/core/impl/OsgiInstallerImpl.java",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/sling-org-apache-sling-installer-core/contents/src/main/java/org/apache/sling/installer/core/impl/OsgiInstallerImpl.java?ref=477978682712e3481001eac5d8c93b2827b6593b",
+                "deletions": 3,
+                "filename": "src/main/java/org/apache/sling/installer/core/impl/OsgiInstallerImpl.java",
+                "patch": "@@ -1020,7 +1020,6 @@ private void internalResourceAddedOrUpdated(final String resourceType,\n                 }\n                 if ( updated || created ) {\n                     this.persistentList.save();\n-                    this.scheduleRetry();\n                 }\n \n             }\n@@ -1059,7 +1058,6 @@ private void internalResourceRemoved(final String resourceType, String resourceI\n                         // if it has been ignored before, we activate it now again!\n                         ((RegisteredResourceImpl)tr).setState(ResourceState.INSTALL);\n                         this.persistentList.save();\n-                        this.scheduleRetry();\n                     } else if ( tr.getState() == ResourceState.UNINSTALLED ) {\n                         // it has already been removed - nothing do to\n                     } else {\n@@ -1082,7 +1080,6 @@ private void internalResourceRemoved(final String resourceType, String resourceI\n                             }\n                         }\n                         this.persistentList.save();\n-                        this.scheduleRetry();\n                     }\n                 }\n             }",
+                "raw_url": "https://github.com/apache/sling-org-apache-sling-installer-core/raw/477978682712e3481001eac5d8c93b2827b6593b/src/main/java/org/apache/sling/installer/core/impl/OsgiInstallerImpl.java",
+                "sha": "d4407dde5fbb6ab0a68e0dc914736cd343287c52",
+                "status": "modified"
+            }
+        ],
+        "message": "SLING-3522 : NPE on startup in ChangeStateTask.getSortKey\n\ngit-svn-id: https://svn.apache.org/repos/asf/sling/trunk@1590657 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/sling-org-apache-sling-installer-core/commit/38bf8de798ad1992d19c803c4fcc98942da19c32",
+        "patched_files": [
+            "OsgiInstallerImpl.java"
+        ],
+        "repo": "sling-org-apache-sling-installer-core",
+        "unit_tests": [
+            "OsgiInstallerImplTest.java"
+        ]
+    },
+    "sling-org-apache-sling-installer-core_4829c3e": {
+        "bug_id": "sling-org-apache-sling-installer-core_4829c3e",
+        "commit": "https://github.com/apache/sling-org-apache-sling-installer-core/commit/4829c3e0431e7a10e1e7c978bae1294e0e0a6b73",
+        "file": [
+            {
+                "additions": 21,
+                "blob_url": "https://github.com/apache/sling-org-apache-sling-installer-core/blob/4829c3e0431e7a10e1e7c978bae1294e0e0a6b73/src/main/java/org/apache/sling/installer/core/impl/DefaultTransformer.java",
+                "changes": 41,
+                "contents_url": "https://api.github.com/repos/apache/sling-org-apache-sling-installer-core/contents/src/main/java/org/apache/sling/installer/core/impl/DefaultTransformer.java?ref=4829c3e0431e7a10e1e7c978bae1294e0e0a6b73",
+                "deletions": 20,
+                "filename": "src/main/java/org/apache/sling/installer/core/impl/DefaultTransformer.java",
+                "patch": "@@ -167,29 +167,30 @@ public String getDescription() {\n     private Manifest getManifest(final InputStream ins) throws IOException {\n         Manifest result = null;\n \n-        JarInputStream jis = null;\n-        try {\n-            jis = new JarInputStream(ins);\n-            result= jis.getManifest();\n-\n-        } finally {\n-\n-            // close the jar stream or the inputstream, if the jar\n-            // stream is set, we don't need to close the input stream\n-            // since closing the jar stream closes the input stream\n-            if (jis != null) {\n-                try {\n-                    jis.close();\n-                } catch (IOException ignore) {\n-                }\n-            } else {\n-                try {\n-                    ins.close();\n-                } catch (IOException ignore) {\n+        if ( ins != null ) {\n+            JarInputStream jis = null;\n+            try {\n+                jis = new JarInputStream(ins);\n+                result= jis.getManifest();\n+\n+            } finally {\n+\n+                // close the jar stream or the inputstream, if the jar\n+                // stream is set, we don't need to close the input stream\n+                // since closing the jar stream closes the input stream\n+                if (jis != null) {\n+                    try {\n+                        jis.close();\n+                    } catch (IOException ignore) {\n+                    }\n+                } else {\n+                    try {\n+                        ins.close();\n+                    } catch (IOException ignore) {\n+                    }\n                 }\n             }\n         }\n-\n         return result;\n     }\n ",
+                "raw_url": "https://github.com/apache/sling-org-apache-sling-installer-core/raw/4829c3e0431e7a10e1e7c978bae1294e0e0a6b73/src/main/java/org/apache/sling/installer/core/impl/DefaultTransformer.java",
+                "sha": "b4cd06d5003251f1a8f06d211ae8b6b28b3e7cb1",
+                "status": "modified"
+            },
+            {
+                "additions": 24,
+                "blob_url": "https://github.com/apache/sling-org-apache-sling-installer-core/blob/4829c3e0431e7a10e1e7c978bae1294e0e0a6b73/src/main/java/org/apache/sling/installer/core/impl/OsgiInstallerImpl.java",
+                "changes": 44,
+                "contents_url": "https://api.github.com/repos/apache/sling-org-apache-sling-installer-core/contents/src/main/java/org/apache/sling/installer/core/impl/OsgiInstallerImpl.java?ref=4829c3e0431e7a10e1e7c978bae1294e0e0a6b73",
+                "deletions": 20,
+                "filename": "src/main/java/org/apache/sling/installer/core/impl/OsgiInstallerImpl.java",
+                "patch": "@@ -164,7 +164,6 @@ public void run() {\n         while (active) {\n             logger.debug(\"Starting new cycle\");\n \n-            boolean sleep = true;\n             this.mergeNewlyRegisteredResources();\n \n             // invoke transformers\n@@ -192,15 +191,12 @@ public void run() {\n                         logger.debug(\"Notified of new resources, back to work\");\n                     }\n                 }\n-                sleep = false;\n-            }\n-            if ( sleep ) {\n-                // Some integration tests depend on this delay, make sure to\n-                // rerun/adapt them if changing this value\n-                try {\n-                    Thread.sleep(250);\n-                } catch (final InterruptedException ignore) {}\n             }\n+            // Some integration tests depend on this delay, make sure to\n+            // rerun/adapt them if changing this value\n+            try {\n+                Thread.sleep(250);\n+            } catch (final InterruptedException ignore) {}\n         }\n     }\n \n@@ -517,13 +513,17 @@ public void log(String message, Object... args) {\n                 }\n             };\n             while (this.active && !tasks.isEmpty()) {\n-                InstallTask t = null;\n+                InstallTask task = null;\n                 synchronized (tasks) {\n-                    t = tasks.first();\n-                    tasks.remove(t);\n+                    task = tasks.first();\n+                    tasks.remove(task);\n+                }\n+                logger.debug(\"Executing task: {}\", task);\n+                try {\n+                    task.execute(ctx);\n+                } catch (final Throwable t) {\n+                    logger.error(\"Uncaught exception during task execution!\", t);\n                 }\n-                logger.debug(\"Executing task: {}\", t);\n-                t.execute(ctx);\n             }\n             persistentList.save();\n         }\n@@ -558,12 +558,16 @@ private void transformResources() {\n                     if ( services[i] instanceof ResourceTransformer ) {\n                         final ResourceTransformer transformer = (ResourceTransformer)services[i];\n \n-                        final TransformationResult[] result = transformer.transform(resource);\n-                        if ( result != null && result.length > 0 ) {\n-                            this.persistentList.transform(resource, result);\n-                            changed = true;\n-                            index--;\n-                            break;\n+                        try {\n+                            final TransformationResult[] result = transformer.transform(resource);\n+                            if ( result != null && result.length > 0 ) {\n+                                this.persistentList.transform(resource, result);\n+                                changed = true;\n+                                index--;\n+                                break;\n+                            }\n+                        } catch (final Throwable t) {\n+                            logger.error(\"Uncaught exception during resource transformation!\", t);\n                         }\n                     }\n                 }",
+                "raw_url": "https://github.com/apache/sling-org-apache-sling-installer-core/raw/4829c3e0431e7a10e1e7c978bae1294e0e0a6b73/src/main/java/org/apache/sling/installer/core/impl/OsgiInstallerImpl.java",
+                "sha": "8e0975aa4eacb02e4c2f566988c42c9f8ff12099",
+                "status": "modified"
+            }
+        ],
+        "message": "Fix NPEs and make service execution more robust.\n\ngit-svn-id: https://svn.apache.org/repos/asf/sling/trunk@1060274 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/sling-org-apache-sling-installer-core/commit/92844c3cb15e1a0b0d1cc43e2128c9c8098a7c71",
+        "patched_files": [
+            "OsgiInstallerImpl.java"
+        ],
+        "repo": "sling-org-apache-sling-installer-core",
+        "unit_tests": [
+            "OsgiInstallerImplTest.java"
+        ]
+    },
+    "sling-org-apache-sling-installer-core_a4d14f8": {
+        "bug_id": "sling-org-apache-sling-installer-core_a4d14f8",
+        "commit": "https://github.com/apache/sling-org-apache-sling-installer-core/commit/a4d14f8ca219e0a61f7738836784a13489f59046",
+        "file": [
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/sling-org-apache-sling-installer-core/blob/a4d14f8ca219e0a61f7738836784a13489f59046/src/main/java/org/apache/sling/installer/core/impl/OsgiInstallerImpl.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/sling-org-apache-sling-installer-core/contents/src/main/java/org/apache/sling/installer/core/impl/OsgiInstallerImpl.java?ref=a4d14f8ca219e0a61f7738836784a13489f59046",
+                "deletions": 1,
+                "filename": "src/main/java/org/apache/sling/installer/core/impl/OsgiInstallerImpl.java",
+                "patch": "@@ -1191,7 +1191,9 @@ private void internalResourceAddedOrUpdated(final String resourceType,\n                     }\n                 }\n                 if ( compactAndSave ) {\n-                    erl.compact();\n+                    if ( erl != null ) {\n+                        erl.compact();\n+                    }\n                     this.persistentList.save();\n                 }\n             }",
+                "raw_url": "https://github.com/apache/sling-org-apache-sling-installer-core/raw/a4d14f8ca219e0a61f7738836784a13489f59046/src/main/java/org/apache/sling/installer/core/impl/OsgiInstallerImpl.java",
+                "sha": "13e8e38386f839cd663f83d9cca22d06ca43384b",
+                "status": "modified"
+            }
+        ],
+        "message": "SLING-4295 : Potential NPE when resource are updated\n\ngit-svn-id: https://svn.apache.org/repos/asf/sling/trunk@1651075 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/sling-org-apache-sling-installer-core/commit/1a4a59affd97fcbb378caa5bc5c9d424771ff16f",
+        "patched_files": [
+            "OsgiInstallerImpl.java"
+        ],
+        "repo": "sling-org-apache-sling-installer-core",
+        "unit_tests": [
+            "OsgiInstallerImplTest.java"
+        ]
+    },
+    "sling-org-apache-sling-installer-core_ee58fa4": {
+        "bug_id": "sling-org-apache-sling-installer-core_ee58fa4",
+        "commit": "https://github.com/apache/sling-org-apache-sling-installer-core/commit/ee58fa4c947b82a15914cbc6b483a1f55e126a2e",
+        "file": [
+            {
+                "additions": 21,
+                "blob_url": "https://github.com/apache/sling-org-apache-sling-installer-core/blob/ee58fa4c947b82a15914cbc6b483a1f55e126a2e/src/main/java/org/apache/sling/installer/core/impl/EntityResourceList.java",
+                "changes": 41,
+                "contents_url": "https://api.github.com/repos/apache/sling-org-apache-sling-installer-core/contents/src/main/java/org/apache/sling/installer/core/impl/EntityResourceList.java?ref=ee58fa4c947b82a15914cbc6b483a1f55e126a2e",
+                "deletions": 20,
+                "filename": "src/main/java/org/apache/sling/installer/core/impl/EntityResourceList.java",
+                "patch": "@@ -66,30 +66,31 @@ public RegisteredResource getActiveResource() {\n      */\n     public void setFinishState(RegisteredResource.State state) {\n         final RegisteredResource toActivate = getActiveResource();\n-        if ( toActivate != null\n-             && toActivate.getState() == RegisteredResource.State.UNINSTALL\n-             && this.resources.size() > 1 ) {\n+        if ( toActivate != null ) {\n+            if ( toActivate.getState() == RegisteredResource.State.UNINSTALL\n+                 && this.resources.size() > 1 ) {\n \n-            // to get the second item in the set we have to use an iterator!\n-            final Iterator<RegisteredResource> i = this.resources.iterator();\n-            i.next(); // skip first\n-            final RegisteredResource second = i.next();\n-            if ( state == RegisteredResource.State.UNINSTALLED ) {\n-                // first resource got uninstalled, go back to second\n-                if (second.getState() == RegisteredResource.State.IGNORED || second.getState() == RegisteredResource.State.INSTALLED) {\n-                    LOGGER.debug(\"Reactivating for next cycle: {}\", second);\n-                    second.setState(RegisteredResource.State.INSTALL);\n-                }\n-            } else {\n-                // don't install as the first did not get uninstalled\n-                if ( second.getState() == RegisteredResource.State.INSTALL ) {\n-                    second.setState(RegisteredResource.State.IGNORED);\n+                // to get the second item in the set we have to use an iterator!\n+                final Iterator<RegisteredResource> i = this.resources.iterator();\n+                i.next(); // skip first\n+                final RegisteredResource second = i.next();\n+                if ( state == RegisteredResource.State.UNINSTALLED ) {\n+                    // first resource got uninstalled, go back to second\n+                    if (second.getState() == RegisteredResource.State.IGNORED || second.getState() == RegisteredResource.State.INSTALLED) {\n+                        LOGGER.debug(\"Reactivating for next cycle: {}\", second);\n+                        second.setState(RegisteredResource.State.INSTALL);\n+                    }\n+                } else {\n+                    // don't install as the first did not get uninstalled\n+                    if ( second.getState() == RegisteredResource.State.INSTALL ) {\n+                        second.setState(RegisteredResource.State.IGNORED);\n+                    }\n+                    // and now set resource to uninstalled\n+                    state = RegisteredResource.State.UNINSTALLED;\n                 }\n-                // and now set resource to uninstalled\n-                state = RegisteredResource.State.UNINSTALLED;\n             }\n+            toActivate.setState(state);\n         }\n-        toActivate.setState(state);\n     }\n \n     public Collection<RegisteredResource> getResources() {",
+                "raw_url": "https://github.com/apache/sling-org-apache-sling-installer-core/raw/ee58fa4c947b82a15914cbc6b483a1f55e126a2e/src/main/java/org/apache/sling/installer/core/impl/EntityResourceList.java",
+                "sha": "9acb5d75b4d3f4470ab16a2a625fbc10f67048a2",
+                "status": "modified"
+            }
+        ],
+        "message": "Fix potential NPE\n\ngit-svn-id: https://svn.apache.org/repos/asf/sling/trunk@1050386 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/sling-org-apache-sling-installer-core/commit/04a194f98e3eaf2bb85213172f9f95666c6f6f8a",
+        "patched_files": [
+            "EntityResourceList.java"
+        ],
+        "repo": "sling-org-apache-sling-installer-core",
+        "unit_tests": [
+            "EntityResourceListTest.java"
+        ]
+    }
+}
