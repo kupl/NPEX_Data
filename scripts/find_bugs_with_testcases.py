@@ -97,7 +97,7 @@ def do_repo(repo):
     #1. Find commit data of repo
     bug_file = None
     try:
-        bug_file = open("data/%s_data.json" % repo, 'r')
+        bug_file = open("data/%s_data.json" % repo, 'r').read()
     except:
         return
     os.system("mkdir benchmarks/%s" % repo)
@@ -113,24 +113,21 @@ def do_repo(repo):
     os.chdir(repo)
     print(os.getcwd())
     
-    for bugs_in_one_repo in bug_file.readlines():
-        time.sleep(10)
-        bugs_in_one_repo = json.loads(bugs_in_one_repo.split('\n')[0])
-        for bug_commit in bugs_in_one_repo:
-            commit_id = bug_commit['commit'].split('/')[-1]
-            bug_id = "%s_%s" % (repo, commit_id[:7])
-            patched, unit_tests = find_unit_tests(bug_commit)
-            if unit_tests:
-                logfile.writelines("%s: has unit-test \n" % bug_id)
-                bug_commit['bug_id'] = bug_id
-                bug_commit['patched_files'] = patched
-                bug_commit['unit_tests'] = unit_tests
-                output[bug_id] = bug_commit
-            else:
-                logfile.writelines("%s: has no unit-tests\n" % bug_id)
+    bugs_in_one_repo = json.loads(bug_file)
+    for bug_commit in bugs_in_one_repo:
+        commit_id = bug_commit['commit'].split('/')[-1]
+        bug_id = "%s_%s" % (repo, commit_id[:7])
+        patched, unit_tests = find_unit_tests(bug_commit)
+        if unit_tests:
+            logfile.writelines("%s: has unit-test \n" % bug_id)
+            bug_commit['bug_id'] = bug_id
+            bug_commit['patched_files'] = patched
+            bug_commit['unit_tests'] = unit_tests
+            output[bug_id] = bug_commit
+        else:
+            logfile.writelines("%s: has no unit-tests\n" % bug_id)
   
     logfile.flush()
-    bug_file.close()
     output_file.write(json.dumps(output, indent=4, sort_keys=True))
     output_file.close()
     os.chdir("..")
