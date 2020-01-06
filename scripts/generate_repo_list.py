@@ -24,7 +24,7 @@ def do_parallel(repos, n_cpus=8):
     p.starmap(do_repo, args)
 
 if __name__ == '__main__':
-    repo_file = open("repo.txt", 'r')
+    repo_file = open("repo_with_commits.txt", 'r')
     os.chdir("benchmarks") 
     for repo in repo_file.readlines():
         repo = repo.split('\n')[0]
