@@ -8,6 +8,7 @@ from easyprocess import EasyProcess
 from easyprocess import EasyProcessError
 from multiprocessing import Process
 from multiprocessing import Pool
+from multiprocessing import Queue
 from functools import partial
 
 starttime = time.strftime("%m%d_%I%M", time.localtime())
@@ -18,6 +19,9 @@ build_command = \
 {   \
     'camel': 'clean install -Pfastinstall'  
 }
+
+PATH = os.path.abspath(os.getcwd())
+q = Queue()
 
 def test_filenames(class_name):
     return \
@@ -38,12 +42,10 @@ def find_unit_tests(commit):
     commit_id = commit['commit'].split('/')[-1]
     repo = commit['repo']
     bug_id = "%s_%s" % (repo, commit_id[:7])
-    
-    logfile_commit = open('%s.log' % bug_id, 'w')
+
     unit_tests = set()
     patched = set()
 
-    logfile_commit.writelines("==== Changed files ====\n")
     files = commit['file']
 
     find_cmd = 'find . -name '
@@ -75,24 +77,45 @@ def find_unit_tests(commit):
             if ret.stdout != '':
                 patched.add(classname + '.java')
                 unit_tests.add(test_filename)
-        
-        logfile_commit.writelines("%s\n" % filename)
     
     if there_is_test:
         patched |= set(file_names)
-
-    logfile_commit.writelines("\n==== RESULTS ====\n")
-    if unit_tests:
-        logfile_commit.writelines("Found testcases:\n - %s\n" % unit_tests)
-    else:
-        logfile_commit.writelines("Unit-tests are not found")
-    logfile_commit.close()
     
     return list(patched), list(unit_tests) 
 
-def do_repo(repo):
+def do_commit(commit):
+    repo = commit['repo']
+    git_http = "https://github.com/apache/%s" % repo
+    commit_id = commit['commit'].split('/')[-1]
+    bug_id = "%s_%s" % (repo, commit_id[:7])
+    print('doing %s...' % bug_id)
+
+    git_clone_cmd = "git clone %s %s" % (git_http, commit_id[:6])
+    git_checkout_command = "git checkout -f %s" % commit_id[:6]
+
+    #2. Clone 
+    ret_clone = EasyProcess(git_clone_cmd).call()
+    os.makedirs(commit_id[:6], exist_ok=True)
+    os.chdir(commit_id[:6])
+    ret_checkout = EasyProcess(git_checkout_command).call()
+
+    output = ()
+    #3. Check if unit-tests exist for each commit
+    patched, unit_tests = find_unit_tests(commit)
+    if unit_tests:
+        logfile.writelines("%s: has unit-test \n" % bug_id)
+        commit['bug_id'] = bug_id
+        commit['patched_files'] = patched
+        commit['unit_tests'] = unit_tests
+        output = (bug_id, commit)
+    else:
+        logfile.writelines("%s: has no unit-tests\n" % bug_id)
+    logfile.flush()
+    q.put(output)
+
+def do_repo(repo, n_cpus):
+    os.chdir(PATH)
     output_file = open("data/%s_test.json" % repo, 'w')
-    output = {}
     
     #1. Find commit data of repo
     bug_file = None
@@ -104,40 +127,25 @@ def do_repo(repo):
     os.chdir("benchmarks/%s" % repo)
     print(os.getcwd())
     
-    #2. Clone 
-    git_http = "https://github.com/apache/%s" % repo
-    git_clone_cmd = "git clone %s" % git_http
-    ret_clone = EasyProcess(git_clone_cmd).call()
-   
-    #3. Check if unit-tests exist for each commit
-    os.chdir(repo)
-    print(os.getcwd())
-    
     bugs_in_one_repo = json.loads(bug_file)
-    for bug_commit in bugs_in_one_repo:
-        commit_id = bug_commit['commit'].split('/')[-1]
-        bug_id = "%s_%s" % (repo, commit_id[:7])
-        patched, unit_tests = find_unit_tests(bug_commit)
-        if unit_tests:
-            logfile.writelines("%s: has unit-test \n" % bug_id)
-            bug_commit['bug_id'] = bug_id
-            bug_commit['patched_files'] = patched
-            bug_commit['unit_tests'] = unit_tests
-            output[bug_id] = bug_commit
+    with Pool(n_cpus) as p:
+        p.map(do_commit, bugs_in_one_repo)
+    
+    output = {}
+    while True:
+        if q.empty():
+            break
         else:
-            logfile.writelines("%s: has no unit-tests\n" % bug_id)
-  
-    logfile.flush()
+            bug_id, commit = q.get()
+            output[bug_id] = commit
+
     output_file.write(json.dumps(output, indent=4, sort_keys=True))
     output_file.close()
-    os.chdir("..")
-    os.chdir("../..")
 
 def do_parallel(repos, n_cpus=8):
-    p = Pool(n_cpus)
     args = [[repo.split('\n')[0]] for repo in repos]
-    
-    p.starmap(do_repo, args)
+    for arg in args:
+        do_repo(''.join(arg), n_cpus)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

@@ -63,12 +63,14 @@ def unittest(commit, testFilename, non_testing_files):
     test_cmd = get_test_command(testClass, testFilename.split('/')[1])
     if test_cmd is None:
         logger.warning(" - not maven project")
+        logger.handlers[0].flush
         ret['fixed'] = False
         ret['buggy'] = False
         ret['buggy_class'] = None
         return ret
 
     logger.info("test command: %s" % (test_cmd))
+    logger.handlers[0].flush
     
     test_ret = EasyProcess(test_cmd).call(timeout=300)
     ret['fixed'] = True if test_ret.return_code is 0 else False
@@ -77,7 +79,8 @@ def unittest(commit, testFilename, non_testing_files):
     parent_commit = commit['parent'].split('/')[-1]
 
     checkout_cmd = 'git checkout %s -- %s' % (parent_commit, ' '.join(non_testing_files))
-    logger.info("git checkout command for buggy version: %s\n" % (checkout_cmd))
+    logger.info("git checkout command for buggy version: %s" % (checkout_cmd))
+    logger.handlers[0].flush
     checkout_ret = EasyProcess(checkout_cmd).call()
 
     test_ret = EasyProcess(test_cmd).call(timeout=300)
@@ -106,17 +109,10 @@ def do_commit(commit):
     commit_id = commit['commit'].split('/')[-1][:6]
 
     ## 1. clone repo and checkout commit
-    git_clone_command = "git clone %s %s" % (repo_url, commit_id)
     git_checkout_command = "git checkout -f %s" % commit_id
-    
-    ret_clone = EasyProcess(git_clone_command).call()
-    os.makedirs(commit_id, exist_ok=True)
+
     os.chdir(commit_id)
     ret_checkout = EasyProcess(git_checkout_command).call()
-
-    # Do not log in the repository. Some repos require no additional files in the repo.
-    if os.path.isfile('commands.log'):
-        os.system('rm commands.log')
 
     ## 2. build repo if unit-test exists
     compile_cmd = get_compile_command()
@@ -124,15 +120,19 @@ def do_commit(commit):
     test_files = find_file_path(unittests)
     if compile_cmd is None:
         logger.warning("# %s IS NOT MAVEN PROJECT" % commit['bug_id'])
+        logger.handlers[0].flush
         return False
     elif not test_files:
         logger.warning("# %s HAS NO TESTCASE" % commit['bug_id'])
+        logger.handlers[0].flush
         return False
     elif not non_testing_files:
         logger.warning("# %s HAS NO PATCHED FILE" % commit['bug_id'])
+        logger.handlers[0].flush
         return False
     elif has_outdated_urls():
         logger.warning("# %s HAS OUTDATED URLS" % commit['bug_id'])
+        logger.handlers[0].flush
         return False
 
     ret_compile = EasyProcess(compile_cmd).call(timeout=300)
@@ -146,20 +146,23 @@ def do_commit(commit):
 
         if (ret['fixed'] & (not ret['buggy'])):
             logger.info(status)
+            logger.handlers[0].flush
             return True
     logger.info(status)
+    logger.handlers[0].flush
     return False
 
+def do_repo(repo, n_cpus):
+    commits = list(repo_dict[repo]['commits'].values())
+    with Pool(n_cpus) as p:
+        p.map(do_commit, commits)
 
 ## main function
 if __name__ == '__main__':
-    logger = logging.getLogger(__name__)
+    logger = logging.getLogger()
     logger.setLevel(logging.INFO)
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(processName)s - %(message)s')
+    formatter = logging.Formatter('[%(asctime)s/%(levelname)s]%(processName)s - %(message)s')
 
-    stream_handler = logging.StreamHandler()
-    stream_handler.setFormatter(formatter)
-    logger.addHandler(stream_handler)
     file_handler = logging.FileHandler("logs/clone_and_compile.log")
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
@@ -193,10 +196,5 @@ if __name__ == '__main__':
         repo_info['commits'] = repo_json
         repo_dict[repo] = repo_info
 
-    commits = []
-
     for repo in repo_dict.keys():
-        commits += list(repo_dict[repo]['commits'].values())
-
-    with Pool(n_cpus) as p:
-        p.map(do_commit, commits)
+        do_repo(repo, n_cpus)
