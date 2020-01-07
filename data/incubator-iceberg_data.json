@@ -1,1 +1,152 @@
-[{"commit": "https://github.com/apache/incubator-iceberg/commit/ce7aeae0e19771a722662a634c4cb82c39e86209", "parent": "https://github.com/apache/incubator-iceberg/commit/a0ee2975adcb181dfbff8e8ae1463a340e3bf0ff", "message": "Fix NPE in ScanSummary.", "bug_id": "incubator-iceberg_1", "file": [{"additions": 3, "raw_url": "https://github.com/apache/incubator-iceberg/raw/ce7aeae0e19771a722662a634c4cb82c39e86209/core/src/main/java/com/netflix/iceberg/ScanSummary.java", "blob_url": "https://github.com/apache/incubator-iceberg/blob/ce7aeae0e19771a722662a634c4cb82c39e86209/core/src/main/java/com/netflix/iceberg/ScanSummary.java", "sha": "66f28ddfac1eadbbe0f5bf88f7473d59718b6b2e", "changes": 4, "status": "modified", "deletions": 1, "contents_url": "https://api.github.com/repos/apache/incubator-iceberg/contents/core/src/main/java/com/netflix/iceberg/ScanSummary.java?ref=ce7aeae0e19771a722662a634c4cb82c39e86209", "patch": "@@ -138,10 +138,12 @@ private PartitionMetrics updateFromFile(DataFile file, Long timestampMillis) {\n \n     @Override\n     public String toString() {\n+      String lastUpdated = lastUpdatedMillis != null ?\n+          new Date(lastUpdatedMillis).toString() : null;\n       return \"PartitionMetrics(fileCount=\" + fileCount +\n           \", recordCount=\" + recordCount +\n           \", totalSize=\" + totalSize +\n-          \", lastUpdatedMillis=\" + new Date(lastUpdatedMillis).toString() + \")\";\n+          \", lastUpdated=\" + lastUpdated + \")\";\n     }\n   }\n ", "filename": "core/src/main/java/com/netflix/iceberg/ScanSummary.java"}], "repo": "incubator-iceberg"}, {"commit": "https://github.com/apache/incubator-iceberg/commit/c1f6603a4e3d73270034a9f92e135d482983e219", "parent": "https://github.com/apache/incubator-iceberg/commit/f94d687755de0bdee40eaaee07b101e5d150c669", "message": "Spark: Fix NPE in PartitionKey accessors. (#73)", "bug_id": "incubator-iceberg_2", "file": [{"additions": 13, "raw_url": "https://github.com/apache/incubator-iceberg/raw/c1f6603a4e3d73270034a9f92e135d482983e219/spark/src/main/java/com/netflix/iceberg/spark/source/PartitionKey.java", "blob_url": "https://github.com/apache/incubator-iceberg/blob/c1f6603a4e3d73270034a9f92e135d482983e219/spark/src/main/java/com/netflix/iceberg/spark/source/PartitionKey.java", "sha": "7e5abd431d5f1d8071f054cbe3ebd4803ba8bdde", "changes": 17, "status": "modified", "deletions": 4, "contents_url": "https://api.github.com/repos/apache/incubator-iceberg/contents/spark/src/main/java/com/netflix/iceberg/spark/source/PartitionKey.java?ref=c1f6603a4e3d73270034a9f92e135d482983e219", "patch": "@@ -228,8 +228,8 @@ public int hashCode() {\n   }\n \n   private static class PositionAccessor implements Accessor<InternalRow> {\n-    private final DataType type;\n-    private int p;\n+    protected final DataType type;\n+    protected int p;\n \n     private PositionAccessor(int p, DataType type) {\n       this.p = p;\n@@ -238,6 +238,9 @@ private PositionAccessor(int p, DataType type) {\n \n     @Override\n     public Object get(InternalRow row) {\n+      if (row.isNullAt(p)) {\n+        return null;\n+      }\n       return row.get(p, type);\n     }\n   }\n@@ -249,7 +252,10 @@ private StringAccessor(int p, DataType type) {\n \n     @Override\n     public Object get(InternalRow row) {\n-      return super.get(row).toString();\n+      if (row.isNullAt(p)) {\n+        return null;\n+      }\n+      return row.get(p, type).toString();\n     }\n   }\n \n@@ -260,7 +266,10 @@ private DecimalAccessor(int p, DataType type) {\n \n     @Override\n     public Object get(InternalRow row) {\n-      return ((Decimal) super.get(row)).toJavaBigDecimal();\n+      if (row.isNullAt(p)) {\n+        return null;\n+      }\n+      return ((Decimal) row.get(p, type)).toJavaBigDecimal();\n     }\n   }\n ", "filename": "spark/src/main/java/com/netflix/iceberg/spark/source/PartitionKey.java"}], "repo": "incubator-iceberg"}, {"commit": "https://github.com/apache/incubator-iceberg/commit/77a9ad7a07a6ec8938abdfaeda1b72d232352a9c", "parent": "https://github.com/apache/incubator-iceberg/commit/f6ed7ab0ba5541c3b119985af6cfab222941178c", "message": "Fix NPE in Spark Reader stats method.", "bug_id": "incubator-iceberg_3", "file": [{"additions": 1, "raw_url": "https://github.com/apache/incubator-iceberg/raw/77a9ad7a07a6ec8938abdfaeda1b72d232352a9c/spark/src/main/java/com/netflix/iceberg/spark/source/Reader.java", "blob_url": "https://github.com/apache/incubator-iceberg/blob/77a9ad7a07a6ec8938abdfaeda1b72d232352a9c/spark/src/main/java/com/netflix/iceberg/spark/source/Reader.java", "sha": "3cb7fa052e15c6f026d4d0c28ba5410fc18e973f", "changes": 2, "status": "modified", "deletions": 1, "contents_url": "https://api.github.com/repos/apache/incubator-iceberg/contents/spark/src/main/java/com/netflix/iceberg/spark/source/Reader.java?ref=77a9ad7a07a6ec8938abdfaeda1b72d232352a9c", "patch": "@@ -198,7 +198,7 @@ public Statistics getStatistics() {\n     long sizeInBytes = 0L;\n     long numRows = 0L;\n \n-    for (CombinedScanTask task : tasks) {\n+    for (CombinedScanTask task : tasks()) {\n       for (FileScanTask file : task.files()) {\n         sizeInBytes += file.length();\n         numRows += file.file().recordCount();", "filename": "spark/src/main/java/com/netflix/iceberg/spark/source/Reader.java"}], "repo": "incubator-iceberg"}, {"commit": "https://github.com/apache/incubator-iceberg/commit/f258bfa1fa89239f0dae18ed49f911602954de1b", "parent": "https://github.com/apache/incubator-iceberg/commit/c5c51e52eda6cdcd794e7817435687423c23d62a", "message": "Fix SparkExpressions.convert recursion with nulls.\n\nConversion returns null to signal that the expression is not supported,\nbut in recursive calls it wasn't checking that the wrapped expression\nwas converted to null. This caused some expressions like not(isnan(d))\nto be converted and pushed to Iceberg even though they are not\nsupported. Iceberg later hit a NPE because an expression was null.\n\nThis also checks for null expressions in the Expressions factory\nmethods.", "bug_id": "incubator-iceberg_4", "file": [{"additions": 5, "raw_url": "https://github.com/apache/incubator-iceberg/raw/f258bfa1fa89239f0dae18ed49f911602954de1b/api/src/main/java/com/netflix/iceberg/expressions/Expressions.java", "blob_url": "https://github.com/apache/incubator-iceberg/blob/f258bfa1fa89239f0dae18ed49f911602954de1b/api/src/main/java/com/netflix/iceberg/expressions/Expressions.java", "sha": "af28b52b7406aee3c64b321046ed9d935ca354bb", "changes": 5, "status": "modified", "deletions": 0, "contents_url": "https://api.github.com/repos/apache/incubator-iceberg/contents/api/src/main/java/com/netflix/iceberg/expressions/Expressions.java?ref=f258bfa1fa89239f0dae18ed49f911602954de1b", "patch": "@@ -24,6 +24,8 @@\n  */\n public class Expressions {\n   public static Expression and(Expression left, Expression right) {\n+    Preconditions.checkNotNull(left, \"Left expression cannot be null.\");\n+    Preconditions.checkNotNull(right, \"Right expression cannot be null.\");\n     if (left == alwaysFalse() || right == alwaysFalse()) {\n       return alwaysFalse();\n     } else if (left == alwaysTrue()) {\n@@ -35,6 +37,8 @@ public static Expression and(Expression left, Expression right) {\n   }\n \n   public static Expression or(Expression left, Expression right) {\n+    Preconditions.checkNotNull(left, \"Left expression cannot be null.\");\n+    Preconditions.checkNotNull(right, \"Right expression cannot be null.\");\n     if (left == alwaysTrue() || right == alwaysTrue()) {\n       return alwaysTrue();\n     } else if (left == alwaysFalse()) {\n@@ -46,6 +50,7 @@ public static Expression or(Expression left, Expression right) {\n   }\n \n   public static Expression not(Expression child) {\n+    Preconditions.checkNotNull(child, \"Child expression cannot be null.\");\n     if (child == alwaysTrue()) {\n       return alwaysFalse();\n     } else if (child == alwaysFalse()) {", "filename": "api/src/main/java/com/netflix/iceberg/expressions/Expressions.java"}, {"additions": 17, "raw_url": "https://github.com/apache/incubator-iceberg/raw/f258bfa1fa89239f0dae18ed49f911602954de1b/spark/src/main/java/com/netflix/iceberg/spark/SparkExpressions.java", "blob_url": "https://github.com/apache/incubator-iceberg/blob/f258bfa1fa89239f0dae18ed49f911602954de1b/spark/src/main/java/com/netflix/iceberg/spark/SparkExpressions.java", "sha": "9bd8b209a2dfd2b18b82f95276f3c4bdb04eff87", "changes": 21, "status": "modified", "deletions": 4, "contents_url": "https://api.github.com/repos/apache/incubator-iceberg/contents/spark/src/main/java/com/netflix/iceberg/spark/SparkExpressions.java?ref=f258bfa1fa89239f0dae18ed49f911602954de1b", "patch": "@@ -23,7 +23,6 @@\n import com.netflix.iceberg.expressions.BoundReference;\n import com.netflix.iceberg.expressions.Expression.Operation;\n import com.netflix.iceberg.expressions.ExpressionVisitors;\n-import com.netflix.iceberg.expressions.Expressions;\n import com.netflix.iceberg.types.Types.TimestampType;\n import com.netflix.iceberg.util.Pair;\n import org.apache.spark.sql.Column;\n@@ -123,13 +122,27 @@ private SparkExpressions() {\n           BinaryExpression binary = (BinaryExpression) expr;\n           return convert(op, binary.left(), binary.right());\n         case NOT:\n-          return not(convert(((Not) expr).child()));\n+          com.netflix.iceberg.expressions.Expression child = convert(((Not) expr).child());\n+          if (child != null) {\n+            return not(child);\n+          }\n+          return null;\n         case AND:\n           And andExpr = (And) expr;\n-          return and(convert(andExpr.left()), convert(andExpr.right()));\n+          com.netflix.iceberg.expressions.Expression andLeft = convert(andExpr.left());\n+          com.netflix.iceberg.expressions.Expression andRight = convert(andExpr.right());\n+          if (andLeft != null && andRight != null) {\n+            return and(convert(andExpr.left()), convert(andExpr.right()));\n+          }\n+          return null;\n         case OR:\n           Or orExpr = (Or) expr;\n-          return or(convert(orExpr.left()), convert(orExpr.right()));\n+          com.netflix.iceberg.expressions.Expression orLeft = convert(orExpr.left());\n+          com.netflix.iceberg.expressions.Expression orRight = convert(orExpr.right());\n+          if (orLeft != null && orRight != null) {\n+            return or(orLeft, orRight);\n+          }\n+          return null;\n         case IN:\n           if (expr instanceof In) {\n             In inExpr = (In) expr;", "filename": "spark/src/main/java/com/netflix/iceberg/spark/SparkExpressions.java"}], "repo": "incubator-iceberg"}]
+[
+    {
+        "commit": "https://github.com/apache/incubator-iceberg/commit/281e0d779126e11cadea51f423abbf303ce42da9",
+        "file": [
+            {
+                "patch": "@@ -191,6 +191,12 @@ public Builder inPartitions(PartitionSpec spec, List<StructLike> partitions) {\n       Snapshot snapshot = snapshotId != null ?\n           ops.current().snapshot(snapshotId) : ops.current().currentSnapshot();\n \n+      // snapshot could be null when the table just gets created\n+      if (snapshot == null) {\n+        return CloseableIterable.empty();\n+      }\n+\n+      // when snapshot is not null\n       CloseableIterable<ManifestEntry> entries = new ManifestGroup(ops, snapshot.manifests())\n           .filterData(rowFilter)\n           .filterFiles(fileFilter)",
+                "additions": 6,
+                "raw_url": "https://github.com/apache/incubator-iceberg/raw/281e0d779126e11cadea51f423abbf303ce42da9/core/src/main/java/org/apache/iceberg/FindFiles.java",
+                "status": "modified",
+                "changes": 6,
+                "deletions": 0,
+                "sha": "6c8c71473f92763605d6099caae79e1d53487b45",
+                "blob_url": "https://github.com/apache/incubator-iceberg/blob/281e0d779126e11cadea51f423abbf303ce42da9/core/src/main/java/org/apache/iceberg/FindFiles.java",
+                "filename": "core/src/main/java/org/apache/iceberg/FindFiles.java",
+                "contents_url": "https://api.github.com/repos/apache/incubator-iceberg/contents/core/src/main/java/org/apache/iceberg/FindFiles.java?ref=281e0d779126e11cadea51f423abbf303ce42da9"
+            },
+            {
+                "patch": "@@ -153,6 +153,17 @@ public void testCaseSensitivity() {\n     Assert.assertEquals(pathSet(FILE_A), pathSet(files));\n   }\n \n+  @Test\n+  public void testNoSnapshot() {\n+    // a table has no snapshot when it just gets created and no data is loaded yet\n+\n+    // if not handled properly, NPE will be thrown in collect()\n+    Iterable<DataFile> files = FindFiles.in(table).collect();\n+\n+    // verify an empty collection of data file is returned\n+    Assert.assertEquals(0, Sets.newHashSet(files).size());\n+  }\n+\n   private Set<String> pathSet(DataFile... files) {\n     return Sets.newHashSet(Iterables.transform(Arrays.asList(files), file -> file.path().toString()));\n   }",
+                "additions": 11,
+                "raw_url": "https://github.com/apache/incubator-iceberg/raw/281e0d779126e11cadea51f423abbf303ce42da9/core/src/test/java/org/apache/iceberg/TestFindFiles.java",
+                "status": "modified",
+                "changes": 11,
+                "deletions": 0,
+                "sha": "01df577859cd9421afee469f7b305378b3838226",
+                "blob_url": "https://github.com/apache/incubator-iceberg/blob/281e0d779126e11cadea51f423abbf303ce42da9/core/src/test/java/org/apache/iceberg/TestFindFiles.java",
+                "filename": "core/src/test/java/org/apache/iceberg/TestFindFiles.java",
+                "contents_url": "https://api.github.com/repos/apache/incubator-iceberg/contents/core/src/test/java/org/apache/iceberg/TestFindFiles.java?ref=281e0d779126e11cadea51f423abbf303ce42da9"
+            }
+        ],
+        "bug_id": "incubator-iceberg_1",
+        "parent": "https://github.com/apache/incubator-iceberg/commit/4ec95e8f89f7f47ac494668139f922f861d96093",
+        "message": "Fix NullPointerException in FindFiles when there is no snapshot (#543)",
+        "repo": "incubator-iceberg"
+    },
+    {
+        "commit": "https://github.com/apache/incubator-iceberg/commit/1cd4c77e0d3bf775fffd52adb35971dbb2ac152f",
+        "file": [
+            {
+                "patch": "@@ -482,6 +482,8 @@ public PartitionSpec build() {\n   static void checkCompatibility(PartitionSpec spec, Schema schema) {\n     for (PartitionField field : spec.fields) {\n       Type sourceType = schema.findType(field.sourceId());\n+      ValidationException.check(sourceType != null,\n+          \"Cannot find source column for partition field: %s\", field);\n       ValidationException.check(sourceType.isPrimitiveType(),\n           \"Cannot partition by non-primitive source field: %s\", sourceType);\n       ValidationException.check(",
+                "additions": 2,
+                "raw_url": "https://github.com/apache/incubator-iceberg/raw/1cd4c77e0d3bf775fffd52adb35971dbb2ac152f/api/src/main/java/org/apache/iceberg/PartitionSpec.java",
+                "status": "modified",
+                "changes": 2,
+                "deletions": 0,
+                "sha": "b936ad50d53465eac9a5f5c423332fdd4e6c9a63",
+                "blob_url": "https://github.com/apache/incubator-iceberg/blob/1cd4c77e0d3bf775fffd52adb35971dbb2ac152f/api/src/main/java/org/apache/iceberg/PartitionSpec.java",
+                "filename": "api/src/main/java/org/apache/iceberg/PartitionSpec.java",
+                "contents_url": "https://api.github.com/repos/apache/incubator-iceberg/contents/api/src/main/java/org/apache/iceberg/PartitionSpec.java?ref=1cd4c77e0d3bf775fffd52adb35971dbb2ac152f"
+            }
+        ],
+        "bug_id": "incubator-iceberg_2",
+        "parent": "https://github.com/apache/incubator-iceberg/commit/2219c86ec6dc5512b2e581f500125841b1b56226",
+        "message": "Avoid NullPointerException when a source column is missing (#532)",
+        "repo": "incubator-iceberg"
+    },
+    {
+        "commit": "https://github.com/apache/incubator-iceberg/commit/ce7aeae0e19771a722662a634c4cb82c39e86209",
+        "file": [
+            {
+                "patch": "@@ -138,10 +138,12 @@ private PartitionMetrics updateFromFile(DataFile file, Long timestampMillis) {\n \n     @Override\n     public String toString() {\n+      String lastUpdated = lastUpdatedMillis != null ?\n+          new Date(lastUpdatedMillis).toString() : null;\n       return \"PartitionMetrics(fileCount=\" + fileCount +\n           \", recordCount=\" + recordCount +\n           \", totalSize=\" + totalSize +\n-          \", lastUpdatedMillis=\" + new Date(lastUpdatedMillis).toString() + \")\";\n+          \", lastUpdated=\" + lastUpdated + \")\";\n     }\n   }\n ",
+                "additions": 3,
+                "raw_url": "https://github.com/apache/incubator-iceberg/raw/ce7aeae0e19771a722662a634c4cb82c39e86209/core/src/main/java/com/netflix/iceberg/ScanSummary.java",
+                "status": "modified",
+                "changes": 4,
+                "deletions": 1,
+                "sha": "66f28ddfac1eadbbe0f5bf88f7473d59718b6b2e",
+                "blob_url": "https://github.com/apache/incubator-iceberg/blob/ce7aeae0e19771a722662a634c4cb82c39e86209/core/src/main/java/com/netflix/iceberg/ScanSummary.java",
+                "filename": "core/src/main/java/com/netflix/iceberg/ScanSummary.java",
+                "contents_url": "https://api.github.com/repos/apache/incubator-iceberg/contents/core/src/main/java/com/netflix/iceberg/ScanSummary.java?ref=ce7aeae0e19771a722662a634c4cb82c39e86209"
+            }
+        ],
+        "bug_id": "incubator-iceberg_3",
+        "parent": "https://github.com/apache/incubator-iceberg/commit/a0ee2975adcb181dfbff8e8ae1463a340e3bf0ff",
+        "message": "Fix NPE in ScanSummary.",
+        "repo": "incubator-iceberg"
+    },
+    {
+        "commit": "https://github.com/apache/incubator-iceberg/commit/c1f6603a4e3d73270034a9f92e135d482983e219",
+        "file": [
+            {
+                "patch": "@@ -228,8 +228,8 @@ public int hashCode() {\n   }\n \n   private static class PositionAccessor implements Accessor<InternalRow> {\n-    private final DataType type;\n-    private int p;\n+    protected final DataType type;\n+    protected int p;\n \n     private PositionAccessor(int p, DataType type) {\n       this.p = p;\n@@ -238,6 +238,9 @@ private PositionAccessor(int p, DataType type) {\n \n     @Override\n     public Object get(InternalRow row) {\n+      if (row.isNullAt(p)) {\n+        return null;\n+      }\n       return row.get(p, type);\n     }\n   }\n@@ -249,7 +252,10 @@ private StringAccessor(int p, DataType type) {\n \n     @Override\n     public Object get(InternalRow row) {\n-      return super.get(row).toString();\n+      if (row.isNullAt(p)) {\n+        return null;\n+      }\n+      return row.get(p, type).toString();\n     }\n   }\n \n@@ -260,7 +266,10 @@ private DecimalAccessor(int p, DataType type) {\n \n     @Override\n     public Object get(InternalRow row) {\n-      return ((Decimal) super.get(row)).toJavaBigDecimal();\n+      if (row.isNullAt(p)) {\n+        return null;\n+      }\n+      return ((Decimal) row.get(p, type)).toJavaBigDecimal();\n     }\n   }\n ",
+                "additions": 13,
+                "raw_url": "https://github.com/apache/incubator-iceberg/raw/c1f6603a4e3d73270034a9f92e135d482983e219/spark/src/main/java/com/netflix/iceberg/spark/source/PartitionKey.java",
+                "status": "modified",
+                "changes": 17,
+                "deletions": 4,
+                "sha": "7e5abd431d5f1d8071f054cbe3ebd4803ba8bdde",
+                "blob_url": "https://github.com/apache/incubator-iceberg/blob/c1f6603a4e3d73270034a9f92e135d482983e219/spark/src/main/java/com/netflix/iceberg/spark/source/PartitionKey.java",
+                "filename": "spark/src/main/java/com/netflix/iceberg/spark/source/PartitionKey.java",
+                "contents_url": "https://api.github.com/repos/apache/incubator-iceberg/contents/spark/src/main/java/com/netflix/iceberg/spark/source/PartitionKey.java?ref=c1f6603a4e3d73270034a9f92e135d482983e219"
+            }
+        ],
+        "bug_id": "incubator-iceberg_4",
+        "parent": "https://github.com/apache/incubator-iceberg/commit/f94d687755de0bdee40eaaee07b101e5d150c669",
+        "message": "Spark: Fix NPE in PartitionKey accessors. (#73)",
+        "repo": "incubator-iceberg"
+    },
+    {
+        "commit": "https://github.com/apache/incubator-iceberg/commit/77a9ad7a07a6ec8938abdfaeda1b72d232352a9c",
+        "file": [
+            {
+                "patch": "@@ -198,7 +198,7 @@ public Statistics getStatistics() {\n     long sizeInBytes = 0L;\n     long numRows = 0L;\n \n-    for (CombinedScanTask task : tasks) {\n+    for (CombinedScanTask task : tasks()) {\n       for (FileScanTask file : task.files()) {\n         sizeInBytes += file.length();\n         numRows += file.file().recordCount();",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/incubator-iceberg/raw/77a9ad7a07a6ec8938abdfaeda1b72d232352a9c/spark/src/main/java/com/netflix/iceberg/spark/source/Reader.java",
+                "status": "modified",
+                "changes": 2,
+                "deletions": 1,
+                "sha": "3cb7fa052e15c6f026d4d0c28ba5410fc18e973f",
+                "blob_url": "https://github.com/apache/incubator-iceberg/blob/77a9ad7a07a6ec8938abdfaeda1b72d232352a9c/spark/src/main/java/com/netflix/iceberg/spark/source/Reader.java",
+                "filename": "spark/src/main/java/com/netflix/iceberg/spark/source/Reader.java",
+                "contents_url": "https://api.github.com/repos/apache/incubator-iceberg/contents/spark/src/main/java/com/netflix/iceberg/spark/source/Reader.java?ref=77a9ad7a07a6ec8938abdfaeda1b72d232352a9c"
+            }
+        ],
+        "bug_id": "incubator-iceberg_5",
+        "parent": "https://github.com/apache/incubator-iceberg/commit/f6ed7ab0ba5541c3b119985af6cfab222941178c",
+        "message": "Fix NPE in Spark Reader stats method.",
+        "repo": "incubator-iceberg"
+    },
+    {
+        "commit": "https://github.com/apache/incubator-iceberg/commit/f258bfa1fa89239f0dae18ed49f911602954de1b",
+        "file": [
+            {
+                "patch": "@@ -24,6 +24,8 @@\n  */\n public class Expressions {\n   public static Expression and(Expression left, Expression right) {\n+    Preconditions.checkNotNull(left, \"Left expression cannot be null.\");\n+    Preconditions.checkNotNull(right, \"Right expression cannot be null.\");\n     if (left == alwaysFalse() || right == alwaysFalse()) {\n       return alwaysFalse();\n     } else if (left == alwaysTrue()) {\n@@ -35,6 +37,8 @@ public static Expression and(Expression left, Expression right) {\n   }\n \n   public static Expression or(Expression left, Expression right) {\n+    Preconditions.checkNotNull(left, \"Left expression cannot be null.\");\n+    Preconditions.checkNotNull(right, \"Right expression cannot be null.\");\n     if (left == alwaysTrue() || right == alwaysTrue()) {\n       return alwaysTrue();\n     } else if (left == alwaysFalse()) {\n@@ -46,6 +50,7 @@ public static Expression or(Expression left, Expression right) {\n   }\n \n   public static Expression not(Expression child) {\n+    Preconditions.checkNotNull(child, \"Child expression cannot be null.\");\n     if (child == alwaysTrue()) {\n       return alwaysFalse();\n     } else if (child == alwaysFalse()) {",
+                "additions": 5,
+                "raw_url": "https://github.com/apache/incubator-iceberg/raw/f258bfa1fa89239f0dae18ed49f911602954de1b/api/src/main/java/com/netflix/iceberg/expressions/Expressions.java",
+                "status": "modified",
+                "changes": 5,
+                "deletions": 0,
+                "sha": "af28b52b7406aee3c64b321046ed9d935ca354bb",
+                "blob_url": "https://github.com/apache/incubator-iceberg/blob/f258bfa1fa89239f0dae18ed49f911602954de1b/api/src/main/java/com/netflix/iceberg/expressions/Expressions.java",
+                "filename": "api/src/main/java/com/netflix/iceberg/expressions/Expressions.java",
+                "contents_url": "https://api.github.com/repos/apache/incubator-iceberg/contents/api/src/main/java/com/netflix/iceberg/expressions/Expressions.java?ref=f258bfa1fa89239f0dae18ed49f911602954de1b"
+            },
+            {
+                "patch": "@@ -23,7 +23,6 @@\n import com.netflix.iceberg.expressions.BoundReference;\n import com.netflix.iceberg.expressions.Expression.Operation;\n import com.netflix.iceberg.expressions.ExpressionVisitors;\n-import com.netflix.iceberg.expressions.Expressions;\n import com.netflix.iceberg.types.Types.TimestampType;\n import com.netflix.iceberg.util.Pair;\n import org.apache.spark.sql.Column;\n@@ -123,13 +122,27 @@ private SparkExpressions() {\n           BinaryExpression binary = (BinaryExpression) expr;\n           return convert(op, binary.left(), binary.right());\n         case NOT:\n-          return not(convert(((Not) expr).child()));\n+          com.netflix.iceberg.expressions.Expression child = convert(((Not) expr).child());\n+          if (child != null) {\n+            return not(child);\n+          }\n+          return null;\n         case AND:\n           And andExpr = (And) expr;\n-          return and(convert(andExpr.left()), convert(andExpr.right()));\n+          com.netflix.iceberg.expressions.Expression andLeft = convert(andExpr.left());\n+          com.netflix.iceberg.expressions.Expression andRight = convert(andExpr.right());\n+          if (andLeft != null && andRight != null) {\n+            return and(convert(andExpr.left()), convert(andExpr.right()));\n+          }\n+          return null;\n         case OR:\n           Or orExpr = (Or) expr;\n-          return or(convert(orExpr.left()), convert(orExpr.right()));\n+          com.netflix.iceberg.expressions.Expression orLeft = convert(orExpr.left());\n+          com.netflix.iceberg.expressions.Expression orRight = convert(orExpr.right());\n+          if (orLeft != null && orRight != null) {\n+            return or(orLeft, orRight);\n+          }\n+          return null;\n         case IN:\n           if (expr instanceof In) {\n             In inExpr = (In) expr;",
+                "additions": 17,
+                "raw_url": "https://github.com/apache/incubator-iceberg/raw/f258bfa1fa89239f0dae18ed49f911602954de1b/spark/src/main/java/com/netflix/iceberg/spark/SparkExpressions.java",
+                "status": "modified",
+                "changes": 21,
+                "deletions": 4,
+                "sha": "9bd8b209a2dfd2b18b82f95276f3c4bdb04eff87",
+                "blob_url": "https://github.com/apache/incubator-iceberg/blob/f258bfa1fa89239f0dae18ed49f911602954de1b/spark/src/main/java/com/netflix/iceberg/spark/SparkExpressions.java",
+                "filename": "spark/src/main/java/com/netflix/iceberg/spark/SparkExpressions.java",
+                "contents_url": "https://api.github.com/repos/apache/incubator-iceberg/contents/spark/src/main/java/com/netflix/iceberg/spark/SparkExpressions.java?ref=f258bfa1fa89239f0dae18ed49f911602954de1b"
+            }
+        ],
+        "bug_id": "incubator-iceberg_6",
+        "parent": "https://github.com/apache/incubator-iceberg/commit/c5c51e52eda6cdcd794e7817435687423c23d62a",
+        "message": "Fix SparkExpressions.convert recursion with nulls.\n\nConversion returns null to signal that the expression is not supported,\nbut in recursive calls it wasn't checking that the wrapped expression\nwas converted to null. This caused some expressions like not(isnan(d))\nto be converted and pushed to Iceberg even though they are not\nsupported. Iceberg later hit a NPE because an expression was null.\n\nThis also checks for null expressions in the Expressions factory\nmethods.",
+        "repo": "incubator-iceberg"
+    }
+]

@@ -1,1 +1,242 @@
-[{"commit": "https://github.com/apache/commons-csv/commit/d8d5de6476ac411593bd34ca89492e74905372ab", "parent": "https://github.com/apache/commons-csv/commit/8a5efdeb7e085ec77acff147493216e8fd0bcd02", "message": "[CSV-239] Cannot get headers in column order from CSVRecord.\n\nSome NPE-proofing.", "bug_id": "commons-csv_1", "file": [{"additions": 7, "raw_url": "https://github.com/apache/commons-csv/raw/d8d5de6476ac411593bd34ca89492e74905372ab/src/main/java/org/apache/commons/csv/CSVParser.java", "blob_url": "https://github.com/apache/commons-csv/blob/d8d5de6476ac411593bd34ca89492e74905372ab/src/main/java/org/apache/commons/csv/CSVParser.java", "sha": "a3decdff3d601ea84a44b247f1f3d7ac61f5cdf7", "changes": 12, "status": "modified", "deletions": 5, "contents_url": "https://api.github.com/repos/apache/commons-csv/contents/src/main/java/org/apache/commons/csv/CSVParser.java?ref=d8d5de6476ac411593bd34ca89492e74905372ab", "patch": "@@ -466,7 +466,7 @@ public long getRecordNumber() {\n         if (formatHeader != null) {\n             hdrMap = this.format.getIgnoreHeaderCase() ?\n                     new TreeMap<>(String.CASE_INSENSITIVE_ORDER) :\n-                    new LinkedHashMap<>();\n+                    new TreeMap<>();\n \n             String[] headerRecord = null;\n             if (formatHeader.length == 0) {\n@@ -486,13 +486,15 @@ public long getRecordNumber() {\n             if (headerRecord != null) {\n                 for (int i = 0; i < headerRecord.length; i++) {\n                     final String header = headerRecord[i];\n-                    final boolean containsHeader = hdrMap.containsKey(header);\n+                    final boolean containsHeader = header == null ? false : hdrMap.containsKey(header);\n                     final boolean emptyHeader = header == null || header.trim().isEmpty();\n                     if (containsHeader && (!emptyHeader || !this.format.getAllowMissingColumnNames())) {\n-                        throw new IllegalArgumentException(\"The header contains a duplicate name: \\\"\" + header +\n-                                \"\\\" in \" + Arrays.toString(headerRecord));\n+                        throw new IllegalArgumentException(\"The header contains a duplicate name: \\\"\" + header\n+                                + \"\\\" in \" + Arrays.toString(headerRecord));\n+                    }\n+                    if (header != null) {\n+                        hdrMap.put(header, Integer.valueOf(i));\n                     }\n-                    hdrMap.put(header, Integer.valueOf(i));\n                 }\n             }\n         }", "filename": "src/main/java/org/apache/commons/csv/CSVParser.java"}], "repo": "commons-csv"}, {"commit": "https://github.com/apache/commons-csv/commit/c52b1f0a9d85b06ce906b055a7e8b0d51dc06d90", "parent": "https://github.com/apache/commons-csv/commit/453cfcbb593732bee980f4c83d06448152ac9887", "message": "FindBugs: Avoid possible NPE.\n\ngit-svn-id: https://svn.apache.org/repos/asf/commons/proper/csv/trunk@1725345 13f79535-47bb-0310-9956-ffa450edef68", "bug_id": "commons-csv_2", "file": [{"additions": 4, "raw_url": "https://github.com/apache/commons-csv/raw/c52b1f0a9d85b06ce906b055a7e8b0d51dc06d90/src/test/java/org/apache/commons/csv/CSVFileParserTest.java", "blob_url": "https://github.com/apache/commons-csv/blob/c52b1f0a9d85b06ce906b055a7e8b0d51dc06d90/src/test/java/org/apache/commons/csv/CSVFileParserTest.java", "sha": "1042030375556c174f2ae1d84430696fe0df3f8c", "changes": 8, "status": "modified", "deletions": 4, "contents_url": "https://api.github.com/repos/apache/commons-csv/contents/src/test/java/org/apache/commons/csv/CSVFileParserTest.java?ref=c52b1f0a9d85b06ce906b055a7e8b0d51dc06d90", "patch": "@@ -79,10 +79,10 @@ public boolean accept(final File dir, final String name) {\n             }\n         };\n         final File[] files = BASE.listFiles(filenameFilter);\n-        for (final File f : files) {\n-            list.add(new Object[] {\n-                f\n-            });\n+        if (files != null) {\n+            for (final File f : files) {\n+                list.add(new Object[] { f });\n+            }\n         }\n         return list;\n     }", "filename": "src/test/java/org/apache/commons/csv/CSVFileParserTest.java"}], "repo": "commons-csv"}, {"commit": "https://github.com/apache/commons-csv/commit/22601f647f2ce9a05fa4ce20ea356492c670940c", "parent": "https://github.com/apache/commons-csv/commit/2b5f84ede12cfadd7946ffb07a56709b8322a02f", "message": "[CSV-100] CSVParser: getHeaderMap throws NPE.\n\ngit-svn-id: https://svn.apache.org/repos/asf/commons/proper/csv/trunk@1524435 13f79535-47bb-0310-9956-ffa450edef68", "bug_id": "commons-csv_3", "file": [{"additions": 2, "raw_url": "https://github.com/apache/commons-csv/raw/22601f647f2ce9a05fa4ce20ea356492c670940c/src/main/java/org/apache/commons/csv/CSVParser.java", "blob_url": "https://github.com/apache/commons-csv/blob/22601f647f2ce9a05fa4ce20ea356492c670940c/src/main/java/org/apache/commons/csv/CSVParser.java", "sha": "e97a364206488144b12e663caf9086525bcb241f", "changes": 4, "status": "modified", "deletions": 2, "contents_url": "https://api.github.com/repos/apache/commons-csv/contents/src/main/java/org/apache/commons/csv/CSVParser.java?ref=22601f647f2ce9a05fa4ce20ea356492c670940c", "patch": "@@ -281,11 +281,11 @@ public long getCurrentLineNumber() {\n      * Returns a copy of the header map that iterates in column order.\n      * <p>\n      * The map keys are column names. The map values are 0-based indices.\n-     *\n+     * </p>\n      * @return a copy of the header map that iterates in column order.\n      */\n     public Map<String, Integer> getHeaderMap() {\n-        return new LinkedHashMap<String, Integer>(this.headerMap);\n+        return this.headerMap == null ? null : new LinkedHashMap<String, Integer>(this.headerMap);\n     }\n \n     /**", "filename": "src/main/java/org/apache/commons/csv/CSVParser.java"}, {"additions": 6, "raw_url": "https://github.com/apache/commons-csv/raw/22601f647f2ce9a05fa4ce20ea356492c670940c/src/test/java/org/apache/commons/csv/CSVParserTest.java", "blob_url": "https://github.com/apache/commons-csv/blob/22601f647f2ce9a05fa4ce20ea356492c670940c/src/test/java/org/apache/commons/csv/CSVParserTest.java", "sha": "18a433c07ff007fb2656ad07bc9690fc08144d0e", "changes": 6, "status": "modified", "deletions": 0, "contents_url": "https://api.github.com/repos/apache/commons-csv/contents/src/test/java/org/apache/commons/csv/CSVParserTest.java?ref=22601f647f2ce9a05fa4ce20ea356492c670940c", "patch": "@@ -664,6 +664,12 @@ public void testGetHeaderMap() throws Exception {\n         assertFalse(records.hasNext());\n     }\n \n+    @Test\n+    public void testNoHeaderMap() throws Exception {\n+        final CSVParser parser = CSVParser.parse(\"a,b,c\\n1,2,3\\nx,y,z\", CSVFormat.DEFAULT);\n+        Assert.assertNull(parser.getHeaderMap());\n+    }\n+\n     @Test\n     public void testGetLineNumberWithLF() throws Exception {\n         this.validateLineNumbers(String.valueOf(LF));", "filename": "src/test/java/org/apache/commons/csv/CSVParserTest.java"}], "repo": "commons-csv"}, {"commit": "https://github.com/apache/commons-csv/commit/2b14b16d4b79c84cf67728b51e4dc222fef57880", "parent": "https://github.com/apache/commons-csv/commit/a0624779468261996e7e6e5c7a63ba1ce1a3a553", "message": "Fix NPE when format is null.\n\ngit-svn-id: https://svn.apache.org/repos/asf/commons/proper/csv/trunk@1508938 13f79535-47bb-0310-9956-ffa450edef68", "bug_id": "commons-csv_4", "file": [{"additions": 1, "raw_url": "https://github.com/apache/commons-csv/raw/2b14b16d4b79c84cf67728b51e4dc222fef57880/src/main/java/org/apache/commons/csv/CSVPrinter.java", "blob_url": "https://github.com/apache/commons-csv/blob/2b14b16d4b79c84cf67728b51e4dc222fef57880/src/main/java/org/apache/commons/csv/CSVPrinter.java", "sha": "431cd4eb988337423662f4b5dbbac2ffab4d9634", "changes": 2, "status": "modified", "deletions": 1, "contents_url": "https://api.github.com/repos/apache/commons-csv/contents/src/main/java/org/apache/commons/csv/CSVPrinter.java?ref=2b14b16d4b79c84cf67728b51e4dc222fef57880", "patch": "@@ -58,7 +58,7 @@\n     public CSVPrinter(final Appendable out, final CSVFormat format) {\n         this.out = out;\n         this.format = format == null ? CSVFormat.DEFAULT : format;\n-        format.validate();\n+        this.format.validate();\n     }\n \n     // ======================================================", "filename": "src/main/java/org/apache/commons/csv/CSVPrinter.java"}], "repo": "commons-csv"}, {"commit": "https://github.com/apache/commons-csv/commit/530b0382691b6af6340f194956f6e79ae3249662", "parent": "https://github.com/apache/commons-csv/commit/93a07b9b8f9e4fa82e6f306d57d71d5268d7dacf", "message": "Fix possible NPE reported by FindBugs.\n\ngit-svn-id: https://svn.apache.org/repos/asf/commons/proper/csv/trunk@1495269 13f79535-47bb-0310-9956-ffa450edef68", "bug_id": "commons-csv_5", "file": [{"additions": 7, "raw_url": "https://github.com/apache/commons-csv/raw/530b0382691b6af6340f194956f6e79ae3249662/src/main/java/org/apache/commons/csv/CSVLexer.java", "blob_url": "https://github.com/apache/commons-csv/blob/530b0382691b6af6340f194956f6e79ae3249662/src/main/java/org/apache/commons/csv/CSVLexer.java", "sha": "8077f2c1f491dd89f54aea7669a09c543fc52477", "changes": 8, "status": "modified", "deletions": 1, "contents_url": "https://api.github.com/repos/apache/commons-csv/contents/src/main/java/org/apache/commons/csv/CSVLexer.java?ref=530b0382691b6af6340f194956f6e79ae3249662", "patch": "@@ -86,7 +86,13 @@ Token nextToken(final Token token) throws IOException {\n         }\n \n         if (isStartOfLine(lastChar) && isCommentStart(c)) {\n-            final String comment = in.readLine().trim();\n+            String line = in.readLine();\n+            if (line == null) {\n+                token.type = EOF;\n+                // don't set token.isReady here because no content\n+                return token;                \n+            }\n+            final String comment = line.trim();\n             token.content.append(comment);\n             token.type = COMMENT;\n             return token;", "filename": "src/main/java/org/apache/commons/csv/CSVLexer.java"}], "repo": "commons-csv"}, {"commit": "https://github.com/apache/commons-csv/commit/2480dffa6d8343b189c6fb57b88b325c45f0b83f", "parent": "https://github.com/apache/commons-csv/commit/0331565fbaf33fab24bfd588948e653475e795d9", "message": "<action issue=\"CSV-118\" type=\"fix\" dev=\"ggregory\" due-to=\"Enrique Lara\">CSVRecord.toMap() throws NPE on formats with no headers.</action>\n\ngit-svn-id: https://svn.apache.org/repos/asf/commons/proper/csv/trunk@1594966 13f79535-47bb-0310-9956-ffa450edef68", "bug_id": "commons-csv_6", "file": [{"additions": 14, "raw_url": "https://github.com/apache/commons-csv/raw/2480dffa6d8343b189c6fb57b88b325c45f0b83f/src/changes/changes.xml", "blob_url": "https://github.com/apache/commons-csv/blob/2480dffa6d8343b189c6fb57b88b325c45f0b83f/src/changes/changes.xml", "sha": "7132bff85ec5d6b56e18be3b6ca6b3760f1614d9", "changes": 20, "status": "modified", "deletions": 6, "contents_url": "https://api.github.com/repos/apache/commons-csv/contents/src/changes/changes.xml?ref=2480dffa6d8343b189c6fb57b88b325c45f0b83f", "patch": "@@ -40,11 +40,15 @@\n   <body>\n \n     <release version=\"1.0\" date=\"TBD\" description=\"First release\">\n+      <action issue=\"CSV-118\" type=\"fix\" dev=\"ggregory\" due-to=\"Enrique Lara\">CSVRecord.toMap() throws NPE on formats with no\n+        headers.</action>\n       <action issue=\"CSV-113\" type=\"fix\" dev=\"sebb\">Check whether ISE/IAE are being used appropriately</action>\n       <action issue=\"CSV-114\" type=\"fix\" dev=\"sebb\">CSVFormat constructor should reject a header array with duplicate\n-        entries</action>\n+        entries\n+      </action>\n       <action issue=\"CSV-112\" type=\"fix\" dev=\"britter\">HeaderMap is inconsistent when it is parsed from an input with\n-        duplicate columns names</action>\n+        duplicate columns names\n+      </action>\n       <action issue=\"CSV-111\" type=\"fix\" dev=\"ggregory\">CSVRecord.toMap() fails if row length shorter than header length\n       </action>\n       <action issue=\"CSV-106\" type=\"fix\" dev=\"ggregory\">CSVFormat.format allways append null</action>\n@@ -55,18 +59,21 @@\n       </action>\n       <action issue=\"CSV-99\" type=\"update\" dev=\"britter\">Revert Builder implementation in CSVFormat</action>\n       <action issue=\"CSV-53\" type=\"fix\" dev=\"britter\">CSVRecord does not verify that the length of the header mapping\n-        matches the number of values</action>\n+        matches the number of values\n+      </action>\n       <action issue=\"CSV-93\" type=\"update\" dev=\"ggregory\">Allow the handling of NULL values</action>\n       <action issue=\"CSV-68\" type=\"update\" dev=\"ggregory\">Use the Builder pattern for CSVFormat</action>\n       <action issue=\"CSV-84\" type=\"update\" dev=\"sebb\">Clarify comment handling</action>\n       <action issue=\"CSV-25\" type=\"update\" dev=\"ebourg\">CSVParser.nextValue() seems pointless</action>\n       <action issue=\"CSV-97\" type=\"update\" dev=\"ggregory\">Allow the String value for null to be customized for the CSV\n-        printer</action>\n+        printer\n+      </action>\n       <action issue=\"CSV-88\" type=\"update\" dev=\"ggregory\">Not possible to create a CSVFormat from scratch</action>\n       <action issue=\"CSV-52\" type=\"add\" dev=\"ggregory\">Keep track of record number</action>\n       <action issue=\"CSV-94\" type=\"update\" dev=\"sebb\">Lexer should only use char fields</action>\n       <action issue=\"CSV-92\" type=\"add\" dev=\"ggregory\">Need a way to extract parsed headers, e.g. for use in formatting\n-        output</action>\n+        output\n+      </action>\n       <action issue=\"CSV-65\" type=\"add\" dev=\"ebourg\">Header support</action>\n       <action issue=\"CSV-54\" type=\"fix\" dev=\"sebb\">Confusing semantic of the ignore leading/trailing spaces parameters\n       </action>\n@@ -76,7 +83,8 @@\n       <action issue=\"CSV-55\" type=\"update\" dev=\"britter\">Replace while(true)-loop in CSVParser.getRecord with do-while-loop\n       </action>\n       <action issue=\"CSV-34\" type=\"fix\" dev=\"sebb\">CSVFormat describes itself as immutable, but it is not - in\n-        particular it is not thread-safe</action>\n+        particular it is not thread-safe\n+      </action>\n       <action issue=\"CSV-36\" type=\"fix\" dev=\"yonik\">Endless loops in CSV parser</action>\n       <action issue=\"CSV-13\" type=\"fix\" dev=\"ebourg\">NullPointerException in CSVPrinter.print()/println()</action>\n       <action issue=\"CSV-45\" type=\"update\" dev=\"yonik\">CSVPrinter overhaul</action>", "filename": "src/changes/changes.xml"}, {"additions": 3, "raw_url": "https://github.com/apache/commons-csv/raw/2480dffa6d8343b189c6fb57b88b325c45f0b83f/src/main/java/org/apache/commons/csv/CSVRecord.java", "blob_url": "https://github.com/apache/commons-csv/blob/2480dffa6d8343b189c6fb57b88b325c45f0b83f/src/main/java/org/apache/commons/csv/CSVRecord.java", "sha": "e814b707c6401fb204b8401ac612ff1640e8d63f", "changes": 3, "status": "modified", "deletions": 0, "contents_url": "https://api.github.com/repos/apache/commons-csv/contents/src/main/java/org/apache/commons/csv/CSVRecord.java?ref=2480dffa6d8343b189c6fb57b88b325c45f0b83f", "patch": "@@ -177,6 +177,9 @@ public boolean isSet(final String name) {\n      * @return the given map.\n      */\n     <M extends Map<String, String>> M putIn(final M map) {\n+        if (mapping == null) {\n+            return map;\n+        }\n         for (final Entry<String, Integer> entry : mapping.entrySet()) {\n             final int col = entry.getValue().intValue();\n             if (col < values.length) {", "filename": "src/main/java/org/apache/commons/csv/CSVRecord.java"}, {"additions": 10, "raw_url": "https://github.com/apache/commons-csv/raw/2480dffa6d8343b189c6fb57b88b325c45f0b83f/src/test/java/org/apache/commons/csv/CSVRecordTest.java", "blob_url": "https://github.com/apache/commons-csv/blob/2480dffa6d8343b189c6fb57b88b325c45f0b83f/src/test/java/org/apache/commons/csv/CSVRecordTest.java", "sha": "1ef6e28e4169cffe0a7178238a3e705925cdcc60", "changes": 10, "status": "modified", "deletions": 0, "contents_url": "https://api.github.com/repos/apache/commons-csv/contents/src/test/java/org/apache/commons/csv/CSVRecordTest.java?ref=2480dffa6d8343b189c6fb57b88b325c45f0b83f", "patch": "@@ -18,6 +18,7 @@\n \n import static org.junit.Assert.assertEquals;\n import static org.junit.Assert.assertFalse;\n+import static org.junit.Assert.assertNotNull;\n import static org.junit.Assert.assertNull;\n import static org.junit.Assert.assertTrue;\n \n@@ -166,6 +167,15 @@ public void testToMapWithShortRecord() throws Exception {\n        final CSVRecord shortRec = parser.iterator().next();\n        shortRec.toMap();\n     }\n+\n+    @Test\n+    public void testToMapWithNoHeader() throws Exception {\n+       final CSVParser parser =  CSVParser.parse(\"a,b\", CSVFormat.newFormat(','));\n+       final CSVRecord shortRec = parser.iterator().next();\n+       Map<String, String> map = shortRec.toMap();\n+       assertNotNull(\"Map is not null.\", map);\n+       assertTrue(\"Map is empty.\", map.isEmpty());\n+    }\n     \n     private void validateMap(final Map<String, String> map, final boolean allowsNulls) {\n         assertTrue(map.containsKey(\"first\"));", "filename": "src/test/java/org/apache/commons/csv/CSVRecordTest.java"}], "repo": "commons-csv"}]
+[
+    {
+        "commit": "https://github.com/apache/commons-csv/commit/d8d5de6476ac411593bd34ca89492e74905372ab",
+        "file": [
+            {
+                "patch": "@@ -466,7 +466,7 @@ public long getRecordNumber() {\n         if (formatHeader != null) {\n             hdrMap = this.format.getIgnoreHeaderCase() ?\n                     new TreeMap<>(String.CASE_INSENSITIVE_ORDER) :\n-                    new LinkedHashMap<>();\n+                    new TreeMap<>();\n \n             String[] headerRecord = null;\n             if (formatHeader.length == 0) {\n@@ -486,13 +486,15 @@ public long getRecordNumber() {\n             if (headerRecord != null) {\n                 for (int i = 0; i < headerRecord.length; i++) {\n                     final String header = headerRecord[i];\n-                    final boolean containsHeader = hdrMap.containsKey(header);\n+                    final boolean containsHeader = header == null ? false : hdrMap.containsKey(header);\n                     final boolean emptyHeader = header == null || header.trim().isEmpty();\n                     if (containsHeader && (!emptyHeader || !this.format.getAllowMissingColumnNames())) {\n-                        throw new IllegalArgumentException(\"The header contains a duplicate name: \\\"\" + header +\n-                                \"\\\" in \" + Arrays.toString(headerRecord));\n+                        throw new IllegalArgumentException(\"The header contains a duplicate name: \\\"\" + header\n+                                + \"\\\" in \" + Arrays.toString(headerRecord));\n+                    }\n+                    if (header != null) {\n+                        hdrMap.put(header, Integer.valueOf(i));\n                     }\n-                    hdrMap.put(header, Integer.valueOf(i));\n                 }\n             }\n         }",
+                "additions": 7,
+                "raw_url": "https://github.com/apache/commons-csv/raw/d8d5de6476ac411593bd34ca89492e74905372ab/src/main/java/org/apache/commons/csv/CSVParser.java",
+                "status": "modified",
+                "changes": 12,
+                "deletions": 5,
+                "sha": "a3decdff3d601ea84a44b247f1f3d7ac61f5cdf7",
+                "blob_url": "https://github.com/apache/commons-csv/blob/d8d5de6476ac411593bd34ca89492e74905372ab/src/main/java/org/apache/commons/csv/CSVParser.java",
+                "filename": "src/main/java/org/apache/commons/csv/CSVParser.java",
+                "contents_url": "https://api.github.com/repos/apache/commons-csv/contents/src/main/java/org/apache/commons/csv/CSVParser.java?ref=d8d5de6476ac411593bd34ca89492e74905372ab"
+            }
+        ],
+        "bug_id": "commons-csv_1",
+        "parent": "https://github.com/apache/commons-csv/commit/8a5efdeb7e085ec77acff147493216e8fd0bcd02",
+        "message": "[CSV-239] Cannot get headers in column order from CSVRecord.\n\nSome NPE-proofing.",
+        "repo": "commons-csv"
+    },
+    {
+        "commit": "https://github.com/apache/commons-csv/commit/b67524da7fd146634c7112b23e95d1d45c398b82",
+        "file": [
+            {
+                "patch": "@@ -40,6 +40,7 @@\n   <body>\n \n     <release version=\"1.0\" date=\"TBD\" description=\"First release\">    \n+      <action issue=\"CSV-122\" type=\"fix\" dev=\"britter\" due-to=\"Mike Lewis\">NullPointerException when empty header string and and null string of \"\"</action>\n       <action issue=\"CSV-117\" type=\"update\" dev=\"sebb\">Validate format parameters in constructor</action>\n       <action issue=\"CSV-121\" type=\"add\" dev=\"ggregory\" due-to=\"Sebastian Hardt\">IllegalArgumentException thrown when the header contains duplicate names when the column names are empty.</action>\n       <action issue=\"CSV-120\" type=\"add\" dev=\"ggregory\" due-to=\"Sergei Lebedev\">CSVFormat#withHeader doesn't work with CSVPrinter</action>",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/commons-csv/raw/b67524da7fd146634c7112b23e95d1d45c398b82/src/changes/changes.xml",
+                "status": "modified",
+                "changes": 1,
+                "deletions": 0,
+                "sha": "26ad32f349d7a87d4d316fc9fa760d34b9387eb5",
+                "blob_url": "https://github.com/apache/commons-csv/blob/b67524da7fd146634c7112b23e95d1d45c398b82/src/changes/changes.xml",
+                "filename": "src/changes/changes.xml",
+                "contents_url": "https://api.github.com/repos/apache/commons-csv/contents/src/changes/changes.xml?ref=b67524da7fd146634c7112b23e95d1d45c398b82"
+            },
+            {
+                "patch": "@@ -381,7 +381,7 @@ public long getRecordNumber() {\n                 for (int i = 0; i < headerRecord.length; i++) {\n                     final String header = headerRecord[i];\n                     final boolean containsHeader = hdrMap.containsKey(header);\n-                    final boolean emptyHeader = header.trim().isEmpty();\n+                    final boolean emptyHeader = header == null || header.trim().isEmpty();\n                     if (containsHeader && (!emptyHeader || (emptyHeader && !this.format.getIgnoreEmptyHeaders()))) {\n                         throw new IllegalArgumentException(\"The header contains a duplicate name: \\\"\" + header +\n                                 \"\\\" in \" + Arrays.toString(headerRecord));",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/commons-csv/raw/b67524da7fd146634c7112b23e95d1d45c398b82/src/main/java/org/apache/commons/csv/CSVParser.java",
+                "status": "modified",
+                "changes": 2,
+                "deletions": 1,
+                "sha": "b7ca3fa9c0199a0daed3651272932b0e8a6d6f7e",
+                "blob_url": "https://github.com/apache/commons-csv/blob/b67524da7fd146634c7112b23e95d1d45c398b82/src/main/java/org/apache/commons/csv/CSVParser.java",
+                "filename": "src/main/java/org/apache/commons/csv/CSVParser.java",
+                "contents_url": "https://api.github.com/repos/apache/commons-csv/contents/src/main/java/org/apache/commons/csv/CSVParser.java?ref=b67524da7fd146634c7112b23e95d1d45c398b82"
+            },
+            {
+                "patch": "@@ -661,6 +661,12 @@ public void testHeadersMissing() throws Exception {\n         CSVFormat.DEFAULT.withHeader().withIgnoreEmptyHeaders(true).parse(in).iterator();\n     }\n \n+    @Test\n+    public void testHeaderMissingWithNull() throws Exception {\n+        final Reader in = new StringReader(\"a,,c,,d\\n1,2,3,4\\nx,y,z,zz\");\n+        CSVFormat.DEFAULT.withHeader().withNullString(\"\").withIgnoreEmptyHeaders(true).parse(in).iterator();\n+    }\n+\n     @Test\n     public void testHeaderComment() throws Exception {\n         final Reader in = new StringReader(\"# comment\\na,b,c\\n1,2,3\\nx,y,z\");",
+                "additions": 6,
+                "raw_url": "https://github.com/apache/commons-csv/raw/b67524da7fd146634c7112b23e95d1d45c398b82/src/test/java/org/apache/commons/csv/CSVParserTest.java",
+                "status": "modified",
+                "changes": 6,
+                "deletions": 0,
+                "sha": "f5b6cb8636edcb6e376b54b261a1745fef9b5bd4",
+                "blob_url": "https://github.com/apache/commons-csv/blob/b67524da7fd146634c7112b23e95d1d45c398b82/src/test/java/org/apache/commons/csv/CSVParserTest.java",
+                "filename": "src/test/java/org/apache/commons/csv/CSVParserTest.java",
+                "contents_url": "https://api.github.com/repos/apache/commons-csv/contents/src/test/java/org/apache/commons/csv/CSVParserTest.java?ref=b67524da7fd146634c7112b23e95d1d45c398b82"
+            }
+        ],
+        "bug_id": "commons-csv_2",
+        "parent": "https://github.com/apache/commons-csv/commit/d3afa156e4ddf8ec76847504988e7979146d9fd6",
+        "message": "CSV-122: NullPointerException when empty header string and and null string of \"\". Thanks to Mike Lewis.\n\ngit-svn-id: https://svn.apache.org/repos/asf/commons/proper/csv/trunk@1609768 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "commons-csv"
+    },
+    {
+        "commit": "https://github.com/apache/commons-csv/commit/e80b8112a719b6b213e833bd0d1ee27f55bfe5f4",
+        "file": [
+            {
+                "patch": "@@ -97,7 +97,7 @@ public void println(String... values) throws IOException {\n      * @param comment the comment to output\n      */\n     public void printComment(String comment) throws IOException {\n-        if (this.format.isCommentingDisabled()) {\n+        if (format.isCommentingDisabled()) {\n             return;\n         }\n         if (!newLine) {\n@@ -127,13 +127,7 @@ public void printComment(String comment) throws IOException {\n     }\n \n \n-    private void print(char[] value, int offset, int len, boolean checkForEscape) throws IOException {\n-        if (!checkForEscape) {\n-            printSep();\n-            out.write(value, offset, len);\n-            return;\n-        }\n-        \n+    private void print(char[] value, int offset, int len) throws IOException {        \n         if (format.isEncapsulating()) {\n             printAndEncapsulate(value, offset, len);\n         } else if (format.isEscaping()) {\n@@ -148,7 +142,7 @@ void printSep() throws IOException {\n         if (newLine) {\n             newLine = false;\n         } else {\n-            out.write(this.format.getDelimiter());\n+            out.write(format.getDelimiter());\n         }\n     }\n \n@@ -159,8 +153,8 @@ void printAndEscape(char[] value, int offset, int len) throws IOException {\n \n         printSep();\n \n-        char delim = this.format.getDelimiter();\n-        char escape = this.format.getEscape();\n+        char delim = format.getDelimiter();\n+        char escape = format.getEscape();\n \n         while (pos < end) {\n             char c = value[pos];\n@@ -201,8 +195,8 @@ void printAndEncapsulate(char[] value, int offset, int len) throws IOException {\n \n         printSep();\n \n-        char delim = this.format.getDelimiter();\n-        char encapsulator = this.format.getEncapsulator();\n+        char delim = format.getDelimiter();\n+        char encapsulator = format.getEncapsulator();\n \n         if (len <= 0) {\n             // always quote an empty token that is the first\n@@ -288,6 +282,11 @@ void printAndEncapsulate(char[] value, int offset, int len) throws IOException {\n      * @param value value to be outputted.\n      */\n     public void print(String value, boolean checkForEscape) throws IOException {\n+        if (value == null) {\n+            // null values are considered empty\n+            value = \"\";\n+        }\n+        \n         if (!checkForEscape) {\n             // write directly from string\n             printSep();\n@@ -300,7 +299,7 @@ public void print(String value, boolean checkForEscape) throws IOException {\n         }\n \n         value.getChars(0, value.length(), buf, 0);\n-        print(buf, 0, value.length(), checkForEscape);\n+        print(buf, 0, value.length());\n     }\n \n     /**",
+                "additions": 13,
+                "raw_url": "https://github.com/apache/commons-csv/raw/e80b8112a719b6b213e833bd0d1ee27f55bfe5f4/src/main/java/org/apache/commons/csv/CSVPrinter.java",
+                "status": "modified",
+                "changes": 27,
+                "deletions": 14,
+                "sha": "aaa34e6651110334bc0549f8eb4afbc4acb37fa3",
+                "blob_url": "https://github.com/apache/commons-csv/blob/e80b8112a719b6b213e833bd0d1ee27f55bfe5f4/src/main/java/org/apache/commons/csv/CSVPrinter.java",
+                "filename": "src/main/java/org/apache/commons/csv/CSVPrinter.java",
+                "contents_url": "https://api.github.com/repos/apache/commons-csv/contents/src/main/java/org/apache/commons/csv/CSVPrinter.java?ref=e80b8112a719b6b213e833bd0d1ee27f55bfe5f4"
+            },
+            {
+                "patch": "@@ -92,6 +92,13 @@ public void testExcelPrinter2() throws IOException {\n         assertEquals(\"\\\"a,b\\\",b\" + lineSeparator, sw.toString());\n     }\n \n+    public void testPrintNullValues() throws IOException {\n+        StringWriter sw = new StringWriter();\n+        CSVPrinter printer = new CSVPrinter(sw, CSVFormat.DEFAULT);\n+        printer.println(\"a\", null, \"b\");\n+        assertEquals(\"a,,b\" + lineSeparator, sw.toString());\n+    }\n+\n     public void testDisabledComment() throws IOException {\n         StringWriter sw = new StringWriter();\n         CSVPrinter printer = new CSVPrinter(sw, CSVFormat.DEFAULT);",
+                "additions": 7,
+                "raw_url": "https://github.com/apache/commons-csv/raw/e80b8112a719b6b213e833bd0d1ee27f55bfe5f4/src/test/java/org/apache/commons/csv/CSVPrinterTest.java",
+                "status": "modified",
+                "changes": 7,
+                "deletions": 0,
+                "sha": "ef2ad002be8a5e8f40205ec16f92ddfe2efc1697",
+                "blob_url": "https://github.com/apache/commons-csv/blob/e80b8112a719b6b213e833bd0d1ee27f55bfe5f4/src/test/java/org/apache/commons/csv/CSVPrinterTest.java",
+                "filename": "src/test/java/org/apache/commons/csv/CSVPrinterTest.java",
+                "contents_url": "https://api.github.com/repos/apache/commons-csv/contents/src/test/java/org/apache/commons/csv/CSVPrinterTest.java?ref=e80b8112a719b6b213e833bd0d1ee27f55bfe5f4"
+            }
+        ],
+        "bug_id": "commons-csv_3",
+        "parent": "https://github.com/apache/commons-csv/commit/fafacd179d4a564b3176014039eef05669a26ffb",
+        "message": "Fixed the NullPointerException on null values in CSVPrinter and print an empty value instead (SANDBOX-209)\n\ngit-svn-id: https://svn.apache.org/repos/asf/commons/sandbox/csv/trunk@1297306 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "commons-csv"
+    },
+    {
+        "commit": "https://github.com/apache/commons-csv/commit/c52b1f0a9d85b06ce906b055a7e8b0d51dc06d90",
+        "file": [
+            {
+                "patch": "@@ -79,10 +79,10 @@ public boolean accept(final File dir, final String name) {\n             }\n         };\n         final File[] files = BASE.listFiles(filenameFilter);\n-        for (final File f : files) {\n-            list.add(new Object[] {\n-                f\n-            });\n+        if (files != null) {\n+            for (final File f : files) {\n+                list.add(new Object[] { f });\n+            }\n         }\n         return list;\n     }",
+                "additions": 4,
+                "raw_url": "https://github.com/apache/commons-csv/raw/c52b1f0a9d85b06ce906b055a7e8b0d51dc06d90/src/test/java/org/apache/commons/csv/CSVFileParserTest.java",
+                "status": "modified",
+                "changes": 8,
+                "deletions": 4,
+                "sha": "1042030375556c174f2ae1d84430696fe0df3f8c",
+                "blob_url": "https://github.com/apache/commons-csv/blob/c52b1f0a9d85b06ce906b055a7e8b0d51dc06d90/src/test/java/org/apache/commons/csv/CSVFileParserTest.java",
+                "filename": "src/test/java/org/apache/commons/csv/CSVFileParserTest.java",
+                "contents_url": "https://api.github.com/repos/apache/commons-csv/contents/src/test/java/org/apache/commons/csv/CSVFileParserTest.java?ref=c52b1f0a9d85b06ce906b055a7e8b0d51dc06d90"
+            }
+        ],
+        "bug_id": "commons-csv_4",
+        "parent": "https://github.com/apache/commons-csv/commit/453cfcbb593732bee980f4c83d06448152ac9887",
+        "message": "FindBugs: Avoid possible NPE.\n\ngit-svn-id: https://svn.apache.org/repos/asf/commons/proper/csv/trunk@1725345 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "commons-csv"
+    },
+    {
+        "commit": "https://github.com/apache/commons-csv/commit/22601f647f2ce9a05fa4ce20ea356492c670940c",
+        "file": [
+            {
+                "patch": "@@ -281,11 +281,11 @@ public long getCurrentLineNumber() {\n      * Returns a copy of the header map that iterates in column order.\n      * <p>\n      * The map keys are column names. The map values are 0-based indices.\n-     *\n+     * </p>\n      * @return a copy of the header map that iterates in column order.\n      */\n     public Map<String, Integer> getHeaderMap() {\n-        return new LinkedHashMap<String, Integer>(this.headerMap);\n+        return this.headerMap == null ? null : new LinkedHashMap<String, Integer>(this.headerMap);\n     }\n \n     /**",
+                "additions": 2,
+                "raw_url": "https://github.com/apache/commons-csv/raw/22601f647f2ce9a05fa4ce20ea356492c670940c/src/main/java/org/apache/commons/csv/CSVParser.java",
+                "status": "modified",
+                "changes": 4,
+                "deletions": 2,
+                "sha": "e97a364206488144b12e663caf9086525bcb241f",
+                "blob_url": "https://github.com/apache/commons-csv/blob/22601f647f2ce9a05fa4ce20ea356492c670940c/src/main/java/org/apache/commons/csv/CSVParser.java",
+                "filename": "src/main/java/org/apache/commons/csv/CSVParser.java",
+                "contents_url": "https://api.github.com/repos/apache/commons-csv/contents/src/main/java/org/apache/commons/csv/CSVParser.java?ref=22601f647f2ce9a05fa4ce20ea356492c670940c"
+            },
+            {
+                "patch": "@@ -664,6 +664,12 @@ public void testGetHeaderMap() throws Exception {\n         assertFalse(records.hasNext());\n     }\n \n+    @Test\n+    public void testNoHeaderMap() throws Exception {\n+        final CSVParser parser = CSVParser.parse(\"a,b,c\\n1,2,3\\nx,y,z\", CSVFormat.DEFAULT);\n+        Assert.assertNull(parser.getHeaderMap());\n+    }\n+\n     @Test\n     public void testGetLineNumberWithLF() throws Exception {\n         this.validateLineNumbers(String.valueOf(LF));",
+                "additions": 6,
+                "raw_url": "https://github.com/apache/commons-csv/raw/22601f647f2ce9a05fa4ce20ea356492c670940c/src/test/java/org/apache/commons/csv/CSVParserTest.java",
+                "status": "modified",
+                "changes": 6,
+                "deletions": 0,
+                "sha": "18a433c07ff007fb2656ad07bc9690fc08144d0e",
+                "blob_url": "https://github.com/apache/commons-csv/blob/22601f647f2ce9a05fa4ce20ea356492c670940c/src/test/java/org/apache/commons/csv/CSVParserTest.java",
+                "filename": "src/test/java/org/apache/commons/csv/CSVParserTest.java",
+                "contents_url": "https://api.github.com/repos/apache/commons-csv/contents/src/test/java/org/apache/commons/csv/CSVParserTest.java?ref=22601f647f2ce9a05fa4ce20ea356492c670940c"
+            }
+        ],
+        "bug_id": "commons-csv_5",
+        "parent": "https://github.com/apache/commons-csv/commit/2b5f84ede12cfadd7946ffb07a56709b8322a02f",
+        "message": "[CSV-100] CSVParser: getHeaderMap throws NPE.\n\ngit-svn-id: https://svn.apache.org/repos/asf/commons/proper/csv/trunk@1524435 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "commons-csv"
+    },
+    {
+        "commit": "https://github.com/apache/commons-csv/commit/2b14b16d4b79c84cf67728b51e4dc222fef57880",
+        "file": [
+            {
+                "patch": "@@ -58,7 +58,7 @@\n     public CSVPrinter(final Appendable out, final CSVFormat format) {\n         this.out = out;\n         this.format = format == null ? CSVFormat.DEFAULT : format;\n-        format.validate();\n+        this.format.validate();\n     }\n \n     // ======================================================",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/commons-csv/raw/2b14b16d4b79c84cf67728b51e4dc222fef57880/src/main/java/org/apache/commons/csv/CSVPrinter.java",
+                "status": "modified",
+                "changes": 2,
+                "deletions": 1,
+                "sha": "431cd4eb988337423662f4b5dbbac2ffab4d9634",
+                "blob_url": "https://github.com/apache/commons-csv/blob/2b14b16d4b79c84cf67728b51e4dc222fef57880/src/main/java/org/apache/commons/csv/CSVPrinter.java",
+                "filename": "src/main/java/org/apache/commons/csv/CSVPrinter.java",
+                "contents_url": "https://api.github.com/repos/apache/commons-csv/contents/src/main/java/org/apache/commons/csv/CSVPrinter.java?ref=2b14b16d4b79c84cf67728b51e4dc222fef57880"
+            }
+        ],
+        "bug_id": "commons-csv_6",
+        "parent": "https://github.com/apache/commons-csv/commit/a0624779468261996e7e6e5c7a63ba1ce1a3a553",
+        "message": "Fix NPE when format is null.\n\ngit-svn-id: https://svn.apache.org/repos/asf/commons/proper/csv/trunk@1508938 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "commons-csv"
+    },
+    {
+        "commit": "https://github.com/apache/commons-csv/commit/530b0382691b6af6340f194956f6e79ae3249662",
+        "file": [
+            {
+                "patch": "@@ -86,7 +86,13 @@ Token nextToken(final Token token) throws IOException {\n         }\n \n         if (isStartOfLine(lastChar) && isCommentStart(c)) {\n-            final String comment = in.readLine().trim();\n+            String line = in.readLine();\n+            if (line == null) {\n+                token.type = EOF;\n+                // don't set token.isReady here because no content\n+                return token;                \n+            }\n+            final String comment = line.trim();\n             token.content.append(comment);\n             token.type = COMMENT;\n             return token;",
+                "additions": 7,
+                "raw_url": "https://github.com/apache/commons-csv/raw/530b0382691b6af6340f194956f6e79ae3249662/src/main/java/org/apache/commons/csv/CSVLexer.java",
+                "status": "modified",
+                "changes": 8,
+                "deletions": 1,
+                "sha": "8077f2c1f491dd89f54aea7669a09c543fc52477",
+                "blob_url": "https://github.com/apache/commons-csv/blob/530b0382691b6af6340f194956f6e79ae3249662/src/main/java/org/apache/commons/csv/CSVLexer.java",
+                "filename": "src/main/java/org/apache/commons/csv/CSVLexer.java",
+                "contents_url": "https://api.github.com/repos/apache/commons-csv/contents/src/main/java/org/apache/commons/csv/CSVLexer.java?ref=530b0382691b6af6340f194956f6e79ae3249662"
+            }
+        ],
+        "bug_id": "commons-csv_7",
+        "parent": "https://github.com/apache/commons-csv/commit/93a07b9b8f9e4fa82e6f306d57d71d5268d7dacf",
+        "message": "Fix possible NPE reported by FindBugs.\n\ngit-svn-id: https://svn.apache.org/repos/asf/commons/proper/csv/trunk@1495269 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "commons-csv"
+    },
+    {
+        "commit": "https://github.com/apache/commons-csv/commit/2480dffa6d8343b189c6fb57b88b325c45f0b83f",
+        "file": [
+            {
+                "patch": "@@ -40,11 +40,15 @@\n   <body>\n \n     <release version=\"1.0\" date=\"TBD\" description=\"First release\">\n+      <action issue=\"CSV-118\" type=\"fix\" dev=\"ggregory\" due-to=\"Enrique Lara\">CSVRecord.toMap() throws NPE on formats with no\n+        headers.</action>\n       <action issue=\"CSV-113\" type=\"fix\" dev=\"sebb\">Check whether ISE/IAE are being used appropriately</action>\n       <action issue=\"CSV-114\" type=\"fix\" dev=\"sebb\">CSVFormat constructor should reject a header array with duplicate\n-        entries</action>\n+        entries\n+      </action>\n       <action issue=\"CSV-112\" type=\"fix\" dev=\"britter\">HeaderMap is inconsistent when it is parsed from an input with\n-        duplicate columns names</action>\n+        duplicate columns names\n+      </action>\n       <action issue=\"CSV-111\" type=\"fix\" dev=\"ggregory\">CSVRecord.toMap() fails if row length shorter than header length\n       </action>\n       <action issue=\"CSV-106\" type=\"fix\" dev=\"ggregory\">CSVFormat.format allways append null</action>\n@@ -55,18 +59,21 @@\n       </action>\n       <action issue=\"CSV-99\" type=\"update\" dev=\"britter\">Revert Builder implementation in CSVFormat</action>\n       <action issue=\"CSV-53\" type=\"fix\" dev=\"britter\">CSVRecord does not verify that the length of the header mapping\n-        matches the number of values</action>\n+        matches the number of values\n+      </action>\n       <action issue=\"CSV-93\" type=\"update\" dev=\"ggregory\">Allow the handling of NULL values</action>\n       <action issue=\"CSV-68\" type=\"update\" dev=\"ggregory\">Use the Builder pattern for CSVFormat</action>\n       <action issue=\"CSV-84\" type=\"update\" dev=\"sebb\">Clarify comment handling</action>\n       <action issue=\"CSV-25\" type=\"update\" dev=\"ebourg\">CSVParser.nextValue() seems pointless</action>\n       <action issue=\"CSV-97\" type=\"update\" dev=\"ggregory\">Allow the String value for null to be customized for the CSV\n-        printer</action>\n+        printer\n+      </action>\n       <action issue=\"CSV-88\" type=\"update\" dev=\"ggregory\">Not possible to create a CSVFormat from scratch</action>\n       <action issue=\"CSV-52\" type=\"add\" dev=\"ggregory\">Keep track of record number</action>\n       <action issue=\"CSV-94\" type=\"update\" dev=\"sebb\">Lexer should only use char fields</action>\n       <action issue=\"CSV-92\" type=\"add\" dev=\"ggregory\">Need a way to extract parsed headers, e.g. for use in formatting\n-        output</action>\n+        output\n+      </action>\n       <action issue=\"CSV-65\" type=\"add\" dev=\"ebourg\">Header support</action>\n       <action issue=\"CSV-54\" type=\"fix\" dev=\"sebb\">Confusing semantic of the ignore leading/trailing spaces parameters\n       </action>\n@@ -76,7 +83,8 @@\n       <action issue=\"CSV-55\" type=\"update\" dev=\"britter\">Replace while(true)-loop in CSVParser.getRecord with do-while-loop\n       </action>\n       <action issue=\"CSV-34\" type=\"fix\" dev=\"sebb\">CSVFormat describes itself as immutable, but it is not - in\n-        particular it is not thread-safe</action>\n+        particular it is not thread-safe\n+      </action>\n       <action issue=\"CSV-36\" type=\"fix\" dev=\"yonik\">Endless loops in CSV parser</action>\n       <action issue=\"CSV-13\" type=\"fix\" dev=\"ebourg\">NullPointerException in CSVPrinter.print()/println()</action>\n       <action issue=\"CSV-45\" type=\"update\" dev=\"yonik\">CSVPrinter overhaul</action>",
+                "additions": 14,
+                "raw_url": "https://github.com/apache/commons-csv/raw/2480dffa6d8343b189c6fb57b88b325c45f0b83f/src/changes/changes.xml",
+                "status": "modified",
+                "changes": 20,
+                "deletions": 6,
+                "sha": "7132bff85ec5d6b56e18be3b6ca6b3760f1614d9",
+                "blob_url": "https://github.com/apache/commons-csv/blob/2480dffa6d8343b189c6fb57b88b325c45f0b83f/src/changes/changes.xml",
+                "filename": "src/changes/changes.xml",
+                "contents_url": "https://api.github.com/repos/apache/commons-csv/contents/src/changes/changes.xml?ref=2480dffa6d8343b189c6fb57b88b325c45f0b83f"
+            },
+            {
+                "patch": "@@ -177,6 +177,9 @@ public boolean isSet(final String name) {\n      * @return the given map.\n      */\n     <M extends Map<String, String>> M putIn(final M map) {\n+        if (mapping == null) {\n+            return map;\n+        }\n         for (final Entry<String, Integer> entry : mapping.entrySet()) {\n             final int col = entry.getValue().intValue();\n             if (col < values.length) {",
+                "additions": 3,
+                "raw_url": "https://github.com/apache/commons-csv/raw/2480dffa6d8343b189c6fb57b88b325c45f0b83f/src/main/java/org/apache/commons/csv/CSVRecord.java",
+                "status": "modified",
+                "changes": 3,
+                "deletions": 0,
+                "sha": "e814b707c6401fb204b8401ac612ff1640e8d63f",
+                "blob_url": "https://github.com/apache/commons-csv/blob/2480dffa6d8343b189c6fb57b88b325c45f0b83f/src/main/java/org/apache/commons/csv/CSVRecord.java",
+                "filename": "src/main/java/org/apache/commons/csv/CSVRecord.java",
+                "contents_url": "https://api.github.com/repos/apache/commons-csv/contents/src/main/java/org/apache/commons/csv/CSVRecord.java?ref=2480dffa6d8343b189c6fb57b88b325c45f0b83f"
+            },
+            {
+                "patch": "@@ -18,6 +18,7 @@\n \n import static org.junit.Assert.assertEquals;\n import static org.junit.Assert.assertFalse;\n+import static org.junit.Assert.assertNotNull;\n import static org.junit.Assert.assertNull;\n import static org.junit.Assert.assertTrue;\n \n@@ -166,6 +167,15 @@ public void testToMapWithShortRecord() throws Exception {\n        final CSVRecord shortRec = parser.iterator().next();\n        shortRec.toMap();\n     }\n+\n+    @Test\n+    public void testToMapWithNoHeader() throws Exception {\n+       final CSVParser parser =  CSVParser.parse(\"a,b\", CSVFormat.newFormat(','));\n+       final CSVRecord shortRec = parser.iterator().next();\n+       Map<String, String> map = shortRec.toMap();\n+       assertNotNull(\"Map is not null.\", map);\n+       assertTrue(\"Map is empty.\", map.isEmpty());\n+    }\n     \n     private void validateMap(final Map<String, String> map, final boolean allowsNulls) {\n         assertTrue(map.containsKey(\"first\"));",
+                "additions": 10,
+                "raw_url": "https://github.com/apache/commons-csv/raw/2480dffa6d8343b189c6fb57b88b325c45f0b83f/src/test/java/org/apache/commons/csv/CSVRecordTest.java",
+                "status": "modified",
+                "changes": 10,
+                "deletions": 0,
+                "sha": "1ef6e28e4169cffe0a7178238a3e705925cdcc60",
+                "blob_url": "https://github.com/apache/commons-csv/blob/2480dffa6d8343b189c6fb57b88b325c45f0b83f/src/test/java/org/apache/commons/csv/CSVRecordTest.java",
+                "filename": "src/test/java/org/apache/commons/csv/CSVRecordTest.java",
+                "contents_url": "https://api.github.com/repos/apache/commons-csv/contents/src/test/java/org/apache/commons/csv/CSVRecordTest.java?ref=2480dffa6d8343b189c6fb57b88b325c45f0b83f"
+            }
+        ],
+        "bug_id": "commons-csv_8",
+        "parent": "https://github.com/apache/commons-csv/commit/0331565fbaf33fab24bfd588948e653475e795d9",
+        "message": "<action issue=\"CSV-118\" type=\"fix\" dev=\"ggregory\" due-to=\"Enrique Lara\">CSVRecord.toMap() throws NPE on formats with no headers.</action>\n\ngit-svn-id: https://svn.apache.org/repos/asf/commons/proper/csv/trunk@1594966 13f79535-47bb-0310-9956-ffa450edef68",
+        "repo": "commons-csv"
+    }
+]
