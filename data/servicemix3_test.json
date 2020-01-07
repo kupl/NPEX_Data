@@ -1,0 +1,356 @@
+{
+    "servicemix3_14d8e4b": {
+        "bug_id": "servicemix3_14d8e4b",
+        "commit": "https://github.com/apache/servicemix3/commit/14d8e4b8bf421edf5e196cb697c3095863d4c259",
+        "file": [
+            {
+                "additions": 0,
+                "blob_url": "https://github.com/apache/servicemix3/blob/14d8e4b8bf421edf5e196cb697c3095863d4c259/core/servicemix-core/pom.xml",
+                "changes": 1,
+                "contents_url": "https://api.github.com/repos/apache/servicemix3/contents/core/servicemix-core/pom.xml?ref=14d8e4b8bf421edf5e196cb697c3095863d4c259",
+                "deletions": 1,
+                "filename": "core/servicemix-core/pom.xml",
+                "patch": "@@ -236,7 +236,6 @@\n     <dependency>\n       <groupId>org.easymock</groupId>\n       <artifactId>easymock</artifactId>\n-      <version>2.0</version>\n       <scope>test</scope>\n     </dependency>    \n   </dependencies>",
+                "raw_url": "https://github.com/apache/servicemix3/raw/14d8e4b8bf421edf5e196cb697c3095863d4c259/core/servicemix-core/pom.xml",
+                "sha": "8bb0060ad8764d9641b5eb5669b694e631d86303",
+                "status": "modified"
+            },
+            {
+                "additions": 135,
+                "blob_url": "https://github.com/apache/servicemix3/blob/14d8e4b8bf421edf5e196cb697c3095863d4c259/core/servicemix-core/src/main/java/org/apache/servicemix/jbi/monitoring/StatisticsService.java",
+                "changes": 225,
+                "contents_url": "https://api.github.com/repos/apache/servicemix3/contents/core/servicemix-core/src/main/java/org/apache/servicemix/jbi/monitoring/StatisticsService.java?ref=14d8e4b8bf421edf5e196cb697c3095863d4c259",
+                "deletions": 90,
+                "filename": "core/servicemix-core/src/main/java/org/apache/servicemix/jbi/monitoring/StatisticsService.java",
+                "patch": "@@ -43,6 +43,7 @@\n import org.apache.servicemix.jbi.event.ExchangeEvent;\n import org.apache.servicemix.jbi.event.ExchangeListener;\n import org.apache.servicemix.jbi.framework.ComponentMBeanImpl;\n+import org.apache.servicemix.jbi.framework.Endpoint;\n import org.apache.servicemix.jbi.management.AttributeInfoHelper;\n import org.apache.servicemix.jbi.management.BaseSystemService;\n import org.apache.servicemix.jbi.management.ManagementContext;\n@@ -156,28 +157,8 @@ public void stop() throws javax.jbi.JBIException {\n     }\n \n     public void init(JBIContainer container) throws JBIException {\n-        endpointListener = new EndpointAdapter() {\n-            public void internalEndpointRegistered(EndpointEvent event) {\n-                onEndpointRegistered(event);\n-            }\n-            public void internalEndpointUnregistered(EndpointEvent event) {\n-                onEndpointUnregistered(event);\n-            }\n-            public void externalEndpointRegistered(EndpointEvent event) {\n-                onEndpointRegistered(event);\n-            }\n-            public void externalEndpointUnregistered(EndpointEvent event) {\n-                onEndpointUnregistered(event);\n-            }\n-        };\n-        componentListener = new ComponentAdapter() {\n-            public void componentInitialized(ComponentEvent event) {\n-                onComponentInitialized(event);\n-            }\n-            public void componentShutDown(ComponentEvent event) {\n-                onComponentShutDown(event);\n-            }\n-        };\n+        initComponentListener(container);\n+        initEndpointListener(container);\n         exchangeListener = new ExchangeListener() {\n             public void exchangeSent(ExchangeEvent event) {\n                 onExchangeSent(event);\n@@ -186,82 +167,47 @@ public void exchangeAccepted(ExchangeEvent event) {\n                 onExchangeAccepted(event);\n             }\n         };\n-        container.addListener(componentListener);\n-        container.addListener(endpointListener);\n         super.init(container);\n     }\n-    \n-    protected void onComponentInitialized(ComponentEvent event) {\n-        ComponentMBeanImpl component = event.getComponent();\n-        String key = component.getName();\n-        ComponentStats stats = new ComponentStats(component);\n-        componentStats.putIfAbsent(key, stats);\n-        // Register MBean\n-        ManagementContext context = container.getManagementContext();\n-        try {\n-            context.registerMBean(context.createObjectName(context.createObjectNameProps(stats, true)), \n-                    stats, \n-                    ComponentStatsMBean.class);\n-        } catch (Exception e) {\n-            LOG.info(\"Unable to register component statistics MBean: \" + e.getMessage());\n-            if (LOG.isDebugEnabled()) {\n-                LOG.debug(\"Unable to register component statistics MBean\", e);\n+\n+    private void initComponentListener(final JBIContainer container) {\n+        componentListener = new ComponentAdapter() {\n+            public void componentInitialized(ComponentEvent event) {\n+                createComponentStats(container, event.getComponent());\n             }\n-        }\n-    }\n-    \n-    protected void onComponentShutDown(ComponentEvent event) {\n-        ComponentMBeanImpl component = event.getComponent();\n-        String key = component.getName();\n-        ComponentStats stats = componentStats.remove(key);\n-        if (stats == null) {\n-            return;\n-        }\n-        // Register MBean\n-        ManagementContext context = container.getManagementContext();\n-        try {\n-            context.unregisterMBean(context.createObjectName(context.createObjectNameProps(stats, true)));\n-        } catch (Exception e) {\n-            LOG.info(\"Unable to unregister component statistics MBean: \" + e);\n-            if (LOG.isDebugEnabled()) {\n-                LOG.debug(\"Unable to unregister component statistics MBean\", e);\n+            public void componentShutDown(ComponentEvent event) {\n+                removeComponentStats(container, event.getComponent());\n             }\n+        };\n+        container.addListener(componentListener);\n+        // add components that were initialized/started before we added the listener\n+        for (ComponentMBeanImpl component : container.getRegistry().getComponentRegistry().getComponents()) {\n+            createComponentStats(container, component);\n         }\n     }\n-    \n-    protected void onEndpointRegistered(EndpointEvent event) {\n-        AbstractServiceEndpoint endpoint = (AbstractServiceEndpoint) event.getEndpoint();\n-        String key = EndpointSupport.getUniqueKey(endpoint);\n-        ComponentStats compStats = componentStats.get(endpoint.getComponentNameSpace().getName()); \n-        EndpointStats stats = new EndpointStats(endpoint, compStats.getMessagingStats());\n-        endpointStats.putIfAbsent(key, stats);\n-        // Register MBean\n-        ManagementContext context = container.getManagementContext();\n-        try {\n-            context.registerMBean(context.createObjectName(context.createObjectNameProps(stats, true)), \n-                                  stats, \n-                                  EndpointStatsMBean.class);\n-        } catch (Exception e) {\n-            LOG.info(\"Unable to register endpoint statistics MBean: \" + e.getMessage());\n-            if (LOG.isDebugEnabled()) {\n-                LOG.debug(\"Unable to register endpoint statistics MBean\", e);\n+\n+    private void initEndpointListener(final JBIContainer container) {\n+        endpointListener = new EndpointAdapter() {\n+            public void internalEndpointRegistered(EndpointEvent event) {\n+                createEndpointStats(container, (AbstractServiceEndpoint) event.getEndpoint());\n             }\n-        }\n-    }\n-    \n-    protected void onEndpointUnregistered(EndpointEvent event) {\n-        AbstractServiceEndpoint endpoint = (AbstractServiceEndpoint) event.getEndpoint();\n-        String key = EndpointSupport.getUniqueKey(endpoint);\n-        EndpointStats stats = endpointStats.remove(key);\n-        // Register MBean\n-        ManagementContext context = container.getManagementContext();\n-        try {\n-            context.unregisterMBean(context.createObjectName(context.createObjectNameProps(stats, true)));\n-        } catch (Exception e) {\n-            LOG.info(\"Unable to unregister endpoint statistics MBean: \" + e.getMessage());\n-            if (LOG.isDebugEnabled()) {\n-                LOG.debug(\"Unable to unregister endpoint statistics MBean\", e);\n+            public void internalEndpointUnregistered(EndpointEvent event) {\n+                removeEndpointStats(container, (AbstractServiceEndpoint) event.getEndpoint());\n+            }\n+            public void externalEndpointRegistered(EndpointEvent event) {\n+                createEndpointStats(container, (AbstractServiceEndpoint) event.getEndpoint());\n             }\n+            public void externalEndpointUnregistered(EndpointEvent event) {\n+                removeEndpointStats(container, (AbstractServiceEndpoint) event.getEndpoint());\n+            }\n+        };\n+        container.addListener(endpointListener);\n+        // add endpoints that were registered before we added the listener\n+        for (Endpoint mbean : container.getDefaultBroker().getRegistry().getEndpointRegistry().getEndpointMBeans()) {\n+            AbstractServiceEndpoint endpoint = \n+                (AbstractServiceEndpoint) container.getEndpoint(container.getComponent(mbean.getComponentName()).getContext(), \n+                                                                mbean.getServiceName(), mbean.getEndpointName());\n+            createEndpointStats(container, endpoint);\n         }\n     }\n \n@@ -354,5 +300,104 @@ protected void doDumpStats() {\n         helper.addOperation(getObjectToManage(), \"resetAllStats\", \"reset all statistics\");\n         return OperationInfoHelper.join(super.getOperationInfos(), helper.getOperationInfos());\n     }\n+    \n+    /*\n+     * Creates a {@link ComponentStats} instance for a component and adds it to the Map\n+     */\n+    private void createComponentStats(JBIContainer container, ComponentMBeanImpl component) {\n+        String key = component.getName();\n+        ComponentStats stats = new ComponentStats(component);\n+        componentStats.putIfAbsent(key, stats);\n+        // Register MBean\n+        ManagementContext context = container.getManagementContext();\n+        try {\n+            context.registerMBean(context.createObjectName(context.createObjectNameProps(stats, true)), \n+                    stats, \n+                    ComponentStatsMBean.class);\n+        } catch (Exception e) {\n+            LOG.info(\"Unable to register component statistics MBean: \" + e.getMessage());\n+            if (LOG.isDebugEnabled()) {\n+                LOG.debug(\"Unable to register component statistics MBean\", e);\n+            }\n+        }\n+    }\n \n+    /*\n+     * Removes the {@link ComponentStats} for this component from the Map\n+     */\n+    private void removeComponentStats(JBIContainer container, ComponentMBeanImpl component) {\n+        String key = component.getName();\n+        ComponentStats stats = componentStats.remove(key);\n+        if (stats == null) {\n+            return;\n+        }\n+        // Register MBean\n+        ManagementContext context = container.getManagementContext();\n+        try {\n+            context.unregisterMBean(context.createObjectName(context.createObjectNameProps(stats, true)));\n+        } catch (Exception e) {\n+            LOG.info(\"Unable to unregister component statistics MBean: \" + e);\n+            if (LOG.isDebugEnabled()) {\n+                LOG.debug(\"Unable to unregister component statistics MBean\", e);\n+            }\n+        }\n+    }\n+    \n+    /*\n+     * Create an {@link EndpointStats} instance for the endpoint and adds it to the Map\n+     */\n+    private void createEndpointStats(JBIContainer container, AbstractServiceEndpoint endpoint) {\n+        String key = EndpointSupport.getUniqueKey(endpoint);\n+        ComponentStats compStats = componentStats.get(endpoint.getComponentNameSpace().getName()); \n+        EndpointStats stats = new EndpointStats(endpoint, compStats.getMessagingStats());\n+        endpointStats.putIfAbsent(key, stats);\n+        // Register MBean\n+        ManagementContext context = container.getManagementContext();\n+        try {\n+            context.registerMBean(context.createObjectName(context.createObjectNameProps(stats, true)), \n+                                  stats, \n+                                  EndpointStatsMBean.class);\n+        } catch (Exception e) {\n+            LOG.info(\"Unable to register endpoint statistics MBean: \" + e.getMessage());\n+            if (LOG.isDebugEnabled()) {\n+                LOG.debug(\"Unable to register endpoint statistics MBean\", e);\n+            }\n+        }\n+    }\n+\n+    /*\n+     * Removes the {@link EndpointStats} instance for the endpoint from the Map\n+     */\n+    private void removeEndpointStats(JBIContainer containner, AbstractServiceEndpoint endpoint) {\n+        String key = EndpointSupport.getUniqueKey(endpoint);\n+        EndpointStats stats = endpointStats.remove(key);\n+        // Register MBean\n+        ManagementContext context = container.getManagementContext();\n+        try {\n+            context.unregisterMBean(context.createObjectName(context.createObjectNameProps(stats, true)));\n+        } catch (Exception e) {\n+            LOG.info(\"Unable to unregister endpoint statistics MBean: \" + e.getMessage());\n+            if (LOG.isDebugEnabled()) {\n+                LOG.debug(\"Unable to unregister endpoint statistics MBean\", e);\n+            }\n+        }\n+    }\n+    \n+    /**\n+     * Access the {@link EndpointStats} for all the endpoints that are currently registered\n+     * \n+     * @return the Map of {@link EndpointStats}\n+     */\n+    protected ConcurrentHashMap<String, EndpointStats> getEndpointStats() {\n+        return endpointStats;\n+    }\n+    \n+    /**\n+     * Access the {@link ComponentStats} for all the endpoints that are currently initialized/started \n+     * \n+     * @return the Map of {@link ComponentStats}\n+     */    \n+    protected ConcurrentHashMap<String, ComponentStats> getComponentStats() {\n+        return componentStats;\n+    }\n }",
+                "raw_url": "https://github.com/apache/servicemix3/raw/14d8e4b8bf421edf5e196cb697c3095863d4c259/core/servicemix-core/src/main/java/org/apache/servicemix/jbi/monitoring/StatisticsService.java",
+                "sha": "682ee0bee75326a1d1908d271a6fb7c9eda931a2",
+                "status": "modified"
+            },
+            {
+                "additions": 85,
+                "blob_url": "https://github.com/apache/servicemix3/blob/14d8e4b8bf421edf5e196cb697c3095863d4c259/core/servicemix-core/src/test/java/org/apache/servicemix/jbi/monitoring/StatisticsServiceTest.java",
+                "changes": 85,
+                "contents_url": "https://api.github.com/repos/apache/servicemix3/contents/core/servicemix-core/src/test/java/org/apache/servicemix/jbi/monitoring/StatisticsServiceTest.java?ref=14d8e4b8bf421edf5e196cb697c3095863d4c259",
+                "deletions": 0,
+                "filename": "core/servicemix-core/src/test/java/org/apache/servicemix/jbi/monitoring/StatisticsServiceTest.java",
+                "patch": "@@ -0,0 +1,85 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one or more\n+ * contributor license agreements.  See the NOTICE file distributed with\n+ * this work for additional information regarding copyright ownership.\n+ * The ASF licenses this file to You under the Apache License, Version 2.0\n+ * (the \"License\"); you may not use this file except in compliance with\n+ * the License.  You may obtain a copy of the License at\n+ *\n+ *      http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing, software\n+ * distributed under the License is distributed on an \"AS IS\" BASIS,\n+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n+ * See the License for the specific language governing permissions and\n+ * limitations under the License.\n+ */\n+package org.apache.servicemix.jbi.monitoring;\n+\n+import javax.jbi.JBIException;\n+import javax.jbi.servicedesc.ServiceEndpoint;\n+import javax.xml.namespace.QName;\n+\n+import junit.framework.TestCase;\n+\n+import org.apache.servicemix.jbi.container.ActivationSpec;\n+import org.apache.servicemix.jbi.container.JBIContainer;\n+import org.apache.servicemix.jbi.framework.ComponentContextImpl;\n+import org.apache.servicemix.jbi.messaging.DeliveryChannelImplTest.TestComponent;\n+import org.apache.servicemix.jbi.servicedesc.EndpointSupport;\n+\n+/**\n+ * Test case for {@link StatisticsService}\n+ */\n+public class StatisticsServiceTest extends TestCase {\n+    \n+    private static final String COMPONENT = \"component\";\n+    private static final String ENDPOINT = \"endpoint\";\n+    private static final QName SERVICE = new QName(\"service\");\n+\n+    protected JBIContainer container;\n+    private StatisticsService service;\n+\n+    protected void setUp() throws Exception {\n+        // set up a test container instance\n+        container = new JBIContainer();\n+        container.setEmbedded(true);\n+        container.init();\n+        container.start();\n+        // and a test StatisticsService\n+        service = new StatisticsService();\n+    }\n+    \n+    public void testAddEndpointStatsByListener() throws JBIException {\n+        // initialize and start the StatisticsService\n+        service.init(container);\n+        service.start();\n+\n+        // now register a new endpoint\n+        ServiceEndpoint endpoint = registerEndpoint();\n+\n+        // StatisticsService should know about the endpoint/component through listener callbacks\n+        assertNotNull(service.getComponentStats().get(COMPONENT));\n+        assertNotNull(service.getEndpointStats().get(EndpointSupport.getUniqueKey(endpoint)));\n+    }\n+    \n+    public void testAddEndpointStatsAtStartup() throws JBIException {\n+        // first register the endpoint\n+        ServiceEndpoint endpoint = registerEndpoint();\n+        \n+        // initialize and start the StatisticsService\n+        service.init(container);\n+        service.start();\n+\n+        // StatisticsService should have learn about existing endpoints/components at startup\n+        assertNotNull(service.getComponentStats().get(COMPONENT));\n+        assertNotNull(service.getEndpointStats().get(EndpointSupport.getUniqueKey(endpoint)));\n+    }\n+\n+    private ServiceEndpoint registerEndpoint() throws JBIException {\n+        TestComponent component = new TestComponent(SERVICE, ENDPOINT);\n+        container.activateComponent(new ActivationSpec(COMPONENT, component));\n+        return container.getEndpoint((ComponentContextImpl)component.getContext(), SERVICE, ENDPOINT);\n+    }\n+\n+}",
+                "raw_url": "https://github.com/apache/servicemix3/raw/14d8e4b8bf421edf5e196cb697c3095863d4c259/core/servicemix-core/src/test/java/org/apache/servicemix/jbi/monitoring/StatisticsServiceTest.java",
+                "sha": "ca4954c9474412709b953320e5a552c17e197cc2",
+                "status": "added"
+            },
+            {
+                "additions": 5,
+                "blob_url": "https://github.com/apache/servicemix3/blob/14d8e4b8bf421edf5e196cb697c3095863d4c259/pom.xml",
+                "changes": 10,
+                "contents_url": "https://api.github.com/repos/apache/servicemix3/contents/pom.xml?ref=14d8e4b8bf421edf5e196cb697c3095863d4c259",
+                "deletions": 5,
+                "filename": "pom.xml",
+                "patch": "@@ -1052,11 +1052,6 @@\n                 <artifactId>drools-core</artifactId>\n                 <version>2.1</version>\n             </dependency>\n-            <dependency>\n-                <groupId>easymock</groupId>\n-                <artifactId>easymock</artifactId>\n-                <version>1.2_Java1.3</version>\n-            </dependency>\n             <dependency>\n                 <groupId>emberio</groupId>\n                 <artifactId>emberio</artifactId>\n@@ -1803,6 +1798,11 @@\n                     </exclusion>\n                 </exclusions>\n             </dependency>\n+            <dependency>\n+                <groupId>org.easymock</groupId>\n+                <artifactId>easymock</artifactId>\n+                <version>2.0</version>\n+            </dependency>\n         </dependencies>\n     </dependencyManagement>\n ",
+                "raw_url": "https://github.com/apache/servicemix3/raw/14d8e4b8bf421edf5e196cb697c3095863d4c259/pom.xml",
+                "sha": "464e2eb59e19c59d65fcb3e56bcc2a68b8b9e055",
+                "status": "modified"
+            }
+        ],
+        "message": "SM-1456: Statistics Service throws NPE on startup.\n\ngit-svn-id: https://svn.apache.org/repos/asf/servicemix/smx3/trunk@707628 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/servicemix3/commit/2ca0818a733329a1856835d9496085cf6a6831c1",
+        "patched_files": [
+            "pom.java",
+            "StatisticsService.java"
+        ],
+        "repo": "servicemix3",
+        "unit_tests": [
+            "StatisticsServiceTest.java"
+        ]
+    },
+    "servicemix3_1a09eeb": {
+        "bug_id": "servicemix3_1a09eeb",
+        "commit": "https://github.com/apache/servicemix3/commit/1a09eeb7d16a7bfbd60905cc604f1853047e8b41",
+        "file": [
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/servicemix3/blob/1a09eeb7d16a7bfbd60905cc604f1853047e8b41/servicemix-jms/src/main/java/org/apache/servicemix/jms/AbstractJmsProcessor.java",
+                "changes": 16,
+                "contents_url": "https://api.github.com/repos/apache/servicemix3/contents/servicemix-jms/src/main/java/org/apache/servicemix/jms/AbstractJmsProcessor.java?ref=1a09eeb7d16a7bfbd60905cc604f1853047e8b41",
+                "deletions": 12,
+                "filename": "servicemix-jms/src/main/java/org/apache/servicemix/jms/AbstractJmsProcessor.java",
+                "patch": "@@ -67,11 +67,10 @@ public AbstractJmsProcessor(JmsEndpoint endpoint) throws Exception {\n     }\n \n     public void start() throws Exception {\n-        InitialContext ctx = null;\n-        ConnectionFactory connectionFactory = null;\n         try {\n-            // First check configured connectionFactory on the endpoint\n-            connectionFactory = getConnectionFactory();\n+            InitialContext ctx = getInitialContext();\n+            ConnectionFactory connectionFactory = null;\n+            connectionFactory = getConnectionFactory(ctx);\n             connection = connectionFactory.createConnection();\n             connection.start();\n             doStart(ctx);\n@@ -82,20 +81,14 @@ public void start() throws Exception {\n                 // TODO: log\n             }\n             throw e;\n-        } finally {\n-            if (ctx != null) {\n-                ctx.close();\n-            }\n         }\n     }\n     \n-    protected ConnectionFactory getConnectionFactory() throws NamingException {\n-        InitialContext ctx = null;\n+    protected ConnectionFactory getConnectionFactory(InitialContext ctx) throws NamingException {\n         // First check configured connectionFactory on the endpoint\n         ConnectionFactory connectionFactory = endpoint.getConnectionFactory();\n         // Then, check for jndi connection factory name on the endpoint\n         if (connectionFactory == null && endpoint.getJndiConnectionFactoryName() != null) {\n-            ctx = getInitialContext();\n             connectionFactory = (ConnectionFactory) ctx.lookup(endpoint.getJndiConnectionFactoryName());\n         }\n         // Check for a configured connectionFactory on the configuration\n@@ -104,7 +97,6 @@ protected ConnectionFactory getConnectionFactory() throws NamingException {\n         }\n         // Check for jndi connection factory name on the configuration\n         if (connectionFactory == null && endpoint.getConfiguration().getJndiConnectionFactoryName() != null) {\n-            ctx = getInitialContext();\n             connectionFactory = (ConnectionFactory) ctx.lookup(endpoint.getConfiguration().getJndiConnectionFactoryName());\n         }\n         return connectionFactory;",
+                "raw_url": "https://github.com/apache/servicemix3/raw/1a09eeb7d16a7bfbd60905cc604f1853047e8b41/servicemix-jms/src/main/java/org/apache/servicemix/jms/AbstractJmsProcessor.java",
+                "sha": "26a111fb0680e22521cf761fc5b4c104877a9cfc",
+                "status": "modified"
+            },
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/servicemix3/blob/1a09eeb7d16a7bfbd60905cc604f1853047e8b41/servicemix-jms/src/main/java/org/apache/servicemix/jms/jca/JcaProviderProcessor.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/servicemix3/contents/servicemix-jms/src/main/java/org/apache/servicemix/jms/jca/JcaProviderProcessor.java?ref=1a09eeb7d16a7bfbd60905cc604f1853047e8b41",
+                "deletions": 2,
+                "filename": "servicemix-jms/src/main/java/org/apache/servicemix/jms/jca/JcaProviderProcessor.java",
+                "patch": "@@ -49,12 +49,12 @@ public JcaProviderProcessor(JmsEndpoint endpoint) throws Exception {\n     }\r\n \r\n     public void start() throws Exception {\r\n-        connectionFactory = getConnectionFactory();\r\n+        InitialContext ctx = getInitialContext();\r\n+        connectionFactory = getConnectionFactory(ctx);\r\n         channel = endpoint.getServiceUnit().getComponent().getComponentContext().getDeliveryChannel();\r\n         destination = endpoint.getDestination();\r\n         if (destination == null) {\r\n             if (endpoint.getJndiDestinationName() != null) {\r\n-                InitialContext ctx = getInitialContext();\r\n                 destination = (Destination) ctx.lookup(endpoint.getJndiDestinationName());\r\n             } else if (endpoint.getJmsProviderDestinationName() == null) {\r\n                 throw new IllegalStateException(\"No destination provided\");\r",
+                "raw_url": "https://github.com/apache/servicemix3/raw/1a09eeb7d16a7bfbd60905cc604f1853047e8b41/servicemix-jms/src/main/java/org/apache/servicemix/jms/jca/JcaProviderProcessor.java",
+                "sha": "502764e1386afd1436cfc9363578e273cd99688c",
+                "status": "modified"
+            },
+            {
+                "additions": 82,
+                "blob_url": "https://github.com/apache/servicemix3/blob/1a09eeb7d16a7bfbd60905cc604f1853047e8b41/servicemix-jms/src/test/java/org/apache/servicemix/jms/JmsStandardTest.java",
+                "changes": 82,
+                "contents_url": "https://api.github.com/repos/apache/servicemix3/contents/servicemix-jms/src/test/java/org/apache/servicemix/jms/JmsStandardTest.java?ref=1a09eeb7d16a7bfbd60905cc604f1853047e8b41",
+                "deletions": 0,
+                "filename": "servicemix-jms/src/test/java/org/apache/servicemix/jms/JmsStandardTest.java",
+                "patch": "@@ -0,0 +1,82 @@\n+/*\r\n+ * Licensed to the Apache Software Foundation (ASF) under one or more\r\n+ * contributor license agreements.  See the NOTICE file distributed with\r\n+ * this work for additional information regarding copyright ownership.\r\n+ * The ASF licenses this file to You under the Apache License, Version 2.0\r\n+ * (the \"License\"); you may not use this file except in compliance with\r\n+ * the License.  You may obtain a copy of the License at\r\n+ *\r\n+ *      http://www.apache.org/licenses/LICENSE-2.0\r\n+ *\r\n+ * Unless required by applicable law or agreed to in writing, software\r\n+ * distributed under the License is distributed on an \"AS IS\" BASIS,\r\n+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\r\n+ * See the License for the specific language governing permissions and\r\n+ * limitations under the License.\r\n+ */\r\n+package org.apache.servicemix.jms;\r\n+\r\n+import javax.naming.Context;\r\n+import javax.naming.InitialContext;\r\n+import javax.xml.namespace.QName;\r\n+\r\n+import org.apache.activemq.ActiveMQConnectionFactory;\r\n+import org.apache.activemq.broker.BrokerService;\r\n+import org.apache.activemq.jndi.ActiveMQInitialContextFactory;\r\n+import org.apache.activemq.xbean.BrokerFactoryBean;\r\n+import org.apache.servicemix.jbi.container.JBIContainer;\r\n+import org.springframework.core.io.ClassPathResource;\r\n+\r\n+import junit.framework.TestCase;\r\n+\r\n+public class JmsStandardTest extends TestCase {\r\n+\r\n+    protected JBIContainer container;\r\n+    protected BrokerService broker;\r\n+    protected ActiveMQConnectionFactory connectionFactory;\r\n+    \r\n+    protected void setUp() throws Exception {\r\n+        System.setProperty(Context.INITIAL_CONTEXT_FACTORY, ActiveMQInitialContextFactory.class.getName());\r\n+        System.setProperty(Context.PROVIDER_URL, \"tcp://localhost:61216\");\r\n+\r\n+      \r\n+        BrokerFactoryBean bfb = new BrokerFactoryBean(new ClassPathResource(\"org/apache/servicemix/jms/activemq.xml\"));\r\n+        bfb.afterPropertiesSet();\r\n+        broker = bfb.getBroker();\r\n+        broker.start();\r\n+        \r\n+        container = new JBIContainer();\r\n+        container.setUseMBeanServer(true);\r\n+        container.setCreateMBeanServer(true);\r\n+        container.setMonitorInstallationDirectory(false);\r\n+        container.setNamingContext(new InitialContext());\r\n+        container.init();\r\n+        \r\n+        connectionFactory = new ActiveMQConnectionFactory(\"tcp://localhost:61216\");\r\n+    }\r\n+    \r\n+    protected void tearDown() throws Exception {\r\n+        if (container != null) {\r\n+            container.shutDown();\r\n+        }\r\n+        if (broker != null) {\r\n+            broker.stop();\r\n+        }\r\n+    }\r\n+\r\n+    public void test() throws Exception {\r\n+        JmsSpringComponent jms = new JmsSpringComponent();\r\n+        JmsEndpoint ep = new JmsEndpoint();\r\n+        ep.setInitialContextFactory(ActiveMQInitialContextFactory.class.getName());\r\n+        ep.setJndiProviderURL(\"tcp://localhost:61216\");\r\n+        ep.setJndiConnectionFactoryName(\"ConnectionFactory\");\r\n+        ep.setJndiDestinationName(\"MyQueue\");\r\n+        ep.setProcessorName(\"standard\");\r\n+        ep.setRoleAsString(\"provider\");\r\n+        ep.setService(new QName(\"service\"));\r\n+        ep.setEndpoint(\"endpoint\");\r\n+        jms.setEndpoints(new JmsEndpoint[] { ep });\r\n+        container.activateComponent(jms, \"jms\");\r\n+        container.start();\r\n+    }\r\n+}\r",
+                "raw_url": "https://github.com/apache/servicemix3/raw/1a09eeb7d16a7bfbd60905cc604f1853047e8b41/servicemix-jms/src/test/java/org/apache/servicemix/jms/JmsStandardTest.java",
+                "sha": "32118638758b6b348c21e4b4fefd995ffc504849",
+                "status": "added"
+            },
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/servicemix3/blob/1a09eeb7d16a7bfbd60905cc604f1853047e8b41/servicemix-jms/src/test/resources/jndi.properties",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/servicemix3/contents/servicemix-jms/src/test/resources/jndi.properties?ref=1a09eeb7d16a7bfbd60905cc604f1853047e8b41",
+                "deletions": 0,
+                "filename": "servicemix-jms/src/test/resources/jndi.properties",
+                "patch": "@@ -23,4 +23,6 @@\n java.naming.factory.initial = org.apache.xbean.spring.jndi.SpringInitialContextFactory\r\n java.naming.provider.url = jndi.xml\r\n \r\n+queue.MyQueue = MyQueue\r\n+\r\n # END SNIPPET: jndi\r",
+                "raw_url": "https://github.com/apache/servicemix3/raw/1a09eeb7d16a7bfbd60905cc604f1853047e8b41/servicemix-jms/src/test/resources/jndi.properties",
+                "sha": "f3a5b7fe0bc76dcbdc50c30d52702d4988b65941",
+                "status": "modified"
+            }
+        ],
+        "message": "SM-603: NPE in StandardConsumerProcessor\n\ngit-svn-id: https://svn.apache.org/repos/asf/incubator/servicemix/trunk@451164 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/servicemix3/commit/9511003cde1d2e18a668b56506f0df30986d07d4",
+        "patched_files": [
+            "JcaProviderProcessor.java",
+            "AbstractJmsProcessor.java",
+            "jndi.java"
+        ],
+        "repo": "servicemix3",
+        "unit_tests": [
+            "JmsStandardTest.java"
+        ]
+    },
+    "servicemix3_4d6dddb": {
+        "bug_id": "servicemix3_4d6dddb",
+        "commit": "https://github.com/apache/servicemix3/commit/4d6dddbc07ce6b42fe81da89786f95cdd6a5ca27",
+        "file": [
+            {
+                "additions": 18,
+                "blob_url": "https://github.com/apache/servicemix3/blob/4d6dddbc07ce6b42fe81da89786f95cdd6a5ca27/servicemix-core/src/main/java/org/apache/servicemix/jbi/messaging/DeliveryChannelImpl.java",
+                "changes": 32,
+                "contents_url": "https://api.github.com/repos/apache/servicemix3/contents/servicemix-core/src/main/java/org/apache/servicemix/jbi/messaging/DeliveryChannelImpl.java?ref=4d6dddbc07ce6b42fe81da89786f95cdd6a5ca27",
+                "deletions": 14,
+                "filename": "servicemix-core/src/main/java/org/apache/servicemix/jbi/messaging/DeliveryChannelImpl.java",
+                "patch": "@@ -280,26 +280,30 @@ private void traceMessageExchange(String header, MessageExchange me) {\n             sb.append(\"  id: \").append(me.getExchangeId()).append('\\n');\n             sb.append(\"  status: \").append(me.getStatus()).append('\\n');\n             if (me.getMessage(\"in\") != null) {\n-                Node node = new SourceTransformer().toDOMNode(me.getMessage(\"in\").getContent());\n-                me.getMessage(\"in\").setContent(new DOMSource(node));\n-                String str = DOMUtil.asXML(node);\n                 sb.append(\"  in: \");\n-                if (str.length() > 150) {\n-                    sb.append(str.substring(0, 150)).append(\"...\");\n-                } else {\n-                    sb.append(str);\n+                if (me.getMessage(\"in\").getContent() != null) {\n+                    Node node = new SourceTransformer().toDOMNode(me.getMessage(\"in\").getContent());\n+                    me.getMessage(\"in\").setContent(new DOMSource(node));\n+                    String str = DOMUtil.asXML(node);\n+                    if (str.length() > 150) {\n+                        sb.append(str.substring(0, 150)).append(\"...\");\n+                    } else {\n+                        sb.append(str);\n+                    }\n                 }\n                 sb.append('\\n');\n             }\n             if (me.getMessage(\"out\") != null) {\n-                Node node = new SourceTransformer().toDOMNode(me.getMessage(\"out\").getContent());\n-                me.getMessage(\"out\").setContent(new DOMSource(node));\n-                String str = DOMUtil.asXML(node);\n                 sb.append(\"  out: \");\n-                if (str.length() > 150) {\n-                    sb.append(str.substring(0, 150)).append(\"...\");\n-                } else {\n-                    sb.append(str);\n+                if (me.getMessage(\"out\").getContent() != null) {\n+                    Node node = new SourceTransformer().toDOMNode(me.getMessage(\"out\").getContent());\n+                    me.getMessage(\"out\").setContent(new DOMSource(node));\n+                    String str = DOMUtil.asXML(node);\n+                    if (str.length() > 150) {\n+                        sb.append(str.substring(0, 150)).append(\"...\");\n+                    } else {\n+                        sb.append(str);\n+                    }\n                 }\n                 sb.append('\\n');\n             }",
+                "raw_url": "https://github.com/apache/servicemix3/raw/4d6dddbc07ce6b42fe81da89786f95cdd6a5ca27/servicemix-core/src/main/java/org/apache/servicemix/jbi/messaging/DeliveryChannelImpl.java",
+                "sha": "c2939b5cef9f3c2cbea1ff2d683a16d8815d963d",
+                "status": "modified"
+            }
+        ],
+        "message": "Fix NPE in DeliveryChannelImpl.traceMessageExchange\n\ngit-svn-id: https://svn.apache.org/repos/asf/incubator/servicemix/trunk@379808 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/servicemix3/commit/f4501e28e704b99c0fdaa078ff829e101da3d5ef",
+        "patched_files": [
+            "DeliveryChannelImpl.java"
+        ],
+        "repo": "servicemix3",
+        "unit_tests": [
+            "DeliveryChannelImplTest.java"
+        ]
+    },
+    "servicemix3_56153fa": {
+        "bug_id": "servicemix3_56153fa",
+        "commit": "https://github.com/apache/servicemix3/commit/56153fa3ea1b21883c06a99ecc931b646660a8b0",
+        "file": [
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/servicemix3/blob/56153fa3ea1b21883c06a99ecc931b646660a8b0/core/servicemix-core/src/main/java/org/apache/servicemix/jbi/monitoring/StatisticsService.java",
+                "changes": 8,
+                "contents_url": "https://api.github.com/repos/apache/servicemix3/contents/core/servicemix-core/src/main/java/org/apache/servicemix/jbi/monitoring/StatisticsService.java?ref=56153fa3ea1b21883c06a99ecc931b646660a8b0",
+                "deletions": 2,
+                "filename": "core/servicemix-core/src/main/java/org/apache/servicemix/jbi/monitoring/StatisticsService.java",
+                "patch": "@@ -232,7 +232,9 @@ protected void onExchangeSent(ExchangeEvent event) {\n                     if (EndpointSupport.getKey(ses[i]).equals(source)) {\n                         source = EndpointSupport.getUniqueKey(ses[i]);\n                         EndpointStats stats = endpointStats.get(source);\n-                        stats.incrementOutbound();\n+                        if (stats != null) {\n+                            stats.incrementOutbound();\n+                        }\n                         break;\n                     }\n                 }\n@@ -250,7 +252,9 @@ protected void onExchangeAccepted(ExchangeEvent event) {\n                 && me instanceof MessageExchangeImpl) {\n             String source = EndpointSupport.getUniqueKey(me.getEndpoint());\n             EndpointStats stats = endpointStats.get(source);\n-            stats.incrementInbound();\n+            if (stats != null) {\n+                stats.incrementInbound();\n+            }\n         }        \n     }\n     ",
+                "raw_url": "https://github.com/apache/servicemix3/raw/56153fa3ea1b21883c06a99ecc931b646660a8b0/core/servicemix-core/src/main/java/org/apache/servicemix/jbi/monitoring/StatisticsService.java",
+                "sha": "ccbb023f351bd7a678ccbb24829e6fa34907ac56",
+                "status": "modified"
+            }
+        ],
+        "message": "[SM-1926]  Statistics Service throws NPE with DynamicEndpoints\n\ngit-svn-id: https://svn.apache.org/repos/asf/servicemix/smx3/trunk@916100 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/servicemix3/commit/42160568ae4a080471cefc7abaea2628e023afa8",
+        "patched_files": [
+            "StatisticsService.java"
+        ],
+        "repo": "servicemix3",
+        "unit_tests": [
+            "StatisticsServiceTest.java"
+        ]
+    },
+    "servicemix3_59f5476": {
+        "bug_id": "servicemix3_59f5476",
+        "commit": "https://github.com/apache/servicemix3/commit/59f54768a56ac5e30af60b9384d872e22a987254",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/servicemix3/blob/59f54768a56ac5e30af60b9384d872e22a987254/core/servicemix-core/src/main/java/org/apache/servicemix/jbi/monitoring/StatisticsService.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/servicemix3/contents/core/servicemix-core/src/main/java/org/apache/servicemix/jbi/monitoring/StatisticsService.java?ref=59f54768a56ac5e30af60b9384d872e22a987254",
+                "deletions": 1,
+                "filename": "core/servicemix-core/src/main/java/org/apache/servicemix/jbi/monitoring/StatisticsService.java",
+                "patch": "@@ -203,7 +203,7 @@ public void externalEndpointUnregistered(EndpointEvent event) {\n         };\n         container.addListener(endpointListener);\n         // add endpoints that were registered before we added the listener\n-        for (Endpoint mbean : container.getDefaultBroker().getRegistry().getEndpointRegistry().getEndpointMBeans()) {\n+        for (Endpoint mbean : container.getRegistry().getEndpointRegistry().getEndpointMBeans()) {\n             AbstractServiceEndpoint endpoint = \n                 (AbstractServiceEndpoint) container.getEndpoint(container.getComponent(mbean.getComponentName()).getContext(), \n                                                                 mbean.getServiceName(), mbean.getEndpointName());",
+                "raw_url": "https://github.com/apache/servicemix3/raw/59f54768a56ac5e30af60b9384d872e22a987254/core/servicemix-core/src/main/java/org/apache/servicemix/jbi/monitoring/StatisticsService.java",
+                "sha": "873f9fcbefc042805d4659ce8bbeeb221a030561",
+                "status": "modified"
+            },
+            {
+                "additions": 12,
+                "blob_url": "https://github.com/apache/servicemix3/blob/59f54768a56ac5e30af60b9384d872e22a987254/core/servicemix-core/src/test/java/org/apache/servicemix/jbi/monitoring/StatisticsServiceTest.java",
+                "changes": 12,
+                "contents_url": "https://api.github.com/repos/apache/servicemix3/contents/core/servicemix-core/src/test/java/org/apache/servicemix/jbi/monitoring/StatisticsServiceTest.java?ref=59f54768a56ac5e30af60b9384d872e22a987254",
+                "deletions": 0,
+                "filename": "core/servicemix-core/src/test/java/org/apache/servicemix/jbi/monitoring/StatisticsServiceTest.java",
+                "patch": "@@ -25,6 +25,7 @@\n import org.apache.servicemix.jbi.container.ActivationSpec;\n import org.apache.servicemix.jbi.container.JBIContainer;\n import org.apache.servicemix.jbi.framework.ComponentContextImpl;\n+import org.apache.servicemix.jbi.management.BaseSystemService;\n import org.apache.servicemix.jbi.messaging.DeliveryChannelImplTest.TestComponent;\n import org.apache.servicemix.jbi.servicedesc.EndpointSupport;\n \n@@ -75,6 +76,17 @@ public void testAddEndpointStatsAtStartup() throws JBIException {\n         assertNotNull(service.getComponentStats().get(COMPONENT));\n         assertNotNull(service.getEndpointStats().get(EndpointSupport.getUniqueKey(endpoint)));\n     }\n+    \n+    public void testInitByContainer() throws Exception {\n+        JBIContainer con = new JBIContainer();\n+        con.setEmbedded(true);\n+        BaseSystemService[] services = new BaseSystemService[] {new StatisticsService()};\n+        con.setServices(services);\n+        con.init();\n+        for (BaseSystemService srv : services) {\n+            assertTrue(srv.isInitialized());\n+        }\n+    }\n \n     private ServiceEndpoint registerEndpoint() throws JBIException {\n         TestComponent component = new TestComponent(SERVICE, ENDPOINT);",
+                "raw_url": "https://github.com/apache/servicemix3/raw/59f54768a56ac5e30af60b9384d872e22a987254/core/servicemix-core/src/test/java/org/apache/servicemix/jbi/monitoring/StatisticsServiceTest.java",
+                "sha": "e79ffcec00939698af72f0a574eb30885f25d27c",
+                "status": "modified"
+            }
+        ],
+        "message": "SM-1456: NPE in StatisticsService.initEndpointListener()\n\ngit-svn-id: https://svn.apache.org/repos/asf/servicemix/smx3/trunk@708647 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/servicemix3/commit/b78a18afa89f8c27b1c7f1d0f57df092cb3542f5",
+        "patched_files": [
+            "StatisticsService.java"
+        ],
+        "repo": "servicemix3",
+        "unit_tests": [
+            "StatisticsServiceTest.java"
+        ]
+    },
+    "servicemix3_5ece0f4": {
+        "bug_id": "servicemix3_5ece0f4",
+        "commit": "https://github.com/apache/servicemix3/commit/5ece0f4cf71d2762f1a62d90e49af84305fe3471",
+        "file": [
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/servicemix3/blob/5ece0f4cf71d2762f1a62d90e49af84305fe3471/servicemix-core/src/main/java/org/apache/servicemix/jbi/messaging/MessageExchangeImpl.java",
+                "changes": 10,
+                "contents_url": "https://api.github.com/repos/apache/servicemix3/contents/servicemix-core/src/main/java/org/apache/servicemix/jbi/messaging/MessageExchangeImpl.java?ref=5ece0f4cf71d2762f1a62d90e49af84305fe3471",
+                "deletions": 4,
+                "filename": "servicemix-core/src/main/java/org/apache/servicemix/jbi/messaging/MessageExchangeImpl.java",
+                "patch": "@@ -719,10 +719,10 @@ private void display(String msg, StringBuffer sb, SourceTransformer st) {\n         if (getMessage(msg) != null) {\n             sb.append(\"  \").append(msg).append(\": \");\n             try {\n-                if (preserveContent) {\n-                    sb.append(getMessage(msg).getContent().getClass());\n-                } else {\n-                    if (getMessage(msg).getContent() != null) {\n+                if (getMessage(msg).getContent() != null) {\n+                    if (preserveContent) {\n+                        sb.append(getMessage(msg).getContent().getClass());\n+                    } else {\n                         Node node = st.toDOMNode(getMessage(msg).getContent());\n                         getMessage(msg).setContent(new DOMSource(node));\n                         String str = st.toString(node);\n@@ -732,6 +732,8 @@ private void display(String msg, StringBuffer sb, SourceTransformer st) {\n                             sb.append(str);\n                         }\n                     }\n+                } else {\n+                    sb.append(\"null\");\n                 }\n             } catch (Exception e) {\n                 sb.append(\"Unable to display: \").append(e);",
+                "raw_url": "https://github.com/apache/servicemix3/raw/5ece0f4cf71d2762f1a62d90e49af84305fe3471/servicemix-core/src/main/java/org/apache/servicemix/jbi/messaging/MessageExchangeImpl.java",
+                "sha": "3fcb7a3e371b15ba0f21864981cfdd10620e72b4",
+                "status": "modified"
+            }
+        ],
+        "message": "Fix possible NPE, thx to Robert H. Pollack\n\ngit-svn-id: https://svn.apache.org/repos/asf/incubator/servicemix/trunk@434178 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/servicemix3/commit/aabfe637f216a76e310860a606b35b9b8f82fa66",
+        "patched_files": [
+            "MessageExchangeImpl.java"
+        ],
+        "repo": "servicemix3",
+        "unit_tests": [
+            "MessageExchangeImplTest.java"
+        ]
+    },
+    "servicemix3_7280b59": {
+        "bug_id": "servicemix3_7280b59",
+        "commit": "https://github.com/apache/servicemix3/commit/7280b59407c41953b8049fc291d56eecbbd1db35",
+        "file": [
+            {
+                "additions": 41,
+                "blob_url": "https://github.com/apache/servicemix3/blob/7280b59407c41953b8049fc291d56eecbbd1db35/common/servicemix-soap2/src/test/resources/log4j-tests.properties",
+                "changes": 41,
+                "contents_url": "https://api.github.com/repos/apache/servicemix3/contents/common/servicemix-soap2/src/test/resources/log4j-tests.properties?ref=7280b59407c41953b8049fc291d56eecbbd1db35",
+                "deletions": 0,
+                "filename": "common/servicemix-soap2/src/test/resources/log4j-tests.properties",
+                "patch": "@@ -0,0 +1,41 @@\n+# \n+# Licensed to the Apache Software Foundation (ASF) under one or more\n+# contributor license agreements.  See the NOTICE file distributed with\n+# this work for additional information regarding copyright ownership.\n+# The ASF licenses this file to You under the Apache License, Version 2.0\n+# (the \"License\"); you may not use this file except in compliance with\n+# the License.  You may obtain a copy of the License at\n+# \n+#   http://www.apache.org/licenses/LICENSE-2.0\n+# \n+# Unless required by applicable law or agreed to in writing, software\n+# distributed  under the  License is distributed on an \"AS IS\" BASIS,\n+# WITHOUT  WARRANTIES OR CONDITIONS  OF ANY KIND, either  express  or\n+# implied.\n+#  \n+# See the License for the specific language governing permissions and\n+# limitations under the License.\n+#\n+#\n+\n+#\n+# The logging properties used during tests..\n+#\n+log4j.rootLogger=DEBUG, out\n+\n+log4j.logger.org.apache.activemq=INFO\n+log4j.logger.org.apache.activemq.spring=WARN\n+log4j.logger.org.apache.activemq.store.journal=INFO\n+log4j.logger.org.activeio.journal=INFO\n+\n+# CONSOLE appender not used by default\n+log4j.appender.stdout=org.apache.log4j.ConsoleAppender\n+log4j.appender.stdout.layout=org.apache.log4j.PatternLayout\n+log4j.appender.stdout.layout.ConversionPattern=%d [%-15.15t] %-5p %-30.30c{1} - %m%n\n+\n+# File appender\n+log4j.appender.out=org.apache.log4j.FileAppender\n+log4j.appender.out.layout=org.apache.log4j.PatternLayout\n+log4j.appender.out.layout.ConversionPattern=%d [%-15.15t] %-5p %-30.30c{1} - %m%n\n+log4j.appender.out.file=target/servicemix-test.log\n+log4j.appender.out.append=true",
+                "raw_url": "https://github.com/apache/servicemix3/raw/7280b59407c41953b8049fc291d56eecbbd1db35/common/servicemix-soap2/src/test/resources/log4j-tests.properties",
+                "sha": "16d3be78d5858de6d9730b3a0d6425aa37f38fb6",
+                "status": "added"
+            },
+            {
+                "additions": 41,
+                "blob_url": "https://github.com/apache/servicemix3/blob/7280b59407c41953b8049fc291d56eecbbd1db35/common/servicemix-soap2/src/test/resources/log4j.properties",
+                "changes": 41,
+                "contents_url": "https://api.github.com/repos/apache/servicemix3/contents/common/servicemix-soap2/src/test/resources/log4j.properties?ref=7280b59407c41953b8049fc291d56eecbbd1db35",
+                "deletions": 0,
+                "filename": "common/servicemix-soap2/src/test/resources/log4j.properties",
+                "patch": "@@ -0,0 +1,41 @@\n+# \n+# Licensed to the Apache Software Foundation (ASF) under one or more\n+# contributor license agreements.  See the NOTICE file distributed with\n+# this work for additional information regarding copyright ownership.\n+# The ASF licenses this file to You under the Apache License, Version 2.0\n+# (the \"License\"); you may not use this file except in compliance with\n+# the License.  You may obtain a copy of the License at\n+# \n+#   http://www.apache.org/licenses/LICENSE-2.0\n+# \n+# Unless required by applicable law or agreed to in writing, software\n+# distributed  under the  License is distributed on an \"AS IS\" BASIS,\n+# WITHOUT  WARRANTIES OR CONDITIONS  OF ANY KIND, either  express  or\n+# implied.\n+#  \n+# See the License for the specific language governing permissions and\n+# limitations under the License.\n+#\n+#\n+\n+#\n+# The logging properties used during tests..\n+#\n+log4j.rootLogger=DEBUG, stdout\n+\n+log4j.logger.org.apache.activemq=INFO\n+log4j.logger.org.apache.activemq.spring=WARN\n+log4j.logger.org.apache.activemq.store.journal=INFO\n+log4j.logger.org.activeio.journal=INFO\n+\n+# CONSOLE appender not used by default\n+log4j.appender.stdout=org.apache.log4j.ConsoleAppender\n+log4j.appender.stdout.layout=org.apache.log4j.PatternLayout\n+log4j.appender.stdout.layout.ConversionPattern=%d [%-15.15t] %-5p %-30.30c{1} - %m%n\n+\n+# File appender\n+log4j.appender.out=org.apache.log4j.FileAppender\n+log4j.appender.out.layout=org.apache.log4j.PatternLayout\n+log4j.appender.out.layout.ConversionPattern=%d [%-15.15t] %-5p %-30.30c{1} - %m%n\n+log4j.appender.out.file=target/servicemix-test.log\n+log4j.appender.out.append=true",
+                "raw_url": "https://github.com/apache/servicemix3/raw/7280b59407c41953b8049fc291d56eecbbd1db35/common/servicemix-soap2/src/test/resources/log4j.properties",
+                "sha": "49315a2a9085737408e8285939f07a5cef302f35",
+                "status": "added"
+            },
+            {
+                "additions": 0,
+                "blob_url": "https://github.com/apache/servicemix3/blob/7280b59407c41953b8049fc291d56eecbbd1db35/common/servicemix-soap2/src/test/resources/org/apache/servicemix/soap/Person.wsdl2",
+                "changes": 0,
+                "contents_url": "https://api.github.com/repos/apache/servicemix3/contents/common/servicemix-soap2/src/test/resources/org/apache/servicemix/soap/Person.wsdl2?ref=7280b59407c41953b8049fc291d56eecbbd1db35",
+                "deletions": 0,
+                "filename": "common/servicemix-soap2/src/test/resources/org/apache/servicemix/soap/Person.wsdl2",
+                "previous_filename": "common/servicemix-soap2/src/test/java/org/apache/servicemix/soap/Person.wsdl2",
+                "raw_url": "https://github.com/apache/servicemix3/raw/7280b59407c41953b8049fc291d56eecbbd1db35/common/servicemix-soap2/src/test/resources/org/apache/servicemix/soap/Person.wsdl2",
+                "sha": "1cc0a71b691ad3d85fc51aadb3a99b3375b384cd",
+                "status": "renamed"
+            }
+        ],
+        "message": "SM-898: soap2 unit tests fail with NPE\nPatch provided by Gert Vanthienen, thx !\n\ngit-svn-id: https://svn.apache.org/repos/asf/incubator/servicemix/trunk@522809 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/servicemix3/commit/bfa2f3f09e21a474961878ab83ed3246abf0a351",
+        "patched_files": [
+            "Person.java"
+        ],
+        "repo": "servicemix3",
+        "unit_tests": [
+            "PersonTest.java"
+        ]
+    },
+    "servicemix3_a176e79": {
+        "bug_id": "servicemix3_a176e79",
+        "commit": "https://github.com/apache/servicemix3/commit/a176e79e088adb905ba198cd4e2e268938979d14",
+        "file": [
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/servicemix3/blob/a176e79e088adb905ba198cd4e2e268938979d14/core/servicemix-core/src/main/java/org/apache/servicemix/jbi/monitoring/StatisticsService.java",
+                "changes": 5,
+                "contents_url": "https://api.github.com/repos/apache/servicemix3/contents/core/servicemix-core/src/main/java/org/apache/servicemix/jbi/monitoring/StatisticsService.java?ref=a176e79e088adb905ba198cd4e2e268938979d14",
+                "deletions": 1,
+                "filename": "core/servicemix-core/src/main/java/org/apache/servicemix/jbi/monitoring/StatisticsService.java",
+                "patch": "@@ -215,12 +215,15 @@ protected void onComponentShutDown(ComponentEvent event) {\n         ComponentMBeanImpl component = event.getComponent();\n         String key = component.getName();\n         ComponentStats stats = (ComponentStats) componentStats.remove(key);\n+        if (stats == null) {\n+            return;\n+        }\n         // Register MBean\n         ManagementContext context= container.getManagementContext();\n         try {\n             context.unregisterMBean(context.createObjectName(context.createObjectNameProps(stats, true)));\n         } catch (Exception e) {\n-            log.info(\"Unable to unregister component statistics MBean: \" + e.getMessage());\n+            log.info(\"Unable to unregister component statistics MBean: \" + e);\n             if (log.isDebugEnabled()) {\n                 log.debug(\"Unable to unregister component statistics MBean\", e);\n             }",
+                "raw_url": "https://github.com/apache/servicemix3/raw/a176e79e088adb905ba198cd4e2e268938979d14/core/servicemix-core/src/main/java/org/apache/servicemix/jbi/monitoring/StatisticsService.java",
+                "sha": "7735f48764fed91aee7d2bcfc198517aab8b4cf5",
+                "status": "modified"
+            }
+        ],
+        "message": "Avoid NPE when component shuts down and the stats mbean is not registered\n\ngit-svn-id: https://svn.apache.org/repos/asf/incubator/servicemix/trunk@486645 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/servicemix3/commit/541bb4164bd76df5badc503ae287ac2426eba1eb",
+        "patched_files": [
+            "StatisticsService.java"
+        ],
+        "repo": "servicemix3",
+        "unit_tests": [
+            "StatisticsServiceTest.java"
+        ]
+    },
+    "servicemix3_c924afd": {
+        "bug_id": "servicemix3_c924afd",
+        "commit": "https://github.com/apache/servicemix3/commit/c924afdbe0a5947c50732919c692d2d10792a071",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/servicemix3/blob/c924afdbe0a5947c50732919c692d2d10792a071/web/servicemix-web-console/src/main/java/org/apache/servicemix/web/model/Registry.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/servicemix3/contents/web/servicemix-web-console/src/main/java/org/apache/servicemix/web/model/Registry.java?ref=c924afdbe0a5947c50732919c692d2d10792a071",
+                "deletions": 1,
+                "filename": "web/servicemix-web-console/src/main/java/org/apache/servicemix/web/model/Registry.java",
+                "patch": "@@ -89,7 +89,7 @@ public Endpoint getEndpoint(ObjectName objectName) {\n     public List<Endpoint> getEndpoints(Component component) throws Exception {\r\n         List<Endpoint> endpoints = new ArrayList<Endpoint>();\r\n         for (Endpoint endpoint : getEndpoints()) {\r\n-            if (endpoint.getComponent().equals(component)) {\r\n+            if (component.equals(endpoint.getComponent())) {\r\n                 endpoints.add(endpoint);\r\n             }\r\n         }\r",
+                "raw_url": "https://github.com/apache/servicemix3/raw/c924afdbe0a5947c50732919c692d2d10792a071/web/servicemix-web-console/src/main/java/org/apache/servicemix/web/model/Registry.java",
+                "sha": "15812d112d56ddad2a574e5f2ee00abca1ee3cb9",
+                "status": "modified"
+            }
+        ],
+        "message": "SM-923: NPE in web console when viewing component with lightweight components deployed\n\ngit-svn-id: https://svn.apache.org/repos/asf/incubator/servicemix/trunk@526105 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/servicemix3/commit/f0818732a9f96ed8752712ef617ee0cff5a96b88",
+        "patched_files": [
+            "Registry.java"
+        ],
+        "repo": "servicemix3",
+        "unit_tests": [
+            "RegistryTest.java"
+        ]
+    }
+}

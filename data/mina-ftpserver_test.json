@@ -1,0 +1,225 @@
+{
+    "mina-ftpserver_0fe58af": {
+        "bug_id": "mina-ftpserver_0fe58af",
+        "commit": "https://github.com/apache/mina-ftpserver/commit/0fe58af78fc805b025f78b32eeeeba38b64a0d77",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/mina-ftpserver/blob/0fe58af78fc805b025f78b32eeeeba38b64a0d77/core/src/main/java/org/apache/ftpserver/command/impl/SITE_DESCUSER.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/mina-ftpserver/contents/core/src/main/java/org/apache/ftpserver/command/impl/SITE_DESCUSER.java?ref=0fe58af78fc805b025f78b32eeeeba38b64a0d77",
+                "deletions": 1,
+                "filename": "core/src/main/java/org/apache/ftpserver/command/impl/SITE_DESCUSER.java",
+                "patch": "@@ -104,7 +104,7 @@ public void execute(final FtpIoSession session,\n         sb.append(\"homedirectory   : \").append(user.getHomeDirectory()).append(\n                 \"\\n\");\n         sb.append(\"writepermission : \").append(\n-                user.authorize(new WriteRequest())).append(\"\\n\");\n+                user.authorize(new WriteRequest()) != null).append(\"\\n\");\n         sb.append(\"enableflag      : \").append(user.getEnabled()).append(\"\\n\");\n         sb.append(\"idletime        : \").append(user.getMaxIdleTime()).append(\n                 \"\\n\");",
+                "raw_url": "https://github.com/apache/mina-ftpserver/raw/0fe58af78fc805b025f78b32eeeeba38b64a0d77/core/src/main/java/org/apache/ftpserver/command/impl/SITE_DESCUSER.java",
+                "sha": "7bef7151a5ba48dc1ffc06f3b52ae75f501d7801",
+                "status": "modified"
+            },
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/mina-ftpserver/blob/0fe58af78fc805b025f78b32eeeeba38b64a0d77/core/src/main/java/org/apache/ftpserver/impl/DefaultFtpHandler.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/mina-ftpserver/contents/core/src/main/java/org/apache/ftpserver/impl/DefaultFtpHandler.java?ref=0fe58af78fc805b025f78b32eeeeba38b64a0d77",
+                "deletions": 0,
+                "filename": "core/src/main/java/org/apache/ftpserver/impl/DefaultFtpHandler.java",
+                "patch": "@@ -63,6 +63,8 @@ public void sessionCreated(final FtpIoSession session) throws Exception {\n     public void sessionOpened(final FtpIoSession session) throws Exception {\n         context.getFtpletContainer().onConnect(session.getFtpletSession());\n \n+        session.updateLastAccessTime();\n+        \n         session.write(LocalizedFtpReply.translate(session, null, context,\n                 FtpReply.REPLY_220_SERVICE_READY, null, null));\n     }\n@@ -114,6 +116,8 @@ private boolean isCommandOkWithoutAuthentication(String command) {\n     public void messageReceived(final FtpIoSession session,\n             final FtpRequest request) throws Exception {\n         try {\n+            session.updateLastAccessTime();\n+            \n             String commandName = request.getCommand();\n             CommandFactory commandFactory = context.getCommandFactory();\n             Command command = commandFactory.getCommand(commandName);",
+                "raw_url": "https://github.com/apache/mina-ftpserver/raw/0fe58af78fc805b025f78b32eeeeba38b64a0d77/core/src/main/java/org/apache/ftpserver/impl/DefaultFtpHandler.java",
+                "sha": "44dabc3a00ab1d3f9bcd167da53058ae79df8c3f",
+                "status": "modified"
+            },
+            {
+                "additions": 76,
+                "blob_url": "https://github.com/apache/mina-ftpserver/blob/0fe58af78fc805b025f78b32eeeeba38b64a0d77/core/src/test/java/org/apache/ftpserver/clienttests/SiteTest.java",
+                "changes": 76,
+                "contents_url": "https://api.github.com/repos/apache/mina-ftpserver/contents/core/src/test/java/org/apache/ftpserver/clienttests/SiteTest.java?ref=0fe58af78fc805b025f78b32eeeeba38b64a0d77",
+                "deletions": 0,
+                "filename": "core/src/test/java/org/apache/ftpserver/clienttests/SiteTest.java",
+                "patch": "@@ -0,0 +1,76 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one\n+ * or more contributor license agreements.  See the NOTICE file\n+ * distributed with this work for additional information\n+ * regarding copyright ownership.  The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance\n+ * with the License.  You may obtain a copy of the License at\n+ *\n+ *  http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing,\n+ * software distributed under the License is distributed on an\n+ * \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+ * KIND, either express or implied.  See the License for the\n+ * specific language governing permissions and limitations\n+ * under the License.\n+ */\n+\n+package org.apache.ftpserver.clienttests;\n+\n+import java.util.regex.Matcher;\n+import java.util.regex.Pattern;\n+\n+import org.apache.commons.net.ftp.FTPReply;\n+\n+/**\n+*\n+* @author The Apache MINA Project (dev@mina.apache.org)\n+* @version $Rev$, $Date$\n+*\n+*/\n+public class SiteTest extends ClientTestTemplate {\n+\n+    public void testSiteDescUser() throws Exception {\n+        client.login(ADMIN_USERNAME, ADMIN_PASSWORD);\n+\n+        client.sendCommand(\"SITE DESCUSER admin\");\n+        String[] siteReplies = client.getReplyString().split(\"\\r\\n\");\n+\n+        assertEquals(\"200-\", siteReplies[0]);\n+        assertEquals(\"userid          : admin\", siteReplies[1]);\n+        assertEquals(\"userpassword    : ********\", siteReplies[2]);\n+        assertEquals(\"homedirectory   : ./test-tmp/ftproot\", siteReplies[3]);\n+        assertEquals(\"writepermission : true\", siteReplies[4]);\n+        assertEquals(\"enableflag      : true\", siteReplies[5]);\n+        assertEquals(\"idletime        : 0\", siteReplies[6]);\n+        assertEquals(\"uploadrate      : 0\", siteReplies[7]);\n+        assertEquals(\"200 downloadrate    : 0\", siteReplies[8]);\n+    }\n+\n+    public void testAnonNotAllowed() throws Exception {\n+        client.login(ANONYMOUS_USERNAME, ANONYMOUS_PASSWORD);\n+\n+        assertTrue(FTPReply.isNegativePermanent(client.sendCommand(\"SITE DESCUSER admin\")));\n+    }\n+\n+    public void testSiteWho() throws Exception {\n+        client.login(ADMIN_USERNAME, ADMIN_PASSWORD);\n+\n+        client.sendCommand(\"SITE WHO\");\n+        String[] siteReplies = client.getReplyString().split(\"\\r\\n\");\n+\n+        assertEquals(\"200-\", siteReplies[0]);\n+        \n+        String timestampPattern = \"\\\\d{4}-\\\\d{2}-\\\\d{2}T\\\\d{2}:\\\\d{2}:\\\\d{2}\";\n+        System.out.println(\">>\" + siteReplies[1] + \"<<\");\n+        \n+        String pattern = \"200 admin           127.0.0.1       \" + timestampPattern + \" \" + timestampPattern + \" \"; \n+        \n+        assertTrue(Pattern.matches(pattern, siteReplies[1]));\n+    }\n+\n+\n+    \n+}",
+                "raw_url": "https://github.com/apache/mina-ftpserver/raw/0fe58af78fc805b025f78b32eeeeba38b64a0d77/core/src/test/java/org/apache/ftpserver/clienttests/SiteTest.java",
+                "sha": "0a1a5afb68a7fcebc6fc5c5f2e1034bd1a45f256",
+                "status": "added"
+            }
+        ],
+        "message": "Fix for SITE DESCUSER printing WriteRequest FQCN instead of true (FTPSERVER-257)\nFix for SITE WHO throwing NPE (FTPSERVER-256)\nAdded test for the above commands\n\ngit-svn-id: https://svn.apache.org/repos/asf/mina/ftpserver/trunk@732069 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/mina-ftpserver/commit/29b02ca75c5c35a2cb511d5e1128019ca21455c0",
+        "patched_files": [
+            "SITE_DESCUSER.java",
+            "DefaultFtpHandler.java"
+        ],
+        "repo": "mina-ftpserver",
+        "unit_tests": [
+            "SiteTest.java"
+        ]
+    },
+    "mina-ftpserver_10df732": {
+        "bug_id": "mina-ftpserver_10df732",
+        "commit": "https://github.com/apache/mina-ftpserver/commit/10df73239d9ff8274dfe8f3fa59be14a49dad49f",
+        "file": [
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/mina-ftpserver/blob/10df73239d9ff8274dfe8f3fa59be14a49dad49f/core/src/main/java/org/apache/ftpserver/impl/DefaultFtpServer.java",
+                "changes": 7,
+                "contents_url": "https://api.github.com/repos/apache/mina-ftpserver/contents/core/src/main/java/org/apache/ftpserver/impl/DefaultFtpServer.java?ref=10df73239d9ff8274dfe8f3fa59be14a49dad49f",
+                "deletions": 1,
+                "filename": "core/src/main/java/org/apache/ftpserver/impl/DefaultFtpServer.java",
+                "patch": "@@ -67,6 +67,10 @@ public DefaultFtpServer(final FtpServerContext serverContext) {\n      * @throws FtpException \n      */\n     public void start() throws FtpException {\n+        if (serverContext == null) {\n+            // we have already been stopped, can not be restarted\n+            throw new IllegalStateException(\"FtpServer has been stopped. Restart is not supported\");\n+        }\n \n         List<Listener> startedListeners = new ArrayList<Listener>();\n         \n@@ -99,7 +103,8 @@ public void start() throws FtpException {\n     }\n \n     /**\n-     * Stop the server. Stop the listener thread.\n+     * Stop the server. Stopping the server will close completely and \n+     * it not supported to restart using {@link #start()}.\n      */\n     public void stop() {\n         if (serverContext == null) {",
+                "raw_url": "https://github.com/apache/mina-ftpserver/raw/10df73239d9ff8274dfe8f3fa59be14a49dad49f/core/src/main/java/org/apache/ftpserver/impl/DefaultFtpServer.java",
+                "sha": "680bd19a8471015094d9f525cab79ad6f6eed736",
+                "status": "modified"
+            }
+        ],
+        "message": "Fixing NPE thrown when restarting a stopped FtpServer and improving Javadoc for this (FTPSERVER-340)\n\ngit-svn-id: https://svn.apache.org/repos/asf/mina/ftpserver/trunk@882110 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/mina-ftpserver/commit/8497b0b094d6caa110602b695055c965c567c537",
+        "patched_files": [
+            "DefaultFtpServer.java"
+        ],
+        "repo": "mina-ftpserver",
+        "unit_tests": [
+            "DefaultFtpServerTest.java"
+        ]
+    },
+    "mina-ftpserver_54a34f4": {
+        "bug_id": "mina-ftpserver_54a34f4",
+        "commit": "https://github.com/apache/mina-ftpserver/commit/54a34f43b7b4019f0ea310ff44ac61a3dcb3b3ef",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/mina-ftpserver/blob/54a34f43b7b4019f0ea310ff44ac61a3dcb3b3ef/core/src/main/java/org/apache/ftpserver/filesystem/nativefs/impl/NativeFtpFile.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/mina-ftpserver/contents/core/src/main/java/org/apache/ftpserver/filesystem/nativefs/impl/NativeFtpFile.java?ref=54a34f43b7b4019f0ea310ff44ac61a3dcb3b3ef",
+                "deletions": 1,
+                "filename": "core/src/main/java/org/apache/ftpserver/filesystem/nativefs/impl/NativeFtpFile.java",
+                "patch": "@@ -496,7 +496,7 @@ public final static String getPhysicalName(final String rootDir,\n                 File[] matches = new File(resArg)\n                         .listFiles(new NameEqualsFileFilter(tok, true));\n \n-                if (matches.length > 0) {\n+                if (matches != null && matches.length > 0) {\n                     tok = matches[0].getName();\n                 }\n             }",
+                "raw_url": "https://github.com/apache/mina-ftpserver/raw/54a34f43b7b4019f0ea310ff44ac61a3dcb3b3ef/core/src/main/java/org/apache/ftpserver/filesystem/nativefs/impl/NativeFtpFile.java",
+                "sha": "cbab9e3d7767abd090d79e4116dd7e8869286745",
+                "status": "modified"
+            }
+        ],
+        "message": "Fix a potential NPE\n\ngit-svn-id: https://svn.apache.org/repos/asf/mina/ftpserver/trunk@746812 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/mina-ftpserver/commit/f6c8f3e3825ad27394c6b0c128b68f3018b8517d",
+        "patched_files": [
+            "NativeFtpFile.java"
+        ],
+        "repo": "mina-ftpserver",
+        "unit_tests": [
+            "NativeFtpFileTest.java"
+        ]
+    },
+    "mina-ftpserver_81ac8af": {
+        "bug_id": "mina-ftpserver_81ac8af",
+        "commit": "https://github.com/apache/mina-ftpserver/commit/81ac8af8dde8197681884f644627a7f7b8c34971",
+        "file": [
+            {
+                "additions": 5,
+                "blob_url": "https://github.com/apache/mina-ftpserver/blob/81ac8af8dde8197681884f644627a7f7b8c34971/core/src/main/java/org/apache/ftpserver/usermanager/BaseUser.java",
+                "changes": 5,
+                "contents_url": "https://api.github.com/repos/apache/mina-ftpserver/contents/core/src/main/java/org/apache/ftpserver/usermanager/BaseUser.java?ref=81ac8af8dde8197681884f644627a7f7b8c34971",
+                "deletions": 0,
+                "filename": "core/src/main/java/org/apache/ftpserver/usermanager/BaseUser.java",
+                "patch": "@@ -180,6 +180,11 @@ public String toString() {\n     public AuthorizationRequest authorize(AuthorizationRequest request) {\n         Authority[] authorities = getAuthorities();\n \n+        // check for no authorities at all\n+        if(authorities == null) {\n+            return null;\n+        }\n+        \n         boolean someoneCouldAuthorize = false;\n         for (int i = 0; i < authorities.length; i++) {\n             Authority authority = authorities[i];",
+                "raw_url": "https://github.com/apache/mina-ftpserver/raw/81ac8af8dde8197681884f644627a7f7b8c34971/core/src/main/java/org/apache/ftpserver/usermanager/BaseUser.java",
+                "sha": "85d1293c8fa46cbe7b5321ca3070d8e6dca6d0f2",
+                "status": "modified"
+            }
+        ],
+        "message": "Added protection against NPE in the unlikely case that the user has no authorities\n\ngit-svn-id: https://svn.apache.org/repos/asf/mina/ftpserver/trunk@689490 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/mina-ftpserver/commit/5c8579b25ebbab0af702e52dfdeb0c3cb3c8dce2",
+        "patched_files": [
+            "BaseUser.java"
+        ],
+        "repo": "mina-ftpserver",
+        "unit_tests": [
+            "BaseUserTest.java"
+        ]
+    },
+    "mina-ftpserver_81f3e47": {
+        "bug_id": "mina-ftpserver_81f3e47",
+        "commit": "https://github.com/apache/mina-ftpserver/commit/81f3e4787910b3bd4a930e9a375c91d3d64d45af",
+        "file": [
+            {
+                "additions": 10,
+                "blob_url": "https://github.com/apache/mina-ftpserver/blob/81f3e4787910b3bd4a930e9a375c91d3d64d45af/src/java/org/apache/ftpserver/ConnectionManagerImpl.java",
+                "changes": 20,
+                "contents_url": "https://api.github.com/repos/apache/mina-ftpserver/contents/src/java/org/apache/ftpserver/ConnectionManagerImpl.java?ref=81f3e4787910b3bd4a930e9a375c91d3d64d45af",
+                "deletions": 10,
+                "filename": "src/java/org/apache/ftpserver/ConnectionManagerImpl.java",
+                "patch": "@@ -16,12 +16,7 @@\n  */\n package org.apache.ftpserver;\n \n-import java.util.ArrayList;\n-import java.util.Iterator;\n-import java.util.List;\n-import java.util.Timer;\n-import java.util.TimerTask;\n-import java.util.Vector;\n+import java.util.*;\n \n import org.apache.commons.logging.Log;\n import org.apache.commons.logging.LogFactory;\n@@ -31,7 +26,6 @@\n import org.apache.ftpserver.interfaces.ConnectionManagerObserver;\n import org.apache.ftpserver.interfaces.IConnection;\n import org.apache.ftpserver.interfaces.IConnectionManager;\n-import org.apache.ftpserver.usermanager.BaseUser;\n \n /**\n  * Connection service to manage all the connections (request handlers).\n@@ -114,6 +108,10 @@ public boolean isAnonymousLoginEnabled() {\n         return anonEnabled;\n     }\n     \n+    public int getDefaultIdleSec() {\n+        return defaultIdleSec;\n+    }\n+    \n     /**\n      * Get maximum anonymous logins\n      */\n@@ -156,9 +154,11 @@ public void newConnection(IConnection connection) {\n             observer.updatedConnection(connection);\n         }\n         \n-        // set default idle time\n-        BaseUser user = (BaseUser)connection.getRequest().getUser();\n-        user.setMaxIdleTime(defaultIdleSec);\n+        /*\n+         * set default idle time for request. This value should be overrided\n+         * after user login\n+         */\n+        connection.getRequest().setMaxIdleTime(defaultIdleSec);\n         \n         // now start a new thread to serve this connection\n         new Thread(connection).start();",
+                "raw_url": "https://github.com/apache/mina-ftpserver/raw/81f3e4787910b3bd4a930e9a375c91d3d64d45af/src/java/org/apache/ftpserver/ConnectionManagerImpl.java",
+                "sha": "bf8b46558a7385084febc8df379eafdbc221630e",
+                "status": "modified"
+            },
+            {
+                "additions": 10,
+                "blob_url": "https://github.com/apache/mina-ftpserver/blob/81f3e4787910b3bd4a930e9a375c91d3d64d45af/src/java/org/apache/ftpserver/FtpRequestImpl.java",
+                "changes": 11,
+                "contents_url": "https://api.github.com/repos/apache/mina-ftpserver/contents/src/java/org/apache/ftpserver/FtpRequestImpl.java?ref=81f3e4787910b3bd4a930e9a375c91d3d64d45af",
+                "deletions": 1,
+                "filename": "src/java/org/apache/ftpserver/FtpRequestImpl.java",
+                "patch": "@@ -51,6 +51,7 @@\n     private ConnectionObserver observer;\n     private String language;\n     \n+    private int maxIdleTime = 0;\n     private long connectionTime = 0L;\n     private long loginTime = 0L;\n     private long lastAccessTime = 0L;\n@@ -403,7 +404,7 @@ public void clear() {\n      */\n     public boolean isTimeout(long currTime) {\n          boolean bActive = true;\n-         int maxIdleTime = user.getMaxIdleTime();\n+         int maxIdleTime = getMaxIdleTime();\n          if(maxIdleTime > 0) {\n              long currIdleTimeMillis = currTime - lastAccessTime;\n              long maxIdleTimeMillis = maxIdleTime * 1000L;\n@@ -418,4 +419,12 @@ public boolean isTimeout(long currTime) {\n     public boolean isTimeout() {\n         return isTimeout(System.currentTimeMillis());\n     }\n+\n+    public int getMaxIdleTime() {\n+        return this.maxIdleTime;\n+    }\n+\n+    public void setMaxIdleTime(int maxIdleTimeSec) {\n+        this.maxIdleTime = maxIdleTimeSec;\n+    }\n }",
+                "raw_url": "https://github.com/apache/mina-ftpserver/raw/81f3e4787910b3bd4a930e9a375c91d3d64d45af/src/java/org/apache/ftpserver/FtpRequestImpl.java",
+                "sha": "897e367bdecd617bcff083213c0ee7993ceafa27",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/mina-ftpserver/blob/81f3e4787910b3bd4a930e9a375c91d3d64d45af/src/java/org/apache/ftpserver/command/PASS.java",
+                "changes": 1,
+                "contents_url": "https://api.github.com/repos/apache/mina-ftpserver/contents/src/java/org/apache/ftpserver/command/PASS.java?ref=81f3e4787910b3bd4a930e9a375c91d3d64d45af",
+                "deletions": 0,
+                "filename": "src/java/org/apache/ftpserver/command/PASS.java",
+                "patch": "@@ -118,6 +118,7 @@ public void execute(RequestHandler handler,\n             if(bSuccess) {\n                 request.setUser(user);\n                 request.setUserArgument(null);\n+                request.setMaxIdleTime(user.getMaxIdleTime());\n             } else {\n                 log.warn(\"Login failure - \" + userName);\n                 out.send(530, \"PASS\", userName);",
+                "raw_url": "https://github.com/apache/mina-ftpserver/raw/81f3e4787910b3bd4a930e9a375c91d3d64d45af/src/java/org/apache/ftpserver/command/PASS.java",
+                "sha": "65a388be5c4f77cbcbbb4c78b5f3f133f88f7cb6",
+                "status": "modified"
+            },
+            {
+                "additions": 16,
+                "blob_url": "https://github.com/apache/mina-ftpserver/blob/81f3e4787910b3bd4a930e9a375c91d3d64d45af/src/java/org/apache/ftpserver/ftplet/FtpRequest.java",
+                "changes": 16,
+                "contents_url": "https://api.github.com/repos/apache/mina-ftpserver/contents/src/java/org/apache/ftpserver/ftplet/FtpRequest.java?ref=81f3e4787910b3bd4a930e9a375c91d3d64d45af",
+                "deletions": 0,
+                "filename": "src/java/org/apache/ftpserver/ftplet/FtpRequest.java",
+                "patch": "@@ -22,6 +22,8 @@\n import java.net.InetAddress;\n import java.util.Date;\n \n+import org.apache.ftpserver.ConnectionManagerImpl;\n+\n /**\n  * Defines an object to provide client request information to a ftplet.\n  * Ftplet methods will always get the same instance of Ftplet request.\n@@ -67,6 +69,20 @@\n      * Get last access time.\n      */\n     Date getLastAccessTime();\n+\n+    /**\n+     * Returns maximum idle time. This time equals to\n+     * {@link ConnectionManagerImpl#getDefaultIdleSec()} until user login, and\n+     * {@link User#getMaxIdleTime()} after user login.\n+     */\n+    int getMaxIdleTime();\n+    \n+    /**\n+     * Set maximum idle time in seconds. This time equals to\n+     * {@link ConnectionManagerImpl#getDefaultIdleSec()} until user login, and\n+     * {@link User#getMaxIdleTime()} after user login.\n+     */\n+    void setMaxIdleTime(int maxIdleTimeSec);\n     \n     /**\n      * Get user object.",
+                "raw_url": "https://github.com/apache/mina-ftpserver/raw/81f3e4787910b3bd4a930e9a375c91d3d64d45af/src/java/org/apache/ftpserver/ftplet/FtpRequest.java",
+                "sha": "08d62a0478ede34b2e79daf881ae905979248506",
+                "status": "modified"
+            }
+        ],
+        "message": "fix NPE due to prev. patch (User is null in Request until login)\nintroduce maxIdleTime variable in request (set in ConnectionManager, chainge in PASS command)\n\ngit-svn-id: https://svn.apache.org/repos/asf/incubator/ftpserver/trunk@405674 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/mina-ftpserver/commit/04e9ec0e2fcb9322de18de50a7cdf078aac3111d",
+        "patched_files": [
+            "FtpRequestImpl.java"
+        ],
+        "repo": "mina-ftpserver",
+        "unit_tests": [
+            "FtpRequestImplTest.java"
+        ]
+    },
+    "mina-ftpserver_e934827": {
+        "bug_id": "mina-ftpserver_e934827",
+        "commit": "https://github.com/apache/mina-ftpserver/commit/e934827758f0019c2dd23c42da27673356125790",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/mina-ftpserver/blob/e934827758f0019c2dd23c42da27673356125790/core/src/main/java/org/apache/ftpserver/usermanager/PropertiesUserManager.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/mina-ftpserver/contents/core/src/main/java/org/apache/ftpserver/usermanager/PropertiesUserManager.java?ref=e934827758f0019c2dd23c42da27673356125790",
+                "deletions": 1,
+                "filename": "core/src/main/java/org/apache/ftpserver/usermanager/PropertiesUserManager.java",
+                "patch": "@@ -224,7 +224,7 @@ public synchronized void save(User usr) throws FtpException {\n      * @throws FtpException\n      */\n     private void saveUserData() throws FtpException {\n-        File dir = userDataFile.getParentFile();\n+        File dir = userDataFile.getAbsoluteFile().getParentFile();\n         if(dir != null && !dir.exists() && !dir.mkdirs() ) {\n             String dirName = dir.getAbsolutePath();\n             throw new FtpServerConfigurationException(\"Cannot create directory for user data file : \" + dirName);",
+                "raw_url": "https://github.com/apache/mina-ftpserver/raw/e934827758f0019c2dd23c42da27673356125790/core/src/main/java/org/apache/ftpserver/usermanager/PropertiesUserManager.java",
+                "sha": "2406c9a494b5f131baa6744f5b573a36ff8d12f6",
+                "status": "modified"
+            }
+        ],
+        "message": "Fix potential NPE in PropertiesUserManager (FTPSERVER-145)\n\ngit-svn-id: https://svn.apache.org/repos/asf/mina/ftpserver/trunk@683615 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/mina-ftpserver/commit/a63073007ab5cd1c8e638b747b8693d01c5445b5",
+        "patched_files": [
+            "PropertiesUserManager.java"
+        ],
+        "repo": "mina-ftpserver",
+        "unit_tests": [
+            "PropertiesUserManagerTest.java"
+        ]
+    }
+}
