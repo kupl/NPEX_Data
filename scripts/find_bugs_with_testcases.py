@@ -112,6 +112,7 @@ def do_commit(commit):
         logfile.writelines("%s: has no unit-tests\n" % bug_id)
     logfile.flush()
     q.put(output)
+    os.chdir('..')
 
 def do_repo(repo, n_cpus):
     os.chdir(PATH)
