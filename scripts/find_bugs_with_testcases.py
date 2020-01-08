@@ -8,8 +8,10 @@ from easyprocess import EasyProcess
 from easyprocess import EasyProcessError
 from multiprocessing import Process
 from multiprocessing import Pool
-from multiprocessing import Queue
+from multiprocessing import Manager
 from functools import partial
+from itertools import repeat
+
 
 starttime = time.strftime("%m%d_%I%M", time.localtime())
 log = "%s.log" % starttime
@@ -21,7 +23,6 @@ build_command = \
 }
 
 PATH = os.path.abspath(os.getcwd())
-q = Queue()
 
 def test_filenames(class_name):
     return \
@@ -83,7 +84,7 @@ def find_unit_tests(commit):
     
     return list(patched), list(unit_tests) 
 
-def do_commit(commit):
+def do_commit(commit, output):
     repo = commit['repo']
     git_http = "https://github.com/apache/%s" % repo
     commit_id = commit['commit'].split('/')[-1]
@@ -99,7 +100,6 @@ def do_commit(commit):
     os.chdir(commit_id[:6])
     ret_checkout = EasyProcess(git_checkout_command).call()
 
-    output = ()
     #3. Check if unit-tests exist for each commit
     patched, unit_tests = find_unit_tests(commit)
     if unit_tests:
@@ -107,11 +107,10 @@ def do_commit(commit):
         commit['bug_id'] = bug_id
         commit['patched_files'] = patched
         commit['unit_tests'] = unit_tests
-        output = (bug_id, commit)
+        output[bug_id] = commit
     else:
         logfile.writelines("%s: has no unit-tests\n" % bug_id)
     logfile.flush()
-    q.put(output)
     os.chdir('..')
 
 def do_repo(repo, n_cpus):
@@ -129,18 +128,12 @@ def do_repo(repo, n_cpus):
     print(os.getcwd())
     
     bugs_in_one_repo = json.loads(bug_file)
-    with Pool(n_cpus) as p:
-        p.map(do_commit, bugs_in_one_repo)
-    
-    output = {}
-    while True:
-        if q.empty():
-            break
-        else:
-            bug_id, commit = q.get()
-            output[bug_id] = commit
 
-    output_file.write(json.dumps(output, indent=4, sort_keys=True))
+    output = Manager().dict()
+    with Pool(n_cpus) as p:
+        p.starmap(do_commit, zip(bugs_in_one_repo, repeat(output)))
+
+    output_file.write(json.dumps(output.copy(), indent=4, sort_keys=True))
     output_file.close()
 
 def do_parallel(repos, n_cpus=8):
