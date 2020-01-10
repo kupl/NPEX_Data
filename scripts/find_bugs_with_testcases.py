@@ -113,8 +113,19 @@ def do_commit(commit, output):
     logfile.flush()
     os.chdir('..')
 
+def is_done(repo):
+    try:
+        file_to_write = open("data/%s_test.json" % repo).read()
+    except FileNotFoundError:
+        return False
+    else:
+        return file_to_write != ''
+
 def do_repo(repo, n_cpus):
     os.chdir(PATH)
+    if is_done(repo):
+        print("%s is already done!" % repo)
+        return
     output_file = open("data/%s_test.json" % repo, 'w')
     
     #1. Find commit data of repo

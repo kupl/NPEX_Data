@@ -108,7 +108,7 @@ def do_commit(commit):
     # 6-digit commit hash, which is used as the name of a directory
     commit_id = commit['commit'].split('/')[-1][:6]
 
-    ## 1. clone repo and checkout commit
+    ## 1. checkout commit
     git_checkout_command = "git checkout -f %s" % commit_id
 
     os.chdir(commit_id)
@@ -133,6 +133,12 @@ def do_commit(commit):
     elif has_outdated_urls():
         logger.warning("# %s HAS OUTDATED URLS" % commit['bug_id'])
         logger.handlers[0].flush
+        return False
+
+    ##### HEURISTIC: skip commit that has only testfile #####
+    changed_files = set(changed_file['filename'].split('/')[-1] for changed_file in commit['file'])
+    if len(changed_files - set(unittests)) == 0:
+        logger.warning("# %s HAS NO PATCHED FILE COMMITED" % commit['bug_id'])
         return False
 
     ret_compile = EasyProcess(compile_cmd).call(timeout=300)
