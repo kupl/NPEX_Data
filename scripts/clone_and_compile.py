@@ -185,7 +185,7 @@ if __name__ == '__main__':
 
     repos = []
     if repo is None:
-        with open("repo_with_pom.txt", 'r') as repo_file:
+        with open("repo_with_commits.txt", 'r') as repo_file:
             repos = [repo.split('\n')[0] for repo in repo_file.readlines()]
     else:
         repos = [repo]

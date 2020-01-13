@@ -43,8 +43,8 @@
         "message": "Merge pull request #33 from jordanly/jly/fix-npe-in-sla-aware-updates\n\nFix possible NullPointerException in InstanceActionHandler",
         "parent": "https://github.com/apache/aurora/commit/d46a8d91aa69ab9cf1ebc2b13552f8093d366fe9",
         "patched_files": [
-            "InstanceActionHandler.java",
-            "http_example.java"
+            "http_example.java",
+            "InstanceActionHandler.java"
         ],
         "repo": "aurora",
         "unit_tests": [
@@ -100,8 +100,34 @@
         ],
         "repo": "aurora",
         "unit_tests": [
-            "BaseSchedulerCoreImplTest.java",
-            "ConfigurationManagerTest.java"
+            "BaseSchedulerCoreImplTest.java"
+        ]
+    },
+    "aurora_3665b4a": {
+        "bug_id": "aurora_3665b4a",
+        "commit": "https://github.com/apache/aurora/commit/3665b4a7ddcdcf7845d4cc2f652fa9f6febda9fc",
+        "file": [
+            {
+                "additions": 44,
+                "blob_url": "https://github.com/apache/aurora/blob/3665b4a7ddcdcf7845d4cc2f652fa9f6febda9fc/src/java/com/twitter/mesos/updater/UpdateLogic.java",
+                "changes": 52,
+                "contents_url": "https://api.github.com/repos/apache/aurora/contents/src/java/com/twitter/mesos/updater/UpdateLogic.java?ref=3665b4a7ddcdcf7845d4cc2f652fa9f6febda9fc",
+                "deletions": 8,
+                "filename": "src/java/com/twitter/mesos/updater/UpdateLogic.java",
+                "patch": "@@ -8,6 +8,7 @@\n import com.twitter.common.util.StateMachine;\n import com.twitter.mesos.gen.UpdateConfig;\n \n+import java.util.Collection;\n import java.util.PriorityQueue;\n import java.util.Set;\n import java.util.logging.Level;\n@@ -17,7 +18,13 @@\n import static com.twitter.common.base.MorePreconditions.checkNotBlank;\n import static com.twitter.mesos.updater.UpdateCommand.Type.ROLLBACK_TASK;\n import static com.twitter.mesos.updater.UpdateCommand.Type.UPDATE_TASK;\n-import static com.twitter.mesos.updater.UpdateLogic.State.*;\n+import static com.twitter.mesos.updater.UpdateLogic.State.CANARY;\n+import static com.twitter.mesos.updater.UpdateLogic.State.COMPLETE_FAILED;\n+import static com.twitter.mesos.updater.UpdateLogic.State.COMPLETE_SUCCESS;\n+import static com.twitter.mesos.updater.UpdateLogic.State.INIT;\n+import static com.twitter.mesos.updater.UpdateLogic.State.PREPARE_ROLLBACK;\n+import static com.twitter.mesos.updater.UpdateLogic.State.ROLLBACK_BATCH;\n+import static com.twitter.mesos.updater.UpdateLogic.State.UPDATE_BATCH;\n \n /**\n  * Abstract logic for the mesos updater.\n@@ -75,9 +82,38 @@ public boolean run() throws InterruptedException {\n     return stateMachine.getState() == COMPLETE_SUCCESS;\n   }\n \n+\n+  private static class ConsumableSortedIds {\n+    private final Collection<Integer> sortedIds;\n+    private final Iterable<Integer> consumingIds;\n+\n+    private ConsumableSortedIds(final Set<Integer> ids) {\n+      sortedIds = new PriorityQueue<Integer>(ids);\n+      consumingIds = Iterables.consumingIterable(sortedIds);\n+    }\n+\n+    /**\n+     * Returns an iterable over sorted ids that will consume ids as they are iterated over.  When\n+     * all ids have been iterated over once, {@link #isEmpty()} will return {@code true}.\n+     *\n+     * @return an consuming {@code Iterable} over the sorted shard ids\n+     */\n+    public Iterable<Integer> get() {\n+      return consumingIds;\n+    }\n+\n+    /**\n+     * @return {@code true} iff the Iterable returned by {@link #get()} has been fully iterated.\n+     */\n+    public boolean isEmpty() {\n+      return sortedIds.isEmpty();\n+    }\n+  }\n+\n+\n   // An iterable that will consume from a queue of shards being operated on in the current stage.\n   // Be careful when reading from this, since the objects are removed.\n-  Iterable<Integer> consumingIds;\n+  private ConsumableSortedIds consumingIds;\n \n   int totalFailures = 0;\n \n@@ -86,7 +122,7 @@ private void step(StateMachine<State> stateMachine) throws InterruptedException\n       switch (stateMachine.getState()) {\n         case INIT:\n           LOG.info(\"Initiating update.\");\n-          consumingIds = Iterables.consumingIterable(new PriorityQueue<Integer>(newShards));\n+          consumingIds = new ConsumableSortedIds(newShards);\n           stateMachine.transition(CANARY);\n           break;\n \n@@ -102,7 +138,7 @@ private void step(StateMachine<State> stateMachine) throws InterruptedException\n           break;\n \n         case UPDATE_BATCH:\n-          if (Iterables.isEmpty(consumingIds)) {\n+          if (consumingIds.isEmpty()) {\n             stateMachine.transition(COMPLETE_SUCCESS);\n           } else {\n             restartShards(UPDATE_TASK, config.getUpdateBatchSize(),\n@@ -116,13 +152,13 @@ private void step(StateMachine<State> stateMachine) throws InterruptedException\n \n         case PREPARE_ROLLBACK:\n           LOG.info(\"Preparing for rollback.\");\n-          consumingIds = Iterables.consumingIterable(new PriorityQueue<Integer>(\n-              Sets.difference(oldShards, ImmutableSet.copyOf(consumingIds))));\n+          consumingIds = new ConsumableSortedIds(Sets.difference(oldShards,\n+              ImmutableSet.copyOf(consumingIds.get())));\n           stateMachine.transition(ROLLBACK_BATCH);\n           break;\n \n         case ROLLBACK_BATCH:\n-          if (Iterables.isEmpty(consumingIds)) {\n+          if (consumingIds.isEmpty()) {\n             stateMachine.transition(COMPLETE_FAILED);\n           } else {\n             // TODO(wfarner): Can/should we do anything if this fails?\n@@ -154,7 +190,7 @@ private int restartShards(UpdateCommand.Type type, int numShards, int toleratedF\n       int updateWatchDurationSecs) throws UpdateException {\n     Preconditions.checkArgument(numShards > 0, \"Restart of zero shards does not make sense.\");\n \n-    Set<Integer> ids = ImmutableSet.copyOf(Iterables.limit(consumingIds, numShards));\n+    Set<Integer> ids = ImmutableSet.copyOf(Iterables.limit(consumingIds.get(), numShards));\n     LOG.info(String.format(\"Issuing %s on shards %s\", type, ids));\n \n     int newFailures = commandRunner.apply(new UpdateCommand(type, ids,",
+                "raw_url": "https://github.com/apache/aurora/raw/3665b4a7ddcdcf7845d4cc2f652fa9f6febda9fc/src/java/com/twitter/mesos/updater/UpdateLogic.java",
+                "sha": "1437cc40a6209bb4fc9b48cb2259a46c0814fcd3",
+                "status": "modified"
+            }
+        ],
+        "message": "Upgrade to guava_r08\n+ fix UpdateLogic/UpdateLogicTest - can no longer get away with Iterables.isEmpty(consumingIterable)\n+ fix NameClassifier -> NPE in NameClassifierTest",
+        "parent": "https://github.com/apache/aurora/commit/850d28673b70d8266a5aa6bd3c9d4c0ba5ed91ec",
+        "patched_files": [
+            "UpdateLogic.java"
+        ],
+        "repo": "aurora",
+        "unit_tests": [
+            "UpdateLogicTest.java"
         ]
     },
     "aurora_86675fc": {
@@ -148,8 +174,8 @@
         "message": "Fix possible NullPointerException in InstanceActionHandler, add e2e tests around feature",
         "parent": "https://github.com/apache/aurora/commit/d46a8d91aa69ab9cf1ebc2b13552f8093d366fe9",
         "patched_files": [
-            "InstanceActionHandler.java",
-            "http_example.java"
+            "http_example.java",
+            "InstanceActionHandler.java"
         ],
         "repo": "aurora",
         "unit_tests": [

@@ -133,18 +133,16 @@
         "message": "OAK-1218 : NPE in PrincipalManagerTest#testMembers\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1545217 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/jackrabbit-oak/commit/1a2a484a41e592d7df42c4ab58dcc540e0cc141b",
         "patched_files": [
-            "GroupImpl.java",
             "IdentifierManager.java",
-            "pom.java",
-            "PrincipalManager.java",
-            "MembershipProvider.java"
+            "MembershipProvider.java",
+            "GroupImpl.java",
+            "pom.java"
         ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
             "PrincipalManagerTest.java",
-            "MembershipProviderTest.java",
-            "GroupImplTest.java",
-            "IdentifierManagerTest.java"
+            "IdentifierManagerTest.java",
+            "MembershipProviderTest.java"
         ]
     },
     "jackrabbit-oak_0989e51": {
@@ -286,47 +284,8 @@
         ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
-            "RDBDocumentStoreTest.java",
-            "RDBDocumentStoreJDBCTest.java"
-        ]
-    },
-    "jackrabbit-oak_0d18e30": {
-        "bug_id": "jackrabbit-oak_0d18e30",
-        "commit": "https://github.com/apache/jackrabbit-oak/commit/0d18e3020b00cf265bd712da0b086297426376ca",
-        "file": [
-            {
-                "additions": 25,
-                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/0d18e3020b00cf265bd712da0b086297426376ca/oak-auth-external/src/main/java/org/apache/jackrabbit/oak/spi/security/authentication/external/impl/jmx/SyncMBeanImpl.java",
-                "changes": 46,
-                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-auth-external/src/main/java/org/apache/jackrabbit/oak/spi/security/authentication/external/impl/jmx/SyncMBeanImpl.java?ref=0d18e3020b00cf265bd712da0b086297426376ca",
-                "deletions": 21,
-                "filename": "oak-auth-external/src/main/java/org/apache/jackrabbit/oak/spi/security/authentication/external/impl/jmx/SyncMBeanImpl.java",
-                "patch": "@@ -159,9 +159,7 @@ private void close() {\n                     SyncResult r = context.sync(userId);\n                     systemSession.save();\n                     result.add(getJSONString(r));\n-                } catch (SyncException e) {\n-                    log.warn(\"Error while syncing user {}\", userId, e);\n-                } catch (RepositoryException e) {\n+                } catch (Exception e) {\n                     log.warn(\"Error while syncing user {}\", userId, e);\n                 }\n             }\n@@ -186,9 +184,8 @@ private void close() {\n                             SyncResult r = context.sync(id.getId());\n                             systemSession.save();\n                             list.add(getJSONString(r));\n-                        } catch (SyncException e) {\n-                            list.add(getJSONString(id, e));\n-                        } catch (RepositoryException e) {\n+                        } catch (Exception e) {\n+                            log.error(\"Error while syncing user {}\", id, e);\n                             list.add(getJSONString(id, e));\n                         }\n                     }\n@@ -224,9 +221,8 @@ private void close() {\n                 } catch (ExternalIdentityException e) {\n                     log.warn(\"error while fetching the external identity {}\", externalId, e);\n                     list.add(getJSONString(ref, e));\n-                } catch (SyncException e) {\n-                    list.add(getJSONString(ref, e));\n-                } catch (RepositoryException e) {\n+                } catch (Exception e) {\n+                    log.error(\"Error while syncing user {}\", ref, e);\n                     list.add(getJSONString(ref, e));\n                 }\n             }\n@@ -247,10 +243,18 @@ private void close() {\n                     try {\n                         SyncResult r = context.sync(user);\n                         systemSession.save();\n+                        if (r.getIdentity() == null) {\n+                            r = new DefaultSyncResultImpl(\n+                                    new DefaultSyncedIdentity(user.getId(), user.getExternalId(), false, -1),\n+                                    SyncResult.Status.NO_SUCH_IDENTITY\n+                            );\n+                            log.warn(\"sync failed. {}\", r.getIdentity());\n+                        } else {\n+                            log.info(\"synced {}\", r.getIdentity());\n+                        }\n                         list.add(getJSONString(r));\n-                    } catch (SyncException e) {\n-                        list.add(getJSONString(user.getExternalId(), e));\n-                    } catch (RepositoryException e) {\n+                    } catch (Exception e) {\n+                        log.error(\"Error while syncing user {}\", user, e);\n                         list.add(getJSONString(user.getExternalId(), e));\n                     }\n                 }\n@@ -271,17 +275,19 @@ private void close() {\n                 while (iter.hasNext()) {\n                     SyncedIdentity id = iter.next();\n                     if (isMyIDP(id)) {\n-                        ExternalIdentityRef exIdRef = id.getExternalIdRef();\n-                        ExternalIdentity extId = (exIdRef == null) ? null : idp.getIdentity(exIdRef);\n-                        if (extId == null) {\n-                            list.add(id.getId());\n+                        try {\n+                            ExternalIdentityRef ref = id.getExternalIdRef();\n+                            ExternalIdentity extId = ref == null ? null : idp.getIdentity(ref);\n+                            if (extId == null) {\n+                                list.add(id.getId());\n+                            }\n+                        } catch (Exception e) {\n+                            log.error(\"Error while fetching external identity {}\", id, e);\n                         }\n                     }\n                 }\n             } catch (RepositoryException e) {\n                 log.error(\"Error while listing orphaned users\", e);\n-            } catch (ExternalIdentityException e) {\n-                log.error(\"Error while fetching external identity\", e);\n             }\n             return list.toArray(new String[list.size()]);\n         }\n@@ -298,9 +304,7 @@ private void close() {\n                     SyncResult r = context.sync(userId);\n                     systemSession.save();\n                     result.add(getJSONString(r));\n-                } catch (SyncException e) {\n-                    log.warn(\"Error while syncing user {}\", userId, e);\n-                } catch (RepositoryException e) {\n+                } catch (Exception e) {\n                     log.warn(\"Error while syncing user {}\", userId, e);\n                 }\n             }",
-                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/0d18e3020b00cf265bd712da0b086297426376ca/oak-auth-external/src/main/java/org/apache/jackrabbit/oak/spi/security/authentication/external/impl/jmx/SyncMBeanImpl.java",
-                "sha": "d7a847da63233d405b58536ea80cbcfe5c40ab77",
-                "status": "modified"
-            },
-            {
-                "additions": 17,
-                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/0d18e3020b00cf265bd712da0b086297426376ca/oak-auth-external/src/test/java/org/apache/jackrabbit/oak/spi/security/authentication/external/ExternalLoginModuleTestBase.java",
-                "changes": 19,
-                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-auth-external/src/test/java/org/apache/jackrabbit/oak/spi/security/authentication/external/ExternalLoginModuleTestBase.java?ref=0d18e3020b00cf265bd712da0b086297426376ca",
-                "deletions": 2,
-                "filename": "oak-auth-external/src/test/java/org/apache/jackrabbit/oak/spi/security/authentication/external/ExternalLoginModuleTestBase.java",
-                "patch": "@@ -36,6 +36,7 @@\n import org.apache.jackrabbit.oak.spi.security.authentication.external.impl.ExternalIDPManagerImpl;\n import org.apache.jackrabbit.oak.spi.security.authentication.external.impl.ExternalLoginModule;\n import org.apache.jackrabbit.oak.spi.security.authentication.external.impl.SyncManagerImpl;\n+import org.apache.jackrabbit.oak.spi.security.authentication.external.impl.jmx.SynchronizationMBean;\n import org.apache.jackrabbit.oak.spi.whiteboard.Registration;\n import org.apache.jackrabbit.oak.spi.whiteboard.Whiteboard;\n import org.junit.After;\n@@ -58,6 +59,10 @@\n \n     protected ExternalIdentityProvider idp;\n \n+    protected SyncManager syncManager;\n+\n+    protected ExternalIdentityProviderManager idpManager;\n+\n     protected DefaultSyncConfig syncConfig;\n \n     @Before\n@@ -123,8 +128,10 @@ protected Oak withEditors(Oak oak) {\n \n         // register non-OSGi managers\n         whiteboard = oak.getWhiteboard();\n-        whiteboard.register(SyncManager.class, new SyncManagerImpl(whiteboard), Collections.emptyMap());\n-        whiteboard.register(ExternalIdentityProviderManager.class, new ExternalIDPManagerImpl(whiteboard), Collections.emptyMap());\n+        syncManager = new SyncManagerImpl(whiteboard);\n+        whiteboard.register(SyncManager.class, syncManager, Collections.emptyMap());\n+        idpManager = new ExternalIDPManagerImpl(whiteboard);\n+        whiteboard.register(ExternalIdentityProviderManager.class, idpManager, Collections.emptyMap());\n \n         return oak;\n     }\n@@ -133,6 +140,14 @@ protected Oak withEditors(Oak oak) {\n \n     protected abstract void destroyIDP(ExternalIdentityProvider idp);\n \n+    protected SynchronizationMBean createMBean() {\n+        // todo: how to retrieve JCR repository here? maybe we should base the sync mbean on oak directly.\n+        // JackrabbitRepository repository =  null;\n+        // return new SyncMBeanImpl(repository, syncManager, \"default\", idpManager, idp.getName());\n+\n+        throw new UnsupportedOperationException(\"creating the mbean is not supported yet.\");\n+    }\n+\n     protected void setSyncConfig(DefaultSyncConfig cfg) {\n         if (syncHandlerReg != null) {\n             syncHandlerReg.unregister();",
-                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/0d18e3020b00cf265bd712da0b086297426376ca/oak-auth-external/src/test/java/org/apache/jackrabbit/oak/spi/security/authentication/external/ExternalLoginModuleTestBase.java",
-                "sha": "f6faee5cbccb89034551c8ff34e9466edd7b9108",
-                "status": "modified"
-            }
-        ],
-        "message": "OAK-3311 Potential NPE in syncAllExternalUsers() aborts the process\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1706459 13f79535-47bb-0310-9956-ffa450edef68",
-        "parent": "https://github.com/apache/jackrabbit-oak/commit/4f560d19e9ff1e0133d8cfbc710eaecb9037a1d0",
-        "patched_files": [
-            "SyncMBeanImpl.java"
-        ],
-        "repo": "jackrabbit-oak",
-        "unit_tests": [
-            "SyncMBeanImplTest.java"
+            "RDBDocumentStoreJDBCTest.java",
+            "RDBDocumentStoreTest.java"
         ]
     },
     "jackrabbit-oak_0eecb7f": {
@@ -361,12 +320,39 @@
         "message": "OAK-8051: PersistentCache: error during open can lead to incomplete initialization and subsequent NPEs\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1854701 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/jackrabbit-oak/commit/b3367cb8bb44c826f68c56b4aead8de67afae236",
         "patched_files": [
-            "CacheMap.java",
-            "Cache.java"
+            "Cache.java",
+            "CacheMap.java"
         ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
             "CacheTest.java"
+        ]
+    },
+    "jackrabbit-oak_0f75aa9": {
+        "bug_id": "jackrabbit-oak_0f75aa9",
+        "commit": "https://github.com/apache/jackrabbit-oak/commit/0f75aa9f436da9e7cc21bc2027d10fb7a408cd32",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/0f75aa9f436da9e7cc21bc2027d10fb7a408cd32/oak-segment/src/main/java/org/apache/jackrabbit/oak/plugins/segment/SegmentGraph.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-segment/src/main/java/org/apache/jackrabbit/oak/plugins/segment/SegmentGraph.java?ref=0f75aa9f436da9e7cc21bc2027d10fb7a408cd32",
+                "deletions": 1,
+                "filename": "oak-segment/src/main/java/org/apache/jackrabbit/oak/plugins/segment/SegmentGraph.java",
+                "patch": "@@ -452,7 +452,7 @@ protected void onListBucket(RecordId parentId, RecordId listId, int index, int c\n \n     private static void writeNode(UUID node, PrintWriter writer, boolean inHead, Date epoch, SegmentTracker tracker) {\n         Map<String, String> sInfo = getSegmentInfoMap(node, tracker);\n-        if (sInfo == null) {\n+        if (!sInfo.containsKey(\"t\")) {\n             writer.write(node + \",b,bulk,b,-1,-1,\" + inHead + \"\\n\");\n         } else {\n             String error = sInfo.get(\"error\");",
+                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/0f75aa9f436da9e7cc21bc2027d10fb7a408cd32/oak-segment/src/main/java/org/apache/jackrabbit/oak/plugins/segment/SegmentGraph.java",
+                "sha": "c77d53ef172ffc1acdb2f28371d1fa94ac2d5234",
+                "status": "modified"
+            }
+        ],
+        "message": "OAK-4046: NPE in oak-run graph when repository contains bulk segments\nCheck info map for bulk segments\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1731972 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/jackrabbit-oak/commit/7ceef5234025e5991fa73328ec892b1ecddc32b6",
+        "patched_files": [
+            "SegmentGraph.java"
+        ],
+        "repo": "jackrabbit-oak",
+        "unit_tests": [
+            "SegmentGraphTest.java"
         ]
     },
     "jackrabbit-oak_10be946": {
@@ -406,33 +392,6 @@
         "repo": "jackrabbit-oak",
         "unit_tests": [
             "TimingDocumentStoreWrapperTest.java"
-        ]
-    },
-    "jackrabbit-oak_1381db4": {
-        "bug_id": "jackrabbit-oak_1381db4",
-        "commit": "https://github.com/apache/jackrabbit-oak/commit/1381db46096850ef4a975445dac682ca57c944e6",
-        "file": [
-            {
-                "additions": 6,
-                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/1381db46096850ef4a975445dac682ca57c944e6/oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/document/rdb/RDBDocumentStore.java",
-                "changes": 8,
-                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/document/rdb/RDBDocumentStore.java?ref=1381db46096850ef4a975445dac682ca57c944e6",
-                "deletions": 2,
-                "filename": "oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/document/rdb/RDBDocumentStore.java",
-                "patch": "@@ -656,7 +656,9 @@ private static String asString(@Nonnull Document doc) {\n             return success;\n         } catch (SQLException ex) {\n             try {\n-                connection.rollback();\n+                if (connection != null) {\n+                    connection.rollback();\n+                }\n             } catch (SQLException e) {\n                 // TODO\n             }\n@@ -681,7 +683,9 @@ private static String asString(@Nonnull Document doc) {\n         } catch (SQLException ex) {\n             LOG.debug(\"insert of \" + document.getId() + \" failed\", ex);\n             try {\n-                connection.rollback();\n+                if (connection != null) {\n+                    connection.rollback();\n+                }\n             } catch (SQLException e) {\n                 // TODO\n             }",
-                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/1381db46096850ef4a975445dac682ca57c944e6/oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/document/rdb/RDBDocumentStore.java",
-                "sha": "7e41705dcf52085791e44f0d261e49a757319900",
-                "status": "modified"
-            }
-        ],
-        "message": "OAK-1853: Potential NPE in RDBDocumentStore\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1596875 13f79535-47bb-0310-9956-ffa450edef68",
-        "parent": "https://github.com/apache/jackrabbit-oak/commit/175f8a7ccbbc4c94478bc8bd7495d598a315232d",
-        "patched_files": [
-            "RDBDocumentStore.java"
-        ],
-        "repo": "jackrabbit-oak",
-        "unit_tests": [
-            "RDBDocumentStoreTest.java"
         ]
     },
     "jackrabbit-oak_157bf55": {
@@ -558,8 +517,7 @@
         "message": "OAK-1218: NPE in PrincipalManagerTest#testMembers\n@Ignore failing test\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1545198 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/jackrabbit-oak/commit/1362f1282a3f99e2655427c489bec00bec03827d",
         "patched_files": [
-            "pom.java",
-            "PrincipalManager.java"
+            "pom.java"
         ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
@@ -718,8 +676,8 @@
         "message": "minor improvement (prevent NPE in AbstractNameMapper)\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1346879 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/jackrabbit-oak/commit/b32db799cca7d8499622fcb52c45b0594cd06790",
         "patched_files": [
-            "AbstractNameMapper.java",
-            "NamePathMapperImpl.java"
+            "NamePathMapperImpl.java",
+            "AbstractNameMapper.java"
         ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
@@ -751,33 +709,6 @@
         "repo": "jackrabbit-oak",
         "unit_tests": [
             "LastRevRecoveryAgentTest.java"
-        ]
-    },
-    "jackrabbit-oak_313c667": {
-        "bug_id": "jackrabbit-oak_313c667",
-        "commit": "https://github.com/apache/jackrabbit-oak/commit/313c667f08a84644d67df6f995aa5d03129ba1d9",
-        "file": [
-            {
-                "additions": 7,
-                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/313c667f08a84644d67df6f995aa5d03129ba1d9/oak-core/src/main/java/org/apache/jackrabbit/oak/security/authorization/permission/CompiledPermissionImpl.java",
-                "changes": 12,
-                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-core/src/main/java/org/apache/jackrabbit/oak/security/authorization/permission/CompiledPermissionImpl.java?ref=313c667f08a84644d67df6f995aa5d03129ba1d9",
-                "deletions": 5,
-                "filename": "oak-core/src/main/java/org/apache/jackrabbit/oak/security/authorization/permission/CompiledPermissionImpl.java",
-                "patch": "@@ -196,22 +196,24 @@ public TreePermission getTreePermission(@Nonnull ImmutableTree tree, @Nonnull Tr\n                 } else {\n                     TreeLocation tl = getLocation(tree, null);\n                     if (tl == null) {\n+                        log.warn(\"Cannot retrieve versionable node for \" + tree.getPath());\n                         return TreePermission.EMPTY;\n                     } else {\n                         // TODO: may return wrong results in case of restrictions\n                         // TODO that would match the path of the versionable node\n                         // TODO (or item in the subtree) but that item no longer exists\n                         // TODO -> evaluation by path would be more accurate (-> see #isGranted)\n-                        while (!tl.exists()) {\n+                        while (!tl.exists() || tl.getProperty() != null) {\n                             tl = tl.getParent();\n                         }\n                         Tree versionableTree = tl.getTree();\n                         if (versionableTree == null) {\n-                            // for PropertyLocations\n-                            versionableTree = tl.getParent().getTree();\n+                            log.warn(\"Cannot retrieve versionable tree for {0}; versionable location {1} does not resolve to an existing tree.\", tree.getPath(), tl.getPath());\n+                            return TreePermission.EMPTY;\n+                        } else {\n+                            TreePermission pp = getParentPermission(versionableTree, TreeTypeProvider.TYPE_VERSION);\n+                            return new TreePermissionImpl(versionableTree, TreeTypeProvider.TYPE_VERSION, pp);\n                         }\n-                        TreePermission pp = getParentPermission(versionableTree, TreeTypeProvider.TYPE_VERSION);\n-                        return new TreePermissionImpl(versionableTree, TreeTypeProvider.TYPE_VERSION, pp);\n                     }\n                 }\n             case TreeTypeProvider.TYPE_PERMISSION_STORE:",
-                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/313c667f08a84644d67df6f995aa5d03129ba1d9/oak-core/src/main/java/org/apache/jackrabbit/oak/security/authorization/permission/CompiledPermissionImpl.java",
-                "sha": "c633c4a659aa18491727173ede552b6e32b7733e",
-                "status": "modified"
-            }
-        ],
-        "message": "OAK-1135 : NPE in CompiledPermissionImpl.getTreePermission() \n\n- slight modification, add log output if versionable node/path cannot be resolved\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1537474 13f79535-47bb-0310-9956-ffa450edef68",
-        "parent": "https://github.com/apache/jackrabbit-oak/commit/b977c6f989d4d922faa00e3a767d475f8a4ca1ec",
-        "patched_files": [
-            "CompiledPermissionImpl.java"
-        ],
-        "repo": "jackrabbit-oak",
-        "unit_tests": [
-            "CompiledPermissionImplTest.java"
         ]
     },
     "jackrabbit-oak_3668247": {
@@ -816,8 +747,7 @@
         ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
-            "UserImportTest.java",
-            "UserImporterTest.java"
+            "UserImportTest.java"
         ]
     },
     "jackrabbit-oak_3b2a979": {
@@ -1066,19 +996,20 @@
         "message": "OAK-3856: Potential NPE in SegmentWriter\nInline constructor only used from tests\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1723804 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/jackrabbit-oak/commit/bfc07661f765e7696386b872cd2466058f8398b8",
         "patched_files": [
-            "SegmentWriter.java",
-            "SegmentParser.java",
             "package-info.java",
-            "FileStoreIT.java",
             "TarWriter.java",
-            "RecordUsageAnalyser.java"
+            "FileStoreIT.java",
+            "RecordUsageAnalyser.java",
+            "PartialCompactionMap.java",
+            "SegmentWriter.java",
+            "SegmentParser.java"
         ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
-            "TarWriterTest.java",
-            "SegmentParserTest.java",
+            "PartialCompactionMapTest.java",
             "RecordUsageAnalyserTest.java",
-            "PartialCompactionMapTest.java"
+            "SegmentParserTest.java",
+            "TarWriterTest.java"
         ]
     },
     "jackrabbit-oak_47c4aef": {
@@ -1221,25 +1152,27 @@
         "message": "OAK-635 SegmentMK NPE in SegmentNodeState#getChildNode\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1447780 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/jackrabbit-oak/commit/0989e5157186aa7dc17b428625bb70aa573757a0",
         "patched_files": [
+            "TreeImpl.java",
+            "NodeState.java",
+            "MemoryNodeState.java",
+            "ReadOnlyTree.java",
+            "AccessControlManagerImpl.java",
             "KernelNodeState.java",
-            "MemoryNodeBuilder.java",
+            "NodeBuilder.java",
+            "Tree.java",
             "ModifiedNodeState.java",
             "AbstractNodeState.java",
-            "ReadOnlyTree.java",
-            "NodeBuilder.java",
-            "MemoryNodeState.java",
-            "Tree.java",
-            "TreeImpl.java",
-            "AccessControlManagerImpl.java",
-            "NodeState.java"
+            "MemoryNodeBuilder.java"
         ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
-            "TreeTest.java",
             "NodeBuilderTest.java",
+            "TreeImplTest.java",
+            "KernelNodeStateTest.java",
+            "MemoryNodeBuilderTest.java",
+            "TreeTest.java",
             "AccessControlManagerImplTest.java",
-            "NodeStateTest.java",
-            "MemoryNodeBuilderTest.java"
+            "ReadOnlyTreeTest.java"
         ]
     },
     "jackrabbit-oak_48efca8": {
@@ -1345,34 +1278,8 @@
         ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
+            "UpToDateNodeStateConfigurationTest.java",
             "SolrIndexQueryTest.java"
-        ]
-    },
-    "jackrabbit-oak_4b7906b": {
-        "bug_id": "jackrabbit-oak_4b7906b",
-        "commit": "https://github.com/apache/jackrabbit-oak/commit/4b7906bedbf9924b911a0b6a497d43d4f9e9bddb",
-        "file": [
-            {
-                "additions": 14,
-                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/4b7906bedbf9924b911a0b6a497d43d4f9e9bddb/oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/mongomk/util/TimingDocumentStoreWrapper.java",
-                "changes": 19,
-                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/mongomk/util/TimingDocumentStoreWrapper.java?ref=4b7906bedbf9924b911a0b6a497d43d4f9e9bddb",
-                "deletions": 5,
-                "filename": "oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/mongomk/util/TimingDocumentStoreWrapper.java",
-                "patch": "@@ -24,6 +24,7 @@\n \n import javax.annotation.CheckForNull;\n import javax.annotation.Nonnull;\n+import javax.annotation.Nullable;\n \n import org.apache.jackrabbit.mk.api.MicroKernelException;\n import org.apache.jackrabbit.oak.plugins.mongomk.Collection;\n@@ -80,7 +81,7 @@ public TimingDocumentStoreWrapper(DocumentStore base) {\n         try {\n             long start = now();\n             T result = base.find(collection, key);\n-            updateAndLogTimes(\"find\", start, 0, result.getMemory());\n+            updateAndLogTimes(\"find\", start, 0, size(result));\n             return result;\n         } catch (Exception e) {\n             throw convert(e);\n@@ -93,7 +94,7 @@ public TimingDocumentStoreWrapper(DocumentStore base) {\n         try {\n             long start = now();\n             T result = base.find(collection, key, maxCacheAge);\n-            updateAndLogTimes(\"find2\", start, 0, result.getMemory());\n+            updateAndLogTimes(\"find2\", start, 0, size(result));\n             return result;\n         } catch (Exception e) {\n             throw convert(e);\n@@ -158,13 +159,13 @@ public TimingDocumentStoreWrapper(DocumentStore base) {\n     }\n \n     @Override\n-    @Nonnull\n+    @CheckForNull\n     public <T extends Document> T createOrUpdate(Collection<T> collection, UpdateOp update)\n             throws MicroKernelException {\n         try {\n             long start = now();\n             T result = base.createOrUpdate(collection, update);\n-            updateAndLogTimes(\"createOrUpdate\", start, 0, result.getMemory());\n+            updateAndLogTimes(\"createOrUpdate\", start, 0, size(result));\n             return result;\n         } catch (Exception e) {\n             throw convert(e);\n@@ -178,7 +179,7 @@ public TimingDocumentStoreWrapper(DocumentStore base) {\n         try {\n             long start = now();\n             T result = base.findAndUpdate(collection, update);\n-            updateAndLogTimes(\"findAndUpdate\", start, 0, result.getMemory());\n+            updateAndLogTimes(\"findAndUpdate\", start, 0, size(result));\n             return result;\n         } catch (Exception e) {\n             throw convert(e);\n@@ -250,6 +251,14 @@ private void log(String message) {\n         }\n         return result;\n     }\n+\n+    private static int size(@Nullable Document document) {\n+        if (document == null) {\n+            return 0;\n+        } else {\n+            return document.getMemory();\n+        }\n+    }\n     \n     private static long now() {\n         return System.currentTimeMillis();",
-                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/4b7906bedbf9924b911a0b6a497d43d4f9e9bddb/oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/mongomk/util/TimingDocumentStoreWrapper.java",
-                "sha": "707484172571ca527c91254a7a803395c7af0234",
-                "status": "modified"
-            }
-        ],
-        "message": "OAK-1047: TimingDocumentStoreWrapper throws NPE when result is null\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1526511 13f79535-47bb-0310-9956-ffa450edef68",
-        "parent": "https://github.com/apache/jackrabbit-oak/commit/f9aa361cc989ca7a289f6a8dfb36e3b455257e0f",
-        "patched_files": [
-            "TimingDocumentStoreWrapper.java"
-        ],
-        "repo": "jackrabbit-oak",
-        "unit_tests": [
-            "TimingDocumentStoreWrapperTest.java"
         ]
     },
     "jackrabbit-oak_500b703": {
@@ -1433,7 +1340,9 @@
         ],
         "message": "OAK-677: Property events on root node fail with NPE\n- adding test case\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1453345 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/jackrabbit-oak/commit/ec55ba76831b7470184d6bfc4d2d999d998292c1",
-        "patched_files": [],
+        "patched_files": [
+            "Repository.java"
+        ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
             "RepositoryTest.java"
@@ -1574,11 +1483,13 @@
         "message": "OAK-677: Property events on root node fail with NPE\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1453359 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/jackrabbit-oak/commit/50b189f0c3b6228a4867653202a6cc785dc5c3d7",
         "patched_files": [
-            "ChangeFilter.java",
-            "ReadOnlyTree.java"
+            "ReadOnlyTree.java",
+            "Repository.java",
+            "ChangeFilter.java"
         ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
+            "ReadOnlyTreeTest.java",
             "RepositoryTest.java"
         ]
     },
@@ -1665,39 +1576,12 @@
         "message": "OAK-3396 NPE during syncAllExternalUsers in LdapIdentityProvider.createUser\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1706457 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/jackrabbit-oak/commit/b645443d6b597b5f88cd2c47b5e9ecb9f74651ae",
         "patched_files": [
-            "LdapIdentityProvider.java",
-            "erroneous.java"
+            "erroneous.java",
+            "LdapIdentityProvider.java"
         ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
             "LdapProviderTest.java"
-        ]
-    },
-    "jackrabbit-oak_5c71283": {
-        "bug_id": "jackrabbit-oak_5c71283",
-        "commit": "https://github.com/apache/jackrabbit-oak/commit/5c712835c0e09f06ba2b19b38e574d5ee99c59eb",
-        "file": [
-            {
-                "additions": 10,
-                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/5c712835c0e09f06ba2b19b38e574d5ee99c59eb/oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/segment/SegmentNodeStoreService.java",
-                "changes": 15,
-                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/segment/SegmentNodeStoreService.java?ref=5c712835c0e09f06ba2b19b38e574d5ee99c59eb",
-                "deletions": 5,
-                "filename": "oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/segment/SegmentNodeStoreService.java",
-                "patch": "@@ -439,12 +439,17 @@ private static String lookup(ComponentContext context, String property) {\n     public synchronized void deactivate() {\n         unregisterNodeStore();\n \n-        observerTracker.stop();\n-        gcMonitor.stop();\n+        if (observerTracker != null) {\n+            observerTracker.stop();\n+        }\n+        if (gcMonitor != null) {\n+            gcMonitor.stop();\n+        }\n         delegate = null;\n-\n-        store.close();\n-        store = null;\n+        if (store != null) {\n+            store.close();\n+            store = null;\n+        }\n     }\n \n     protected void bindBlobStore(BlobStore blobStore) throws IOException {",
-                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/5c712835c0e09f06ba2b19b38e574d5ee99c59eb/oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/segment/SegmentNodeStoreService.java",
-                "sha": "0925ce9a4d9e19b47c23f33b1a8f2fad6fe54af0",
-                "status": "modified"
-            }
-        ],
-        "message": "OAK-2811 Oak + data store: NPE in SegmentNodeStoreService.deactivate() leads to data store not shutting down properly\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1676237 13f79535-47bb-0310-9956-ffa450edef68",
-        "parent": "https://github.com/apache/jackrabbit-oak/commit/d590db7196e812c9e0a9a411bb1db0b44c39f5a6",
-        "patched_files": [
-            "SegmentNodeStoreService.java"
-        ],
-        "repo": "jackrabbit-oak",
-        "unit_tests": [
-            "SegmentNodeStoreServiceTest.java"
         ]
     },
     "jackrabbit-oak_5cc0e30": {
@@ -1737,8 +1621,8 @@
         ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
-            "RDBDocumentStoreJDBCTest.java",
-            "RDBDocumentSerializerTest.java"
+            "RDBDocumentSerializerTest.java",
+            "RDBDocumentStoreJDBCTest.java"
         ]
     },
     "jackrabbit-oak_5e6906a": {
@@ -1814,8 +1698,8 @@
         ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
-            "RepositoryUpgradeTest.java",
-            "PermissionHookTest.java"
+            "PermissionHookTest.java",
+            "RepositoryUpgradeTest.java"
         ]
     },
     "jackrabbit-oak_5ec570c": {
@@ -1854,9 +1738,9 @@
         ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
+            "TestACL.java",
             "RemappedRestrictionNamesTest.java",
-            "ACLTest.java",
-            "TestACL.java"
+            "ACLTest.java"
         ]
     },
     "jackrabbit-oak_5f36b76": {
@@ -1979,87 +1863,6 @@
             "ConfigurationParametersTest.java"
         ]
     },
-    "jackrabbit-oak_6440348": {
-        "bug_id": "jackrabbit-oak_6440348",
-        "commit": "https://github.com/apache/jackrabbit-oak/commit/6440348b3a9bbe94098b59c541b80f1b7f05d216",
-        "file": [
-            {
-                "additions": 18,
-                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/6440348b3a9bbe94098b59c541b80f1b7f05d216/oak-mk/src/main/java/org/apache/jackrabbit/mk/model/CommitBuilder.java",
-                "changes": 18,
-                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-mk/src/main/java/org/apache/jackrabbit/mk/model/CommitBuilder.java?ref=6440348b3a9bbe94098b59c541b80f1b7f05d216",
-                "deletions": 0,
-                "filename": "oak-mk/src/main/java/org/apache/jackrabbit/mk/model/CommitBuilder.java",
-                "patch": "@@ -141,6 +141,13 @@ public void copyNode(String srcPath, String destPath) throws NotFoundException,\n         MutableNode destParent = getOrCreateStagedNode(destParentPath);\n         destParent.add(new ChildNode(destNodeName, srcCNE.getId()));\n \n+        if (srcCNE.getId() == null) {\n+            // a 'new' node is being copied\n+\n+            // update staging area\n+            copyStagedNodes(srcPath, destPath);\n+        }\n+\n         // update change log\n         changeLog.add(new CopyNode(srcPath, destPath));\n     }\n@@ -269,6 +276,17 @@ void moveStagedNodes(String srcPath, String destPath) throws Exception {\n         }\n     }\n \n+    void copyStagedNodes(String srcPath, String destPath) throws Exception {\n+        MutableNode node = staged.get(srcPath);\n+        if (node != null) {\n+            staged.put(destPath, new MutableNode(node, store, destPath));\n+            for (Iterator<String> it = node.getChildNodeNames(0, -1); it.hasNext(); ) {\n+                String childName = it.next();\n+                copyStagedNodes(PathUtils.concat(srcPath, childName), PathUtils.concat(destPath, childName));\n+            }\n+        }\n+    }\n+\n     void removeStagedNodes(String nodePath) throws Exception {\n         MutableNode node = staged.get(nodePath);\n         if (node != null) {",
-                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/6440348b3a9bbe94098b59c541b80f1b7f05d216/oak-mk/src/main/java/org/apache/jackrabbit/mk/model/CommitBuilder.java",
-                "sha": "645851b8adff1e71bccb8531891a0e63ea77808d",
-                "status": "modified"
-            }
-        ],
-        "message": "OAK-47: NPE with nested add&copy operation\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1310044 13f79535-47bb-0310-9956-ffa450edef68",
-        "parent": "https://github.com/apache/jackrabbit-oak/commit/cf381a66ab5d9fab1711881455496efac528fb9d",
-        "patched_files": [
-            "CommitBuilder.java"
-        ],
-        "repo": "jackrabbit-oak",
-        "unit_tests": [
-            "CommitBuilderTest.java"
-        ]
-    },
-    "jackrabbit-oak_64ccc4f": {
-        "bug_id": "jackrabbit-oak_64ccc4f",
-        "commit": "https://github.com/apache/jackrabbit-oak/commit/64ccc4fd29c03d6597fbe4170dc20f306dbfeb1f",
-        "file": [
-            {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/64ccc4fd29c03d6597fbe4170dc20f306dbfeb1f/oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/mongomk/Commit.java",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/mongomk/Commit.java?ref=64ccc4fd29c03d6597fbe4170dc20f306dbfeb1f",
-                "deletions": 1,
-                "filename": "oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/mongomk/Commit.java",
-                "patch": "@@ -326,7 +326,7 @@ void concurrentModification(Revision other) {\n             }\n             if (conflictMessage != null) {\n                 conflictMessage += \", before\\n\" + revision + \n-                        \"; document:\\n\" + doc.format() +\n+                        \"; document:\\n\" + (doc == null ? \"\" : doc.format()) +\n                         \",\\nrevision order:\\n\" + mk.getRevisionComparator();\n                 throw new MicroKernelException(conflictMessage);\n             }",
-                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/64ccc4fd29c03d6597fbe4170dc20f306dbfeb1f/oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/mongomk/Commit.java",
-                "sha": "b684e89d74c0843dcb401933220f6c7d802f9a16",
-                "status": "modified"
-            }
-        ],
-        "message": "OAK-926 MongoMK: split documents (avoid NPE when constructing the error message)\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1531843 13f79535-47bb-0310-9956-ffa450edef68",
-        "parent": "https://github.com/apache/jackrabbit-oak/commit/2dad579272d6461c5fb1f86ad2375e1f2cdbb790",
-        "patched_files": [
-            "Commit.java"
-        ],
-        "repo": "jackrabbit-oak",
-        "unit_tests": [
-            "CommitTest.java"
-        ]
-    },
-    "jackrabbit-oak_69aa46f": {
-        "bug_id": "jackrabbit-oak_69aa46f",
-        "commit": "https://github.com/apache/jackrabbit-oak/commit/69aa46fbe70842a15e6325ba61ba0c36c66ff67a",
-        "file": [
-            {
-                "additions": 4,
-                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/69aa46fbe70842a15e6325ba61ba0c36c66ff67a/oak-core/src/main/java/org/apache/jackrabbit/oak/security/authorization/permission/CompiledPermissionImpl.java",
-                "changes": 4,
-                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-core/src/main/java/org/apache/jackrabbit/oak/security/authorization/permission/CompiledPermissionImpl.java?ref=69aa46fbe70842a15e6325ba61ba0c36c66ff67a",
-                "deletions": 0,
-                "filename": "oak-core/src/main/java/org/apache/jackrabbit/oak/security/authorization/permission/CompiledPermissionImpl.java",
-                "patch": "@@ -206,6 +206,10 @@ public TreePermission getTreePermission(@Nonnull ImmutableTree tree, @Nonnull Tr\n                             tl = tl.getParent();\n                         }\n                         Tree versionableTree = tl.getTree();\n+                        if (versionableTree == null) {\n+                            // for PropertyLocations\n+                            versionableTree = tl.getParent().getTree();\n+                        }\n                         TreePermission pp = getParentPermission(versionableTree, TreeTypeProvider.TYPE_VERSION);\n                         return new TreePermissionImpl(versionableTree, TreeTypeProvider.TYPE_VERSION, pp);\n                     }",
-                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/69aa46fbe70842a15e6325ba61ba0c36c66ff67a/oak-core/src/main/java/org/apache/jackrabbit/oak/security/authorization/permission/CompiledPermissionImpl.java",
-                "sha": "145a1628e2d6385dbbb93e3ec29bb799759c24db",
-                "status": "modified"
-            }
-        ],
-        "message": "OAK-1135 NPE in CompiledPermissionImpl.getTreePermission()\n\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1537376 13f79535-47bb-0310-9956-ffa450edef68",
-        "parent": "https://github.com/apache/jackrabbit-oak/commit/2c4f23a0d8a5deb83c647cce7c6fb1f70d59da78",
-        "patched_files": [
-            "CompiledPermissionImpl.java"
-        ],
-        "repo": "jackrabbit-oak",
-        "unit_tests": [
-            "CompiledPermissionImplTest.java"
-        ]
-    },
     "jackrabbit-oak_6f3c58a": {
         "bug_id": "jackrabbit-oak_6f3c58a",
         "commit": "https://github.com/apache/jackrabbit-oak/commit/6f3c58af575d0bf1c3e9e30da27b40830dbf3d30",
@@ -2124,33 +1927,6 @@
         "repo": "jackrabbit-oak",
         "unit_tests": [
             "FileStoreBackupTest.java"
-        ]
-    },
-    "jackrabbit-oak_777f624": {
-        "bug_id": "jackrabbit-oak_777f624",
-        "commit": "https://github.com/apache/jackrabbit-oak/commit/777f624de75943f8de0e9c3f8690715f9e407aef",
-        "file": [
-            {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/777f624de75943f8de0e9c3f8690715f9e407aef/oak-jcr/src/main/java/org/apache/jackrabbit/oak/jcr/session/SessionStats.java",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-jcr/src/main/java/org/apache/jackrabbit/oak/jcr/session/SessionStats.java?ref=777f624de75943f8de0e9c3f8690715f9e407aef",
-                "deletions": 1,
-                "filename": "oak-jcr/src/main/java/org/apache/jackrabbit/oak/jcr/session/SessionStats.java",
-                "patch": "@@ -222,7 +222,7 @@ public double getSaveRate() {\n         String[] atts = new String[attributes.size()];\n         int k = 0;\n         for (Entry<String, Object> attribute : attributes.entrySet()) {\n-            atts[k] = attribute.getKey() + '=' + attribute.getValue();\n+            atts[k++] = attribute.getKey() + '=' + attribute.getValue();\n         }\n         return atts;\n     }",
-                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/777f624de75943f8de0e9c3f8690715f9e407aef/oak-jcr/src/main/java/org/apache/jackrabbit/oak/jcr/session/SessionStats.java",
-                "sha": "550b3141c33f72068532d66480ee4386c4b04a5b",
-                "status": "modified"
-            }
-        ],
-        "message": "OAK-2027 - SessionMBean fails to render due to NPE in getSessionAttributes\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1617451 13f79535-47bb-0310-9956-ffa450edef68",
-        "parent": "https://github.com/apache/jackrabbit-oak/commit/57682ce3b88d3de666514cba807393e45de578b1",
-        "patched_files": [
-            "SessionStats.java"
-        ],
-        "repo": "jackrabbit-oak",
-        "unit_tests": [
-            "SessionStatsTest.java"
         ]
     },
     "jackrabbit-oak_7a00410": {
@@ -2349,6 +2125,33 @@
             "RecordIdMapTest.java"
         ]
     },
+    "jackrabbit-oak_82819bc": {
+        "bug_id": "jackrabbit-oak_82819bc",
+        "commit": "https://github.com/apache/jackrabbit-oak/commit/82819bc6c0aa9992777d4b233db641c174804233",
+        "file": [
+            {
+                "additions": 5,
+                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/82819bc6c0aa9992777d4b233db641c174804233/oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/document/mongo/replica/ReplicaSetInfo.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/document/mongo/replica/ReplicaSetInfo.java?ref=82819bc6c0aa9992777d4b233db641c174804233",
+                "deletions": 1,
+                "filename": "oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/document/mongo/replica/ReplicaSetInfo.java",
+                "patch": "@@ -250,18 +250,22 @@ private void updateRevisions(Iterable<BasicBSONObject> members) {\n             }\n         }\n \n+        Set<String> hostsToCheck = new HashSet<String>();\n         if (secondaries.isEmpty()) {\n             LOG.debug(\"No secondaries found: {}\", members);\n             unknownState = true;\n+        } else {\n+            hostsToCheck.addAll(secondaries);\n         }\n \n         if (primary == null) {\n             LOG.debug(\"No primary found: {}\", members);\n             unknownState = true;\n+        } else {\n+            hostsToCheck.add(primary);\n         }\n \n         Map<String, Timestamped<RevisionVector>> vectors = null;\n-        Set<String> hostsToCheck = union(secondaries, of(primary));\n         if (!unknownState) {\n             vectors = getRootRevisions(hostsToCheck);\n             if (vectors.containsValue(null)) {",
+                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/82819bc6c0aa9992777d4b233db641c174804233/oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/document/mongo/replica/ReplicaSetInfo.java",
+                "sha": "a3477464a2ad1fc6d41460bc7161bbec2b8c32f9",
+                "status": "modified"
+            }
+        ],
+        "message": "OAK-5636: potential NPE in ReplicaSetInfo\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1782962 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/jackrabbit-oak/commit/302228a44592c10b690f957107fe257566f951a0",
+        "patched_files": [
+            "ReplicaSetInfo.java"
+        ],
+        "repo": "jackrabbit-oak",
+        "unit_tests": [
+            "ReplicaSetInfoTest.java"
+        ]
+    },
     "jackrabbit-oak_83dcea5": {
         "bug_id": "jackrabbit-oak_83dcea5",
         "commit": "https://github.com/apache/jackrabbit-oak/commit/83dcea53271e4d34e2de60152ca935b637eb70fb",
@@ -2417,16 +2220,15 @@
         "message": "OAK-6229: NPE when running datastorecheck command with S3\n\n- Initializing the S3DataStore with a temp directory\n- Changed setup to also enable testing for S3 & Azure and test dependencies to s3, azure modules\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1795475 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/jackrabbit-oak/commit/39cc2d5741d2eba1f0e2eb4eefb5d8b7774315b1",
         "patched_files": [
-            "BlobStoreFixtureProvider.java",
-            "pom.java",
             "Utils.java",
-            "DataStoreCheckCommand.java"
+            "DataStoreCheckCommand.java",
+            "pom.java",
+            "BlobStoreFixtureProvider.java"
         ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
-            "UtilsTest.java",
-            "BlobStoreFixtureProviderTest.java",
             "DataStoreCheckTest.java",
+            "UtilsTest.java",
             "TestUtils.java"
         ]
     },
@@ -2474,8 +2276,8 @@
         "message": "OAK-7513 - avoid NPE in exact size calculation, adjusted some log statements\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1832379 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/jackrabbit-oak/commit/99bcde9a7a9192ac8ff93473bf8d0c1086627045",
         "patched_files": [
-            "FilterQueryParser.java",
-            "SolrQueryIndex.java"
+            "SolrQueryIndex.java",
+            "FilterQueryParser.java"
         ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
@@ -2639,17 +2441,16 @@
         "message": "OAK-6486: NPE in CompositeNodeStore\n\nReplaced the CopyOnReadIdentityMap with a Function<MountedNodeStore, NodeState>\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1803029 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/jackrabbit-oak/commit/79a66bca4c6ca6afc91c03b6b690f7ca454b5004",
         "patched_files": [
-            "CompositeNodeBuilder.java",
-            "CompositeNodeStore.java",
-            "CompositeNodeState.java",
-            "CopyOnReadIdentityMap.java",
-            "Memoizer.java",
             "CommitHookEnhancer.java",
-            "CompositionContext.java"
+            "CompositeNodeState.java",
+            "CompositeNodeBuilder.java",
+            "CompositionContext.java",
+            "Memoizer.java",
+            "CopyOnReadIdentityMap.java",
+            "CompositeNodeStore.java"
         ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
-            "CompositionContextTest.java",
             "CompositeNodeStoreTest.java"
         ]
     },
@@ -2709,9 +2510,9 @@
         "message": "OAK-47 Wrong results and NPE with copy operation (support the copy operation in the Indexer and the SimpleKernel)\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1309835 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/jackrabbit-oak/commit/625f5c692194033ac5c3db8d626ffc5dfd1cc639",
         "patched_files": [
+            "Index.java",
             "SimpleKernelImpl.java",
-            "Indexer.java",
-            "Index.java"
+            "Indexer.java"
         ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
@@ -3089,25 +2890,25 @@
         "message": "OAK-4248 More tests for the exposed 'basic' package \n OAK-4249 Extract abstract test-base without OSGi registrations\nOAK-4251 Guard against NPE in DefaultSyncConfig.Authorizable.setAutoMembership\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1740114 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/jackrabbit-oak/commit/c9c8744830a72da9d3b0515606852869f869542b",
         "patched_files": [
-            "DefaultSyncConfig.java",
-            "DefaultSyncHandler.java",
             "DefaultSyncedIdentity.java",
-            "DefaultSyncResultImpl.java",
             "ExternalLoginModule.java",
+            "DefaultSyncResultImpl.java",
+            "ExternalLoginModuleTestBase.java",
+            "DefaultSyncHandler.java",
             "DefaultSyncContext.java",
-            "ExternalLoginModuleTestBase.java"
+            "DefaultSyncConfig.java"
         ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
             "ExternalLoginModuleTest.java",
+            "AbstractExternalAuthTest.java",
+            "DefaultSyncConfigTest.java",
+            "DefaultSyncHandlerTest.java",
             "DefaultSyncResultImplTest.java",
+            "DefaultSyncedIdentityTest.java",
             "DefaultSyncContextTest.java",
             "RepExternalIdTest.java",
-            "CustomCredentialsSupportTest.java",
-            "DefaultSyncedIdentityTest.java",
-            "DefaultSyncHandlerTest.java",
-            "AbstractExternalAuthTest.java",
-            "DefaultSyncConfigTest.java"
+            "CustomCredentialsSupportTest.java"
         ]
     },
     "jackrabbit-oak_ac194bb": {
@@ -3451,31 +3252,31 @@
             "SegmentTarFixtureTest.java"
         ]
     },
-    "jackrabbit-oak_c2211a7": {
-        "bug_id": "jackrabbit-oak_c2211a7",
-        "commit": "https://github.com/apache/jackrabbit-oak/commit/c2211a799a0e62a21aa26b4886c8a06d053f1287",
+    "jackrabbit-oak_bc30ef8": {
+        "bug_id": "jackrabbit-oak_bc30ef8",
+        "commit": "https://github.com/apache/jackrabbit-oak/commit/bc30ef8e4c0dbc097c25346d36b8c16355df29a5",
         "file": [
             {
-                "additions": 3,
-                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/c2211a799a0e62a21aa26b4886c8a06d053f1287/oak-core/src/main/java/org/apache/jackrabbit/oak/osgi/OsgiWhiteboard.java",
-                "changes": 4,
-                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-core/src/main/java/org/apache/jackrabbit/oak/osgi/OsgiWhiteboard.java?ref=c2211a799a0e62a21aa26b4886c8a06d053f1287",
-                "deletions": 1,
-                "filename": "oak-core/src/main/java/org/apache/jackrabbit/oak/osgi/OsgiWhiteboard.java",
-                "patch": "@@ -20,6 +20,7 @@\n import static com.google.common.base.Preconditions.checkNotNull;\n import static java.util.Arrays.asList;\n \n+import java.util.Collections;\n import java.util.Dictionary;\n import java.util.Hashtable;\n import java.util.List;\n@@ -77,7 +78,8 @@ public void unregister() {\n         return new Tracker<T>() {\n             @Override @SuppressWarnings(\"unchecked\")\n             public List<T> getServices() {\n-                return (List<T>) asList(tracker.getServices());\n+                Object[] services = tracker.getServices();\n+                return (List<T>) (services != null ? asList(services) : Collections.emptyList());\n             }\n             @Override\n             public void stop() {",
-                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/c2211a799a0e62a21aa26b4886c8a06d053f1287/oak-core/src/main/java/org/apache/jackrabbit/oak/osgi/OsgiWhiteboard.java",
-                "sha": "5f80ec103dcae406b034de4fb0c1a6be9f1588a7",
+                "additions": 10,
+                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/bc30ef8e4c0dbc097c25346d36b8c16355df29a5/oak-core/src/main/java/org/apache/jackrabbit/oak/core/RootImpl.java",
+                "changes": 17,
+                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-core/src/main/java/org/apache/jackrabbit/oak/core/RootImpl.java?ref=bc30ef8e4c0dbc097c25346d36b8c16355df29a5",
+                "deletions": 7,
+                "filename": "oak-core/src/main/java/org/apache/jackrabbit/oak/core/RootImpl.java",
+                "patch": "@@ -18,12 +18,19 @@\n  */\n package org.apache.jackrabbit.oak.core;\n \n+import static com.google.common.base.Preconditions.checkArgument;\n+import static com.google.common.base.Preconditions.checkNotNull;\n+import static org.apache.jackrabbit.oak.commons.PathUtils.elements;\n+import static org.apache.jackrabbit.oak.commons.PathUtils.getName;\n+import static org.apache.jackrabbit.oak.commons.PathUtils.getParentPath;\n+\n import java.io.IOException;\n import java.io.InputStream;\n import java.security.PrivilegedAction;\n import java.util.ArrayList;\n import java.util.Collections;\n import java.util.List;\n+\n import javax.annotation.Nonnull;\n import javax.security.auth.Subject;\n \n@@ -60,12 +67,6 @@\n import org.apache.jackrabbit.oak.spi.state.NodeStore;\n import org.apache.jackrabbit.oak.spi.state.NodeStoreBranch;\n \n-import static com.google.common.base.Preconditions.checkArgument;\n-import static com.google.common.base.Preconditions.checkNotNull;\n-import static org.apache.jackrabbit.oak.commons.PathUtils.elements;\n-import static org.apache.jackrabbit.oak.commons.PathUtils.getName;\n-import static org.apache.jackrabbit.oak.commons.PathUtils.getParentPath;\n-\n public class RootImpl implements Root {\n \n     /**\n@@ -510,7 +511,9 @@ Move apply(TreeImpl tree) {\n \n         @Override\n         public String toString() {\n-            return '>' + source + ':' + PathUtils.concat(destParent.getPathInternal(), destName);\n+            return source == null\n+                ? \"NIL\"\n+                : '>' + source + ':' + PathUtils.concat(destParent.getPathInternal(), destName);\n         }\n     }\n }",
+                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/bc30ef8e4c0dbc097c25346d36b8c16355df29a5/oak-core/src/main/java/org/apache/jackrabbit/oak/core/RootImpl.java",
+                "sha": "211871a1a95278fe49b419fe5d80b86b3ee873b9",
                 "status": "modified"
             }
         ],
-        "message": "OAK-1581: NPE in OsgiWhiteboard#track()\nNull guard\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1579605 13f79535-47bb-0310-9956-ffa450edef68",
-        "parent": "https://github.com/apache/jackrabbit-oak/commit/1eb69d5b8c24acdfe9f2b0e4c4ff225ee50c58a7",
+        "message": "OAK-741: Better toString() methods\nAvoid NPE in toString\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1467298 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/jackrabbit-oak/commit/a5ea2cdad86b8677b46c4c88954ec90c2f28760d",
         "patched_files": [
-            "OsgiWhiteboard.java"
+            "RootImpl.java"
         ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
-            "OsgiWhiteboardTest.java"
+            "RootImplTest.java"
         ]
     },
     "jackrabbit-oak_c4fbc5b": {
@@ -3497,7 +3298,9 @@
         ],
         "message": "OAK-613 NPE in Property2IndexDiff#getIndexes(String) when processing a removed node.\n - Test for the NPE guard\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1443498 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/jackrabbit-oak/commit/d2f71270a1bb8e662c77cd2a913e888879626647",
-        "patched_files": [],
+        "patched_files": [
+            "Property2Index.java"
+        ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
             "Property2IndexTest.java"
@@ -3559,9 +3362,9 @@
         "message": "OAK-5002: NPE when creating read only store\nIntroduce a segment writer that throws an exception when written to\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1766548 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/jackrabbit-oak/commit/02776f5169a6382c2891ed2768f084c8a5188de6",
         "patched_files": [
-            "ReadOnlyFileStore.java",
+            "AbstractFileStore.java",
             "SegmentWriterBuilder.java",
-            "AbstractFileStore.java"
+            "ReadOnlyFileStore.java"
         ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
@@ -3600,40 +3403,12 @@
         "message": "OAK-1173 : NPE if TreePermissionImpl if tree does not have a primary type\n\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1541452 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/jackrabbit-oak/commit/c9c85507704868cbb37287b26b4ebada1d938e34",
         "patched_files": [
-            "VersionStorage.java",
-            "CompiledPermissionImpl.java"
+            "CompiledPermissionImpl.java",
+            "VersionStorage.java"
         ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
-            "CompiledPermissionImplTest.java",
             "VersionStorageTest.java"
-        ]
-    },
-    "jackrabbit-oak_cb0764b": {
-        "bug_id": "jackrabbit-oak_cb0764b",
-        "commit": "https://github.com/apache/jackrabbit-oak/commit/cb0764b6998be1059cdf4dce49a475d9b9dc6b01",
-        "file": [
-            {
-                "additions": 18,
-                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/cb0764b6998be1059cdf4dce49a475d9b9dc6b01/oak-store-composite/src/main/java/org/apache/jackrabbit/oak/composite/CompositionContext.java",
-                "changes": 20,
-                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-store-composite/src/main/java/org/apache/jackrabbit/oak/composite/CompositionContext.java?ref=cb0764b6998be1059cdf4dce49a475d9b9dc6b01",
-                "deletions": 2,
-                "filename": "oak-store-composite/src/main/java/org/apache/jackrabbit/oak/composite/CompositionContext.java",
-                "patch": "@@ -174,10 +174,26 @@ public boolean apply(String childName) {\n     }\n \n     CompositeNodeState createRootNodeState(Map<MountedNodeStore, NodeState> rootStates) {\n-        for (NodeState s : rootStates.values()) {\n-            if (s instanceof CompositeNodeState) {\n+        for (Map.Entry<MountedNodeStore, NodeState> e : rootStates.entrySet()) {\n+            MountedNodeStore mns = e.getKey();\n+            NodeState nodeState = e.getValue();\n+            if (nodeState instanceof CompositeNodeState) {\n                 throw new IllegalArgumentException(\"Nesting composite node states is not supported\");\n             }\n+            if (nodeState == null) {\n+                throw new NullPointerException(\"Passed null as a nodestate for \" + mns.getMount().getName());\n+            }\n+        }\n+        for (MountedNodeStore mns : nonDefaultStores) {\n+            if (!rootStates.containsKey(mns)) {\n+                throw new IllegalArgumentException(\"Can't find node state for \" + mns.getMount().getName());\n+            }\n+        }\n+        if (!rootStates.containsKey(globalStore)) {\n+            throw new IllegalArgumentException(\"Can't find node state for the global store\");\n+        }\n+        if (rootStates.size() != nonDefaultStores.size() + 1) {\n+            throw new IllegalArgumentException(\"Too many root states passed: \" + rootStates.size());\n         }\n         return new CompositeNodeState(\"/\", rootStates, this);\n     }",
-                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/cb0764b6998be1059cdf4dce49a475d9b9dc6b01/oak-store-composite/src/main/java/org/apache/jackrabbit/oak/composite/CompositionContext.java",
-                "sha": "06c195c3105e86df903e92d2f757f5f6a5121600",
-                "status": "modified"
-            }
-        ],
-        "message": "OAK-6486: NPE in CompositeNodeStore\n\nCheck arguments carefully in the createRootNodeState() method.\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1802871 13f79535-47bb-0310-9956-ffa450edef68",
-        "parent": "https://github.com/apache/jackrabbit-oak/commit/66c11ac457ac9b00d6f2a7eb16417ae7dee5018c",
-        "patched_files": [
-            "CompositionContext.java"
-        ],
-        "repo": "jackrabbit-oak",
-        "unit_tests": [
-            "CompositionContextTest.java"
         ]
     },
     "jackrabbit-oak_d074fc8": {
@@ -3730,57 +3505,6 @@
             "FileStoreBackupTest.java"
         ]
     },
-    "jackrabbit-oak_d569277": {
-        "bug_id": "jackrabbit-oak_d569277",
-        "commit": "https://github.com/apache/jackrabbit-oak/commit/d56927746d55232b673a90f79073809c6b674064",
-        "file": [
-            {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/d56927746d55232b673a90f79073809c6b674064/oak-store-composite/src/main/java/org/apache/jackrabbit/oak/composite/CommitHookEnhancer.java",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-store-composite/src/main/java/org/apache/jackrabbit/oak/composite/CommitHookEnhancer.java?ref=d56927746d55232b673a90f79073809c6b674064",
-                "deletions": 1,
-                "filename": "oak-store-composite/src/main/java/org/apache/jackrabbit/oak/composite/CommitHookEnhancer.java",
-                "patch": "@@ -62,7 +62,7 @@ public NodeState processCommit(NodeState before, NodeState after, CommitInfo inf\n \n         NodeState result = hook.processCommit(compositeBefore, compositeAfter, info);\n         updatedBuilder = Optional.of(toComposite(result, compositeBefore));\n-        return updatedBuilder.get().getNodeState().getNodeStates().get(ctx.getGlobalStore());\n+        return updatedBuilder.get().getNodeState().getNodeState(ctx.getGlobalStore());\n     }\n \n     Optional<CompositeNodeBuilder> getUpdatedBuilder() {",
-                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/d56927746d55232b673a90f79073809c6b674064/oak-store-composite/src/main/java/org/apache/jackrabbit/oak/composite/CommitHookEnhancer.java",
-                "sha": "ef96b71136835749bd6822c2e9266ea2f75213aa",
-                "status": "modified"
-            },
-            {
-                "additions": 36,
-                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/d56927746d55232b673a90f79073809c6b674064/oak-store-composite/src/main/java/org/apache/jackrabbit/oak/composite/CompositeNodeState.java",
-                "changes": 50,
-                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-store-composite/src/main/java/org/apache/jackrabbit/oak/composite/CompositeNodeState.java?ref=d56927746d55232b673a90f79073809c6b674064",
-                "deletions": 14,
-                "filename": "oak-store-composite/src/main/java/org/apache/jackrabbit/oak/composite/CompositeNodeState.java",
-                "patch": "@@ -19,6 +19,9 @@\n package org.apache.jackrabbit.oak.composite;\n \n import com.google.common.base.Function;\n+import com.google.common.collect.ImmutableSet;\n+import com.google.common.collect.Maps;\n+import com.google.common.collect.Sets;\n import org.apache.jackrabbit.oak.api.PropertyState;\n import org.apache.jackrabbit.oak.commons.PathUtils;\n import org.apache.jackrabbit.oak.plugins.memory.MemoryChildNodeEntry;\n@@ -27,7 +30,10 @@\n import org.apache.jackrabbit.oak.spi.state.NodeBuilder;\n import org.apache.jackrabbit.oak.spi.state.NodeState;\n import org.apache.jackrabbit.oak.spi.state.NodeStateDiff;\n+import org.slf4j.Logger;\n+import org.slf4j.LoggerFactory;\n \n+import javax.annotation.Nullable;\n import java.util.List;\n import java.util.Map;\n \n@@ -36,14 +42,18 @@\n import static com.google.common.collect.Iterables.concat;\n import static com.google.common.collect.Iterables.filter;\n import static com.google.common.collect.Iterables.transform;\n+import static com.google.common.collect.Maps.asMap;\n import static com.google.common.collect.Maps.transformValues;\n+import static com.google.common.collect.Sets.newHashSet;\n import static java.lang.Long.MAX_VALUE;\n import static java.util.Collections.singleton;\n import static org.apache.jackrabbit.oak.composite.CompositeNodeBuilder.simpleConcat;\n import static org.apache.jackrabbit.oak.spi.state.ChildNodeEntry.GET_NAME;\n \n class CompositeNodeState extends AbstractNodeState {\n \n+    private static final Logger LOG = LoggerFactory.getLogger(CompositeNodeState.class);\n+\n     // A note on content held by node stores which is outside the mount boundaries\n     //\n     // As a matter of design, mounted stores will definitely hold information _above_\n@@ -75,8 +85,16 @@\n         this.owningStore = ctx.getOwningStore(path);\n     }\n \n-    Map<MountedNodeStore, NodeState> getNodeStates() {\n-        return nodeStates;\n+    NodeState getNodeState(MountedNodeStore mns) {\n+        NodeState nodeState = nodeStates.get(mns);\n+        if (nodeState != null) {\n+            return nodeState;\n+        }\n+\n+        // this shouldn't happen, so we need to log some more debug info\n+        String mountName = mns.getMount().isDefault() ? \"[default]\" : mns.getMount().getName();\n+        LOG.warn(\"Can't find node state for path {} and mount {}. The node state map: {}\", path, mountName, nodeStates);\n+        throw new IllegalStateException(\"Can't find the node state for mount \" + mountName);\n     }\n \n     @Override\n@@ -110,16 +128,16 @@ public long getPropertyCount() {\n     public boolean hasChildNode(String name) {\n         String childPath = simpleConcat(path, name);\n         MountedNodeStore mountedStore = ctx.getOwningStore(childPath);\n-        return nodeStates.get(mountedStore).hasChildNode(name);\n+        return getNodeState(mountedStore).hasChildNode(name);\n     }\n \n     @Override\n     public NodeState getChildNode(final String name) {\n         String childPath = simpleConcat(path, name);\n         if (!ctx.shouldBeComposite(childPath)) {\n-            return nodeStates.get(ctx.getOwningStore(childPath)).getChildNode(name);\n+            return getNodeState(ctx.getOwningStore(childPath)).getChildNode(name);\n         }\n-        Map<MountedNodeStore, NodeState> newNodeStates = transformValues(nodeStates, new Function<NodeState, NodeState>() {\n+        Map<MountedNodeStore, NodeState> newNodeStates = transformValues(safeGetMap(), new Function<NodeState, NodeState>() {\n             @Override\n             public NodeState apply(NodeState input) {\n                 return input.getChildNode(name);\n@@ -130,7 +148,7 @@ public NodeState apply(NodeState input) {\n \n     @Override\n     public long getChildNodeCount(final long max) {\n-        List<MountedNodeStore> contributingStores = ctx.getContributingStoresForNodes(path, nodeStates);\n+        List<MountedNodeStore> contributingStores = ctx.getContributingStoresForNodes(path, safeGetMap());\n         if (contributingStores.isEmpty()) {\n             return 0; // this shouldn't happen\n         } else if (contributingStores.size() == 1) {\n@@ -140,7 +158,7 @@ public long getChildNodeCount(final long max) {\n             return accumulateChildSizes(concat(transform(contributingStores, new Function<MountedNodeStore, Iterable<String>>() {\n                 @Override\n                 public Iterable<String> apply(MountedNodeStore mns) {\n-                    NodeState contributing = nodeStates.get(mns);\n+                    NodeState contributing = getNodeState(mns);\n                     if (contributing.getChildNodeCount(max) == MAX_VALUE) {\n                         return singleton(STOP_COUNTING_CHILDREN);\n                     } else {\n@@ -164,10 +182,10 @@ static long accumulateChildSizes(Iterable<String> nodeNames, long max) {\n \n     @Override\n     public Iterable<? extends ChildNodeEntry> getChildNodeEntries() {\n-        Iterable<? extends ChildNodeEntry> nativeChildren = concat(transform(ctx.getContributingStoresForNodes(path, nodeStates), new Function<MountedNodeStore, Iterable<? extends ChildNodeEntry>>() {\n+        Iterable<? extends ChildNodeEntry> nativeChildren = concat(transform(ctx.getContributingStoresForNodes(path, safeGetMap()), new Function<MountedNodeStore, Iterable<? extends ChildNodeEntry>>() {\n             @Override\n             public Iterable<? extends ChildNodeEntry> apply(final MountedNodeStore mountedNodeStore) {\n-                return filter(nodeStates.get(mountedNodeStore).getChildNodeEntries(), compose(ctx.belongsToStore(mountedNodeStore, path), GET_NAME));\n+                return filter(getNodeState(mountedNodeStore).getChildNodeEntries(), compose(ctx.belongsToStore(mountedNodeStore, path), GET_NAME));\n             }\n         }));\n         return transform(nativeChildren, new Function<ChildNodeEntry, ChildNodeEntry>() {\n@@ -185,13 +203,13 @@ public boolean compareAgainstBaseState(NodeState base, NodeStateDiff diff) {\n             CompositeNodeState multiBase = (CompositeNodeState) base;\n             NodeStateDiff wrappingDiff = new WrappingDiff(diff, multiBase);\n             boolean full = getWrappedNodeState().compareAgainstBaseState(multiBase.getWrappedNodeState(), new ChildrenDiffFilter(wrappingDiff, owningStore, true));\n-            for (MountedNodeStore mns : ctx.getContributingStoresForNodes(path, nodeStates)) {\n+            for (MountedNodeStore mns : ctx.getContributingStoresForNodes(path, safeGetMap())) {\n                 if (owningStore == mns) {\n                     continue;\n                 }\n                 NodeStateDiff childrenDiffFilter = new ChildrenDiffFilter(wrappingDiff, mns, false);\n-                NodeState contributing = nodeStates.get(mns);\n-                NodeState contributingBase = multiBase.nodeStates.get(mns);\n+                NodeState contributing = getNodeState(mns);\n+                NodeState contributingBase = multiBase.getNodeState(mns);\n                 full = full && contributing.compareAgainstBaseState(contributingBase, childrenDiffFilter);\n             }\n             return full;\n@@ -203,7 +221,7 @@ public boolean compareAgainstBaseState(NodeState base, NodeStateDiff diff) {\n     // write operations\n     @Override\n     public CompositeNodeBuilder builder() {\n-        Map<MountedNodeStore, NodeBuilder> nodeBuilders = transformValues(nodeStates, new Function<NodeState, NodeBuilder>() {\n+        Map<MountedNodeStore, NodeBuilder> nodeBuilders = transformValues(safeGetMap(), new Function<NodeState, NodeBuilder>() {\n             @Override\n             public NodeBuilder apply(NodeState input) {\n                 return input.builder();\n@@ -213,7 +231,11 @@ public NodeBuilder apply(NodeState input) {\n     }\n \n     private NodeState getWrappedNodeState() {\n-        return nodeStates.get(owningStore);\n+        return getNodeState(owningStore);\n+    }\n+\n+    private Map<MountedNodeStore, NodeState> safeGetMap() {\n+        return asMap(ctx.getAllMountedNodeStores(), this::getNodeState);\n     }\n \n     private class ChildrenDiffFilter implements NodeStateDiff {",
-                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/d56927746d55232b673a90f79073809c6b674064/oak-store-composite/src/main/java/org/apache/jackrabbit/oak/composite/CompositeNodeState.java",
-                "sha": "e2c6f97782d37cbe43c63b8a1c34be3fd7584fa3",
-                "status": "modified"
-            },
-            {
-                "additions": 15,
-                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/d56927746d55232b673a90f79073809c6b674064/oak-store-composite/src/main/java/org/apache/jackrabbit/oak/composite/CompositionContext.java",
-                "changes": 18,
-                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-store-composite/src/main/java/org/apache/jackrabbit/oak/composite/CompositionContext.java?ref=d56927746d55232b673a90f79073809c6b674064",
-                "deletions": 3,
-                "filename": "oak-store-composite/src/main/java/org/apache/jackrabbit/oak/composite/CompositionContext.java",
-                "patch": "@@ -18,6 +18,8 @@\n \n import com.google.common.base.Function;\n import com.google.common.base.Predicate;\n+import com.google.common.collect.ImmutableMap;\n+import com.google.common.collect.ImmutableSet;\n import com.google.common.collect.Iterables;\n import org.apache.jackrabbit.oak.api.Blob;\n import org.apache.jackrabbit.oak.commons.PathUtils;\n@@ -32,6 +34,7 @@\n import java.util.Collection;\n import java.util.List;\n import java.util.Map;\n+import java.util.Set;\n \n import static com.google.common.collect.ImmutableMap.copyOf;\n import static com.google.common.collect.Iterables.concat;\n@@ -51,16 +54,25 @@\n \n     private final Map<Mount, MountedNodeStore> nodeStoresByMount;\n \n+    private final Set<MountedNodeStore> allStores;\n+\n     CompositionContext(MountInfoProvider mip, NodeStore globalStore, List<MountedNodeStore> nonDefaultStores) {\n         this.mip = mip;\n         this.globalStore = new MountedNodeStore(mip.getDefaultMount(), globalStore);\n         this.nonDefaultStores = nonDefaultStores;\n-        this.nodeStoresByMount = copyOf(uniqueIndex(getAllMountedNodeStores(), new Function<MountedNodeStore, Mount>() {\n+\n+        ImmutableSet.Builder<MountedNodeStore> b = ImmutableSet.builder();\n+        b.add(this.globalStore);\n+        b.addAll(this.nonDefaultStores);\n+        allStores = b.build();\n+\n+        this.nodeStoresByMount = copyOf(uniqueIndex(allStores, new Function<MountedNodeStore, Mount>() {\n             @Override\n             public Mount apply(MountedNodeStore input) {\n                 return input.getMount();\n             }\n         }));\n+\n     }\n \n     MountedNodeStore getGlobalStore() {\n@@ -152,8 +164,8 @@ public boolean apply(String input) {\n         }).isPresent();\n     }\n \n-    Iterable<MountedNodeStore> getAllMountedNodeStores() {\n-        return concat(singleton(globalStore), nonDefaultStores);\n+    Set<MountedNodeStore> getAllMountedNodeStores() {\n+        return allStores;\n     }\n \n     Blob createBlob(InputStream inputStream) throws IOException {",
-                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/d56927746d55232b673a90f79073809c6b674064/oak-store-composite/src/main/java/org/apache/jackrabbit/oak/composite/CompositionContext.java",
-                "sha": "122dc992b5a26fc609fb3824cc53095bedde29e6",
-                "status": "modified"
-            }
-        ],
-        "message": "OAK-6486: NPE in CompositeNodeStore\n\nLog diagnostic info if there's no node state for given mounted node store.\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1802932 13f79535-47bb-0310-9956-ffa450edef68",
-        "parent": "https://github.com/apache/jackrabbit-oak/commit/2867d90ed56dc9bee3e4d08198746e6e03b04445",
-        "patched_files": [
-            "CompositionContext.java"
-        ],
-        "repo": "jackrabbit-oak",
-        "unit_tests": [
-            "CompositionContextTest.java"
-        ]
-    },
     "jackrabbit-oak_d6a2d3d": {
         "bug_id": "jackrabbit-oak_d6a2d3d",
         "commit": "https://github.com/apache/jackrabbit-oak/commit/d6a2d3ddcfbb56f5fc5e7e02e76a4c58bdbbeab4",
@@ -3825,42 +3549,11 @@
         "message": "OAK-2930 - RDBBlob/DocumentStore: do not NPE calls after dispose()\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1682494 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/jackrabbit-oak/commit/39e931e22fe8a579822f622bd6328116ab25c9d6",
         "patched_files": [
-            "RDBBlobStore.java",
-            "RDBConnectionHandler.java",
-            "RDBDocumentStore.java"
+            "RDBBlobStore.java"
         ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
-            "RDBDocumentStoreTest.java",
-            "RDBConnectionHandlerTest.java",
             "RDBBlobStoreTest.java"
-        ]
-    },
-    "jackrabbit-oak_d773cfd": {
-        "bug_id": "jackrabbit-oak_d773cfd",
-        "commit": "https://github.com/apache/jackrabbit-oak/commit/d773cfd24500b88c87cd24c0d80098ffef2c287e",
-        "file": [
-            {
-                "additions": 2,
-                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/d773cfd24500b88c87cd24c0d80098ffef2c287e/oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/lucene/LuceneIndex.java",
-                "changes": 3,
-                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/lucene/LuceneIndex.java?ref=d773cfd24500b88c87cd24c0d80098ffef2c287e",
-                "deletions": 1,
-                "filename": "oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/lucene/LuceneIndex.java",
-                "patch": "@@ -165,7 +165,8 @@ private static Query getQuery(Filter filter) {\n                 last = pr.last.getString();\n             }\n \n-            if (first.equals(last) && pr.firstIncluding && pr.lastIncluding) {\n+            if (first != null && first.equals(last) && pr.firstIncluding\n+                    && pr.lastIncluding) {\n                 qs.add(new TermQuery(new Term(name, first)));\n             } else {\n                 qs.add(TermRangeQuery.newStringRange(name, first, last,",
-                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/d773cfd24500b88c87cd24c0d80098ffef2c287e/oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/lucene/LuceneIndex.java",
-                "sha": "2698c8c57185191f4e270539e9570ee3d378358f",
-                "status": "modified"
-            }
-        ],
-        "message": "OAK-286 Possible NPE in LuceneIndex\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1378643 13f79535-47bb-0310-9956-ffa450edef68",
-        "parent": "https://github.com/apache/jackrabbit-oak/commit/85f4e08eefcc57c70e312ee7ae1069883a577ecd",
-        "patched_files": [
-            "LuceneIndex.java"
-        ],
-        "repo": "jackrabbit-oak",
-        "unit_tests": [
-            "LuceneIndexTest.java"
         ]
     },
     "jackrabbit-oak_d8432d6": {
@@ -4028,22 +3721,21 @@
         "message": "OAK-619 Lock-free MongoMK implementation\n- Improve branch support\n- Copied over some tests from previous MongoDB based MicroKernel implementation. Some tests are still marked ignored.\n- Fixed NPE in Commit.createOrUpdateNode() (newestRev may be null)\n- Disabled document splitting until it is fully implemented -> max size set to Integer.MAX_VALUE\n- Fixed path issue with JSOP move and copy operation\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1461044 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/jackrabbit-oak/commit/56112cb2ae3f679e480478f7b2433d476634a759",
         "patched_files": [
-            "DocumentStore.java",
-            "Commit.java",
-            "MongoMK.java",
             "MongoDocumentStore.java",
-            "MemoryDocumentStore.java"
+            "DocumentStore.java",
+            "MemoryDocumentStore.java",
+            "MongoMK.java",
+            "Commit.java"
         ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
-            "MongoMKCommitMoveTest.java",
-            "BaseMongoMicroKernelTest.java",
             "MongoMKBranchTest.java",
             "MongoDocumentStoreTest.java",
-            "CommitTest.java",
+            "AbstractMongoConnectionTest.java",
+            "BaseMongoMicroKernelTest.java",
+            "MongoMKCommitMoveTest.java",
             "MongoMKBranchMergeTest.java",
-            "BaseMongoMKTest.java",
-            "AbstractMongoConnectionTest.java"
+            "BaseMongoMKTest.java"
         ]
     },
     "jackrabbit-oak_de6253b": {
@@ -4083,33 +3775,6 @@
         "repo": "jackrabbit-oak",
         "unit_tests": [
             "MongoDocumentStoreTest.java"
-        ]
-    },
-    "jackrabbit-oak_dec3772": {
-        "bug_id": "jackrabbit-oak_dec3772",
-        "commit": "https://github.com/apache/jackrabbit-oak/commit/dec377243963969ba53f68715936b4f20ebca5e3",
-        "file": [
-            {
-                "additions": 4,
-                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/dec377243963969ba53f68715936b4f20ebca5e3/oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/segment/file/FileStore.java",
-                "changes": 6,
-                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/segment/file/FileStore.java?ref=dec377243963969ba53f68715936b4f20ebca5e3",
-                "deletions": 2,
-                "filename": "oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/segment/file/FileStore.java",
-                "patch": "@@ -234,8 +234,10 @@ public void flush() throws IOException {\n             }\n         }\n \n-        for (Segment segment : segments.asMap().values().toArray(new Segment[0])) {\n-            segment.dropOldCacheEntries();\n+        if (segments != null) {\n+            for (Segment segment : segments.asMap().values().toArray(new Segment[0])) {\n+                segment.dropOldCacheEntries();\n+            }\n         }\n     }\n ",
-                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/dec377243963969ba53f68715936b4f20ebca5e3/oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/segment/file/FileStore.java",
-                "sha": "25269bee378379d963ef7e2810c22eb7ccd8dfb4",
-                "status": "modified"
-            }
-        ],
-        "message": "OAK-1524: NPE in TarMK flush thread\n\nFixed as suggested by Chetan Mehrotra\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1576452 13f79535-47bb-0310-9956-ffa450edef68",
-        "parent": "https://github.com/apache/jackrabbit-oak/commit/46b3bfd2c75f464c2059687004ad96974df562c9",
-        "patched_files": [
-            "FileStore.java"
-        ],
-        "repo": "jackrabbit-oak",
-        "unit_tests": [
-            "FileStoreTest.java"
         ]
     },
     "jackrabbit-oak_e094b0d": {
@@ -4195,8 +3860,8 @@
         "message": "OAK-8700 : ExternalIdentityConflictHandler prone to NPE\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1869187 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/jackrabbit-oak/commit/fc73eb4c80f1c30fa2256ab7c6b1e07a95e21ea9",
         "patched_files": [
-            "pom.java",
-            "ExternalIdentityConflictHandler.java"
+            "ExternalIdentityConflictHandler.java",
+            "pom.java"
         ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
@@ -4350,17 +4015,15 @@
         "parent": "https://github.com/apache/jackrabbit-oak/commit/35c3ad072df911b14bffec7f9c827f38edd9b3fb",
         "patched_files": [
             "Revision.java",
-            "MongoMK.java",
-            "Branch.java",
+            "NodeDocument.java",
             "UnmergedBranches.java",
-            "NodeDocument.java"
+            "Branch.java",
+            "MongoMK.java"
         ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
-            "BranchTest.java",
-            "NodeDocumentTest.java",
-            "MongoMKBranchMergeTest.java",
-            "RevisionTest.java"
+            "RevisionTest.java",
+            "MongoMKBranchMergeTest.java"
         ]
     },
     "jackrabbit-oak_efb99d1": {
@@ -4382,61 +4045,12 @@
         ],
         "message": "OAK-60: workaround for NPEs in derived classes\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1325296 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/jackrabbit-oak/commit/832f89b221d34d728fa04ac43de5dede54c356ab",
-        "patched_files": [],
+        "patched_files": [
+            "DbBlobStore.java"
+        ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
             "DbBlobStoreTest.java"
-        ]
-    },
-    "jackrabbit-oak_f4b0563": {
-        "bug_id": "jackrabbit-oak_f4b0563",
-        "commit": "https://github.com/apache/jackrabbit-oak/commit/f4b0563dc3e73bcd94c23b8d1032d45eaff1a397",
-        "file": [
-            {
-                "additions": 4,
-                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/f4b0563dc3e73bcd94c23b8d1032d45eaff1a397/oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/version/ReadOnlyVersionManager.java",
-                "changes": 10,
-                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/version/ReadOnlyVersionManager.java?ref=f4b0563dc3e73bcd94c23b8d1032d45eaff1a397",
-                "deletions": 6,
-                "filename": "oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/version/ReadOnlyVersionManager.java",
-                "patch": "@@ -47,7 +47,7 @@\n      *         {@code Root} returned by {@link #getWorkspaceRoot()}.\n      */\n     @Nonnull\n-    protected abstract Tree getVersionStorageTree();\n+    protected abstract TreeLocation getVersionStorageLocation();\n \n     /**\n      * @return the {@code Root} of the workspace.\n@@ -100,16 +100,14 @@ public Tree getVersionHistory(@Nonnull Tree versionable)\n             throws UnsupportedRepositoryOperationException,\n             RepositoryException {\n         checkVersionable(versionable);\n-        String uuid = versionable.getProperty(\n-                VersionConstants.JCR_UUID).getValue(Type.STRING);\n-        return getVersionStorageTree().getLocation().getChild(\n-                getVersionHistoryPath(uuid)).getTree();\n+        String uuid = versionable.getProperty(VersionConstants.JCR_UUID).getValue(Type.STRING);\n+        return getVersionStorageLocation().getChild(getVersionHistoryPath(uuid)).getTree();\n     }\n \n     /**\n      * Returns the path of the version history for the given {@code uuid}.\n      * The returned path is relative to the version storage tree as returned\n-     * by {@link #getVersionStorageTree()}.\n+     * by {@link #getVersionStorageLocation()}.\n      *\n      * @param uuid the uuid of the versionable node\n      * @return the relative path of the version history for the given uuid.",
-                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/f4b0563dc3e73bcd94c23b8d1032d45eaff1a397/oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/version/ReadOnlyVersionManager.java",
-                "sha": "7aa0640bb7a4cb9a292ca0e984afe36ee827ed44",
-                "status": "modified"
-            },
-            {
-                "additions": 3,
-                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/f4b0563dc3e73bcd94c23b8d1032d45eaff1a397/oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/version/ReadWriteVersionManager.java",
-                "changes": 6,
-                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/version/ReadWriteVersionManager.java?ref=f4b0563dc3e73bcd94c23b8d1032d45eaff1a397",
-                "deletions": 3,
-                "filename": "oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/version/ReadWriteVersionManager.java",
-                "patch": "@@ -26,7 +26,7 @@\n \n import org.apache.jackrabbit.oak.api.PropertyState;\n import org.apache.jackrabbit.oak.api.Root;\n-import org.apache.jackrabbit.oak.api.Tree;\n+import org.apache.jackrabbit.oak.api.TreeLocation;\n import org.apache.jackrabbit.oak.api.Type;\n import org.apache.jackrabbit.oak.commons.PathUtils;\n import org.apache.jackrabbit.oak.core.ReadOnlyRoot;\n@@ -77,8 +77,8 @@\n \n     @Nonnull\n     @Override\n-    protected Tree getVersionStorageTree() {\n-        return new ReadOnlyTree(versionStorageNode.getNodeState());\n+    protected TreeLocation getVersionStorageLocation() {\n+        return new ReadOnlyTree(versionStorageNode.getNodeState()).getLocation();\n     }\n \n     @Nonnull",
-                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/f4b0563dc3e73bcd94c23b8d1032d45eaff1a397/oak-core/src/main/java/org/apache/jackrabbit/oak/plugins/version/ReadWriteVersionManager.java",
-                "sha": "0fece38b5e261d1a2a82830117202e6f44e4a3f5",
-                "status": "modified"
-            },
-            {
-                "additions": 3,
-                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/f4b0563dc3e73bcd94c23b8d1032d45eaff1a397/oak-jcr/src/main/java/org/apache/jackrabbit/oak/jcr/version/ReadWriteVersionManager.java",
-                "changes": 6,
-                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-jcr/src/main/java/org/apache/jackrabbit/oak/jcr/version/ReadWriteVersionManager.java?ref=f4b0563dc3e73bcd94c23b8d1032d45eaff1a397",
-                "deletions": 3,
-                "filename": "oak-jcr/src/main/java/org/apache/jackrabbit/oak/jcr/version/ReadWriteVersionManager.java",
-                "patch": "@@ -34,7 +34,7 @@\n import static com.google.common.base.Preconditions.checkNotNull;\n \n /**\n- * <code>ReadWriteVersionManager</code>...\n+ * {@code ReadWriteVersionManager}...\n  */\n public class ReadWriteVersionManager extends ReadOnlyVersionManager {\n \n@@ -61,8 +61,8 @@ protected void refresh() throws RepositoryException {\n \n     @Override\n     @Nonnull\n-    protected Tree getVersionStorageTree() {\n-        return versionStorageLocation.getTree();\n+    protected TreeLocation getVersionStorageLocation() {\n+        return versionStorageLocation;\n     }\n \n     @Override",
-                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/f4b0563dc3e73bcd94c23b8d1032d45eaff1a397/oak-jcr/src/main/java/org/apache/jackrabbit/oak/jcr/version/ReadWriteVersionManager.java",
-                "sha": "891fe1077e0980b49b18e61377d8a79e92e9e0c6",
-                "status": "modified"
-            }
-        ],
-        "message": "OAK-681: ReadOnlyVersionManager.getVersionHistory throws NPE if the versionstore is not accessible\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1453759 13f79535-47bb-0310-9956-ffa450edef68",
-        "parent": "https://github.com/apache/jackrabbit-oak/commit/51d2704c3de23f02c4fd15d9fb302b6f29fb5516",
-        "patched_files": [
-            "ReadOnlyVersionManager.java"
-        ],
-        "repo": "jackrabbit-oak",
-        "unit_tests": [
-            "ReadOnlyVersionManagerTest.java"
         ]
     },
     "jackrabbit-oak_f65d4d6": {
@@ -4462,57 +4076,6 @@
         "repo": "jackrabbit-oak",
         "unit_tests": [
             "ReadOnlyStoreTest.java"
-        ]
-    },
-    "jackrabbit-oak_f75b8e5": {
-        "bug_id": "jackrabbit-oak_f75b8e5",
-        "commit": "https://github.com/apache/jackrabbit-oak/commit/f75b8e5e4058d8fcd3ac320aea4a4cebaa458c75",
-        "file": [
-            {
-                "additions": 13,
-                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/f75b8e5e4058d8fcd3ac320aea4a4cebaa458c75/oak-it/mk/src/main/java/org/apache/jackrabbit/mk/test/MicroKernelIT.java",
-                "changes": 13,
-                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-it/mk/src/main/java/org/apache/jackrabbit/mk/test/MicroKernelIT.java?ref=f75b8e5e4058d8fcd3ac320aea4a4cebaa458c75",
-                "deletions": 0,
-                "filename": "oak-it/mk/src/main/java/org/apache/jackrabbit/mk/test/MicroKernelIT.java",
-                "patch": "@@ -263,6 +263,19 @@ public void copyToDescendant() {\n \n         assertTrue(mk.nodeExists(\"/test/child\", null));\n         assertTrue(mk.nodeExists(\"/test/copy/child\", null));\n+        JSONObject obj = parseJSONObject(mk.getNodes(\"/test\", null, 99, 0, -1, null));\n+        assertPropertyValue(obj, \":childNodeCount\", 2l);\n+        assertPropertyValue(obj, \"copy/:childNodeCount\", 1l);\n+        assertPropertyValue(obj, \"copy/child/:childNodeCount\", 0l);\n+\n+        mk.commit(\"\", \"+\\\"/root\\\":{} +\\\"/root/N4\\\":{} *\\\"/root/N4\\\":\\\"/root/N4/N5\\\"\", null, null);\n+        assertTrue(mk.nodeExists(\"/root\", null));\n+        assertTrue(mk.nodeExists(\"/root/N4\", null));\n+        assertTrue(mk.nodeExists(\"/root/N4/N5\", null));\n+        obj = parseJSONObject(mk.getNodes(\"/root\", null, 99, 0, -1, null));\n+        assertPropertyValue(obj, \":childNodeCount\", 1l);\n+        assertPropertyValue(obj, \"N4/:childNodeCount\", 1l);\n+        assertPropertyValue(obj, \"N4/N5/:childNodeCount\", 0l);\n     }\n \n     @Test",
-                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/f75b8e5e4058d8fcd3ac320aea4a4cebaa458c75/oak-it/mk/src/main/java/org/apache/jackrabbit/mk/test/MicroKernelIT.java",
-                "sha": "7d2b13f43f0f9413783562d6a96d660de5ba185a",
-                "status": "modified"
-            },
-            {
-                "additions": 40,
-                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/f75b8e5e4058d8fcd3ac320aea4a4cebaa458c75/oak-mk/src/main/java/org/apache/jackrabbit/mk/api/MicroKernel.java",
-                "changes": 52,
-                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-mk/src/main/java/org/apache/jackrabbit/mk/api/MicroKernel.java?ref=f75b8e5e4058d8fcd3ac320aea4a4cebaa458c75",
-                "deletions": 12,
-                "filename": "oak-mk/src/main/java/org/apache/jackrabbit/mk/api/MicroKernel.java",
-                "patch": "@@ -77,14 +77,20 @@\n      *   ...\n      * ]\n      * </pre>\n+     * The {@code path} parameter allows to filter the revisions by path, i.e.\n+     * only those revisions that affected the subtree rooted at {@code path}\n+     * will be included.\n      *\n      * @param since      timestamp (ms) of earliest revision to be returned\n      * @param maxEntries maximum #entries to be returned;\n      *                   if < 0, no limit will be applied.\n+     * @param path       optional path filter; if {@code null} or {@code \"\"} the\n+     *                   default ({@code\"/\"}) will be assumed, i.e. no filter\n+     *                   will be applied\n      * @return a list of revisions in chronological order in JSON format.\n      * @throws MicroKernelException if an error occurs\n      */\n-    String /* jsonArray */ getRevisionHistory(long since, int maxEntries)\n+    String /* jsonArray */ getRevisionHistory(long since, int maxEntries/*, String path*/)\n             throws MicroKernelException;\n \n     /**\n@@ -127,39 +133,47 @@ String waitForCommit(String oldHeadRevisionId, long timeout)\n      * If {@code fromRevisionId} and {@code toRevisionId} are not in chronological\n      * order the returned journal will be empty (i.e. {@code []})\n      * <p/>\n+     * The {@code path} parameter allows to filter the revisions by path, i.e.\n+     * only those revisions that affected the subtree rooted at {@code path}\n+     * will be included.\n+     * <p/>\n      * A {@code MicroKernelException} is thrown if either {@code fromRevisionId}\n      * or {@code toRevisionId}  doesn't exist, denotes a <i>private</i> branch\n      * revision or if another error occurs.\n      *\n      * @param fromRevisionId id of first revision to be returned in journal\n      * @param toRevisionId   id of last revision to be returned in journal,\n      *                       if {@code null} the current head revision is assumed\n-     * @param filter         (optional) filter criteria\n-     *                       (e.g. path, property names, etc);\n-     *                       TODO specify format and semantics\n+     * @param path           optional path filter; if {@code null} or {@code \"\"}\n+     *                       the default ({@code\"/\"}) will be assumed, i.e. no\n+     *                       filter will be applied\n      * @return a chronological list of revisions in JSON format\n      * @throws MicroKernelException if an error occurs\n      */\n     String /* jsonArray */ getJournal(String fromRevisionId, String toRevisionId,\n-                                      String filter)\n+                                      String path)\n             throws MicroKernelException;\n \n     /**\n      * Returns the JSON diff representation of the changes between the specified\n      * revisions. The changes will be consolidated if the specified range\n      * covers intermediary revisions. {@code fromRevisionId} and {@code toRevisionId}\n      * don't need not be in a specific chronological order.\n+     * <p/>\n+     * The {@code path} parameter allows to filter the revisions by path, i.e.\n+     * only those revisions that affected the subtree rooted at {@code path}\n+     * will be included.\n      *\n      * @param fromRevisionId a revision id, if {@code null} the current head revision is assumed\n      * @param toRevisionId   another revision id, if {@code null} the current head revision is assumed\n-     * @param filter         (optional) filter criteria\n-     *                       (e.g. path, property names, etc);\n-     *                       TODO specify format and semantics\n+     * @param path           optional path filter; if {@code null} or {@code \"\"}\n+     *                       the default ({@code\"/\"}) will be assumed, i.e. no\n+     *                       filter will be applied\n      * @return JSON diff representation of the changes\n      * @throws MicroKernelException if an error occurs\n      */\n     String /* JSON diff */ diff(String fromRevisionId, String toRevisionId,\n-                                String filter)\n+                                String path)\n             throws MicroKernelException;\n \n     //-------------------------------------------------------------< READ ops >\n@@ -250,18 +264,32 @@ String waitForCommit(String oldHeadRevisionId, long timeout)\n      * <p/>\n      * The {@code offset} and {@code count} parameters are only applied to the\n      * direct child nodes of the root of the returned node tree.\n+     * <p/>\n+     * The {@code filter} parameter allows to specify the names of properties\n+     * to be included or excluded.\n+     * <p/>\n+     * Format:\n+     * <pre>\n+     * {\n+     *   incl: [ \"foo\", \"foo1\" ],\n+     *   excl: [ \"bar\", \"tmp\" ]\n+     * }\n+     * </pre>\n+     * TODO clarify (globbing) syntax, semantics and implicit default filter (OAK-75)\n+     * <p/>\n+     * For more information see {@link #getNodes(String, String)}.\n      *\n      * @param path       path denoting root of node tree to be retrieved\n      * @param revisionId revision id, if {@code null} the current head revision is assumed\n      * @param depth      maximum depth of returned tree\n      * @param offset     start position in the iteration order of child nodes (0 to start at the\n      *                   beginning)\n      * @param count      maximum number of child nodes to retrieve (-1 for all)\n-     * @param filter     (optional) filter criteria\n-     *                   (e.g. names of properties to be included, etc);\n-     *                   TODO specify format and semantics\n+     * @param filter     optional filter on property names; if {@code null} or\n+     *                   {@code \"\"} the default filter will be assumed\n      * @return node tree in JSON format or {@code null} if the specified node does not exist\n      * @throws MicroKernelException if the specified revision does not exist or if another error occurs\n+     * @see #getNodes(String, String)\n      */\n     String /* jsonTree */ getNodes(String path, String revisionId, int depth,\n                                    long offset, int count, String filter)",
-                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/f75b8e5e4058d8fcd3ac320aea4a4cebaa458c75/oak-mk/src/main/java/org/apache/jackrabbit/mk/api/MicroKernel.java",
-                "sha": "b18ff64b3ff3b7b2365841143d1f0636015f8658",
-                "status": "modified"
-            },
-            {
-                "additions": 4,
-                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/f75b8e5e4058d8fcd3ac320aea4a4cebaa458c75/oak-mk/src/main/java/org/apache/jackrabbit/mk/model/CommitBuilder.java",
-                "changes": 7,
-                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-mk/src/main/java/org/apache/jackrabbit/mk/model/CommitBuilder.java?ref=f75b8e5e4058d8fcd3ac320aea4a4cebaa458c75",
-                "deletions": 3,
-                "filename": "oak-mk/src/main/java/org/apache/jackrabbit/mk/model/CommitBuilder.java",
-                "patch": "@@ -615,15 +615,16 @@ void apply() throws Exception {\n                 throw new NotFoundException(srcPath);\n             }\n \n-            MutableNode destParent = getOrCreateStagedNode(destParentPath);\n-            destParent.add(new ChildNode(destNodeName, srcCNE.getId()));\n-\n             if (staged.containsKey(srcPath)) {\n                 // the copied subtree is modified\n \n                 // update staging area\n                 copyStagedNodes(srcPath, destPath, destPath);\n             }\n+\n+            MutableNode destParent = getOrCreateStagedNode(destParentPath);\n+            destParent.add(new ChildNode(destNodeName, srcCNE.getId()));\n+\n         }\n \n         @Override",
-                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/f75b8e5e4058d8fcd3ac320aea4a4cebaa458c75/oak-mk/src/main/java/org/apache/jackrabbit/mk/model/CommitBuilder.java",
-                "sha": "ccc033cfbdc465bb03d5ffaa457d11070c692189",
-                "status": "modified"
-            }
-        ],
-        "message": "OAK-85: NPE and wrong result on copy operation\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1334040 13f79535-47bb-0310-9956-ffa450edef68",
-        "parent": "https://github.com/apache/jackrabbit-oak/commit/bc20b6dc88f32deb3baa76bbbd6005b5cd2f4fd5",
-        "patched_files": [
-            "CommitBuilder.java"
-        ],
-        "repo": "jackrabbit-oak",
-        "unit_tests": [
-            "CommitBuilderTest.java"
         ]
     },
     "jackrabbit-oak_f878b38": {
@@ -4644,21 +4207,21 @@
         "parent": "https://github.com/apache/jackrabbit-oak/commit/11903eb48da994d1477df04eb4aa7e86750005bb",
         "patched_files": [
             "WorkspaceImpl.java",
-            "RepositoryUpgrade.java",
             "NodeTypeRegistry.java",
-            "CugConfiguration.java",
-            "ReadOnlyNodeTypeManager.java",
+            "RepositoryUpgrade.java",
+            "NodeTypeImpl.java",
             "IndexDefinition.java",
-            "NodeTypeImpl.java"
+            "CugConfiguration.java",
+            "ReadOnlyNodeTypeManager.java"
         ],
         "repo": "jackrabbit-oak",
         "unit_tests": [
             "CugConfigurationTest.java",
-            "JcrUUIDTest.java",
             "RepositoryUpgradeTest.java",
-            "CugValidatorTest.java",
+            "NodeTypeRegistryTest.java",
             "IndexDefinitionTest.java",
-            "NodeTypeRegistryTest.java"
+            "CugValidatorTest.java",
+            "JcrUUIDTest.java"
         ]
     },
     "jackrabbit-oak_fb31aec": {

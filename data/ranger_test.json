@@ -1,4 +1,31 @@
 {
+    "ranger_1e8dc41": {
+        "bug_id": "ranger_1e8dc41",
+        "commit": "https://github.com/apache/ranger/commit/1e8dc41a82e2217a5c10a67c8f6bb58b6e06342e",
+        "file": [
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/ranger/blob/1e8dc41a82e2217a5c10a67c8f6bb58b6e06342e/hdfs-agent/src/main/java/org/apache/hadoop/hdfs/server/namenode/RangerFSPermissionChecker.java",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/ranger/contents/hdfs-agent/src/main/java/org/apache/hadoop/hdfs/server/namenode/RangerFSPermissionChecker.java?ref=1e8dc41a82e2217a5c10a67c8f6bb58b6e06342e",
+                "deletions": 1,
+                "filename": "hdfs-agent/src/main/java/org/apache/hadoop/hdfs/server/namenode/RangerFSPermissionChecker.java",
+                "patch": "@@ -292,7 +292,8 @@ public void logAudit(RangerAccessResult result) {\n \t\tString              serviceName  = result.getServiceName();\n \t\tString              resourceType = getResourceName(request.getResource(), serviceDef);\n \t\tString              resourcePath = getResourceValueAsString(request.getResource(), serviceDef);\n-\t\tLong                policyId     = (result.getAccessTypeResults() != null && result.getAccessTypeResults().size() > 0) ? result.getAccessTypeResults().get(0).getPolicyId() : null;\n+\t\tLong                policyId     = (result.getAccessTypeResults() != null && !result.getAccessTypeResults().isEmpty())\n+\t\t\t\t\t\t\t\t\t\t\t\t\t\t? result.getAccessTypeResults().values().iterator().next().getPolicyId() : null;\n \n \t\tauditEvent.setUser(request.getUser());\n \t\tauditEvent.setResourcePath(pathToBeValidated);",
+                "raw_url": "https://github.com/apache/ranger/raw/1e8dc41a82e2217a5c10a67c8f6bb58b6e06342e/hdfs-agent/src/main/java/org/apache/hadoop/hdfs/server/namenode/RangerFSPermissionChecker.java",
+                "sha": "9cf57a9332ed7e55d96a855f7396b9d3d5c51a38",
+                "status": "modified"
+            }
+        ],
+        "message": "RANGER-203: fix NPE while getting policyId from the result.",
+        "parent": "https://github.com/apache/ranger/commit/6a803eaa1a569753974e2c550a58fa1c2cf7e443",
+        "patched_files": [
+            "RangerFSPermissionChecker.java"
+        ],
+        "repo": "ranger",
+        "unit_tests": [
+            "TestRangerFSPermissionChecker.java"
+        ]
+    },
     "ranger_29f8f20": {
         "bug_id": "ranger_29f8f20",
         "commit": "https://github.com/apache/ranger/commit/29f8f2027f7703dcb144f4bd87499fe3d8459a88",
@@ -63,88 +90,6 @@
         "repo": "ranger",
         "unit_tests": [
             "HdfsClientTest.java"
-        ]
-    },
-    "ranger_3a57aa3": {
-        "bug_id": "ranger_3a57aa3",
-        "commit": "https://github.com/apache/ranger/commit/3a57aa3c324b5d3580209cdf96cd19451ee5efd5",
-        "file": [
-            {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/ranger/blob/3a57aa3c324b5d3580209cdf96cd19451ee5efd5/security-admin/src/main/java/org/apache/ranger/biz/ServiceDBStore.java",
-                "changes": 1,
-                "contents_url": "https://api.github.com/repos/apache/ranger/contents/security-admin/src/main/java/org/apache/ranger/biz/ServiceDBStore.java?ref=3a57aa3c324b5d3580209cdf96cd19451ee5efd5",
-                "deletions": 0,
-                "filename": "security-admin/src/main/java/org/apache/ranger/biz/ServiceDBStore.java",
-                "patch": "@@ -600,6 +600,7 @@ public RangerPolicy createPolicy(RangerPolicy policy) throws Exception {\n \t\tcreateNewResourcesForPolicy(policy, xCreatedPolicy, resources);\n \t\tcreateNewPolicyItemsForPolicy(policy, xCreatedPolicy, policyItems, xServiceDef);\n \t\t\n+\t\thandlePolicyUpdate(service);\n \t\tRangerPolicy createdPolicy = policyService.getPopulatedViewObject(xCreatedPolicy);\n \t\tdataHistService.createObjectDataHistory(createdPolicy, RangerDataHistService.ACTION_CREATE);\n \t\t",
-                "raw_url": "https://github.com/apache/ranger/raw/3a57aa3c324b5d3580209cdf96cd19451ee5efd5/security-admin/src/main/java/org/apache/ranger/biz/ServiceDBStore.java",
-                "sha": "292a9b9b32b916b9a3d001a461f3321fcbfddcdb",
-                "status": "modified"
-            },
-            {
-                "additions": 27,
-                "blob_url": "https://github.com/apache/ranger/blob/3a57aa3c324b5d3580209cdf96cd19451ee5efd5/security-admin/src/main/java/org/apache/ranger/common/ServiceUtil.java",
-                "changes": 39,
-                "contents_url": "https://api.github.com/repos/apache/ranger/contents/security-admin/src/main/java/org/apache/ranger/common/ServiceUtil.java?ref=3a57aa3c324b5d3580209cdf96cd19451ee5efd5",
-                "deletions": 12,
-                "filename": "security-admin/src/main/java/org/apache/ranger/common/ServiceUtil.java",
-                "patch": "@@ -27,6 +27,8 @@\n import java.util.Map.Entry;\n \n import org.apache.commons.collections.CollectionUtils;\n+import org.apache.commons.lang.StringUtils;\n+import org.apache.log4j.Logger;\n import org.apache.ranger.db.RangerDaoManager;\n import org.apache.ranger.entity.XXGroup;\n import org.apache.ranger.entity.XXUser;\n@@ -45,7 +47,8 @@\n \n @Component\n public class ServiceUtil {\n-\t\n+\tstatic final Logger LOG = Logger.getLogger(ServiceUtil.class);\n+\n \tstatic Map<String, Integer> mapServiceTypeToAssetType = new HashMap<String, Integer>();\n \tstatic Map<String, Integer> mapAccessTypeToPermType   = new HashMap<String, Integer>();\n \t\n@@ -119,15 +122,21 @@ public VXAsset toVXAsset(RangerService service) {\n \t\t\treturn null;\n \t\t}\n \n-\t\tVXAsset ret = new VXAsset();\n+\t\tVXAsset ret = null;\n \n-\t\trangerObjectToDataObject(service, ret);\n-\n-\t\tret.setAssetType(toAssetType(service.getType()));\n-\t\tret.setName(service.getName());\n-\t\tret.setDescription(service.getDescription());\n-\t\tret.setActiveStatus(service.getIsEnabled() ? RangerCommonEnums.STATUS_ENABLED : RangerCommonEnums.STATUS_DISABLED);\n-\t\tret.setConfig(jsonUtil.readMapToString(service.getConfigs()));\n+\t\tInteger assetType = toAssetType(service.getType());\n+\t\t\n+\t\tif(assetType != null) {\n+\t\t\tret = new VXAsset();\n+\t\n+\t\t\trangerObjectToDataObject(service, ret);\n+\t\n+\t\t\tret.setAssetType(toAssetType(service.getType()));\n+\t\t\tret.setName(service.getName());\n+\t\t\tret.setDescription(service.getDescription());\n+\t\t\tret.setActiveStatus(service.getIsEnabled() ? RangerCommonEnums.STATUS_ENABLED : RangerCommonEnums.STATUS_DISABLED);\n+\t\t\tret.setConfig(jsonUtil.readMapToString(service.getConfigs()));\n+\t\t}\n \n \t\treturn ret;\n \t}\n@@ -188,6 +197,8 @@ public RangerPolicy toRangerPolicy(VXResource resource, RangerService service) {\n \t\t\tList<RangerPolicyItemAccess> accessList = new ArrayList<RangerPolicyItemAccess>();\n \t\t\tString                       ipAddress  = null;\n \n+\t\t\tRangerPolicy.RangerPolicyItem policyItem = new RangerPolicy.RangerPolicyItem();\n+\n \t\t\tfor(VXPermMap permMap : entry.getValue()) {\n \t\t\t\tif(permMap.getPermFor() == AppConstants.XA_PERM_FOR_USER) {\n \t\t\t\t\tString userName = getUserName(permMap);\n@@ -203,13 +214,17 @@ public RangerPolicy toRangerPolicy(VXResource resource, RangerService service) {\n \t\t\t\t\t}\t\t\t\t\t\n \t\t\t\t} \n \n-\t\t\t\taccessList.add(new RangerPolicyItemAccess(toAccessType(permMap.getPermType())));\n+\t\t\t\tString accessType = toAccessType(permMap.getPermType());\n+\t\t\t\t\n+\t\t\t\tif(StringUtils.equalsIgnoreCase(accessType, \"Admin\")) {\n+\t\t\t\t\tpolicyItem.setDelegateAdmin(Boolean.TRUE);\n+\t\t\t\t} else {\n+\t\t\t\t\taccessList.add(new RangerPolicyItemAccess(accessType));\n+\t\t\t\t}\n \n \t\t\t\tipAddress = permMap.getIpAddress();\n \t\t\t}\n \t\t\t\n-\t\t\tRangerPolicy.RangerPolicyItem policyItem = new RangerPolicy.RangerPolicyItem();\n-\n \t\t\tpolicyItem.setUsers(userList);\n \t\t\tpolicyItem.setGroups(groupList);\n \t\t\tpolicyItem.setAccesses(accessList);",
-                "raw_url": "https://github.com/apache/ranger/raw/3a57aa3c324b5d3580209cdf96cd19451ee5efd5/security-admin/src/main/java/org/apache/ranger/common/ServiceUtil.java",
-                "sha": "d26f4c5caee7450281c3b4434385d1b28508e2f5",
-                "status": "modified"
-            },
-            {
-                "additions": 6,
-                "blob_url": "https://github.com/apache/ranger/blob/3a57aa3c324b5d3580209cdf96cd19451ee5efd5/security-admin/src/main/java/org/apache/ranger/rest/AssetREST.java",
-                "changes": 8,
-                "contents_url": "https://api.github.com/repos/apache/ranger/contents/security-admin/src/main/java/org/apache/ranger/rest/AssetREST.java?ref=3a57aa3c324b5d3580209cdf96cd19451ee5efd5",
-                "deletions": 2,
-                "filename": "security-admin/src/main/java/org/apache/ranger/rest/AssetREST.java",
-                "patch": "@@ -239,10 +239,14 @@ public VXAssetList searchXAssets(@Context HttpServletRequest request) {\n \t\tList<RangerService> services = serviceREST.getServices(request);\n \n \t\tif(services != null) {\n-\t\t\tList<VXAsset> assets = new ArrayList<VXAsset>(services.size());\n+\t\t\tList<VXAsset> assets = new ArrayList<VXAsset>();\n \n \t\t\tfor(RangerService service : services) {\n-\t\t\t\tassets.add(serviceUtil.toVXAsset(service));\n+\t\t\t\tVXAsset asset = serviceUtil.toVXAsset(service);\n+\t\t\t\t\n+\t\t\t\tif(asset != null) {\n+\t\t\t\t\tassets.add(asset);\n+\t\t\t\t}\n \t\t\t}\n \n \t\t\tret.setVXAssets(assets);",
-                "raw_url": "https://github.com/apache/ranger/raw/3a57aa3c324b5d3580209cdf96cd19451ee5efd5/security-admin/src/main/java/org/apache/ranger/rest/AssetREST.java",
-                "sha": "753a3bf08dd5f9465b2b63d7a5701ad87e937810",
-                "status": "modified"
-            }
-        ],
-        "message": "RANGER-203: fix to update policyVersion in service on policy-create; fix for NPE in legacy repository retrieval API",
-        "parent": "https://github.com/apache/ranger/commit/aceff0e8ebedb490d8e4446fab8829a138fadd4b",
-        "patched_files": [
-            "ServiceUtil.java",
-            "ServiceDBStore.java",
-            "AssetREST.java"
-        ],
-        "repo": "ranger",
-        "unit_tests": [
-            "TestServiceUtil.java",
-            "TestAssetREST.java",
-            "TestServiceDBStore.java"
-        ]
-    },
-    "ranger_3bed641": {
-        "bug_id": "ranger_3bed641",
-        "commit": "https://github.com/apache/ranger/commit/3bed641fe69ba15d69a0c88a81eecab905fff8e0",
-        "file": [
-            {
-                "additions": 18,
-                "blob_url": "https://github.com/apache/ranger/blob/3bed641fe69ba15d69a0c88a81eecab905fff8e0/hdfs-agent/src/main/java/org/apache/ranger/authorization/hadoop/RangerHdfsAuthorizer.java",
-                "changes": 32,
-                "contents_url": "https://api.github.com/repos/apache/ranger/contents/hdfs-agent/src/main/java/org/apache/ranger/authorization/hadoop/RangerHdfsAuthorizer.java?ref=3bed641fe69ba15d69a0c88a81eecab905fff8e0",
-                "deletions": 14,
-                "filename": "hdfs-agent/src/main/java/org/apache/ranger/authorization/hadoop/RangerHdfsAuthorizer.java",
-                "patch": "@@ -477,14 +477,16 @@ public void processResult(RangerAccessResult result) {\n \n \t\tauditEvent = super.getAuthzEvents(result);\n \n-\t\tRangerAccessRequest  request      = result.getAccessRequest();\n-\t\tRangerAccessResource resource     = request.getResource();\n-\t\tString               resourcePath = resource != null ? resource.getAsString() : null;\n-\n-\t\tauditEvent.setEventTime(request.getAccessTime());\n-\t\tauditEvent.setAccessType(request.getAction());\n-\t\tauditEvent.setResourcePath(this.pathToBeValidated);\n-\t\tauditEvent.setResultReason(resourcePath);\n+\t\tif (auditEvent != null) {\n+\t\t\tRangerAccessRequest request = result.getAccessRequest();\n+\t\t\tRangerAccessResource resource = request.getResource();\n+\t\t\tString resourcePath = resource != null ? resource.getAsString() : null;\n+\n+\t\t\tauditEvent.setEventTime(request.getAccessTime());\n+\t\t\tauditEvent.setAccessType(request.getAction());\n+\t\t\tauditEvent.setResourcePath(this.pathToBeValidated);\n+\t\t\tauditEvent.setResultReason(resourcePath);\n+\t\t}\n \n \t\tif(LOG.isDebugEnabled()) {\n \t\t\tLOG.debug(\"<== RangerHdfsAuditHandler.logAudit(\" + result + \"): \" + auditEvent);\n@@ -496,11 +498,13 @@ public void logHadoopEvent(String path, FsAction action, boolean accessGranted)\n \t\t\tLOG.debug(\"==> RangerHdfsAuditHandler.logHadoopEvent(\" + path + \", \" + action + \", \" + accessGranted + \")\");\n \t\t}\n \n-\t\tauditEvent.setResultReason(path);\n-\t\tauditEvent.setAccessResult((short) (accessGranted ? 1 : 0));\n-\t\tauditEvent.setAccessType(action == null ? null : action.toString());\n-\t\tauditEvent.setAclEnforcer(HadoopModuleName);\n-\t\tauditEvent.setPolicyId(-1);\n+\t\tif(auditEvent != null) {\n+\t\t\tauditEvent.setResultReason(path);\n+\t\t\tauditEvent.setAccessResult((short) (accessGranted ? 1 : 0));\n+\t\t\tauditEvent.setAccessType(action == null ? null : action.toString());\n+\t\t\tauditEvent.setAclEnforcer(HadoopModuleName);\n+\t\t\tauditEvent.setPolicyId(-1);\n+\t\t}\n \n \t\tif(LOG.isDebugEnabled()) {\n \t\t\tLOG.debug(\"<== RangerHdfsAuditHandler.logHadoopEvent(\" + path + \", \" + action + \", \" + accessGranted + \"): \" + auditEvent);\n@@ -512,7 +516,7 @@ public void flushAudit() {\n \t\t\tLOG.debug(\"==> RangerHdfsAuditHandler.flushAudit(\" + isAuditEnabled + \", \" + auditEvent + \")\");\n \t\t}\n \n-\t\tif(isAuditEnabled && !StringUtils.isEmpty(auditEvent.getAccessType())) {\n+\t\tif(isAuditEnabled && auditEvent != null && !StringUtils.isEmpty(auditEvent.getAccessType())) {\n \t\t\tString username = auditEvent.getUser();\n \n \t\t\tboolean skipLog = (username != null && excludeUsers != null && excludeUsers.contains(username)) ;",
-                "raw_url": "https://github.com/apache/ranger/raw/3bed641fe69ba15d69a0c88a81eecab905fff8e0/hdfs-agent/src/main/java/org/apache/ranger/authorization/hadoop/RangerHdfsAuthorizer.java",
-                "sha": "2b52670d1fdb25208e2fbee420ce12d5da775f60",
-                "status": "modified"
-            }
-        ],
-        "message": "RANGER-274: Fixed NPE in RangerHdfsAuthorizer when audit is done without any Ranger policy allowing audit\n\nSigned-off-by: Madhan Neethiraj <madhan@apache.org>",
-        "parent": "https://github.com/apache/ranger/commit/3a0982b5133ab9d786956d15e07d65f2af6401b9",
-        "patched_files": [
-            "RangerHdfsAuthorizer.java"
-        ],
-        "repo": "ranger",
-        "unit_tests": [
-            "RangerHdfsAuthorizerTest.java"
         ]
     },
     "ranger_8744627": {
@@ -263,15 +208,13 @@
         "message": "Mainly potential NPE problems in security-admin process.\n\nSigned-off-by: Madhan Neethiraj <madhan@apache.org>",
         "parent": "https://github.com/apache/ranger/commit/24543ec1d171134f33bdd2544299b7ce2eec2c9d",
         "patched_files": [
-            "XAuditMapService.java",
-            "UserMgr.java",
-            "XPermMapService.java",
-            "XUserMgr.java"
+            "XUserMgr.java",
+            "AssetMgr.java",
+            "UserMgr.java"
         ],
         "repo": "ranger",
         "unit_tests": [
-            "TestXPermMapService.java",
-            "TestXAuditMapService.java",
+            "TestAssetMgr.java",
             "TestXUserMgr.java",
             "TestUserMgr.java"
         ]
@@ -359,14 +302,14 @@
         "message": "RANGER-770 : Fix NullPointerException Unit test cases on master branch",
         "parent": "https://github.com/apache/ranger/commit/f3467abc3dce82c66acaa4530ce8c6d34bb455a2",
         "patched_files": [
+            "RangerServiceDefServiceBase.java",
             "XXTagAttributeDef.java",
-            "ServiceREST.java",
-            "RangerServiceDefServiceBase.java"
+            "ServiceREST.java"
         ],
         "repo": "ranger",
         "unit_tests": [
-            "TestServiceREST.java",
-            "TestRangerServiceDefServiceBase.java"
+            "TestRangerServiceDefServiceBase.java",
+            "TestServiceREST.java"
         ]
     },
     "ranger_9f639f3": {
@@ -510,8 +453,8 @@
         ],
         "repo": "ranger",
         "unit_tests": [
-            "test-validity-schedules-valid-and-applicable.java",
-            "test-validity-schedules-invalid.java"
+            "test-validity-schedules-invalid.java",
+            "test-validity-schedules-valid-and-applicable.java"
         ]
     },
     "ranger_b1bfbc5": {
@@ -702,23 +645,13 @@
         "message": "RANGER-339: Fix for potential NPE, remove dead code",
         "parent": "https://github.com/apache/ranger/commit/87446272e0e3678463aad96770c7f957f1d9418b",
         "patched_files": [
-            "XGroupService.java",
-            "PolicyMgrUserGroupBuilder.java",
-            "UserMgr.java",
-            "XPermMapService.java",
-            "XAssetService.java",
-            "XAccessAuditService.java",
-            "XAuditMapService.java"
+            "AssetMgr.java",
+            "UserMgr.java"
         ],
         "repo": "ranger",
         "unit_tests": [
-            "TestXPermMapService.java",
-            "TestXAccessAuditService.java",
-            "TestUserMgr.java",
-            "TestXGroupService.java",
-            "PolicyMgrUserGroupBuilderTest.java",
-            "TestXAssetService.java",
-            "TestXAuditMapService.java"
+            "TestAssetMgr.java",
+            "TestUserMgr.java"
         ]
     },
     "ranger_f8bea62": {
@@ -837,21 +770,21 @@
         "message": "RANGER-274: Fixed minor bugs, potential NPE, REST resource path. Fixed service creation\n\nSigned-off-by: Madhan Neethiraj <madhan@apache.org>",
         "parent": "https://github.com/apache/ranger/commit/5876e22723c3ba82c405efbb29d97fae28e189aa",
         "patched_files": [
+            "ServiceDBStore.java",
             "RangerRESTUtils.java",
             "RangerAdminRESTClient.java",
-            "RangerAdminTagRetriever.java",
-            "RangerServiceServiceBase.java",
             "RangerTagProvider.java",
+            "RangerAdminTagRetriever.java",
             "TagStore.java",
-            "TagRESTConstants.java",
-            "ServiceDBStore.java",
-            "TagFileStore.java"
+            "TagFileStore.java",
+            "RangerServiceServiceBase.java",
+            "TagRESTConstants.java"
         ],
         "repo": "ranger",
         "unit_tests": [
-            "TestTagStore.java",
+            "TestRangerServiceServiceBase.java",
             "TestServiceDBStore.java",
-            "TestRangerServiceServiceBase.java"
+            "TestTagStore.java"
         ]
     }
 }

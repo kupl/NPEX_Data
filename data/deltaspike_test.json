@@ -82,7 +82,6 @@
         "message": "DELTASPIKE-513 Transactional interceptor throws NPE for missing EntityManager",
         "parent": "https://github.com/apache/deltaspike/commit/364b84a831738b7228b81ae5ae1b6638e1d6cc02",
         "patched_files": [
-            "EntityManagerProducer.java",
             "ResourceLocalTransactionStrategy.java",
             "TransactionalBean.java"
         ],
@@ -117,45 +116,6 @@
         "repo": "deltaspike",
         "unit_tests": [
             "AbstractContextTest.java"
-        ]
-    },
-    "deltaspike_49c9a9e": {
-        "bug_id": "deltaspike_49c9a9e",
-        "commit": "https://github.com/apache/deltaspike/commit/49c9a9eafd2aa69a0264a69eea388ad32fdaa803",
-        "file": [
-            {
-                "additions": 29,
-                "blob_url": "https://github.com/apache/deltaspike/blob/49c9a9eafd2aa69a0264a69eea388ad32fdaa803/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/util/proxy/AsmProxyClassGenerator.java",
-                "changes": 31,
-                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/util/proxy/AsmProxyClassGenerator.java?ref=49c9a9eafd2aa69a0264a69eea388ad32fdaa803",
-                "deletions": 2,
-                "filename": "deltaspike/core/api/src/main/java/org/apache/deltaspike/core/util/proxy/AsmProxyClassGenerator.java",
-                "patch": "@@ -111,7 +111,8 @@ private AsmProxyClassGenerator()\n         }\n \n         defineInvocationHandlerField(cw, invocationHandlerType);\n-        defineConstructor(cw, proxyType, superType);\n+        defineDefaultConstructor(cw, proxyType, superType);\n+        defineDelegateInvocationHandlerConstructor(cw, proxyType, superType, invocationHandlerType);\n         defineDeltaSpikeProxyMethods(cw, proxyType, invocationHandlerType);\n \n         for (java.lang.reflect.Method method : delegateMethods)\n@@ -136,7 +137,7 @@ private static void defineInvocationHandlerField(ClassWriter cw, Type invocation\n                 invocationHandlerType.getDescriptor(), null, null).visitEnd();\n     }\n \n-    private static void defineConstructor(ClassWriter cw, Type proxyType, Type superType)\n+    private static void defineDefaultConstructor(ClassWriter cw, Type proxyType, Type superType)\n     {\n         GeneratorAdapter mg = new GeneratorAdapter(Opcodes.ACC_PUBLIC,\n                 new Method(\"<init>\", Type.VOID_TYPE, new Type[]{ }),\n@@ -154,6 +155,32 @@ private static void defineConstructor(ClassWriter cw, Type proxyType, Type super\n \n         mg.visitEnd();\n     }\n+    \n+    private static void defineDelegateInvocationHandlerConstructor(ClassWriter cw, Type proxyType, Type superType,\n+            Type invocationHandlerType)\n+    {\n+        GeneratorAdapter mg = new GeneratorAdapter(Opcodes.ACC_PUBLIC,\n+                new Method(\"<init>\", Type.VOID_TYPE, new Type[] { invocationHandlerType }),\n+                null,\n+                null,\n+                cw);\n+\n+        mg.visitCode();\n+\n+        // invoke super constructor\n+        mg.loadThis();\n+        mg.invokeConstructor(superType, Method.getMethod(\"void <init> ()\"));\n+        \n+        // set invocation handler\n+        mg.loadThis();\n+        mg.loadArg(0);\n+        mg.putField(proxyType, FIELDNAME_DELEGATE_INVOCATION_HANDLER, invocationHandlerType);\n+        \n+        mg.returnValue();\n+        mg.endMethod();\n+\n+        mg.visitEnd();\n+    }\n \n     private static void defineDeltaSpikeProxyMethods(ClassWriter cw, Type proxyType, Type invocationHandlerType)\n     {",
-                "raw_url": "https://github.com/apache/deltaspike/raw/49c9a9eafd2aa69a0264a69eea388ad32fdaa803/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/util/proxy/AsmProxyClassGenerator.java",
-                "sha": "e1f839479784c4dc7c3008a6301d83479616278b",
-                "status": "modified"
-            },
-            {
-                "additions": 9,
-                "blob_url": "https://github.com/apache/deltaspike/blob/49c9a9eafd2aa69a0264a69eea388ad32fdaa803/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/util/proxy/DeltaSpikeProxyContextualLifecycle.java",
-                "changes": 12,
-                "contents_url": "https://api.github.com/repos/apache/deltaspike/contents/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/util/proxy/DeltaSpikeProxyContextualLifecycle.java?ref=49c9a9eafd2aa69a0264a69eea388ad32fdaa803",
-                "deletions": 3,
-                "filename": "deltaspike/core/api/src/main/java/org/apache/deltaspike/core/util/proxy/DeltaSpikeProxyContextualLifecycle.java",
-                "patch": "@@ -18,6 +18,7 @@\n  */\n package org.apache.deltaspike.core.util.proxy;\n \n+import java.lang.reflect.Constructor;\n import java.lang.reflect.InvocationHandler;\n import java.util.Set;\n import javax.enterprise.context.Dependent;\n@@ -60,12 +61,17 @@ public T create(Bean bean, CreationalContext creationalContext)\n     {\n         try\n         {\n-            T instance = proxyClass.newInstance();\n+            T instance;\n \n-            if (delegateInvocationHandlerClass != null)\n+            if (delegateInvocationHandlerClass == null)\n+            {\n+                instance = proxyClass.newInstance();\n+            }\n+            else\n             {\n                 H delegateInvocationHandler = instantiateDelegateInvocationHandler();\n-                ((DeltaSpikeProxy) instance).setDelegateInvocationHandler(delegateInvocationHandler);\n+                Constructor<T> constructor = proxyClass.getConstructor(delegateInvocationHandlerClass);\n+                instance = constructor.newInstance(delegateInvocationHandler);\n             }\n \n             if (this.injectionTarget != null)",
-                "raw_url": "https://github.com/apache/deltaspike/raw/49c9a9eafd2aa69a0264a69eea388ad32fdaa803/deltaspike/core/api/src/main/java/org/apache/deltaspike/core/util/proxy/DeltaSpikeProxyContextualLifecycle.java",
-                "sha": "a9fb26d3393251af769eb8d9b8343b382bf7776d",
-                "status": "modified"
-            }
-        ],
-        "message": "DELTASPIKE-863 NPE when invoking proxy for custom jsf converter",
-        "parent": "https://github.com/apache/deltaspike/commit/4edbca0cabfb017460262a0ccd529597aa98a017",
-        "patched_files": [
-            "AsmProxyClassGenerator.java"
-        ],
-        "repo": "deltaspike",
-        "unit_tests": [
-            "AsmProxyClassGeneratorTest.java"
         ]
     },
     "deltaspike_709fdb7": {
@@ -217,8 +177,8 @@
         "message": "DELTASPIKE-354 prevent NPE when passing null to a @MessageBundle",
         "parent": "https://github.com/apache/deltaspike/commit/d3d26f8dee03e96fc21722bdbb3c501d97ba6317",
         "patched_files": [
-            "MessageBundleInvocationHandler.java",
-            "SimpleMessage.java"
+            "SimpleMessage.java",
+            "MessageBundleInvocationHandler.java"
         ],
         "repo": "deltaspike",
         "unit_tests": [
@@ -269,8 +229,8 @@
         "message": "DELTASPIKE-1139 also fix a NPE if the configured value is not set and logValues is enabled",
         "parent": "https://github.com/apache/deltaspike/commit/07f5199529a0e2cdb6dfbda20e4b16f060378b84",
         "patched_files": [
-            "org.java",
-            "ConfigResolver.java"
+            "ConfigResolver.java",
+            "org.java"
         ],
         "repo": "deltaspike",
         "unit_tests": [

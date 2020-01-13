@@ -26,6 +26,45 @@
             "TestPlatformImplBase.java"
         ]
     },
+    "ddlutils_59aac8a": {
+        "bug_id": "ddlutils_59aac8a",
+        "commit": "https://github.com/apache/ddlutils/commit/59aac8acc4c1844b11eb71a090e1417ffe55d1ff",
+        "file": [
+            {
+                "additions": 34,
+                "blob_url": "https://github.com/apache/ddlutils/blob/59aac8acc4c1844b11eb71a090e1417ffe55d1ff/src/java/org/apache/commons/sql/io/JdbcModelReader.java",
+                "changes": 46,
+                "contents_url": "https://api.github.com/repos/apache/ddlutils/contents/src/java/org/apache/commons/sql/io/JdbcModelReader.java?ref=59aac8acc4c1844b11eb71a090e1417ffe55d1ff",
+                "deletions": 12,
+                "filename": "src/java/org/apache/commons/sql/io/JdbcModelReader.java",
+                "patch": "@@ -21,6 +21,7 @@\n import java.sql.ResultSet;\n import java.sql.ResultSetMetaData;\n import java.sql.SQLException;\n+import java.sql.Types;\n import java.util.HashMap;\n import java.util.Iterator;\n import java.util.List;\n@@ -48,19 +49,38 @@\n public class JdbcModelReader {\n \n     /** The Log to which logging calls will be made. */\n-    private static final Log log = LogFactory.getLog( JdbcModelReader.class );\n+    private final Log log = LogFactory.getLog( JdbcModelReader.class );\n \n-    Connection connection = null;\n-    String catalog = null;\n-    String schema = null;\n-    String[] tableTypes = { \"TABLE\", \"VIEW\" };\n-    Pattern defaultPattern = Pattern.compile(\"\\\\(\\\\'?(.*?)\\\\'?\\\\)\"); //value with parenthesis and/or quotes around it\n+    /** Contains default column sizes (minimum sizes that a JDBC-compliant db must support) */\n+    private HashMap defaultSizes = new HashMap();\n+    \n+    private Connection connection = null;\n+    private String catalog = null;\n+    private String schema = null;\n+    private String[] tableTypes = { \"TABLE\", \"VIEW\" };\n+    private Pattern defaultPattern = Pattern.compile(\"\\\\(\\\\'?(.*?)\\\\'?\\\\)\"); //value with parenthesis and/or quotes around it\n \n-    public JdbcModelReader() {\n+    public JdbcModelReader()\n+    {\n+        this(null);\n     }\n     \n-    public JdbcModelReader(Connection conn) {\n-        this.connection = conn;\n+    public JdbcModelReader(Connection conn)\n+    {\n+        connection = conn;\n+        defaultSizes.put(new Integer(Types.CHAR),          \"254\");\n+        defaultSizes.put(new Integer(Types.VARCHAR),       \"254\");\n+        defaultSizes.put(new Integer(Types.LONGVARCHAR),   \"254\");\n+        defaultSizes.put(new Integer(Types.BINARY),        \"254\");\n+        defaultSizes.put(new Integer(Types.VARBINARY),     \"254\");\n+        defaultSizes.put(new Integer(Types.LONGVARBINARY), \"254\");\n+        defaultSizes.put(new Integer(Types.INTEGER),       \"32\");\n+        defaultSizes.put(new Integer(Types.BIGINT),        \"64\");\n+        defaultSizes.put(new Integer(Types.REAL),          \"7,0\");\n+        defaultSizes.put(new Integer(Types.FLOAT),         \"15,0\");\n+        defaultSizes.put(new Integer(Types.DOUBLE),        \"15,0\");\n+        defaultSizes.put(new Integer(Types.DECIMAL),       \"15,15\");\n+        defaultSizes.put(new Integer(Types.NUMERIC),       \"15,15\");\n     }\n     \n     public void setCatalog(String catalog) {\n@@ -243,7 +263,7 @@ private List getColumnsForTable(String tableName) throws SQLException {\n                 String columnSize =\n                     columnInfoColumns.contains(\"COLUMN_SIZE\")\n                         ? columnData.getString(\"COLUMN_SIZE\")\n-                        : null;\n+                        : (String)defaultSizes.get(new Integer(columnType));\n                 /* the number of fractional digits */\n                 int columnScale =\n                     columnInfoColumns.contains(\"DECIMAL_DIGITS\")\n@@ -338,6 +358,10 @@ private List getColumnsForTable(String tableName) throws SQLException {\n                 Column col = new Column();\n                 col.setName(columnName);\n                 col.setTypeCode(columnType);\n+                col.setPrecisionRadix(columnPrecision);\n+                col.setScale(columnScale);\n+                // we're setting the size after the precision and radix in case\n+                // the database prefers to return them in the size value \n                 col.setSize(columnSize);\n                 col.setRequired(!columnIsNullable);\n                 if (primaryKeys.contains(col.getName())) {\n@@ -355,8 +379,6 @@ private List getColumnsForTable(String tableName) throws SQLException {\n                     }\n                     col.setDefaultValue(columnDefaultValue);\n                 }\n-                col.setPrecisionRadix(columnPrecision);\n-                col.setScale(columnScale);\n                 columns.add(col);\n             }\n             return columns;",
+                "raw_url": "https://github.com/apache/ddlutils/raw/59aac8acc4c1844b11eb71a090e1417ffe55d1ff/src/java/org/apache/commons/sql/io/JdbcModelReader.java",
+                "sha": "fe44ab41ad6be03de6bc10d5329421f9ce9f8f17",
+                "status": "modified"
+            },
+            {
+                "additions": 12,
+                "blob_url": "https://github.com/apache/ddlutils/blob/59aac8acc4c1844b11eb71a090e1417ffe55d1ff/src/java/org/apache/commons/sql/model/Column.java",
+                "changes": 21,
+                "contents_url": "https://api.github.com/repos/apache/ddlutils/contents/src/java/org/apache/commons/sql/model/Column.java?ref=59aac8acc4c1844b11eb71a090e1417ffe55d1ff",
+                "deletions": 9,
+                "filename": "src/java/org/apache/commons/sql/model/Column.java",
+                "patch": "@@ -201,16 +201,19 @@ public int getSizeAsInt()\n \n     public void setSize(String size)\n     {\n-        int pos = size.indexOf(\",\");\n-\n-        if (pos < 0)\n-        {\n-            this.size = size;\n-        }\n-        else\n+        if (size != null)\n         {\n-            this.size = size.substring(0, pos);\n-            scale     = Integer.parseInt(size.substring(pos + 1));\n+            int pos = size.indexOf(\",\");\n+    \n+            if (pos < 0)\n+            {\n+                this.size = size;\n+            }\n+            else\n+            {\n+                this.size = size.substring(0, pos);\n+                scale     = Integer.parseInt(size.substring(pos + 1));\n+            }\n         }\n     }\n     ",
+                "raw_url": "https://github.com/apache/ddlutils/raw/59aac8acc4c1844b11eb71a090e1417ffe55d1ff/src/java/org/apache/commons/sql/model/Column.java",
+                "sha": "e57a1309a1204440f7e1baa2a020be4134dc6ed9",
+                "status": "modified"
+            }
+        ],
+        "message": "Fixed NPE that occurs when using JdbcModelReader with numeric column types in Hsqldb\n\n\ngit-svn-id: https://svn.apache.org/repos/asf/jakarta/commons/sandbox/sql/trunk@147532 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/ddlutils/commit/3661aa0f599c87ff683f82e309bd74eebf02ef1b",
+        "patched_files": [
+            "Column.java"
+        ],
+        "repo": "ddlutils",
+        "unit_tests": [
+            "TestColumn.java"
+        ]
+    },
     "ddlutils_7c30513": {
         "bug_id": "ddlutils_7c30513",
         "commit": "https://github.com/apache/ddlutils/commit/7c30513e4be87a6077b67b18d1399b67ab9ab16b",

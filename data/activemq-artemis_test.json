@@ -151,9 +151,9 @@
         "repo": "activemq-artemis",
         "unit_tests": [
             "JMSXDeliveryCountTest.java",
+            "StompV12Test.java",
             "JournalCrashTest.java",
-            "StompV11Test.java",
-            "StompV12Test.java"
+            "StompV11Test.java"
         ]
     },
     "activemq-artemis_0a9a6c9": {
@@ -309,7 +309,6 @@
         ],
         "repo": "activemq-artemis",
         "unit_tests": [
-            "TransactionImplTest.java",
             "DuplicateDetectionTest.java"
         ]
     },
@@ -415,7 +414,6 @@
         ],
         "repo": "activemq-artemis",
         "unit_tests": [
-            "ProtonServerSenderContextTest.java",
             "AmqpFullyQualifiedNameTest.java"
         ]
     },
@@ -456,99 +454,6 @@
         "repo": "activemq-artemis",
         "unit_tests": [
             "SSLSupportTest.java"
-        ]
-    },
-    "activemq-artemis_33cab06": {
-        "bug_id": "activemq-artemis_33cab06",
-        "commit": "https://github.com/apache/activemq-artemis/commit/33cab063eab6e45a594132e4a19d41da98ac70db",
-        "file": [
-            {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/activemq-artemis/blob/33cab063eab6e45a594132e4a19d41da98ac70db/artemis-server/src/main/java/org/apache/activemq/artemis/core/server/impl/jdbc/ActiveMQScheduledLeaseLock.java",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/activemq-artemis/contents/artemis-server/src/main/java/org/apache/activemq/artemis/core/server/impl/jdbc/ActiveMQScheduledLeaseLock.java?ref=33cab063eab6e45a594132e4a19d41da98ac70db",
-                "deletions": 1,
-                "filename": "artemis-server/src/main/java/org/apache/activemq/artemis/core/server/impl/jdbc/ActiveMQScheduledLeaseLock.java",
-                "patch": "@@ -92,7 +92,7 @@ public void run() {\n       }\n       //logic to detect slowness of DB and/or the scheduled executor service\n       detectAndReportRenewSlowness(lockName, lastRenewStart, renewStart, renewPeriodMillis, lock.expirationMillis());\n-      this.lastLockRenewStart = lastRenewStart;\n+      this.lastLockRenewStart = renewStart;\n    }\n \n    private static void detectAndReportRenewSlowness(String lockName,",
-                "raw_url": "https://github.com/apache/activemq-artemis/raw/33cab063eab6e45a594132e4a19d41da98ac70db/artemis-server/src/main/java/org/apache/activemq/artemis/core/server/impl/jdbc/ActiveMQScheduledLeaseLock.java",
-                "sha": "89762dc4b5348b0de0c70bfc9fbe17aa3afa4291",
-                "status": "modified"
-            },
-            {
-                "additions": 8,
-                "blob_url": "https://github.com/apache/activemq-artemis/blob/33cab063eab6e45a594132e4a19d41da98ac70db/artemis-server/src/main/java/org/apache/activemq/artemis/core/server/impl/jdbc/JdbcNodeManager.java",
-                "changes": 12,
-                "contents_url": "https://api.github.com/repos/apache/activemq-artemis/contents/artemis-server/src/main/java/org/apache/activemq/artemis/core/server/impl/jdbc/JdbcNodeManager.java?ref=33cab063eab6e45a594132e4a19d41da98ac70db",
-                "deletions": 4,
-                "filename": "artemis-server/src/main/java/org/apache/activemq/artemis/core/server/impl/jdbc/JdbcNodeManager.java",
-                "patch": "@@ -28,6 +28,8 @@\n import org.apache.activemq.artemis.core.server.ActivateCallback;\n import org.apache.activemq.artemis.core.server.ActiveMQServerLogger;\n import org.apache.activemq.artemis.core.server.NodeManager;\n+import org.apache.activemq.artemis.jdbc.store.drivers.JDBCUtils;\n+import org.apache.activemq.artemis.jdbc.store.sql.GenericSQLProvider;\n import org.apache.activemq.artemis.jdbc.store.sql.SQLProvider;\n import org.apache.activemq.artemis.utils.ExecutorFactory;\n import org.apache.activemq.artemis.utils.UUID;\n@@ -56,11 +58,13 @@ public static JdbcNodeManager with(DatabaseStorageConfiguration configuration,\n                                       ExecutorFactory executorFactory,\n                                       IOCriticalErrorListener ioCriticalErrorListener) {\n       if (configuration.getDataSource() != null) {\n+         final SQLProvider.Factory sqlProviderFactory = configuration.getSqlProviderFactory() == null ? new GenericSQLProvider.Factory() : configuration.getSqlProviderFactory();\n          final String brokerId = java.util.UUID.randomUUID().toString();\n-         return usingDataSource(brokerId, configuration.getJdbcLockExpirationMillis(), configuration.getJdbcLockRenewPeriodMillis(), configuration.getJdbcLockAcquisitionTimeoutMillis(), configuration.getDataSource(), configuration.getSqlProviderFactory().create(configuration.getNodeManagerStoreTableName(), SQLProvider.DatabaseStoreType.NODE_MANAGER), scheduledExecutorService, executorFactory, ioCriticalErrorListener);\n+         return usingDataSource(brokerId, configuration.getJdbcLockExpirationMillis(), configuration.getJdbcLockRenewPeriodMillis(), configuration.getJdbcLockAcquisitionTimeoutMillis(), configuration.getDataSource(), sqlProviderFactory.create(configuration.getNodeManagerStoreTableName(), SQLProvider.DatabaseStoreType.NODE_MANAGER), scheduledExecutorService, executorFactory, ioCriticalErrorListener);\n       } else {\n+         final SQLProvider sqlProvider = JDBCUtils.getSQLProvider(configuration.getJdbcDriverClassName(), configuration.getNodeManagerStoreTableName(), SQLProvider.DatabaseStoreType.NODE_MANAGER);\n          final String brokerId = java.util.UUID.randomUUID().toString();\n-         return usingConnectionUrl(brokerId, configuration.getJdbcLockExpirationMillis(), configuration.getJdbcLockRenewPeriodMillis(), configuration.getJdbcLockAcquisitionTimeoutMillis(), configuration.getJdbcConnectionUrl(), configuration.getJdbcDriverClassName(), configuration.getSqlProviderFactory().create(configuration.getNodeManagerStoreTableName(), SQLProvider.DatabaseStoreType.NODE_MANAGER), scheduledExecutorService, executorFactory, ioCriticalErrorListener);\n+         return usingConnectionUrl(brokerId, configuration.getJdbcLockExpirationMillis(), configuration.getJdbcLockRenewPeriodMillis(), configuration.getJdbcLockAcquisitionTimeoutMillis(), configuration.getJdbcConnectionUrl(), configuration.getJdbcDriverClassName(), sqlProvider, scheduledExecutorService, executorFactory, ioCriticalErrorListener);\n       }\n    }\n \n@@ -101,8 +105,8 @@ private JdbcNodeManager(final SharedStateManager sharedStateManager,\n       this.lockRenewPeriodMillis = lockRenewPeriodMillis;\n       this.pauser = LeaseLock.Pauser.sleep(Math.min(this.lockRenewPeriodMillis, MAX_PAUSE_MILLIS), TimeUnit.MILLISECONDS);\n       this.sharedStateManager = sharedStateManager;\n-      this.scheduledLiveLock = ScheduledLeaseLock.of(scheduledExecutorService, executorFactory.getExecutor(), \"live\", this.sharedStateManager.liveLock(), lockRenewPeriodMillis, ioCriticalErrorListener);\n-      this.scheduledBackupLock = ScheduledLeaseLock.of(scheduledExecutorService, executorFactory.getExecutor(), \"backup\", this.sharedStateManager.backupLock(), lockRenewPeriodMillis, ioCriticalErrorListener);\n+      this.scheduledLiveLock = ScheduledLeaseLock.of(scheduledExecutorService, executorFactory != null ? executorFactory.getExecutor() : null, \"live\", this.sharedStateManager.liveLock(), lockRenewPeriodMillis, ioCriticalErrorListener);\n+      this.scheduledBackupLock = ScheduledLeaseLock.of(scheduledExecutorService, executorFactory != null ? executorFactory.getExecutor() : null, \"backup\", this.sharedStateManager.backupLock(), lockRenewPeriodMillis, ioCriticalErrorListener);\n       this.ioCriticalErrorListener = ioCriticalErrorListener;\n    }\n ",
-                "raw_url": "https://github.com/apache/activemq-artemis/raw/33cab063eab6e45a594132e4a19d41da98ac70db/artemis-server/src/main/java/org/apache/activemq/artemis/core/server/impl/jdbc/JdbcNodeManager.java",
-                "sha": "8cb852d9715fcc476b26cf915e05e752cd82a400",
-                "status": "modified"
-            }
-        ],
-        "message": "ARTEMIS-1447 JDBC NodeManager to support JDBC HA Shared Store\n\nIt fixes the NPE on server start due to:\n - missing SqlProviderFactory\n - missing executor factory/scheduled pool (ie using exclusive scheduled pools)\n\nIt fixes the WARNINGS due to wrong slowness detection while renewing JdbcLeaseLock.",
-        "parent": "https://github.com/apache/activemq-artemis/commit/dc4681b0d7010684a0b848ea2eea2b78b2eac14c",
-        "patched_files": [
-            "JdbcNodeManager.java"
-        ],
-        "repo": "activemq-artemis",
-        "unit_tests": [
-            "JdbcNodeManagerTest.java"
-        ]
-    },
-    "activemq-artemis_3c3c817": {
-        "bug_id": "activemq-artemis_3c3c817",
-        "commit": "https://github.com/apache/activemq-artemis/commit/3c3c81720a93e7617fca757dd9df49cd3b590d96",
-        "file": [
-            {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/activemq-artemis/blob/3c3c81720a93e7617fca757dd9df49cd3b590d96/artemis-server/src/main/java/org/apache/activemq/artemis/core/server/impl/SharedStoreBackupActivation.java",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/activemq-artemis/contents/artemis-server/src/main/java/org/apache/activemq/artemis/core/server/impl/SharedStoreBackupActivation.java?ref=3c3c81720a93e7617fca757dd9df49cd3b590d96",
-                "deletions": 1,
-                "filename": "artemis-server/src/main/java/org/apache/activemq/artemis/core/server/impl/SharedStoreBackupActivation.java",
-                "patch": "@@ -114,7 +114,7 @@ public void run() {\n \n             activeMQServer.getNodeManager().releaseBackup();\n          }\n-         if (sharedStoreSlavePolicy.isAllowAutoFailBack()) {\n+         if (sharedStoreSlavePolicy.isAllowAutoFailBack() && ActiveMQServerImpl.SERVER_STATE.STOPPING != activeMQServer.getState() && ActiveMQServerImpl.SERVER_STATE.STOPPED != activeMQServer.getState()) {\n             startFailbackChecker();\n          }\n       } catch (ClosedChannelException | InterruptedException e) {",
-                "raw_url": "https://github.com/apache/activemq-artemis/raw/3c3c81720a93e7617fca757dd9df49cd3b590d96/artemis-server/src/main/java/org/apache/activemq/artemis/core/server/impl/SharedStoreBackupActivation.java",
-                "sha": "c978ff6e0f7ba86d6b37442fcc3c52b3f3fc8e3a",
-                "status": "modified"
-            }
-        ],
-        "message": "[ARTEMIS-2050] It is possible to get AMQ224000: Failure in initialisation: java.lang.NullPointerException during shutdown of backup server with shared store",
-        "parent": "https://github.com/apache/activemq-artemis/commit/552b7793d30a902015ab31fc611b9c9a69d4eccc",
-        "patched_files": [
-            "SharedStoreBackupActivation.java"
-        ],
-        "repo": "activemq-artemis",
-        "unit_tests": [
-            "SharedStoreBackupActivationTest.java"
-        ]
-    },
-    "activemq-artemis_45121ea": {
-        "bug_id": "activemq-artemis_45121ea",
-        "commit": "https://github.com/apache/activemq-artemis/commit/45121eade2035f470d4d092cc82c17ff39bf549a",
-        "file": [
-            {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/activemq-artemis/blob/45121eade2035f470d4d092cc82c17ff39bf549a/artemis-server/src/main/java/org/apache/activemq/artemis/core/server/impl/ActiveMQServerImpl.java",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/activemq-artemis/contents/artemis-server/src/main/java/org/apache/activemq/artemis/core/server/impl/ActiveMQServerImpl.java?ref=45121eade2035f470d4d092cc82c17ff39bf549a",
-                "deletions": 1,
-                "filename": "artemis-server/src/main/java/org/apache/activemq/artemis/core/server/impl/ActiveMQServerImpl.java",
-                "patch": "@@ -3016,7 +3016,7 @@ private void deployQueuesFromListCoreQueueConfiguration(List<CoreQueueConfigurat\n             long delayBeforeDispatch = config.getDelayBeforeDispatch() == null ? as.getDefaultDelayBeforeDispatch() : config.getDelayBeforeDispatch();\n \n             if (locateQueue(queueName) != null && locateQueue(queueName).getAddress().toString().equals(config.getAddress())) {\n-               updateQueue(config.getName(), config.getRoutingType(), config.getFilterString(), maxConsumers, config.getPurgeOnNoConsumers(), isExclusive, groupRebalance, groupBuckets, groupFirstKey.toString(), isNonDestructive, consumersBeforeDispatch, delayBeforeDispatch, config.getUser(), true);\n+               updateQueue(config.getName(), config.getRoutingType(), config.getFilterString(), maxConsumers, config.getPurgeOnNoConsumers(), isExclusive, groupRebalance, groupBuckets, groupFirstKey != null ? groupFirstKey.toString() : null, isNonDestructive, consumersBeforeDispatch, delayBeforeDispatch, config.getUser(), true);\n             } else {\n                // if the address::queue doesn't exist then create it\n                try {",
-                "raw_url": "https://github.com/apache/activemq-artemis/raw/45121eade2035f470d4d092cc82c17ff39bf549a/artemis-server/src/main/java/org/apache/activemq/artemis/core/server/impl/ActiveMQServerImpl.java",
-                "sha": "a4766efb244b6b4cecdcfbd569fb570c7bd2a2d2",
-                "status": "modified"
-            }
-        ],
-        "message": "ARTEMIS-2306 Fixing Test and possible NPE",
-        "parent": "https://github.com/apache/activemq-artemis/commit/214dd0d6641289a0b78ce2f255ab980233a06694",
-        "patched_files": [
-            "ActiveMQServerImpl.java"
-        ],
-        "repo": "activemq-artemis",
-        "unit_tests": [
-            "ActiveMQServerImplTest.java"
         ]
     },
     "activemq-artemis_48d8a54": {
@@ -615,8 +520,8 @@
         ],
         "repo": "activemq-artemis",
         "unit_tests": [
-            "LegacyLDAPSecuritySettingPluginTest.java",
-            "ConfigurationImplTest.java"
+            "ConfigurationImplTest.java",
+            "LegacyLDAPSecuritySettingPluginTest.java"
         ]
     },
     "activemq-artemis_4d126ad": {
@@ -796,12 +701,11 @@
         "parent": "https://github.com/apache/activemq-artemis/commit/8d789726730d6c77713f8677cdfbc29f6180906e",
         "patched_files": [
             "ActiveMQServerImpl.java",
-            "PostOfficeImpl.java",
-            "UpdateQueue.java"
+            "UpdateQueue.java",
+            "PostOfficeImpl.java"
         ],
         "repo": "activemq-artemis",
         "unit_tests": [
-            "ActiveMQServerImplTest.java",
             "UpdateQueueTest.java"
         ]
     },
@@ -1069,17 +973,17 @@
         "message": "ARTEMIS-1314 Fixing issues with JMS selectors on AMQP\n\nAllows for JMS selectors on JMSCorrelationID as well as JMSXGroupID\nand JMSXUserID along with some fixes to avoid an NPE case and fixes\nto the conversion of AMQP MessageID and CorrelationID values when\ndoing cross protocol mappings.  Adds new tests to cover more cases\nof using the JMS selector with Qpid JMS and the AMQP test client.",
         "parent": "https://github.com/apache/activemq-artemis/commit/8af0569521100780fb82422e19236c373a109173",
         "patched_files": [
-            "AMQPMessageIdHelper.java",
-            "AmqpCoreConverter.java",
             "AMQPMessage.java",
-            "AmqpMessage.java"
+            "AmqpMessage.java",
+            "AMQPMessageIdHelper.java",
+            "AmqpCoreConverter.java"
         ],
         "repo": "activemq-artemis",
         "unit_tests": [
-            "AMQPMessageTest.java",
-            "AMQPMessageIdHelperTest.java",
             "JMSMessageConsumerTest.java",
-            "AmqpSendReceiveTest.java"
+            "AMQPMessageTest.java",
+            "AmqpSendReceiveTest.java",
+            "AMQPMessageIdHelperTest.java"
         ]
     },
     "activemq-artemis_6fbafc4": {
@@ -1189,15 +1093,15 @@
         "message": "ARTEMIS-2200 NPE while dropping/failing large messages on paging\n\nLarge messages pendingRecordID is not accessed atomically, leading\nto races that would lead to records that cannot been found on the\njournal for deletion: it would lead to cause NPE that won't clean\nthe pending tasks on the current OperationContextImpl.\nAdding a cleanup on error of those tasks and avoiding the race\nto happen by adding proper synchronization will both enforce\ncorrect clean up when something bad happen and avoid NPE.",
         "parent": "https://github.com/apache/activemq-artemis/commit/2b096ad926d95e39a421933b9af12f7164d0f983",
         "patched_files": [
-            "JournalStorageManager.java",
+            "JournalImpl.java",
             "PostOfficeImpl.java",
             "AbstractJournalStorageManager.java",
-            "JournalImpl.java"
+            "JournalStorageManager.java"
         ],
         "repo": "activemq-artemis",
         "unit_tests": [
-            "JournalStorageManagerTest.java",
-            "OpenWireLargeMessageTest.java"
+            "OpenWireLargeMessageTest.java",
+            "JournalStorageManagerTest.java"
         ]
     },
     "activemq-artemis_71e664a": {
@@ -1358,10 +1262,10 @@
         "message": "ARTEMIS-1753 Prevent NPE on 1.x Client Topic Sub\n\nWhen creting a durable topic subscription using the Artemis 1.x JMS\nclient library.  The client sends a QueueQuery to the server to see if\nthe durable subsciption queue already exists.  The broker then performs\nsome transformation of the queue addresses to suit the 1.x naming\nscheme.  However, if the queue does not already exist the transform is\nattempted on a null string causing NPE.  To fix we simply check that the\nresult return isExists=true.",
         "parent": "https://github.com/apache/activemq-artemis/commit/e56b38b3e009c971b16502d863fa338ad9becc20",
         "patched_files": [
-            "receiveMessages.java",
-            "sendMessagesAddress.java",
             "artemisServer.java",
-            "ServerSessionPacketHandler.java"
+            "ServerSessionPacketHandler.java",
+            "sendMessagesAddress.java",
+            "receiveMessages.java"
         ],
         "repo": "activemq-artemis",
         "unit_tests": [
@@ -1569,8 +1473,8 @@
         "message": "ARTEMIS-2395 empty address.txt causes NPE",
         "parent": "https://github.com/apache/activemq-artemis/commit/f964f955fa8a877d2f15d4665dadbfb0be96442a",
         "patched_files": [
-            "ActiveMQServerLogger.java",
-            "PagingStoreFactoryNIO.java"
+            "PagingStoreFactoryNIO.java",
+            "ActiveMQServerLogger.java"
         ],
         "repo": "activemq-artemis",
         "unit_tests": [
@@ -1633,14 +1537,14 @@
         "message": "ARTEMIS-1853 Adding Netty OpenSSL provider test\n\nAdded some netty openssl tests\nFix a NPE issue",
         "parent": "https://github.com/apache/activemq-artemis/commit/ef03ce4ee9704a611370fc13096358af8504b6dd",
         "patched_files": [
-            "SSLSupport.java",
-            "SSLTestBase.java"
+            "SSLTestBase.java",
+            "SSLSupport.java"
         ],
         "repo": "activemq-artemis",
         "unit_tests": [
+            "SSLProviderTest.java",
             "SSLSupportTest.java",
-            "SSLProviderTwoWayTest.java",
-            "SSLProviderTest.java"
+            "SSLProviderTwoWayTest.java"
         ]
     },
     "activemq-artemis_971f673": {
@@ -1687,12 +1591,51 @@
         "message": "ARTEMIS-2206 The MQTT consumer reconnection caused the queue to not be cleared, and caused Artemis broker to throw a NullPointerException.\n\nWhen the MQTT consumer client (cleanSession property set to true) reconnected, there are certain probabilities that these two bugs will occur.\nThis is because the MQTT consumer client thinks that its connection has been disconnected and triggers reconnection, but the MQTT connection is still alive at Artemis broker. This bug occurs when new and old connections occur while operating the same queue for unsafe behavior.",
         "parent": "https://github.com/apache/activemq-artemis/commit/2a3ce34a58817002e637a33ed244749f23f36471",
         "patched_files": [
-            "MQTTSubscriptionManager.java",
-            "MQTTConnectionManager.java"
+            "MQTTConnectionManager.java",
+            "MQTTSubscriptionManager.java"
         ],
         "repo": "activemq-artemis",
         "unit_tests": [
             "MQTTQueueCleanTest.java"
+        ]
+    },
+    "activemq-artemis_97f3fb2": {
+        "bug_id": "activemq-artemis_97f3fb2",
+        "commit": "https://github.com/apache/activemq-artemis/commit/97f3fb241ccc72d230dabef4deb028219f8ac8ad",
+        "file": [
+            {
+                "additions": 18,
+                "blob_url": "https://github.com/apache/activemq-artemis/blob/97f3fb241ccc72d230dabef4deb028219f8ac8ad/artemis-protocols/artemis-amqp-protocol/src/main/java/org/apache/activemq/artemis/core/protocol/proton/plug/ProtonSessionIntegrationCallback.java",
+                "changes": 30,
+                "contents_url": "https://api.github.com/repos/apache/activemq-artemis/contents/artemis-protocols/artemis-amqp-protocol/src/main/java/org/apache/activemq/artemis/core/protocol/proton/plug/ProtonSessionIntegrationCallback.java?ref=97f3fb241ccc72d230dabef4deb028219f8ac8ad",
+                "deletions": 12,
+                "filename": "artemis-protocols/artemis-amqp-protocol/src/main/java/org/apache/activemq/artemis/core/protocol/proton/plug/ProtonSessionIntegrationCallback.java",
+                "patch": "@@ -242,23 +242,29 @@ public void commitCurrentTX() throws Exception {\n \n    @Override\n    public void rollbackCurrentTX() throws Exception {\n-      recoverContext();\n-      try {\n-         serverSession.rollback(false);\n-      }\n-      finally {\n-         resetContext();\n+      //need to check here as this can be called if init fails\n+      if (serverSession != null) {\n+         recoverContext();\n+         try {\n+            serverSession.rollback(false);\n+         }\n+         finally {\n+            resetContext();\n+         }\n       }\n    }\n \n    @Override\n    public void close() throws Exception {\n-      recoverContext();\n-      try {\n-         serverSession.close(false);\n-      }\n-      finally {\n-         resetContext();\n+      //need to check here as this can be called if init fails\n+      if (serverSession != null) {\n+         recoverContext();\n+         try {\n+            serverSession.close(false);\n+         }\n+         finally {\n+            resetContext();\n+         }\n       }\n    }\n ",
+                "raw_url": "https://github.com/apache/activemq-artemis/raw/97f3fb241ccc72d230dabef4deb028219f8ac8ad/artemis-protocols/artemis-amqp-protocol/src/main/java/org/apache/activemq/artemis/core/protocol/proton/plug/ProtonSessionIntegrationCallback.java",
+                "sha": "2dccc30962468cd1813de4b8b5afafef409aa15e",
+                "status": "modified"
+            },
+            {
+                "additions": 5,
+                "blob_url": "https://github.com/apache/activemq-artemis/blob/97f3fb241ccc72d230dabef4deb028219f8ac8ad/artemis-protocols/artemis-proton-plug/src/main/java/org/proton/plug/context/AbstractConnectionContext.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/activemq-artemis/contents/artemis-protocols/artemis-proton-plug/src/main/java/org/proton/plug/context/AbstractConnectionContext.java?ref=97f3fb241ccc72d230dabef4deb028219f8ac8ad",
+                "deletions": 1,
+                "filename": "artemis-protocols/artemis-proton-plug/src/main/java/org/proton/plug/context/AbstractConnectionContext.java",
+                "patch": "@@ -182,7 +182,11 @@ public void onRemoteOpen(Connection connection) throws Exception {\n             connection.open();\n          }\n          initialise();\n-         if (!connection.getRemoteProperties().containsKey(CONNECTION_OPEN_FAILED)) {\n+         /*\n+         * This can be null which is in effect an empty map, also we really dont need to check this for in bound connections\n+         * but its here in case we add support for outbound connections.\n+         * */\n+         if (connection.getRemoteProperties() == null || !connection.getRemoteProperties().containsKey(CONNECTION_OPEN_FAILED)) {\n             long nextKeepAliveTime = handler.tick(true);\n             flushBytes();\n             if (nextKeepAliveTime > 0 && scheduledPool != null) {",
+                "raw_url": "https://github.com/apache/activemq-artemis/raw/97f3fb241ccc72d230dabef4deb028219f8ac8ad/artemis-protocols/artemis-proton-plug/src/main/java/org/proton/plug/context/AbstractConnectionContext.java",
+                "sha": "93442de98e820a2d4a31fa43c796905e5b21cb3c",
+                "status": "modified"
+            }
+        ],
+        "message": "ARTEMIS-493 - NullPointerException when trying a null connection remote properties are passed by client\n\nadde a check and fixed a couple of other potential NPE's\n\nhttps://issues.apache.org/jira/browse/ARTEMIS-493",
+        "parent": "https://github.com/apache/activemq-artemis/commit/bfa3b27cf740a1249491b0c7221268082306641e",
+        "patched_files": [
+            "AbstractConnectionContext.java"
+        ],
+        "repo": "activemq-artemis",
+        "unit_tests": [
+            "AbstractConnectionContextTest.java"
         ]
     },
     "activemq-artemis_9c840bd": {
@@ -1766,8 +1709,8 @@
         "message": "ARTEMIS-2200 NPE when calling journal.delete from Multiple Threads",
         "parent": "https://github.com/apache/activemq-artemis/commit/702f445205de953a343c1beef436fc8b984c7624",
         "patched_files": [
-            "JournalImplTestUnit.java",
-            "JournalImpl.java"
+            "JournalImpl.java",
+            "JournalImplTestUnit.java"
         ],
         "repo": "activemq-artemis",
         "unit_tests": [
@@ -1974,16 +1917,16 @@
         "message": "ARTEMIS-1785 Producer CLI would throw NPEs if using Text Messages",
         "parent": "https://github.com/apache/activemq-artemis/commit/0bd99dfff7c297953f03fa9b06f27305fc1a1341",
         "patched_files": [
-            "demo.java",
-            "ConsumerThread.java",
-            "ProducerThread.java",
             "Artemis.java",
-            "Producer.java"
+            "ConsumerThread.java",
+            "Producer.java",
+            "ProducerThread.java",
+            "demo.java"
         ],
         "repo": "activemq-artemis",
         "unit_tests": [
-            "ArtemisTest.java",
             "StreamClassPathTest.java",
+            "ArtemisTest.java",
             "ProducerTest.java"
         ]
     },
@@ -2036,9 +1979,9 @@
         ],
         "repo": "activemq-artemis",
         "unit_tests": [
-            "ProtocolsMessageLoadBalancingTest.java",
             "AMQPConnectionCallbackTest.java",
-            "BindingsImplTest.java"
+            "BindingsImplTest.java",
+            "ProtocolsMessageLoadBalancingTest.java"
         ]
     },
     "activemq-artemis_e2d6d07": {
@@ -2093,45 +2036,6 @@
         "repo": "activemq-artemis",
         "unit_tests": [
             "CoreMessageTest.java"
-        ]
-    },
-    "activemq-artemis_f29ab83": {
-        "bug_id": "activemq-artemis_f29ab83",
-        "commit": "https://github.com/apache/activemq-artemis/commit/f29ab8372711f9fa66dfa2f8e44229d99a807876",
-        "file": [
-            {
-                "additions": 7,
-                "blob_url": "https://github.com/apache/activemq-artemis/blob/f29ab8372711f9fa66dfa2f8e44229d99a807876/artemis-server/src/main/java/org/apache/activemq/artemis/core/transaction/TransactionDetail.java",
-                "changes": 8,
-                "contents_url": "https://api.github.com/repos/apache/activemq-artemis/contents/artemis-server/src/main/java/org/apache/activemq/artemis/core/transaction/TransactionDetail.java?ref=f29ab8372711f9fa66dfa2f8e44229d99a807876",
-                "deletions": 1,
-                "filename": "artemis-server/src/main/java/org/apache/activemq/artemis/core/transaction/TransactionDetail.java",
-                "patch": "@@ -72,7 +72,13 @@ public JSONObject toJSON() throws Exception {\n       detailJson.put(KEY_XID_BRANCH_QUAL, new String(this.xid.getBranchQualifier()));\n \n       JSONArray msgsJson = new JSONArray();\n-      List<TransactionOperation> txops = this.transaction.getAllOperations();\n+\n+      List<TransactionOperation> txops = null;\n+\n+      if (this.transaction != null) {\n+         txops = this.transaction.getAllOperations();\n+      }\n+\n       detailJson.put(KEY_TX_RELATED_MESSAGES, msgsJson);\n       if (txops == null) {\n          return detailJson;",
-                "raw_url": "https://github.com/apache/activemq-artemis/raw/f29ab8372711f9fa66dfa2f8e44229d99a807876/artemis-server/src/main/java/org/apache/activemq/artemis/core/transaction/TransactionDetail.java",
-                "sha": "068b15f04c0db121c5556338b5722986c7f53284",
-                "status": "modified"
-            },
-            {
-                "additions": 7,
-                "blob_url": "https://github.com/apache/activemq-artemis/blob/f29ab8372711f9fa66dfa2f8e44229d99a807876/artemis-server/src/main/java/org/apache/activemq/artemis/core/transaction/impl/TransactionImpl.java",
-                "changes": 8,
-                "contents_url": "https://api.github.com/repos/apache/activemq-artemis/contents/artemis-server/src/main/java/org/apache/activemq/artemis/core/transaction/impl/TransactionImpl.java?ref=f29ab8372711f9fa66dfa2f8e44229d99a807876",
-                "deletions": 1,
-                "filename": "artemis-server/src/main/java/org/apache/activemq/artemis/core/transaction/impl/TransactionImpl.java",
-                "patch": "@@ -392,7 +392,13 @@ private int getOperationsCount() {\n \n    @Override\n    public synchronized List<TransactionOperation> getAllOperations() {\n-      return new ArrayList<TransactionOperation>(operations);\n+\n+      if (operations != null) {\n+         return new ArrayList<TransactionOperation>(operations);\n+      }\n+      else {\n+         return new ArrayList<TransactionOperation>();\n+      }\n    }\n \n    @Override",
-                "raw_url": "https://github.com/apache/activemq-artemis/raw/f29ab8372711f9fa66dfa2f8e44229d99a807876/artemis-server/src/main/java/org/apache/activemq/artemis/core/transaction/impl/TransactionImpl.java",
-                "sha": "c84e6f00a4fb29c22b7104ef6bbcbb0bce4fe680",
-                "status": "modified"
-            }
-        ],
-        "message": "NullPointerException when trying to list prepared transactions as JSON",
-        "parent": "https://github.com/apache/activemq-artemis/commit/a95784096db856c89c4fa5ffb51752f63e2564c1",
-        "patched_files": [
-            "TransactionImpl.java"
-        ],
-        "repo": "activemq-artemis",
-        "unit_tests": [
-            "TransactionImplTest.java"
         ]
     }
 }

@@ -1,4 +1,43 @@
 {
+    "atlas_0c1d599": {
+        "bug_id": "atlas_0c1d599",
+        "commit": "https://github.com/apache/atlas/commit/0c1d599ddca7ad9e4c677c77908e96dd492a8f90",
+        "file": [
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/atlas/blob/0c1d599ddca7ad9e4c677c77908e96dd492a8f90/addons/hive-bridge/src/main/java/org/apache/atlas/hive/hook/HiveHook.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/atlas/contents/addons/hive-bridge/src/main/java/org/apache/atlas/hive/hook/HiveHook.java?ref=0c1d599ddca7ad9e4c677c77908e96dd492a8f90",
+                "deletions": 2,
+                "filename": "addons/hive-bridge/src/main/java/org/apache/atlas/hive/hook/HiveHook.java",
+                "patch": "@@ -248,7 +248,7 @@ private void collect(HiveEventContext event) throws Exception {\n \n         case CREATETABLE:\n             LinkedHashMap<Type, Referenceable> tablesCreated = handleEventOutputs(dgiBridge, event, Type.TABLE);\n-            if (tablesCreated.size() > 0) {\n+            if (tablesCreated != null && tablesCreated.size() > 0) {\n                 handleExternalTables(dgiBridge, event, tablesCreated);\n             }\n             break;\n@@ -730,7 +730,7 @@ private void handleExternalTables(final HiveMetaStoreBridge dgiBridge, final Hiv\n             final String location = lower(hiveTable.getDataLocation().toString());\n             final ReadEntity dfsEntity = new ReadEntity();\n             dfsEntity.setTyp(Type.DFS_DIR);\n-            dfsEntity.setName(location);\n+            dfsEntity.setD(new Path(location));\n \n             SortedMap<ReadEntity, Referenceable> hiveInputsMap = new TreeMap<ReadEntity, Referenceable>(entityComparator) {{\n                 put(dfsEntity, dgiBridge.fillHDFSDataSet(location));",
+                "raw_url": "https://github.com/apache/atlas/raw/0c1d599ddca7ad9e4c677c77908e96dd492a8f90/addons/hive-bridge/src/main/java/org/apache/atlas/hive/hook/HiveHook.java",
+                "sha": "16835cf88410276712a54d8de75cf78768fbe35c",
+                "status": "modified"
+            },
+            {
+                "additions": 21,
+                "blob_url": "https://github.com/apache/atlas/blob/0c1d599ddca7ad9e4c677c77908e96dd492a8f90/repository/src/main/java/org/apache/atlas/repository/store/graph/v1/AtlasEntityStoreV1.java",
+                "changes": 34,
+                "contents_url": "https://api.github.com/repos/apache/atlas/contents/repository/src/main/java/org/apache/atlas/repository/store/graph/v1/AtlasEntityStoreV1.java?ref=0c1d599ddca7ad9e4c677c77908e96dd492a8f90",
+                "deletions": 13,
+                "filename": "repository/src/main/java/org/apache/atlas/repository/store/graph/v1/AtlasEntityStoreV1.java",
+                "patch": "@@ -21,7 +21,6 @@\n import com.google.inject.Inject;\n import com.google.inject.Singleton;\n import org.apache.atlas.AtlasErrorCode;\n-import org.apache.atlas.AtlasException;\n import org.apache.atlas.GraphTransaction;\n import org.apache.atlas.RequestContextV1;\n import org.apache.atlas.exception.AtlasBaseException;\n@@ -38,12 +37,10 @@\n import org.apache.atlas.repository.store.graph.EntityGraphDiscovery;\n import org.apache.atlas.repository.store.graph.EntityGraphDiscoveryContext;\n import org.apache.atlas.type.AtlasEntityType;\n-import org.apache.atlas.type.AtlasStructType;\n import org.apache.atlas.type.AtlasStructType.AtlasAttribute;\n import org.apache.atlas.type.AtlasType;\n import org.apache.atlas.type.AtlasTypeRegistry;\n import org.apache.atlas.type.AtlasTypeUtil;\n-import org.apache.atlas.typesystem.persistence.Id;\n import org.apache.commons.collections.CollectionUtils;\n import org.apache.commons.collections.MapUtils;\n import org.apache.commons.lang3.StringUtils;\n@@ -326,17 +323,18 @@ public EntityMutationResponse deleteById(final String guid) throws AtlasBaseExce\n         // Retrieve vertices for requested guids.\n         AtlasVertex vertex = AtlasGraphUtilsV1.findByGuid(guid);\n \n-        if (LOG.isDebugEnabled()) {\n-            if (vertex == null) {\n+        Collection<AtlasVertex> deletionCandidates = new ArrayList<>();\n+\n+        if (vertex != null) {\n+            deletionCandidates.add(vertex);\n+        } else {\n+            if (LOG.isDebugEnabled()) {\n                 // Entity does not exist - treat as non-error, since the caller\n                 // wanted to delete the entity and it's already gone.\n                 LOG.debug(\"Deletion request ignored for non-existent entity with guid \" + guid);\n             }\n         }\n \n-        Collection<AtlasVertex> deletionCandidates = new ArrayList<>();\n-        deletionCandidates.add(vertex);\n-\n         EntityMutationResponse ret = deleteVertices(deletionCandidates);\n \n         // Notify the change listeners\n@@ -357,15 +355,16 @@ public EntityMutationResponse deleteByIds(final List<String> guids) throws Atlas\n         for (String guid : guids) {\n             // Retrieve vertices for requested guids.\n             AtlasVertex vertex = AtlasGraphUtilsV1.findByGuid(guid);\n-            if (LOG.isDebugEnabled()) {\n-                if (vertex == null) {\n+\n+            if (vertex != null) {\n+                deletionCandidates.add(vertex);\n+            } else {\n+                if (LOG.isDebugEnabled()) {\n                     // Entity does not exist - treat as non-error, since the caller\n                     // wanted to delete the entity and it's already gone.\n                     LOG.debug(\"Deletion request ignored for non-existent entity with guid \" + guid);\n                 }\n             }\n-            deletionCandidates.add(vertex);\n-\n         }\n \n         if (deletionCandidates.isEmpty()) {\n@@ -391,7 +390,16 @@ public EntityMutationResponse deleteByUniqueAttributes(AtlasEntityType entityTyp\n \n         final AtlasVertex vertex = AtlasGraphUtilsV1.findByUniqueAttributes(entityType, uniqAttributes);\n         Collection<AtlasVertex> deletionCandidates = new ArrayList<>();\n-        deletionCandidates.add(vertex);\n+\n+        if (vertex != null) {\n+            deletionCandidates.add(vertex);\n+        } else {\n+            if (LOG.isDebugEnabled()) {\n+                // Entity does not exist - treat as non-error, since the caller\n+                // wanted to delete the entity and it's already gone.\n+                LOG.debug(\"Deletion request ignored for non-existent entity with uniqueAttributes \" + uniqAttributes);\n+            }\n+        }\n \n         EntityMutationResponse ret = deleteVertices(deletionCandidates);\n ",
+                "raw_url": "https://github.com/apache/atlas/raw/0c1d599ddca7ad9e4c677c77908e96dd492a8f90/repository/src/main/java/org/apache/atlas/repository/store/graph/v1/AtlasEntityStoreV1.java",
+                "sha": "587f3c74ea95af926caaebf549bb4c443db414f8",
+                "status": "modified"
+            }
+        ],
+        "message": "ATLAS-1598: fix for NPE in Hive hook while processing create-table",
+        "parent": "https://github.com/apache/atlas/commit/08944c54de13054b4b7a76dbcba79218779f02d3",
+        "patched_files": [
+            "AtlasEntityStoreV1.java"
+        ],
+        "repo": "atlas",
+        "unit_tests": [
+            "AtlasEntityStoreV1Test.java"
+        ]
+    },
     "atlas_19a5f65": {
         "bug_id": "atlas_19a5f65",
         "commit": "https://github.com/apache/atlas/commit/19a5f65c9bcafc77df164c4dd75c89782b4f4076",
@@ -24,6 +63,72 @@
         "repo": "atlas",
         "unit_tests": [
             "MetricsServiceTest.java"
+        ]
+    },
+    "atlas_29880e7": {
+        "bug_id": "atlas_29880e7",
+        "commit": "https://github.com/apache/atlas/commit/29880e77c953cf4ddc8e9733b5d71c6dd75a328c",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/atlas/blob/29880e77c953cf4ddc8e9733b5d71c6dd75a328c/release-log.txt",
+                "changes": 1,
+                "contents_url": "https://api.github.com/repos/apache/atlas/contents/release-log.txt?ref=29880e77c953cf4ddc8e9733b5d71c6dd75a328c",
+                "deletions": 0,
+                "filename": "release-log.txt",
+                "patch": "@@ -9,6 +9,7 @@ ATLAS-1060 Add composite indexes for exact match performance improvements for al\n ATLAS-1127 Modify creation and modification timestamps to Date instead of Long(sumasai)\n \n ALL CHANGES:\n+ATLAS-1258 BugFix for Indexer NPE on StructDef lookup (apoorvnaik via sumasai)\n ATLAS-1233 UnitTests for the TypeDefStores (apoorvnaik via sumasai)\n ATLAS-1240 Adding Change listeners to react on changes in TypesDef (apoorvnaik via sumasai)\n ATLAS-1239 when stopping Atlas on the command line it should explicitly say when it has stopped (ayubkhan via sumasai)",
+                "raw_url": "https://github.com/apache/atlas/raw/29880e77c953cf4ddc8e9733b5d71c6dd75a328c/release-log.txt",
+                "sha": "e44d8efb197dcd3a95d66dfe4ad70831941845f0",
+                "status": "modified"
+            },
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/atlas/blob/29880e77c953cf4ddc8e9733b5d71c6dd75a328c/repository/src/main/java/org/apache/atlas/repository/graph/GraphBackedSearchIndexer.java",
+                "changes": 12,
+                "contents_url": "https://api.github.com/repos/apache/atlas/contents/repository/src/main/java/org/apache/atlas/repository/graph/GraphBackedSearchIndexer.java?ref=29880e77c953cf4ddc8e9733b5d71c6dd75a328c",
+                "deletions": 9,
+                "filename": "repository/src/main/java/org/apache/atlas/repository/graph/GraphBackedSearchIndexer.java",
+                "patch": "@@ -280,17 +280,11 @@ private void createIndexForAttribute(AtlasGraphManagement management, String typ\n \n             if (isMapType || isArrayType || isClassificationType(atlasType) || isEntityType(atlasType)) {\n                 LOG.warn(\"Ignoring non-indexable attribute {}\", attribTypeName);\n-            }\n-\n-            if (isBuiltInType) {\n+            } else if (isBuiltInType) {\n                 createIndexes(management, propertyName, getPrimitiveClass(attribTypeName), isUnique, cardinality, false, isIndexable);\n-            }\n-\n-            if (isEnumType(atlasType)) {\n+            } else if (isEnumType(atlasType)) {\n                 createIndexes(management, propertyName, String.class, isUnique, cardinality, false, isIndexable);\n-            }\n-\n-            if (isStructType(atlasType)) {\n+            } else if (isStructType(atlasType)) {\n                 AtlasStructDef structDef = typeRegistry.getStructDefByName(attributeDef.getName());\n                 updateIndexForTypeDef(management, structDef);\n             }",
+                "raw_url": "https://github.com/apache/atlas/raw/29880e77c953cf4ddc8e9733b5d71c6dd75a328c/repository/src/main/java/org/apache/atlas/repository/graph/GraphBackedSearchIndexer.java",
+                "sha": "3c7f63bbf244d3e4a38ad6eca9f73d65293e5cb3",
+                "status": "modified"
+            }
+        ],
+        "message": "ATLAS-1258 BugFix for Indexer NPE on StructDef lookup (apoorvnaik via sumasai)",
+        "parent": "https://github.com/apache/atlas/commit/c9e58e0aa31fa833981a8c069e23a4ca3e07b293",
+        "patched_files": [
+            "GraphBackedSearchIndexer.java"
+        ],
+        "repo": "atlas",
+        "unit_tests": [
+            "GraphBackedSearchIndexerTest.java"
+        ]
+    },
+    "atlas_38297a8": {
+        "bug_id": "atlas_38297a8",
+        "commit": "https://github.com/apache/atlas/commit/38297a8441e7d32d41e717fd6efc415804e640af",
+        "file": [
+            {
+                "additions": 9,
+                "blob_url": "https://github.com/apache/atlas/blob/38297a8441e7d32d41e717fd6efc415804e640af/repository/src/main/java/org/apache/atlas/repository/graph/GraphBackedSearchIndexer.java",
+                "changes": 16,
+                "contents_url": "https://api.github.com/repos/apache/atlas/contents/repository/src/main/java/org/apache/atlas/repository/graph/GraphBackedSearchIndexer.java?ref=38297a8441e7d32d41e717fd6efc415804e640af",
+                "deletions": 7,
+                "filename": "repository/src/main/java/org/apache/atlas/repository/graph/GraphBackedSearchIndexer.java",
+                "patch": "@@ -263,17 +263,19 @@ public void onChange(Collection<? extends IDataType> dataTypes) throws AtlasExce\n             }\n \n             if (management != null) {\n-                recomputeIndexedKeys = false;\n-\n                 AtlasGraphIndex vertexIndex = management.getGraphIndex(Constants.VERTEX_INDEX);\n \n-                Set<String> indexKeys = new HashSet<>();\n+                if (vertexIndex != null) {\n+                    recomputeIndexedKeys = false;\n \n-                for (AtlasPropertyKey fieldKey : vertexIndex.getFieldKeys()) {\n-                    indexKeys.add(fieldKey.getName());\n-                }\n+                    Set<String> indexKeys = new HashSet<>();\n \n-                vertexIndexKeys = indexKeys;\n+                    for (AtlasPropertyKey fieldKey : vertexIndex.getFieldKeys()) {\n+                        indexKeys.add(fieldKey.getName());\n+                    }\n+\n+                    vertexIndexKeys = indexKeys;\n+                }\n             }\n         }\n ",
+                "raw_url": "https://github.com/apache/atlas/raw/38297a8441e7d32d41e717fd6efc415804e640af/repository/src/main/java/org/apache/atlas/repository/graph/GraphBackedSearchIndexer.java",
+                "sha": "632b479064f80b1e2c7a68171e85b51806139081",
+                "status": "modified"
+            }
+        ],
+        "message": "ATLAS-1997: fix to avoid NPE while getting vertex_indices\n\nSigned-off-by: Madhan Neethiraj <madhan@apache.org>",
+        "parent": "https://github.com/apache/atlas/commit/eb5d6fcdcbbfb6d6a69f2c78ef64a7c5a47425ec",
+        "patched_files": [
+            "GraphBackedSearchIndexer.java"
+        ],
+        "repo": "atlas",
+        "unit_tests": [
+            "GraphBackedSearchIndexerTest.java"
         ]
     },
     "atlas_39be2cc": {
@@ -244,21 +349,22 @@
         "message": "ATLAS-1126 Fix NPE in getSchema calls (sumasai)",
         "parent": "https://github.com/apache/atlas/commit/7b7f4e0b68637fec82af4443aedcecc63cf10747",
         "patched_files": [
-            "DataSetLineageResource.java",
-            "release-log.java",
-            "SchemaNotFoundException.java",
-            "HiveDataModelGenerator.java",
-            "DataSetLineageService.java",
-            "DataSetLineageJerseyResourceIT.java",
             "InMemoryJAASConfiguration.java",
+            "HiveDataModelGenerator.java",
+            "SchemaNotFoundException.java",
+            "DataSetLineageResource.java",
             "HBaseBasedAuditRepository.java",
-            "pom.java",
-            "LineageResource.java"
+            "LineageResource.java",
+            "DataSetLineageService.java",
+            "release-log.java",
+            "DataSetLineageJerseyResourceIT.java",
+            "pom.java"
         ],
         "repo": "atlas",
         "unit_tests": [
-            "BaseRepositoryTest.java",
             "InMemoryJAASConfigurationTest.java",
+            "HBaseBasedAuditRepositoryTest.java",
+            "BaseRepositoryTest.java",
             "DataSetLineageServiceTest.java"
         ]
     },
@@ -311,6 +417,33 @@
         "repo": "atlas",
         "unit_tests": [
             "TestEntityREST.java"
+        ]
+    },
+    "atlas_906f365": {
+        "bug_id": "atlas_906f365",
+        "commit": "https://github.com/apache/atlas/commit/906f36517bd13cb3f5318e7843ebfd0276a2975f",
+        "file": [
+            {
+                "additions": 5,
+                "blob_url": "https://github.com/apache/atlas/blob/906f36517bd13cb3f5318e7843ebfd0276a2975f/authorization/src/main/java/org/apache/atlas/authorize/simple/AtlasAuthorizationUtils.java",
+                "changes": 5,
+                "contents_url": "https://api.github.com/repos/apache/atlas/contents/authorization/src/main/java/org/apache/atlas/authorize/simple/AtlasAuthorizationUtils.java?ref=906f36517bd13cb3f5318e7843ebfd0276a2975f",
+                "deletions": 0,
+                "filename": "authorization/src/main/java/org/apache/atlas/authorize/simple/AtlasAuthorizationUtils.java",
+                "patch": "@@ -44,6 +44,11 @@ public static String getApi(String contextPath) {\n         if (isDebugEnabled) {\n             LOG.debug(\"==> getApi({})\", contextPath);\n         }\n+\n+        if(contextPath == null){\n+            contextPath = \"\";\n+        }\n+\n         if (contextPath.startsWith(BASE_URL)) {\n             contextPath = contextPath.substring(BASE_URL.length());\n         } else {",
+                "raw_url": "https://github.com/apache/atlas/raw/906f36517bd13cb3f5318e7843ebfd0276a2975f/authorization/src/main/java/org/apache/atlas/authorize/simple/AtlasAuthorizationUtils.java",
+                "sha": "93d988e668ac4865621472b50724ead38406fee1",
+                "status": "modified"
+            }
+        ],
+        "message": "ATLAS-1878 - Fix for NPE when a request without any query path lands on atlas",
+        "parent": "https://github.com/apache/atlas/commit/c6081ddcfdb4c8100a4b099405ac8d397fbf9583",
+        "patched_files": [
+            "AtlasAuthorizationUtils.java"
+        ],
+        "repo": "atlas",
+        "unit_tests": [
+            "AtlasAuthorizationUtilsTest.java"
         ]
     },
     "atlas_a5f971a": {
@@ -408,13 +541,13 @@
         "message": "ATLAS-888 NPE in NotificationHookConsumer (sumasai via shwethags)",
         "parent": "https://github.com/apache/atlas/commit/8fefd165586f5fd8acd5c3a5786d6012dda68a5b",
         "patched_files": [
+            "EntityResource.java",
             "release-log.java",
-            "pom.java",
-            "EntityResource.java"
+            "LocalAtlasClient.java",
+            "pom.java"
         ],
         "repo": "atlas",
         "unit_tests": [
-            "EntityResourceTest.java",
             "LocalAtlasClientTest.java"
         ]
     },
@@ -462,11 +595,13 @@
         "message": "ATLAS-2141: edit/disassociate tag results in NPE\n\n(cherry picked from commit 4b9d2670709df52e0d983587832fe6256220691b)",
         "parent": "https://github.com/apache/atlas/commit/ccd121e74204e1d85001be62abf09446d879889d",
         "patched_files": [
-            "NotificationEntityChangeListener.java"
+            "NotificationEntityChangeListener.java",
+            "GraphHelper.java"
         ],
         "repo": "atlas",
         "unit_tests": [
-            "NotificationEntityChangeListenerTest.java"
+            "NotificationEntityChangeListenerTest.java",
+            "GraphHelperTest.java"
         ]
     },
     "atlas_c331846": {

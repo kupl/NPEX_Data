@@ -127,7 +127,6 @@
         ],
         "repo": "crunch",
         "unit_tests": [
-            "MRPipelineTest.java",
             "UnionCollectionTest.java"
         ]
     },
@@ -199,41 +198,14 @@
         "message": "fix NPE on InputCollection getSize()",
         "parent": "https://github.com/apache/crunch/commit/4b6a08f511c1ce6a3075881072c3eb491b93591c",
         "patched_files": [
+            "FileSourceImpl.java",
             "CompositePathIterable.java",
-            "SourceTargetHelper.java",
             "InputCollection.java",
-            "FileSourceImpl.java"
+            "SourceTargetHelper.java"
         ],
         "repo": "crunch",
         "unit_tests": [
             "SourceTargetHelperTest.java"
-        ]
-    },
-    "crunch_7c49b8b": {
-        "bug_id": "crunch_7c49b8b",
-        "commit": "https://github.com/apache/crunch/commit/7c49b8b9f8f85782370e158fc681904c5c34647e",
-        "file": [
-            {
-                "additions": 2,
-                "blob_url": "https://github.com/apache/crunch/blob/7c49b8b9f8f85782370e158fc681904c5c34647e/crunch-core/src/main/java/org/apache/crunch/io/FormatBundle.java",
-                "changes": 3,
-                "contents_url": "https://api.github.com/repos/apache/crunch/contents/crunch-core/src/main/java/org/apache/crunch/io/FormatBundle.java?ref=7c49b8b9f8f85782370e158fc681904c5c34647e",
-                "deletions": 1,
-                "filename": "crunch-core/src/main/java/org/apache/crunch/io/FormatBundle.java",
-                "patch": "@@ -31,6 +31,7 @@\n import java.util.Arrays;\n import java.util.Map;\n \n+import java.util.Objects;\n import java.util.Set;\n import org.apache.commons.codec.binary.Base64;\n import org.apache.commons.lang.builder.HashCodeBuilder;\n@@ -147,7 +148,7 @@ public boolean equals(Object other) {\n       return false;\n     }\n     FormatBundle<K> oib = (FormatBundle<K>) other;\n-    return formatClass.equals(oib.formatClass) && extraConf.equals(oib.extraConf);\n+    return Objects.equals(formatClass, oib.formatClass) && Objects.equals(extraConf, oib.extraConf);\n   }\n \n   @Override",
-                "raw_url": "https://github.com/apache/crunch/raw/7c49b8b9f8f85782370e158fc681904c5c34647e/crunch-core/src/main/java/org/apache/crunch/io/FormatBundle.java",
-                "sha": "0b5008010593d648d8468fafc654791c9f30362e",
-                "status": "modified"
-            }
-        ],
-        "message": "CRUNCH-684: Fix NullPointerException\n\nSigned-off-by: Josh Wills <jwills@apache.org>",
-        "parent": "https://github.com/apache/crunch/commit/869aac60c9d3b5bef10b4e907ec3840be2d8c20e",
-        "patched_files": [
-            "FormatBundle.java"
-        ],
-        "repo": "crunch",
-        "unit_tests": [
-            "FormatBundleTest.java"
         ]
     },
     "crunch_9397eda": {
@@ -273,45 +245,6 @@
         "repo": "crunch",
         "unit_tests": [
             "SourceTargetHelperTest.java"
-        ]
-    },
-    "crunch_ace392b": {
-        "bug_id": "crunch_ace392b",
-        "commit": "https://github.com/apache/crunch/commit/ace392bde724273b1d300f7b01c4648e9e1b9060",
-        "file": [
-            {
-                "additions": 39,
-                "blob_url": "https://github.com/apache/crunch/blob/ace392bde724273b1d300f7b01c4648e9e1b9060/crunch-core/src/it/java/org/apache/crunch/io/text/csv/CSVFileSourceIT.java",
-                "changes": 66,
-                "contents_url": "https://api.github.com/repos/apache/crunch/contents/crunch-core/src/it/java/org/apache/crunch/io/text/csv/CSVFileSourceIT.java?ref=ace392bde724273b1d300f7b01c4648e9e1b9060",
-                "deletions": 27,
-                "filename": "crunch-core/src/it/java/org/apache/crunch/io/text/csv/CSVFileSourceIT.java",
-                "patch": "@@ -17,19 +17,18 @@\n  */\n package org.apache.crunch.io.text.csv;\n \n-import java.io.File;\n-import java.io.FileInputStream;\n+import static org.junit.Assert.assertTrue;\n+\n import java.io.IOException;\n import java.util.Collection;\n-import static org.junit.Assert.*;\n \n import org.apache.crunch.PCollection;\n+import org.apache.crunch.PTable;\n import org.apache.crunch.Pipeline;\n import org.apache.crunch.impl.mr.MRPipeline;\n import org.apache.crunch.test.TemporaryPath;\n import org.apache.crunch.test.TemporaryPaths;\n import org.apache.hadoop.fs.Path;\n-import org.apache.hadoop.io.Text;\n import org.junit.Rule;\n import org.junit.Test;\n \n@@ -39,14 +38,30 @@\n \n   @Test\n   public void testVanillaCSV() throws Exception {\n-    String[] expectedFileContents = { \"1,2,3,4\", \"5,6,7,8\", \"9,10,11\", \"12,13,14\" };\n+    final String[] expectedFileContents = { \"1,2,3,4\", \"5,6,7,8\", \"9,10,11\", \"12,13,14\" };\n+\n+    final String vanillaCSVFile = tmpDir.copyResourceFileName(\"vanilla.csv\");\n+    final Pipeline pipeline = new MRPipeline(CSVFileSourceIT.class, tmpDir.getDefaultConfiguration());\n+    final PCollection<String> csvLines = pipeline.read(new CSVFileSource(new Path(vanillaCSVFile)));\n+\n+    final Collection<String> csvLinesList = csvLines.asCollection().getValue();\n+\n+    for (int i = 0; i < expectedFileContents.length; i++) {\n+      assertTrue(csvLinesList.contains(expectedFileContents[i]));\n+    }\n+  }\n+\n+  @Test\n+  public void testVanillaCSVWithAdditionalActions() throws Exception {\n+    final String[] expectedFileContents = { \"1,2,3,4\", \"5,6,7,8\", \"9,10,11\", \"12,13,14\" };\n \n-    String vanillaCSVFile = tmpDir.copyResourceFileName(\"vanilla.csv\");\n-    Pipeline pipeline = new MRPipeline(CSVFileSourceIT.class, tmpDir.getDefaultConfiguration());\n-    PCollection<String> csvLines = pipeline.read(new CSVFileSource(new Path(vanillaCSVFile)));\n-    pipeline.run();\n+    final String vanillaCSVFile = tmpDir.copyResourceFileName(\"vanilla.csv\");\n+    final Pipeline pipeline = new MRPipeline(CSVFileSourceIT.class, tmpDir.getDefaultConfiguration());\n+    final PCollection<String> csvLines = pipeline.read(new CSVFileSource(new Path(vanillaCSVFile)));\n \n-    Collection<String> csvLinesList = csvLines.asCollection().getValue();\n+    final PTable<String, Long> countTable = csvLines.count();\n+    final PCollection<String> csvLines2 = countTable.keys();\n+    final Collection<String> csvLinesList = csvLines2.asCollection().getValue();\n \n     for (int i = 0; i < expectedFileContents.length; i++) {\n       assertTrue(csvLinesList.contains(expectedFileContents[i]));\n@@ -55,16 +70,15 @@ public void testVanillaCSV() throws Exception {\n \n   @Test\n   public void testCSVWithNewlines() throws Exception {\n-    String[] expectedFileContents = {\n+    final String[] expectedFileContents = {\n         \"\\\"Champion, Mac\\\",\\\"1234 Hoth St.\\n\\tApartment 101\\n\\tAtlanta, GA\\n\\t64086\\\",\\\"30\\\",\\\"M\\\",\\\"5/28/2010 12:00:00 AM\\\",\\\"Just some guy\\\"\",\n         \"\\\"Champion, Mac\\\",\\\"5678 Tatooine Rd. Apt 5, Mobile, AL 36608\\\",\\\"30\\\",\\\"M\\\",\\\"Some other date\\\",\\\"short description\\\"\" };\n \n-    String csvWithNewlines = tmpDir.copyResourceFileName(\"withNewlines.csv\");\n-    Pipeline pipeline = new MRPipeline(CSVFileSourceIT.class, tmpDir.getDefaultConfiguration());\n-    PCollection<String> csvLines = pipeline.read(new CSVFileSource(new Path(csvWithNewlines)));\n-    pipeline.run();\n+    final String csvWithNewlines = tmpDir.copyResourceFileName(\"withNewlines.csv\");\n+    final Pipeline pipeline = new MRPipeline(CSVFileSourceIT.class, tmpDir.getDefaultConfiguration());\n+    final PCollection<String> csvLines = pipeline.read(new CSVFileSource(new Path(csvWithNewlines)));\n \n-    Collection<String> csvLinesList = csvLines.asCollection().getValue();\n+    final Collection<String> csvLinesList = csvLines.asCollection().getValue();\n \n     for (int i = 0; i < expectedFileContents.length; i++) {\n       assertTrue(csvLinesList.contains(expectedFileContents[i]));\n@@ -77,18 +91,17 @@ public void testCSVWithNewlines() throws Exception {\n    */\n   @Test\n   public void testCSVWithCustomQuoteAndNewlines() throws IOException {\n-    String[] expectedFileContents = {\n+    final String[] expectedFileContents = {\n         \"*Champion, Mac*,*1234 Hoth St.\\n\\tApartment 101\\n\\tAtlanta, GA\\n\\t64086*,*30*,*M*,*5/28/2010 12:00:00 AM*,*Just some guy*\",\n         \"*Mac, Champion*,*5678 Tatooine Rd. Apt 5, Mobile, AL 36608*,*30*,*M*,*Some other date*,*short description*\" };\n \n-    String csvWithNewlines = tmpDir.copyResourceFileName(\"customQuoteCharWithNewlines.csv\");\n-    Pipeline pipeline = new MRPipeline(CSVFileSourceIT.class, tmpDir.getDefaultConfiguration());\n-    PCollection<String> csvLines = pipeline.read(new CSVFileSource(new Path(csvWithNewlines),\n+    final String csvWithNewlines = tmpDir.copyResourceFileName(\"customQuoteCharWithNewlines.csv\");\n+    final Pipeline pipeline = new MRPipeline(CSVFileSourceIT.class, tmpDir.getDefaultConfiguration());\n+    final PCollection<String> csvLines = pipeline.read(new CSVFileSource(new Path(csvWithNewlines),\n         CSVLineReader.DEFAULT_BUFFER_SIZE, CSVLineReader.DEFAULT_INPUT_FILE_ENCODING, '*', '*',\n         CSVLineReader.DEFAULT_ESCAPE_CHARACTER));\n-    pipeline.run();\n \n-    Collection<String> csvLinesList = csvLines.asCollection().getValue();\n+    final Collection<String> csvLinesList = csvLines.asCollection().getValue();\n \n     for (int i = 0; i < expectedFileContents.length; i++) {\n       assertTrue(csvLinesList.contains(expectedFileContents[i]));\n@@ -105,13 +118,12 @@ public void testCSVWithCustomQuoteAndNewlines() throws IOException {\n   public void testBrokenLineParsingInChinese() throws IOException {\n     final String[] expectedChineseLines = { \"\u60a8\u597d\u6211\u53eb\u9a6c\u514b\uff0c\u6211\u4ece\u4e9a\u62c9\u5df4\u9a6c\u5dde\u6765\uff0c\u6211\u662f\u8f6f\u4ef6\u5de5\u7a0b\u5e08\uff0c\u6211\u4e8c\u5341\u516b\u5c81\", \"\u6211\u6709\u4e00\u4e2a\u5ba0\u7269\uff0c\u5b83\u662f\u4e00\u4e2a\u5c0f\u732b\uff0c\u5b83\u516d\u5c81\uff0c\u5b83\u5f88\u6f02\u4eae\",\n         \"\u6211\u559c\u6b22\u5403\u996d\uff0c\u201c\u6211\u89c9\u5f97\u8fd9\u4e2a\u996d\u6700\u597d\\n\uff0a\u86cb\u7cd5\\n\uff0a\u5305\u5b50\\n\uff0a\u51b0\u6dc7\u6dcb\\n\uff0a\u5564\u9152\u201c\uff0c\u4ed6\u4eec\u90fd\u5f88\u597d\uff0c\u6211\u4e5f\u5f88\u559c\u6b22\u5976\u916a\u4f46\u5b83\u662f\u4e0d\u5065\u5eb7\u7684\", \"\u6211\u662f\u7537\u7684\uff0c\u6211\u7684\u5934\u53d1\u5f88\u77ed\uff0c\u6211\u7a7f\u84dd\u8272\u7684\u88e4\u5b50\uff0c\u201c\u6211\u7a7f\u9ed1\u8272\u7684\u3001\u201c\u8863\u670d\u201d\" };\n-    String chineseLines = tmpDir.copyResourceFileName(\"brokenChineseLines.csv\");\n+    final String chineseLines = tmpDir.copyResourceFileName(\"brokenChineseLines.csv\");\n \n-    Pipeline pipeline = new MRPipeline(CSVFileSourceIT.class, tmpDir.getDefaultConfiguration());\n-    PCollection<String> csvLines = pipeline.read(new CSVFileSource(new Path(chineseLines),\n+    final Pipeline pipeline = new MRPipeline(CSVFileSourceIT.class, tmpDir.getDefaultConfiguration());\n+    final PCollection<String> csvLines = pipeline.read(new CSVFileSource(new Path(chineseLines),\n         CSVLineReader.DEFAULT_BUFFER_SIZE, CSVLineReader.DEFAULT_INPUT_FILE_ENCODING, '\u201c', '\u201d', '\u3001'));\n-    pipeline.run();\n-    Collection<String> csvLinesList = csvLines.asCollection().getValue();\n+    final Collection<String> csvLinesList = csvLines.asCollection().getValue();\n     for (int i = 0; i < expectedChineseLines.length; i++) {\n       assertTrue(csvLinesList.contains(expectedChineseLines[i]));\n     }",
-                "raw_url": "https://github.com/apache/crunch/raw/ace392bde724273b1d300f7b01c4648e9e1b9060/crunch-core/src/it/java/org/apache/crunch/io/text/csv/CSVFileSourceIT.java",
-                "sha": "ba8e19310b5ce007d8d8775aa496e6fab309df8d",
-                "status": "modified"
-            },
-            {
-                "additions": 27,
-                "blob_url": "https://github.com/apache/crunch/blob/ace392bde724273b1d300f7b01c4648e9e1b9060/crunch-core/src/main/java/org/apache/crunch/io/text/csv/CSVInputFormat.java",
-                "changes": 47,
-                "contents_url": "https://api.github.com/repos/apache/crunch/contents/crunch-core/src/main/java/org/apache/crunch/io/text/csv/CSVInputFormat.java?ref=ace392bde724273b1d300f7b01c4648e9e1b9060",
-                "deletions": 20,
-                "filename": "crunch-core/src/main/java/org/apache/crunch/io/text/csv/CSVInputFormat.java",
-                "patch": "@@ -21,14 +21,15 @@\n import java.util.ArrayList;\n import java.util.List;\n \n+import org.apache.hadoop.conf.Configurable;\n+import org.apache.hadoop.conf.Configuration;\n import org.apache.hadoop.fs.FSDataInputStream;\n import org.apache.hadoop.fs.FileStatus;\n import org.apache.hadoop.fs.FileSystem;\n import org.apache.hadoop.fs.FileUtil;\n import org.apache.hadoop.fs.Path;\n import org.apache.hadoop.io.LongWritable;\n import org.apache.hadoop.io.Text;\n-import org.apache.hadoop.mapred.JobConf;\n import org.apache.hadoop.mapreduce.InputSplit;\n import org.apache.hadoop.mapreduce.JobContext;\n import org.apache.hadoop.mapreduce.RecordReader;\n@@ -43,12 +44,13 @@\n  * format deals with the fact that CSV files can potentially have multiple lines\n  * within fields which should all be treated as one record.\n  */\n-public class CSVInputFormat extends FileInputFormat<LongWritable, Text> {\n+public class CSVInputFormat extends FileInputFormat<LongWritable, Text> implements Configurable {\n   private int bufferSize;\n   private String inputFileEncoding;\n   private char openQuoteChar;\n   private char closeQuoteChar;\n   private char escapeChar;\n+  private Configuration configuration;\n \n   /**\n    * This method is used by crunch to get an instance of {@link CSVRecordReader}\n@@ -57,10 +59,7 @@\n    *          the {@link InputSplit} that will be assigned to the record reader\n    * @param context\n    *          the {@TaskAttemptContext} for the job\n-   * @return an instance of {@link CSVRecordReader} created using\n-   *         {@link CSVInputFormat#getSeparatorChar()},\n-   *         {@link CSVInputFormat#getQuoteChar()}, and\n-   *         {@link CSVInputFormat#getEscapeChar()}.\n+   * @return an instance of {@link CSVRecordReader} created using configured separator, quote, and escape characters.\n    */\n   @Override\n   public RecordReader<LongWritable, Text> createRecordReader(final InputSplit split, final TaskAttemptContext context) {\n@@ -83,17 +82,18 @@\n     final long splitSize = job.getConfiguration().getLong(\"csv.input.split.size\", 67108864);\n     final List<InputSplit> splits = new ArrayList<InputSplit>();\n     final Path[] paths = FileUtil.stat2Paths(listStatus(job).toArray(new FileStatus[0]));\n-    FileSystem fileSystem = null;\n+    FileSystem fileSystem = FileSystem.get(job.getConfiguration());\n     FSDataInputStream inputStream = null;\n     try {\n       for (final Path path : paths) {\n-        fileSystem = path.getFileSystem(job.getConfiguration());\n         inputStream = fileSystem.open(path);\n         splits.addAll(getSplitsForFile(splitSize, fileSystem.getFileStatus(path).getLen(), path, inputStream));\n       }\n       return splits;\n     } finally {\n-      inputStream.close();\n+      if(inputStream != null) {\n+        inputStream.close();\n+      }\n     }\n   }\n \n@@ -166,44 +166,51 @@\n     return splitsList;\n   }\n \n+  @Override\n+  public Configuration getConf() {\n+    return configuration;\n+  }\n+\n+  @Override\n+  public void setConf(final Configuration conf) {\n+    configuration = conf;\n+    configure();\n+  }\n+\n   /**\n-   * This method will read the configuration that is set in\n+   * This method will read the configuration options that were set in\n    * {@link CSVFileSource}'s private getBundle() method\n-   * \n-   * @param jobConf\n-   *          The {@code JobConf} instance from which the CSV configuration\n-   *          parameters will be read, if necessary.\n    */\n-  public void configure(JobConf jobConf) {\n-    String bufferValue = jobConf.get(CSVFileSource.CSV_BUFFER_SIZE);\n+  public void configure() {\n+    final String bufferValue = this.configuration.get(CSVFileSource.CSV_BUFFER_SIZE);\n     if (\"\".equals(bufferValue)) {\n       bufferSize = CSVLineReader.DEFAULT_BUFFER_SIZE;\n     } else {\n       bufferSize = Integer.parseInt(bufferValue);\n     }\n \n-    String inputFileEncodingValue = jobConf.get(CSVFileSource.CSV_INPUT_FILE_ENCODING);\n+    final String inputFileEncodingValue = this.configuration.get(CSVFileSource.CSV_INPUT_FILE_ENCODING);\n     if (\"\".equals(inputFileEncodingValue)) {\n       inputFileEncoding = CSVLineReader.DEFAULT_INPUT_FILE_ENCODING;\n     } else {\n       inputFileEncoding = inputFileEncodingValue;\n     }\n \n-    String openQuoteCharValue = jobConf.get(CSVFileSource.CSV_OPEN_QUOTE_CHAR);\n+    final String openQuoteCharValue = this.configuration.get(CSVFileSource.CSV_OPEN_QUOTE_CHAR);\n     if (\"\".equals(openQuoteCharValue)) {\n       openQuoteChar = CSVLineReader.DEFAULT_QUOTE_CHARACTER;\n     } else {\n       openQuoteChar = openQuoteCharValue.charAt(0);\n     }\n \n-    String closeQuoteCharValue = jobConf.get(CSVFileSource.CSV_CLOSE_QUOTE_CHAR);\n+    final String closeQuoteCharValue = this.configuration.get(CSVFileSource.CSV_CLOSE_QUOTE_CHAR);\n     if (\"\".equals(closeQuoteCharValue)) {\n       closeQuoteChar = CSVLineReader.DEFAULT_QUOTE_CHARACTER;\n     } else {\n       closeQuoteChar = closeQuoteCharValue.charAt(0);\n     }\n \n-    String escapeCharValue = jobConf.get(CSVFileSource.CSV_ESCAPE_CHAR);\n+    final String escapeCharValue = this.configuration.get(CSVFileSource.CSV_ESCAPE_CHAR);\n     if (\"\".equals(escapeCharValue)) {\n       escapeChar = CSVLineReader.DEFAULT_ESCAPE_CHARACTER;\n     } else {",
-                "raw_url": "https://github.com/apache/crunch/raw/ace392bde724273b1d300f7b01c4648e9e1b9060/crunch-core/src/main/java/org/apache/crunch/io/text/csv/CSVInputFormat.java",
-                "sha": "867b7047a6ce0bd1b5798da9de64fd389dfefecd",
-                "status": "modified"
-            }
-        ],
-        "message": "CRUNCH-429: Fix CSVInputFormat\n\nSigned-off-by: Micah Whitacre <mkwhit@apache.org>\n\nCRUNCH-429: Fixed spelling error, handled potential NPE, and moved FileSystem retrieval outside of for loop.",
-        "parent": "https://github.com/apache/crunch/commit/8027f706ae47b613c6f0e96e0ee9f7ef21d1d6ed",
-        "patched_files": [
-            "CSVInputFormat.java"
-        ],
-        "repo": "crunch",
-        "unit_tests": [
-            "CSVInputFormatTest.java"
         ]
     },
     "crunch_c69a354": {
@@ -364,7 +297,6 @@
         ],
         "repo": "crunch",
         "unit_tests": [
-            "MRPipelineTest.java",
             "UnionCollectionTest.java"
         ]
     },
@@ -404,8 +336,8 @@
         ],
         "repo": "crunch",
         "unit_tests": [
-            "MRPipelineTest.java",
-            "PTableUnionTest.java"
+            "PTableUnionTest.java",
+            "MRPipelineTest.java"
         ]
     },
     "crunch_f57c8fc": {
@@ -476,8 +408,8 @@
         "message": "CRUNCH-679: Improvements for usage of DistCp (#20)\n\n* CRUNCH-679: Improvements for usage of DistCp\r\n\r\n* CRUNCH-679: Fix NPE bug by preserving IOUtils.cleanup logic\r\n\r\n* CRUNCH-679: CrunchRenameCopyListing's constructor needs to be public\r\n\r\n* CRUNCH-679: Unset rename configuration after loading into copy listing\r\n\r\n* CRUNCH-679: Reduce default max distcp map tasks from 1000 to 100\r\n\r\n* CRUNCH-679: Update log message formatting",
         "parent": "https://github.com/apache/crunch/commit/587e2c9eaaec8ae9a26e6b1b5c99be7f4d521951",
         "patched_files": [
-            "FileTargetImpl.java",
-            "HFileTarget.java"
+            "HFileTarget.java",
+            "FileTargetImpl.java"
         ],
         "repo": "crunch",
         "unit_tests": [

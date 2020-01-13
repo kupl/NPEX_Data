@@ -31,12 +31,39 @@
         "message": "merge: fix NPE in objEntity.getDbEntity()\n\ngit-svn-id: https://svn.apache.org/repos/asf/cayenne/main/trunk@615405 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/cayenne/commit/22f361488fdb23e9072fecf7d72a16d7146122fa",
         "patched_files": [
-            "CreateTableToModel.java",
-            "AbstractToModelToken.java"
+            "AbstractToModelToken.java",
+            "CreateTableToModel.java"
         ],
         "repo": "cayenne",
         "unit_tests": [
             "CreateTableToModelTest.java"
+        ]
+    },
+    "cayenne_04d67fd": {
+        "bug_id": "cayenne_04d67fd",
+        "commit": "https://github.com/apache/cayenne/commit/04d67fdc9645ff22c0c306b1bbfe49e4b6ebbfec",
+        "file": [
+            {
+                "additions": 73,
+                "blob_url": "https://github.com/apache/cayenne/blob/04d67fdc9645ff22c0c306b1bbfe49e4b6ebbfec/framework/cayenne-jdk1.5-unpublished/src/main/java/org/apache/cayenne/access/FlattenedArcKey.java",
+                "changes": 85,
+                "contents_url": "https://api.github.com/repos/apache/cayenne/contents/framework/cayenne-jdk1.5-unpublished/src/main/java/org/apache/cayenne/access/FlattenedArcKey.java?ref=04d67fdc9645ff22c0c306b1bbfe49e4b6ebbfec",
+                "deletions": 12,
+                "filename": "framework/cayenne-jdk1.5-unpublished/src/main/java/org/apache/cayenne/access/FlattenedArcKey.java",
+                "patch": "@@ -19,17 +19,21 @@\n \n package org.apache.cayenne.access;\n \n+import java.util.ArrayList;\n import java.util.Collection;\n import java.util.Collections;\n import java.util.HashMap;\n import java.util.List;\n import java.util.Map;\n \n import org.apache.cayenne.CayenneRuntimeException;\n+import org.apache.cayenne.DataRow;\n import org.apache.cayenne.ObjectId;\n import org.apache.cayenne.access.DataDomainSyncBucket.PropagatedValueFactory;\n import org.apache.cayenne.access.util.DefaultOperationObserver;\n import org.apache.cayenne.dba.DbAdapter;\n+import org.apache.cayenne.dba.QuotingStrategy;\n+import org.apache.cayenne.dba.TypesMapping;\n import org.apache.cayenne.map.DbAttribute;\n import org.apache.cayenne.map.DbEntity;\n import org.apache.cayenne.map.DbJoin;\n@@ -168,23 +172,57 @@ List buildJoinSnapshotsForDelete(DataNode node) {\n         // TODO: this should be optimized in the future, but now DeleteBatchQuery\n         // expects a PK snapshot, so we must provide it.\n \n+        final boolean quotesNeeded;\n+        if (joinEntity.getDataMap() != null\n+                && joinEntity.getDataMap().isQuotingSQLIdentifiers()) {\n+            quotesNeeded = true;\n+        }\n+        else {\n+            quotesNeeded = false;\n+        }\n+\n+        QuotingStrategy quoter = node.getAdapter().getQuotingStrategy(quotesNeeded);\n+\n         StringBuilder sql = new StringBuilder(\"SELECT \");\n         Collection<DbAttribute> pk = joinEntity.getPrimaryKeys();\n+        final List<DbAttribute> pkList = pk instanceof List\n+                ? (List<DbAttribute>) pk\n+                : new ArrayList<DbAttribute>(pk);\n \n-        int i = pk.size();\n-        for (DbAttribute attribute : joinEntity.getPrimaryKeys()) {\n-            sql.append(\"#result('\");\n-            sql.append(attribute.getName());\n-            sql.append(\"')\");\n-            if (--i > 0) {\n+        for (int i = 0; i < pkList.size(); i++) {\n+\n+            if (i > 0) {\n                 sql.append(\", \");\n             }\n+\n+            DbAttribute attribute = pkList.get(i);\n+\n+            sql.append(\"#result('\");\n+            sql.append(quoter.quoteString(attribute.getName()));\n+\n+            if (quotesNeeded) {\n+                // since the name of the column can potentially be quoted and use reserved\n+                // keywords as name, let's specify\n+                // generated column name parameters to ensure the query doesn't explode\n+                sql.append(\"' '\").append(\n+                        TypesMapping.getJavaBySqlType(attribute.getType()));\n+                sql.append(\"' '\").append(\"pk\").append(i);\n+            }\n+\n+            sql.append(\"')\");\n         }\n \n-        sql.append(\" FROM \").append(joinEntity.getFullyQualifiedName()).append(\" WHERE \");\n-        i = snapshot.size();\n+        sql\n+                .append(\" FROM \")\n+                .append(quoter.quoteFullyQualifiedName(joinEntity))\n+                .append(\" WHERE \");\n+        int i = snapshot.size();\n         for (Object key : snapshot.keySet()) {\n-            sql.append(key).append(\" #bindEqual($\").append(key).append(\")\");\n+            sql\n+                    .append(quoter.quoteString(String.valueOf(key)))\n+                    .append(\" #bindEqual($\")\n+                    .append(key)\n+                    .append(\")\");\n \n             if (--i > 0) {\n                 sql.append(\" AND \");\n@@ -202,13 +240,36 @@ List buildJoinSnapshotsForDelete(DataNode node) {\n \n                     @Override\n                     public void nextRows(Query query, List dataRows) {\n+\n+                        if (quotesNeeded && !dataRows.isEmpty()) {\n+                            // decode results...\n+\n+                            List<DataRow> fixedRows = new ArrayList<DataRow>(dataRows\n+                                    .size());\n+                            for(Object o : dataRows) {\n+                                DataRow row = (DataRow) o;\n+                                \n+                                DataRow fixedRow = new DataRow(2);\n+                                \n+                                for (int i = 0; i < pkList.size(); i++) {\n+                                    DbAttribute attribute = pkList.get(i);\n+                                    fixedRow.put(attribute.getName(), row.get(\"pk\" + i));\n+                                }\n+                                \n+                                fixedRows.add(fixedRow);\n+                            }\n+                            \n+                            dataRows = fixedRows;\n+                        }\n+\n                         result[0] = dataRows;\n                     }\n-                    \n+\n                     @Override\n                     public void nextQueryException(Query query, Exception ex) {\n-                        throw new CayenneRuntimeException(\"Raising from query exception.\", Util\n-                                .unwindException(ex));\n+                        throw new CayenneRuntimeException(\n+                                \"Raising from query exception.\",\n+                                Util.unwindException(ex));\n                     }\n \n                     @Override",
+                "raw_url": "https://github.com/apache/cayenne/raw/04d67fdc9645ff22c0c306b1bbfe49e4b6ebbfec/framework/cayenne-jdk1.5-unpublished/src/main/java/org/apache/cayenne/access/FlattenedArcKey.java",
+                "sha": "3c38d2e180d2f6501f3776a89cc7310376a03566",
+                "status": "modified"
+            }
+        ],
+        "message": "CAY-1725 NullPointerException from call to removeToManyTarget\n\nproper quoting of the query\n\ngit-svn-id: https://svn.apache.org/repos/asf/cayenne/main/trunk@1361358 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/cayenne/commit/382feb7699136b85fa35463ade6242e70bedd278",
+        "patched_files": [
+            "FlattenedArcKey.java"
+        ],
+        "repo": "cayenne",
+        "unit_tests": [
+            "FlattenedArcKeyTest.java"
         ]
     },
     "cayenne_11dc22c": {
@@ -110,12 +137,117 @@
         "message": "CAY-941 NPE in SimpleNode.connectChildren()\n(while 3.0 is not affected, I still added a unit test and a null check for extra robustness)\n\ngit-svn-id: https://svn.apache.org/repos/asf/cayenne/main/trunk@604601 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/cayenne/commit/deddd919fd46af896e90af32c044e03631be6af5",
         "patched_files": [
-            "ExpressionFactory.java",
-            "SimpleNode.java"
+            "SimpleNode.java",
+            "ExpressionFactory.java"
         ],
         "repo": "cayenne",
         "unit_tests": [
             "ExpressionFactoryTest.java"
+        ]
+    },
+    "cayenne_2a41d5d": {
+        "bug_id": "cayenne_2a41d5d",
+        "commit": "https://github.com/apache/cayenne/commit/2a41d5d9ddaefe99983625c438dd9624b5d3687e",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/cayenne/blob/2a41d5d9ddaefe99983625c438dd9624b5d3687e/framework/cayenne-jdk1.4-unpublished/src/main/java/org/apache/cayenne/access/DataDomain.java",
+                "changes": 1,
+                "contents_url": "https://api.github.com/repos/apache/cayenne/contents/framework/cayenne-jdk1.4-unpublished/src/main/java/org/apache/cayenne/access/DataDomain.java?ref=2a41d5d9ddaefe99983625c438dd9624b5d3687e",
+                "deletions": 0,
+                "filename": "framework/cayenne-jdk1.4-unpublished/src/main/java/org/apache/cayenne/access/DataDomain.java",
+                "patch": "@@ -252,6 +252,7 @@ public void initWithProperties(Map properties) {\n         }\n \n         if (queryCacheFactory != null\n+                && dataContextFactory != null\n                 && !Util.isEmptyString(dataContextFactory.toString())) {\n             queryCacheFactory = (QueryCacheFactory) createInstance(queryCacheFactory\n                     .toString(), QueryCacheFactory.class);",
+                "raw_url": "https://github.com/apache/cayenne/raw/2a41d5d9ddaefe99983625c438dd9624b5d3687e/framework/cayenne-jdk1.4-unpublished/src/main/java/org/apache/cayenne/access/DataDomain.java",
+                "sha": "0e3806b0f7b04c24b68083a4710c0a4c7689d8f4",
+                "status": "modified"
+            },
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/cayenne/blob/2a41d5d9ddaefe99983625c438dd9624b5d3687e/framework/cayenne-jdk1.4-unpublished/src/main/java/org/apache/cayenne/conf/DriverDataSourceFactory.java",
+                "changes": 8,
+                "contents_url": "https://api.github.com/repos/apache/cayenne/contents/framework/cayenne-jdk1.4-unpublished/src/main/java/org/apache/cayenne/conf/DriverDataSourceFactory.java?ref=2a41d5d9ddaefe99983625c438dd9624b5d3687e",
+                "deletions": 2,
+                "filename": "framework/cayenne-jdk1.4-unpublished/src/main/java/org/apache/cayenne/conf/DriverDataSourceFactory.java",
+                "patch": "@@ -251,13 +251,17 @@ private String passwordFromInputStream(InputStream inputStream) {\n             }\n             finally {\n                 try {\n-                    bufferedReader.close();\n+                    if (bufferedReader != null) {\n+                        bufferedReader.close();\n+                    }\n                 }\n                 catch (Exception exception) {\n                 }\n \n                 try {\n-                    inputStreamReader.close();\n+                    if (inputStreamReader != null) {\n+                        inputStreamReader.close();\n+                    }\n                 }\n                 catch (Exception exception) {\n                 }",
+                "raw_url": "https://github.com/apache/cayenne/raw/2a41d5d9ddaefe99983625c438dd9624b5d3687e/framework/cayenne-jdk1.4-unpublished/src/main/java/org/apache/cayenne/conf/DriverDataSourceFactory.java",
+                "sha": "a5340e153fbbb5616c620c2df2e631ab8c8efb0d",
+                "status": "modified"
+            }
+        ],
+        "message": "NPE protection.\n\ngit-svn-id: https://svn.apache.org/repos/asf/cayenne/main/trunk@584610 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/cayenne/commit/2b5c5739d3b34e27687f26e8a21b430b47ccfb3a",
+        "patched_files": [
+            "DataDomain.java"
+        ],
+        "repo": "cayenne",
+        "unit_tests": [
+            "DataDomainTest.java"
+        ]
+    },
+    "cayenne_382feb7": {
+        "bug_id": "cayenne_382feb7",
+        "commit": "https://github.com/apache/cayenne/commit/382feb7699136b85fa35463ade6242e70bedd278",
+        "file": [
+            {
+                "additions": 14,
+                "blob_url": "https://github.com/apache/cayenne/blob/382feb7699136b85fa35463ade6242e70bedd278/framework/cayenne-jdk1.5-unpublished/src/main/java/org/apache/cayenne/access/FlattenedArcKey.java",
+                "changes": 14,
+                "contents_url": "https://api.github.com/repos/apache/cayenne/contents/framework/cayenne-jdk1.5-unpublished/src/main/java/org/apache/cayenne/access/FlattenedArcKey.java?ref=382feb7699136b85fa35463ade6242e70bedd278",
+                "deletions": 0,
+                "filename": "framework/cayenne-jdk1.5-unpublished/src/main/java/org/apache/cayenne/access/FlattenedArcKey.java",
+                "patch": "@@ -37,6 +37,7 @@\n import org.apache.cayenne.map.ObjRelationship;\n import org.apache.cayenne.query.Query;\n import org.apache.cayenne.query.SQLTemplate;\n+import org.apache.cayenne.util.Util;\n \n /**\n  * A holder of flattened relationship modification data.\n@@ -203,6 +204,19 @@ List buildJoinSnapshotsForDelete(DataNode node) {\n                     public void nextRows(Query query, List dataRows) {\n                         result[0] = dataRows;\n                     }\n+                    \n+                    @Override\n+                    public void nextQueryException(Query query, Exception ex) {\n+                        throw new CayenneRuntimeException(\"Raising from query exception.\", Util\n+                                .unwindException(ex));\n+                    }\n+\n+                    @Override\n+                    public void nextGlobalException(Exception ex) {\n+                        throw new CayenneRuntimeException(\n+                                \"Raising from underlyingQueryEngine exception.\",\n+                                Util.unwindException(ex));\n+                    }\n                 });\n \n         return result[0];",
+                "raw_url": "https://github.com/apache/cayenne/raw/382feb7699136b85fa35463ade6242e70bedd278/framework/cayenne-jdk1.5-unpublished/src/main/java/org/apache/cayenne/access/FlattenedArcKey.java",
+                "sha": "af8f46d4f2cb3e52dc5113a9a2e2b561f7544dc4",
+                "status": "modified"
+            }
+        ],
+        "message": "CAY-1725 NullPointerException from call to removeToManyTarget\n\ndo not swallow the underlying exception that confuses the users downstream\n\ngit-svn-id: https://svn.apache.org/repos/asf/cayenne/main/trunk@1361357 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/cayenne/commit/c4bd3cdc373fb1cb9b07eb65e9836decf81b2b73",
+        "patched_files": [
+            "FlattenedArcKey.java"
+        ],
+        "repo": "cayenne",
+        "unit_tests": [
+            "FlattenedArcKeyTest.java"
+        ]
+    },
+    "cayenne_3c55684": {
+        "bug_id": "cayenne_3c55684",
+        "commit": "https://github.com/apache/cayenne/commit/3c556849d832f44c5304d765fa86ac5b1db039b8",
+        "file": [
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/cayenne/blob/3c556849d832f44c5304d765fa86ac5b1db039b8/framework/cayenne-jdk1.4-unpublished/src/main/java/org/apache/cayenne/access/DataDomainQueryAction.java",
+                "changes": 9,
+                "contents_url": "https://api.github.com/repos/apache/cayenne/contents/framework/cayenne-jdk1.4-unpublished/src/main/java/org/apache/cayenne/access/DataDomainQueryAction.java?ref=3c556849d832f44c5304d765fa86ac5b1db039b8",
+                "deletions": 3,
+                "filename": "framework/cayenne-jdk1.4-unpublished/src/main/java/org/apache/cayenne/access/DataDomainQueryAction.java",
+                "patch": "@@ -168,10 +168,10 @@ private boolean interceptOIDQuery() {\n         if (query instanceof ObjectIdQuery) {\n \n             ObjectIdQuery oidQuery = (ObjectIdQuery) query;\n-\n             DataRow row = null;\n \n-            if (!oidQuery.isFetchMandatory()) {\n+            if (cache != null\n+                    && !oidQuery.isFetchMandatory()) {\n                 row = cache.getCachedSnapshot(oidQuery.getObjectId());\n             }\n \n@@ -214,8 +214,11 @@ private boolean interceptRelationshipQuery() {\n                 return !DONE;\n             }\n \n+            if(cache == null) {\n+                return !DONE;\n+            }\n+            \n             DataRow sourceRow = cache.getCachedSnapshot(relationshipQuery.getObjectId());\n-\n             if (sourceRow == null) {\n                 return !DONE;\n             }",
+                "raw_url": "https://github.com/apache/cayenne/raw/3c556849d832f44c5304d765fa86ac5b1db039b8/framework/cayenne-jdk1.4-unpublished/src/main/java/org/apache/cayenne/access/DataDomainQueryAction.java",
+                "sha": "c7165bcf8bbc9359f43f4064e4cc71a7cb734cf8",
+                "status": "modified"
+            },
+            {
+                "additions": 8,
+                "blob_url": "https://github.com/apache/cayenne/blob/3c556849d832f44c5304d765fa86ac5b1db039b8/framework/cayenne-jdk1.4-unpublished/src/main/java/org/apache/cayenne/map/AshwoodEntitySorter.java",
+                "changes": 10,
+                "contents_url": "https://api.github.com/repos/apache/cayenne/contents/framework/cayenne-jdk1.4-unpublished/src/main/java/org/apache/cayenne/map/AshwoodEntitySorter.java?ref=3c556849d832f44c5304d765fa86ac5b1db039b8",
+                "deletions": 2,
+                "filename": "framework/cayenne-jdk1.4-unpublished/src/main/java/org/apache/cayenne/map/AshwoodEntitySorter.java",
+                "patch": "@@ -302,16 +302,22 @@ protected Object findReflexiveMaster(\n \n         // find committed snapshot - so we can't fetch from the context as it will return\n         // dirty snapshot; must go down the stack instead\n+\n+        // how do we handle this for NEW objects correctly? For now bail from the method\n+        if (object.getObjectId().isTemporary()) {\n+            return null;\n+        }\n+\n         ObjectIdQuery query = new ObjectIdQuery(\n                 object.getObjectId(),\n                 true,\n                 ObjectIdQuery.CACHE);\n         QueryResponse response = context.getChannel().onQuery(null, query);\n         List result = response.firstList();\n-        if(result == null || result.size() == 0) {\n+        if (result == null || result.size() == 0) {\n             return null;\n         }\n-        \n+\n         DataRow snapshot = (DataRow) result.get(0);\n \n         ObjectId id = snapshot.createTargetObjectId(targetEntityName, finalRel);",
+                "raw_url": "https://github.com/apache/cayenne/raw/3c556849d832f44c5304d765fa86ac5b1db039b8/framework/cayenne-jdk1.4-unpublished/src/main/java/org/apache/cayenne/map/AshwoodEntitySorter.java",
+                "sha": "cb2480248a51ecdadb62c46996e0fed9a1c3829b",
+                "status": "modified"
+            }
+        ],
+        "message": "DataDomainQueryAction NPE fix\n\ngit-svn-id: https://svn.apache.org/repos/asf/cayenne/main/trunk@565900 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/cayenne/commit/bf11dd32fa4ff49bb99d96759191e2746c723b3f",
+        "patched_files": [
+            "AshwoodEntitySorter.java"
+        ],
+        "repo": "cayenne",
+        "unit_tests": [
+            "AshwoodEntitySorterTest.java"
         ]
     },
     "cayenne_446034a": {
@@ -210,16 +342,44 @@
         "message": "CAY-830 DataChannelCallbackInterceptor.onQuery NPE\n\ngit-svn-id: https://svn.apache.org/repos/asf/cayenne/main/trunk@556338 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/cayenne/commit/4c983420c786c19626763bc0e2e53cc2e893bbfc",
         "patched_files": [
-            "ClientMtReflexive.java",
-            "_ClientMtReflexive.java",
-            "multi-tier.java",
             "_MtReflexive.java",
+            "ClientMtReflexive.java",
+            "multi-tier.java",
+            "_ClientMtReflexive.java",
             "DataChannelCallbackInterceptor.java",
             "MtReflexive.java"
         ],
         "repo": "cayenne",
         "unit_tests": [
+            "DataChannelCallbackInterceptorTest.java",
             "CayenneContextWithDataContextTest.java"
+        ]
+    },
+    "cayenne_48dbd36": {
+        "bug_id": "cayenne_48dbd36",
+        "commit": "https://github.com/apache/cayenne/commit/48dbd3642011febf0f0395b94fb72d4e0190d47a",
+        "file": [
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/cayenne/blob/48dbd3642011febf0f0395b94fb72d4e0190d47a/framework/cayenne-jdk1.5-unpublished/src/main/java/org/apache/cayenne/access/DataContext.java",
+                "changes": 10,
+                "contents_url": "https://api.github.com/repos/apache/cayenne/contents/framework/cayenne-jdk1.5-unpublished/src/main/java/org/apache/cayenne/access/DataContext.java?ref=48dbd3642011febf0f0395b94fb72d4e0190d47a",
+                "deletions": 4,
+                "filename": "framework/cayenne-jdk1.5-unpublished/src/main/java/org/apache/cayenne/access/DataContext.java",
+                "patch": "@@ -95,15 +95,17 @@ public DataContext() {\n      */\n     public DataContext(DataChannel channel, ObjectStore objectStore) {\n \n-        if (channel != null) {\n-            attachToChannel(channel);\n-        }\n-\n         // inject self as parent context\n         if (objectStore != null) {\n             this.objectStore = objectStore;\n             objectStore.setContext(this);\n+        }\n+        \n+        if (channel != null) {\n+            attachToChannel(channel);\n+        }\n \n+        if (objectStore != null) {\n             DataDomain domain = getParentDataDomain();\n             this.usingSharedSnaphsotCache = domain != null\n                     && objectStore.getDataRowCache() == domain.getSharedSnapshotCache();",
+                "raw_url": "https://github.com/apache/cayenne/raw/48dbd3642011febf0f0395b94fb72d4e0190d47a/framework/cayenne-jdk1.5-unpublished/src/main/java/org/apache/cayenne/access/DataContext.java",
+                "sha": "33dc5d95a929411d98a38849bcd6a4c28da56162",
+                "status": "modified"
+            }
+        ],
+        "message": "CAY-1583 context.getObjectStore() returning null causing NullpointerException in DataMergeHandler\n\ninitializing objectStore before attaching context to parent channel\n\n\ngit-svn-id: https://svn.apache.org/repos/asf/cayenne/main/trunk@1147169 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/cayenne/commit/2fb0fe8e0254f83789b7b8bde4481669527896ae",
+        "patched_files": [
+            "DataContext.java"
+        ],
+        "repo": "cayenne",
+        "unit_tests": [
+            "DataContextTest.java"
         ]
     },
     "cayenne_4bd2cad": {
@@ -245,6 +405,33 @@
         "repo": "cayenne",
         "unit_tests": [
             "BaseSchemaUpdateStrategy_ConcurrencyTest.java"
+        ]
+    },
+    "cayenne_4dcb157": {
+        "bug_id": "cayenne_4dcb157",
+        "commit": "https://github.com/apache/cayenne/commit/4dcb1571068b9e0363dbd091686d6eb9901d16c5",
+        "file": [
+            {
+                "additions": 9,
+                "blob_url": "https://github.com/apache/cayenne/blob/4dcb1571068b9e0363dbd091686d6eb9901d16c5/framework/cayenne-jpa-unpublished/src/main/java/org/apache/cayenne/jpa/conf/EntityMapDefaultsProcessor.java",
+                "changes": 12,
+                "contents_url": "https://api.github.com/repos/apache/cayenne/contents/framework/cayenne-jpa-unpublished/src/main/java/org/apache/cayenne/jpa/conf/EntityMapDefaultsProcessor.java?ref=4dcb1571068b9e0363dbd091686d6eb9901d16c5",
+                "deletions": 3,
+                "filename": "framework/cayenne-jpa-unpublished/src/main/java/org/apache/cayenne/jpa/conf/EntityMapDefaultsProcessor.java",
+                "patch": "@@ -126,7 +126,8 @@ public boolean onStartNode(ProjectPath path) {\n                     JpaTable table = new JpaTable(AnnotationPrototypes.getTable());\n \n                     // unclear whether we need to apply any other name transformations ...\n-                    // or even if we need to uppercase the name. Per default examples looks\n+                    // or even if we need to uppercase the name. Per default examples\n+                    // looks\n                     // like we need. table.setName(entity.getName().toUpperCase());\n                     table.setName(entity.getName());\n                     entity.setTable(table);\n@@ -207,7 +208,8 @@ public boolean onStartNode(ProjectPath path) {\n                 jpaBasic.setColumn(column);\n             }\n \n-            JpaEntity entity = (JpaEntity) path.firstInstanceOf(JpaEntity.class);\n+            JpaAbstractEntity entity = (JpaAbstractEntity) path\n+                    .firstInstanceOf(JpaAbstractEntity.class);\n \n             // process temporal type defaults\n             if (jpaBasic.getTemporal() == null && jpaBasic.getEnumerated() == null) {\n@@ -282,7 +284,11 @@ public boolean onStartNode(ProjectPath path) {\n \n             if (column.getTable() == null) {\n                 JpaEntity entity = (JpaEntity) path.firstInstanceOf(JpaEntity.class);\n-                column.setTable(entity.getTable().getName());\n+\n+                // parent can be a mapped superclass\n+                if (entity != null) {\n+                    column.setTable(entity.getTable().getName());\n+                }\n             }\n \n             if (parent.getPropertyDescriptor().isStringType()) {",
+                "raw_url": "https://github.com/apache/cayenne/raw/4dcb1571068b9e0363dbd091686d6eb9901d16c5/framework/cayenne-jpa-unpublished/src/main/java/org/apache/cayenne/jpa/conf/EntityMapDefaultsProcessor.java",
+                "sha": "d018ee66152849769602e2d2ef0dc7ff401eba75",
+                "status": "modified"
+            }
+        ],
+        "message": "fixing npe\n\ngit-svn-id: https://svn.apache.org/repos/asf/cayenne/main/trunk@571952 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/cayenne/commit/f9e7f1439fcc207e5eaf374c4cdc27ea41f668be",
+        "patched_files": [
+            "EntityMapDefaultsProcessor.java"
+        ],
+        "repo": "cayenne",
+        "unit_tests": [
+            "EntityMapDefaultsProcessorTest.java"
         ]
     },
     "cayenne_5692a6a": {
@@ -354,16 +541,17 @@
         "message": "CAY-1328 SQLTemplate for DataMap is not working\n\nChanged constructor to have dataRowFatching option.\nAdd handling of case when dataRowFatching is false and ObjectEntity not set as CayenneRuntimeException instead of NullPointerException. Fix some tests\n\ngit-svn-id: https://svn.apache.org/repos/asf/cayenne/main/trunk@940121 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/cayenne/commit/ef79fc9ed78fc796ee51dc8e5b747d1c190e3e55",
         "patched_files": [
-            "SQLTemplate.java",
+            "ObjectResolver.java",
             "FlattenedArcKey.java",
-            "Cayenne.java",
-            "ObjectResolver.java"
+            "SQLTemplate.java",
+            "Cayenne.java"
         ],
         "repo": "cayenne",
         "unit_tests": [
-            "SQLTemplateTest.java",
             "DataContextSQLTemplateTest.java",
-            "CayenneTest.java"
+            "FlattenedArcKeyTest.java",
+            "CayenneTest.java",
+            "SQLTemplateTest.java"
         ]
     },
     "cayenne_65ebda9": {
@@ -509,17 +697,17 @@
         "message": "CAY-1444 NPE when persisting a newly instatiated object\n\npatch by Dzmitry Kazimirchyk\nsome small edits + extra unit test by aadamchik\n\ngit-svn-id: https://svn.apache.org/repos/asf/cayenne/main/trunk@1090117 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/cayenne/commit/48525f1759b7685b738d0c074acf99c38a72bed3",
         "patched_files": [
-            "DataContext.java",
             "NullTestEntity.java",
-            "RELEASE-NOTES.java",
+            "DataDomainInsertBucket.java",
             "_NullTestEntity.java",
-            "DataDomainInsertBucket.java"
+            "DataContext.java",
+            "RELEASE-NOTES.java"
         ],
         "repo": "cayenne",
         "unit_tests": [
             "testmap.java",
-            "DataContextCommitTest.java",
-            "DataContextTest.java"
+            "DataContextTest.java",
+            "DataContextCommitTest.java"
         ]
     },
     "cayenne_77f976a": {
@@ -605,11 +793,13 @@
         "message": "[CAY-2131] Modeler. NullPointerException in reverse engineering when importing different catalogs in one datamap",
         "parent": "https://github.com/apache/cayenne/commit/469bacb44b3c47f4912d40977c6f3cd83ff85f24",
         "patched_files": [
+            "DbMerger.java",
             "FiltersConfig.java"
         ],
         "repo": "cayenne",
         "unit_tests": [
-            "FiltersConfigTest.java"
+            "FiltersConfigTest.java",
+            "DbMergerTest.java"
         ]
     },
     "cayenne_84e4df3": {
@@ -692,14 +882,15 @@
         "message": "CAY-1489 NPE using DataContext.objectFromDataRow for a nested context\n\nPatch by Andrei Veprev\n\ngit-svn-id: https://svn.apache.org/repos/asf/cayenne/main/trunk@1026083 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/cayenne/commit/15875523fc872f9ae2efa28f68225821374b0408",
         "patched_files": [
-            "DataContext.java",
-            "RELEASE-NOTES.java",
-            "DataContextQueryAction.java",
             "ObjectsFromDataRowsQuery.java",
-            "ObjectContextQueryAction.java"
+            "DataContext.java",
+            "ObjectContextQueryAction.java",
+            "DataContextQueryAction.java",
+            "RELEASE-NOTES.java"
         ],
         "repo": "cayenne",
         "unit_tests": [
+            "DataContextTest.java",
             "NestedDataContextReadTest.java"
         ]
     },
@@ -838,9 +1029,9 @@
         "message": "CAY-1257 NullPointerException in Class Qualifier when using \"field = null\"\n\ngit-svn-id: https://svn.apache.org/repos/asf/cayenne/main/trunk@824131 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/cayenne/commit/f642be93cb17808c221f8148f1d9d7cbc7e9e6b5",
         "patched_files": [
-            "RELEASE-NOTES.java",
+            "ObjEntity.java",
             "SimpleNode.java",
-            "ObjEntity.java"
+            "RELEASE-NOTES.java"
         ],
         "repo": "cayenne",
         "unit_tests": [
@@ -923,6 +1114,33 @@
         "repo": "cayenne",
         "unit_tests": [
             "DataContextFactoryTest.java"
+        ]
+    },
+    "cayenne_d973891": {
+        "bug_id": "cayenne_d973891",
+        "commit": "https://github.com/apache/cayenne/commit/d973891f10d8e839bca3c3ce7e42cbfef1b925cb",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/cayenne/blob/d973891f10d8e839bca3c3ce7e42cbfef1b925cb/framework/cayenne-jdk1.5-unpublished/src/main/java/org/apache/cayenne/conf/ConfigSaver.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/cayenne/contents/framework/cayenne-jdk1.5-unpublished/src/main/java/org/apache/cayenne/conf/ConfigSaver.java?ref=d973891f10d8e839bca3c3ce7e42cbfef1b925cb",
+                "deletions": 1,
+                "filename": "framework/cayenne-jdk1.5-unpublished/src/main/java/org/apache/cayenne/conf/ConfigSaver.java",
+                "patch": "@@ -195,7 +195,7 @@ public void storeDataNode(PrintWriter pw, Project project, DataSourceInfo info)\n \n         if (info.getPasswordLocation().equals(DataSourceInfo.PASSWORD_LOCATION_MODEL)) {\n             PasswordEncoding encoder = info.getPasswordEncoder();\n-            if (encoder != null) {\n+            if (encoder != null && info.getPassword() != null) {\n                 pw.print(attribute(\"password\", encoder.encodePassword(\n                         info.getPassword(),\n                         info.getPasswordEncoderKey())));",
+                "raw_url": "https://github.com/apache/cayenne/raw/d973891f10d8e839bca3c3ce7e42cbfef1b925cb/framework/cayenne-jdk1.5-unpublished/src/main/java/org/apache/cayenne/conf/ConfigSaver.java",
+                "sha": "ae0eb913a74e79e409f57aa7ba5f15da82cc9ddd",
+                "status": "modified"
+            }
+        ],
+        "message": "adding password NPE check that prevents project save errors on invalid modeler inputs\n\ngit-svn-id: https://svn.apache.org/repos/asf/cayenne/main/trunk@688324 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/cayenne/commit/7efda9e09d03bf94ac15b42f85f73cb360fe6dfc",
+        "patched_files": [
+            "ConfigSaver.java"
+        ],
+        "repo": "cayenne",
+        "unit_tests": [
+            "ConfigSaverTest.java"
         ]
     },
     "cayenne_e77e278": {
@@ -1045,8 +1263,8 @@
         "message": "CAY-1044 NPE on commit when the new object was deleted before commit\n\ngit-svn-id: https://svn.apache.org/repos/asf/cayenne/main/trunk@652383 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/cayenne/commit/8056f253eff78436aa2281df95ffe7ff60b0fd30",
         "patched_files": [
-            "RELEASE-NOTES.java",
-            "ChildDiffLoader.java"
+            "ChildDiffLoader.java",
+            "RELEASE-NOTES.java"
         ],
         "repo": "cayenne",
         "unit_tests": [
@@ -1144,31 +1362,31 @@
             "DataContextPrefetchMultistepTest.java"
         ]
     },
-    "cayenne_ff70edc": {
-        "bug_id": "cayenne_ff70edc",
-        "commit": "https://github.com/apache/cayenne/commit/ff70edcb491d94589c91c1c2d384c482e624e214",
+    "cayenne_f9e7f14": {
+        "bug_id": "cayenne_f9e7f14",
+        "commit": "https://github.com/apache/cayenne/commit/f9e7f1439fcc207e5eaf374c4cdc27ea41f668be",
         "file": [
             {
-                "additions": 60,
-                "blob_url": "https://github.com/apache/cayenne/blob/ff70edcb491d94589c91c1c2d384c482e624e214/framework/cayenne-jdk1.5-unpublished/src/main/java/org/apache/cayenne/BaseContext.java",
-                "changes": 62,
-                "contents_url": "https://api.github.com/repos/apache/cayenne/contents/framework/cayenne-jdk1.5-unpublished/src/main/java/org/apache/cayenne/BaseContext.java?ref=ff70edcb491d94589c91c1c2d384c482e624e214",
-                "deletions": 2,
-                "filename": "framework/cayenne-jdk1.5-unpublished/src/main/java/org/apache/cayenne/BaseContext.java",
-                "patch": "@@ -18,6 +18,7 @@\n  ****************************************************************/\n package org.apache.cayenne;\n \n+import java.util.ArrayList;\n import java.util.Collection;\n import java.util.List;\n \n@@ -26,6 +27,11 @@\n import org.apache.cayenne.query.ObjectIdQuery;\n import org.apache.cayenne.query.Query;\n import org.apache.cayenne.reflect.Property;\n+import org.apache.cayenne.reflect.ClassDescriptor;\n+import org.apache.cayenne.reflect.PropertyVisitor;\n+import org.apache.cayenne.reflect.AttributeProperty;\n+import org.apache.cayenne.reflect.ToOneProperty;\n+import org.apache.cayenne.reflect.ToManyProperty;\n \n /**\n  * A common base superclass for Cayenne ObjectContext implementors.\n@@ -115,8 +121,60 @@ else if (objects.size() > 1) {\n \n         // resolve relationship fault\n         if (lazyFaulting && property != null) {\n-            Property propertyDescriptor = getEntityResolver().getClassDescriptor(\n-                    object.getObjectId().getEntityName()).getProperty(property);\n+            ClassDescriptor classDescriptor = getEntityResolver().getClassDescriptor(\n+                    object.getObjectId().getEntityName());\n+            Property propertyDescriptor = classDescriptor.getProperty(property);\n+\n+            // If we don't have a property descriptor, there's not much we can do.\n+            // Let the caller know that the specified property could not be found and list\n+            // all of the properties that could be so the caller knows what can be used.\n+            if (propertyDescriptor == null) {\n+                final StringBuilder errorMessage = new StringBuilder();\n+\n+                errorMessage.append(String.format(\"Property '%s' is not declared for entity '%s'.\",\n+                        property, object.getObjectId().getEntityName()));\n+                \n+                errorMessage.append(\" Declared properties are: \");\n+\n+                // Grab each of the declared properties.\n+                final List<String> properties = new ArrayList<String>();\n+                classDescriptor.visitProperties(new PropertyVisitor() {\n+                    public boolean visitAttribute(final AttributeProperty property) {\n+                        properties.add(property.getName());\n+\n+                        return true;\n+                    }\n+\n+                    public boolean visitToOne(final ToOneProperty property) {\n+                        properties.add(property.getName());\n+\n+                        return true;\n+                    }\n+\n+                    public boolean visitToMany(final ToManyProperty property) {\n+                        properties.add(property.getName());\n+\n+                        return true;\n+                    }\n+                });\n+\n+                // Now add the declared property names to the error message.\n+                boolean first = true;\n+                for (String declaredProperty : properties) {\n+                    if (first) {\n+                        errorMessage.append(String.format(\"'%s'\", declaredProperty));\n+\n+                        first = false;\n+                    }\n+                    else {\n+                        errorMessage.append(String.format(\", '%s'\", declaredProperty));\n+                    }\n+                }\n+\n+                errorMessage.append(\".\");\n+\n+                throw new CayenneRuntimeException(errorMessage.toString());\n+            }\n \n             // this should trigger fault resolving\n             propertyDescriptor.readProperty(object);",
-                "raw_url": "https://github.com/apache/cayenne/raw/ff70edcb491d94589c91c1c2d384c482e624e214/framework/cayenne-jdk1.5-unpublished/src/main/java/org/apache/cayenne/BaseContext.java",
-                "sha": "975c4d35cc4b162b22c2a05b22cf0dda45f6b639",
+                "additions": 7,
+                "blob_url": "https://github.com/apache/cayenne/blob/f9e7f1439fcc207e5eaf374c4cdc27ea41f668be/framework/cayenne-jpa-unpublished/src/main/java/org/apache/cayenne/jpa/bridge/DataMapConverter.java",
+                "changes": 7,
+                "contents_url": "https://api.github.com/repos/apache/cayenne/contents/framework/cayenne-jpa-unpublished/src/main/java/org/apache/cayenne/jpa/bridge/DataMapConverter.java?ref=f9e7f1439fcc207e5eaf374c4cdc27ea41f668be",
+                "deletions": 0,
+                "filename": "framework/cayenne-jpa-unpublished/src/main/java/org/apache/cayenne/jpa/bridge/DataMapConverter.java",
+                "patch": "@@ -414,6 +414,13 @@ public boolean onStartNode(ProjectPath path) {\n             JpaId jpaTargetId = targetEntity.getAttributes().getId(\n                     jpaJoin.getReferencedColumnName());\n \n+            if (jpaTargetId == null) {\n+                throw new IllegalArgumentException(\"Null id \"\n+                        + targetEntity.getName()\n+                        + \".\"\n+                        + jpaJoin.getReferencedColumnName());\n+            }\n+\n             ObjRelationship objRelationship = (ObjRelationship) targetPath.getObject();\n             DataMap dataMap = objRelationship.getSourceEntity().getDataMap();\n ",
+                "raw_url": "https://github.com/apache/cayenne/raw/f9e7f1439fcc207e5eaf374c4cdc27ea41f668be/framework/cayenne-jpa-unpublished/src/main/java/org/apache/cayenne/jpa/bridge/DataMapConverter.java",
+                "sha": "2e53b245ab696cb223874a978c086ed140236e59",
                 "status": "modified"
             }
         ],
-        "message": "Better error message on NPE.\n\ngit-svn-id: https://svn.apache.org/repos/asf/cayenne/main/trunk@619169 13f79535-47bb-0310-9956-ffa450edef68",
-        "parent": "https://github.com/apache/cayenne/commit/b5bc20be375487eebab8f201e71dfa0e3f2b4753",
+        "message": "better NPE detection\n\ngit-svn-id: https://svn.apache.org/repos/asf/cayenne/main/trunk@571946 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/cayenne/commit/dedf848eac3111fbf60d6f9ceb0c6c814154d66f",
         "patched_files": [
-            "BaseContext.java"
+            "DataMapConverter.java"
         ],
         "repo": "cayenne",
         "unit_tests": [
-            "BaseContextTest.java"
+            "DataMapConverterTest.java"
         ]
     }
 }

@@ -67,14 +67,53 @@
         "message": "Bug 32536 - Guard against NPE by checking passed in RepositorySelector\n\ngit-svn-id: https://svn.apache.org/repos/asf/logging/log4j/trunk@500473 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/log4j/commit/bc7ace697b7097329c5f4f7ffb978b0bd7f4dda2",
         "patched_files": [
-            "RootLogger.java",
-            "LogManager.java",
             "Hierarchy.java",
+            "LogManager.java",
+            "RootLogger.java",
             "DefaultRepositorySelector.java"
         ],
         "repo": "log4j",
         "unit_tests": [
             "LogManagerTest.java"
+        ]
+    },
+    "log4j_16d943b": {
+        "bug_id": "log4j_16d943b",
+        "commit": "https://github.com/apache/log4j/commit/16d943b19781ee83ae9a276debcf1139f89a6d5c",
+        "file": [
+            {
+                "additions": 5,
+                "blob_url": "https://github.com/apache/log4j/blob/16d943b19781ee83ae9a276debcf1139f89a6d5c/src/java/org/apache/log4j/AsyncAppender.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/log4j/contents/src/java/org/apache/log4j/AsyncAppender.java?ref=16d943b19781ee83ae9a276debcf1139f89a6d5c",
+                "deletions": 1,
+                "filename": "src/java/org/apache/log4j/AsyncAppender.java",
+                "patch": "@@ -466,7 +466,11 @@ public LoggingEvent createEvent() {\n           new Object[] { new Integer(count), maxEvent.getMessage() });\n \n       return new LoggingEvent(\n-        null, Logger.getLogger(maxEvent.getLoggerName()), maxEvent.getLevel(), msg, null);\n+              \"org.apache.log4j.AsyncAppender.DONT_REPORT_LOCATION\",\n+              Logger.getLogger(maxEvent.getLoggerName()),\n+              maxEvent.getLevel(),\n+              msg,\n+              null);\n     }\n   }\n ",
+                "raw_url": "https://github.com/apache/log4j/raw/16d943b19781ee83ae9a276debcf1139f89a6d5c/src/java/org/apache/log4j/AsyncAppender.java",
+                "sha": "967dd135443bcebebb0bceec6097d2b29ab9a678",
+                "status": "modified"
+            },
+            {
+                "additions": 174,
+                "blob_url": "https://github.com/apache/log4j/blob/16d943b19781ee83ae9a276debcf1139f89a6d5c/tests/src/java/org/apache/log4j/AsyncAppenderTestCase.java",
+                "changes": 174,
+                "contents_url": "https://api.github.com/repos/apache/log4j/contents/tests/src/java/org/apache/log4j/AsyncAppenderTestCase.java?ref=16d943b19781ee83ae9a276debcf1139f89a6d5c",
+                "deletions": 0,
+                "filename": "tests/src/java/org/apache/log4j/AsyncAppenderTestCase.java",
+                "patch": "@@ -23,6 +23,7 @@\n import java.util.Vector;\n \n import org.apache.log4j.*;\n+import org.apache.log4j.spi.LoggingEvent;\n import org.apache.log4j.varia.NullAppender;\n \n /**\n@@ -151,4 +152,177 @@ public void testBadAppender() throws Exception {\n \n         }\n     }\n+\n+    /**\n+     * Tests location processing when buffer is full and locationInfo=true.\n+     * See bug 41186.\n+     */\n+    public void testLocationInfoTrue() {\n+        BlockableVectorAppender blockableAppender = new BlockableVectorAppender();\n+        AsyncAppender async = new AsyncAppender();\n+        async.addAppender(blockableAppender);\n+        async.setBufferSize(5);\n+        async.setLocationInfo(true);\n+        async.setBlocking(false);\n+        async.activateOptions();\n+        Logger rootLogger = Logger.getRootLogger();\n+        rootLogger.addAppender(async);\n+        Greeter greeter = new Greeter(rootLogger, 100);\n+        synchronized(blockableAppender.getMonitor()) {\n+            greeter.run();\n+            rootLogger.error(\"That's all folks.\");\n+        }\n+        async.close();\n+        Vector events = blockableAppender.getVector();\n+        LoggingEvent initialEvent = (LoggingEvent) events.get(0);\n+        LoggingEvent discardEvent = (LoggingEvent) events.get(events.size() - 1);\n+        PatternLayout layout = new PatternLayout();\n+        layout.setConversionPattern(\"%C:%L %m%n\");\n+        layout.activateOptions();\n+        String initialStr = layout.format(initialEvent);\n+        assertEquals(AsyncAppenderTestCase.class.getName(),\n+                initialStr.substring(0, AsyncAppenderTestCase.class.getName().length()));\n+        String discardStr = layout.format(discardEvent);\n+        assertEquals(\"?:? \", discardStr.substring(0, 4));\n+    }\n+\n+\n+    /**\n+     * Tests location processing when buffer is full and locationInfo=false.\n+     * See bug 41186.\n+     */\n+    public void testLocationInfoFalse() {\n+        BlockableVectorAppender blockableAppender = new BlockableVectorAppender();\n+        AsyncAppender async = new AsyncAppender();\n+        async.addAppender(blockableAppender);\n+        async.setBufferSize(5);\n+        async.setLocationInfo(false);\n+        async.setBlocking(false);\n+        async.activateOptions();\n+        Logger rootLogger = Logger.getRootLogger();\n+        rootLogger.addAppender(async);\n+        Greeter greeter = new Greeter(rootLogger, 100);\n+        synchronized(blockableAppender.getMonitor()) {\n+            greeter.run();\n+            rootLogger.error(\"That's all folks.\");\n+        }\n+        async.close();\n+        Vector events = blockableAppender.getVector();\n+        LoggingEvent initialEvent = (LoggingEvent) events.get(0);\n+        LoggingEvent discardEvent = (LoggingEvent) events.get(events.size() - 1);\n+        PatternLayout layout = new PatternLayout();\n+        layout.setConversionPattern(\"%C:%L %m%n\");\n+        layout.activateOptions();\n+        String initialStr = layout.format(initialEvent);\n+        assertEquals(\"?:? \", initialStr.substring(0, 4));\n+        String discardStr = layout.format(discardEvent);\n+        assertEquals(\"?:? \", discardStr.substring(0, 4));\n+    }\n+\n+    /**\n+     *  Logging request runnable.\n+     */\n+    private static final class Greeter implements Runnable {\n+      /**\n+       * Logger.\n+       */\n+      private final Logger logger;\n+\n+      /**\n+       * Repetitions.\n+       */\n+      private final int repetitions;\n+\n+      /**\n+       * Create new instance.\n+       * @param logger logger, may not be null.\n+       * @param repetitions repetitions.\n+       */\n+      public Greeter(final Logger logger, final int repetitions) {\n+        if (logger == null) {\n+          throw new IllegalArgumentException(\"logger\");\n+        }\n+\n+        this.logger = logger;\n+        this.repetitions = repetitions;\n+      }\n+\n+      /**\n+       * {@inheritDoc}\n+       */\n+      public void run() {\n+        try {\n+          for (int i = 0; i < repetitions; i++) {\n+            logger.info(\"Hello, World\");\n+            Thread.sleep(1);\n+          }\n+        } catch (InterruptedException ex) {\n+          Thread.currentThread().interrupt();\n+        }\n+      }\n+    }\n+\n+\n+\n+    /**\n+     * Vector appender that can be explicitly blocked.\n+     */\n+    private static final class BlockableVectorAppender extends VectorAppender {\n+      /**\n+       * Monitor object used to block appender.\n+       */\n+      private final Object monitor = new Object();\n+\n+      /**\n+       * Thread of last call to append.\n+       */\n+      private Thread dispatcher;\n+\n+      /**\n+       * Create new instance.\n+       */\n+      public BlockableVectorAppender() {\n+        super();\n+      }\n+\n+      /**\n+       * {@inheritDoc}\n+       */\n+      public void append(final LoggingEvent event) {\n+        synchronized (monitor) {\n+          dispatcher = Thread.currentThread();\n+          super.append(event);\n+            //\n+            //   if fatal, echo messages for testLoggingInDispatcher\n+            //\n+            if (event.getLevel() == Level.FATAL) {\n+                Logger logger = Logger.getLogger(event.getLoggerName());\n+                logger.error(event.getMessage().toString());\n+                logger.warn(event.getMessage().toString());\n+                logger.info(event.getMessage().toString());\n+                logger.debug(event.getMessage().toString());\n+            }\n+        }\n+      }\n+\n+      /**\n+       * Get monitor object.\n+       * @return monitor.\n+       */\n+      public Object getMonitor() {\n+        return monitor;\n+      }\n+\n+      /**\n+       * Get thread of previous call to append.\n+       * @return thread, may be null.\n+       */\n+      public Thread getDispatcher() {\n+        synchronized (monitor) {\n+          return dispatcher;\n+        }\n+      }\n+    }\n+\n+\n }",
+                "raw_url": "https://github.com/apache/log4j/raw/16d943b19781ee83ae9a276debcf1139f89a6d5c/tests/src/java/org/apache/log4j/AsyncAppenderTestCase.java",
+                "sha": "027e6ea640538a06d981b3f348079df104fb6852",
+                "status": "modified"
+            }
+        ],
+        "message": "Bug 41186: DiscardSummary events create NPE in layouts\n\ngit-svn-id: https://svn.apache.org/repos/asf/logging/log4j/branches/v1_2-branch@487724 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/log4j/commit/6e4da7fcdfb8504c627278ac564957555db105e2",
+        "patched_files": [
+            "AsyncAppender.java"
+        ],
+        "repo": "log4j",
+        "unit_tests": [
+            "AsyncAppenderTest.java"
         ]
     },
     "log4j_269f78a": {
@@ -187,13 +226,12 @@
         "message": "Bug 41186: Eliminate NPE on getLocationInfo() when FQCN is null\n\ngit-svn-id: https://svn.apache.org/repos/asf/logging/log4j/branches/v1_2-branch@530974 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/log4j/commit/25d6aed165192bba00212628c572597e48e4d91c",
         "patched_files": [
-            "LocationInfo.java",
-            "LoggingEvent.java"
+            "LoggingEvent.java",
+            "LocationInfo.java"
         ],
         "repo": "log4j",
         "unit_tests": [
-            "LoggingEventTest.java",
-            "LocationInfoTest.java"
+            "LoggingEventTest.java"
         ]
     },
     "log4j_437a2a9": {
@@ -492,263 +530,212 @@
         "message": "Bug fix commit\nChanges:\n\n* build.xml - copy logger.dtd into jar\n* locationinfo - non-log4j apps may only specify a subset of the locationinfo fields (the rest would be null), a check was added to prevent an NPE on each accessor\n* loggingevent - Added locationInformationExists method (getLocationInfo creates a location info if it does not exist), and added exist checks to code as needed to prevent location info construction\n* loggingevent - modified setProperty behavior, if value is null, the property is removed\n* receiverpanel - add xmlsocketreceiver support(built-in support for reception of xml-formatted log4j events via tcp socket)\n* utillogginglevel - modified intvalues so that the lowest value is greater than log4j's debug level intvalue (so the appender skeleton would forward the events correctly with threshold set to debug)\n* fileloadaction - when attempting to load an xml file, directories are displayed as well as xml files\n* modified thread code in chainsawappenderhandler in an attempt to improve performance\n* multicastappender/udpappender - removing internally specified properties (log4japp/log4jmachine name) so the rest of the appenders in the appender chain could specify these properties themselves or the default behavior of using the remote machine could be used\n* multicastappender/receiver, udpappender/receiver added encoding support (chartset) as a property.  If none set, the default system encoding is used.\n* xmlsocketreceiver/udpreceiver/multicastreceiver - added pausable support (useful in receiver panel)\n\n\ngit-svn-id: https://svn.apache.org/repos/asf/logging/log4j/trunk@310152 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/log4j/commit/5f07b1b2911a4f02a75e01c3d3a2cf33787c7458",
         "patched_files": [
-            "ChainsawAppenderHandler.java",
-            "LoggingEvent.java",
-            "UtilLoggingLevel.java",
-            "LogPanel.java",
-            "UDPAppender.java",
-            "Details_XMLSocketReceiver.java",
-            "ReceiversPanel.java",
-            "ColumnComparator.java",
-            "ChainsawEventBatchEntry.java",
-            "LoggingEventFieldResolver.java",
-            "MulticastAppender.java",
-            "FilterModel.java",
-            "ChainsawCyclicBufferTableModel.java",
-            "ReceiversTreeModel.java",
-            "MulticastReceiver.java",
-            "UDPReceiver.java",
             "XMLDecoder.java",
+            "ChainsawCyclicBufferTableModel.java",
+            "LoggingEventFieldResolver.java",
             "UtilLoggingXMLDecoder.java",
-            "XMLSocketReceiver.java",
+            "MulticastAppender.java",
             "LocationInfo.java",
             "FileLoadAction.java",
+            "MulticastReceiver.java",
+            "ReceiversPanel.java",
+            "build.java",
+            "UDPReceiver.java",
+            "ReceiversTreeModel.java",
+            "ChainsawAppenderHandler.java",
+            "LoggingEvent.java",
+            "Details_XMLSocketReceiver.java",
+            "UtilLoggingLevel.java",
             "EventDetailLayout.java",
-            "build.java"
+            "XMLSocketReceiver.java",
+            "UDPAppender.java",
+            "FilterModel.java",
+            "LogPanel.java",
+            "Rule.java",
+            "ColumnComparator.java",
+            "ChainsawEventBatchEntry.java"
         ],
         "repo": "log4j",
         "unit_tests": [
-            "RuleTest.java",
-            "LoggingEventTest.java",
-            "LocationInfoTest.java",
-            "UtilLoggingLevelTest.java"
+            "XMLDecoderTest.java",
+            "RuleTest.java"
         ]
     },
-    "log4j_5b78ffe": {
-        "bug_id": "log4j_5b78ffe",
-        "commit": "https://github.com/apache/log4j/commit/5b78ffe04c143e4cfb22a5be72acc63ead4f9b4f",
+    "log4j_60bd3db": {
+        "bug_id": "log4j_60bd3db",
+        "commit": "https://github.com/apache/log4j/commit/60bd3dbdf1bc7f5cb335fddea5d1159cc626d6bf",
         "file": [
-            {
-                "additions": 7,
-                "blob_url": "https://github.com/apache/log4j/blob/5b78ffe04c143e4cfb22a5be72acc63ead4f9b4f/src/java/org/apache/log4j/BasicConfigurator.java",
-                "changes": 13,
-                "contents_url": "https://api.github.com/repos/apache/log4j/contents/src/java/org/apache/log4j/BasicConfigurator.java?ref=5b78ffe04c143e4cfb22a5be72acc63ead4f9b4f",
-                "deletions": 6,
-                "filename": "src/java/org/apache/log4j/BasicConfigurator.java",
-                "patch": "@@ -98,7 +98,7 @@ void addRenderer(String renderedClassName, String renderingClassName) {\n     } else {\n       try {\n \tClass renderedClass = Class.forName(renderedClassName);\n-\tHierarchy._default.rendererMap.put(renderedClass, renderer);\n+\tCategory._default.rendererMap.put(renderedClass, renderer);\n       } catch(ClassNotFoundException e) {\n \tLogLog.error(\"Could not find class [\"+renderedClassName+\"].\", e);\n       }\n@@ -268,15 +268,16 @@ void overrideAsNeeded(String override) {\n   public\n   static\n   void resetConfiguration() {\n-    Hierarchy._default.getRoot().setPriority(Priority.DEBUG);\n-    Hierarchy._default.getRoot().removeAllAppenders();\n-    Hierarchy._default.root.setResourceBundle(null);\n+\n+    Category._default.getRoot().setPriority(Priority.DEBUG);\n+    Category._default.getRoot().removeAllAppenders();\n+    Category._default.root.setResourceBundle(null);\n \n     Category.disable =  Category.DISABLE_OFF;\n     \n     // the synchronization is needed to prevent JDK 1.2.x hashtable\n     // surprises\n-    synchronized(Hierarchy._default.ht) {\n+    synchronized(Category._default.ht) {\n       Enumeration cats = Category.getCurrentCategories();\n       while(cats.hasMoreElements()) {\n \tCategory c = (Category) cats.nextElement();\n@@ -286,6 +287,6 @@ void resetConfiguration() {\n \tc.removeAllAppenders();\n       }\n     }\n-    Hierarchy._default.rendererMap.clear();\n+    Category._default.rendererMap.clear();\n   }\n }",
-                "raw_url": "https://github.com/apache/log4j/raw/5b78ffe04c143e4cfb22a5be72acc63ead4f9b4f/src/java/org/apache/log4j/BasicConfigurator.java",
-                "sha": "4355371830b46e6be2468a13d970073f86f21baa",
-                "status": "modified"
-            },
-            {
-                "additions": 27,
-                "blob_url": "https://github.com/apache/log4j/blob/5b78ffe04c143e4cfb22a5be72acc63ead4f9b4f/src/java/org/apache/log4j/Category.java",
-                "changes": 34,
-                "contents_url": "https://api.github.com/repos/apache/log4j/contents/src/java/org/apache/log4j/Category.java?ref=5b78ffe04c143e4cfb22a5be72acc63ead4f9b4f",
-                "deletions": 7,
-                "filename": "src/java/org/apache/log4j/Category.java",
-                "patch": "@@ -65,6 +65,13 @@\n \n   static boolean emittedNoAppenderWarning = false;\n   static boolean emittedNoResourceBundleWarning = false;  \n+\n+  // default is a language reserved term, we exceptionally prefix with\n+  // an undescore.\n+  static \n+  public \n+  final Hierarchy _default = new Hierarchy( new RootCategory(Priority.DEBUG));\n+\n   \n   protected ResourceBundle resourceBundle;\n   \n@@ -379,7 +386,7 @@ If the named category exists (in the default hierarchy) then it\n   public\n   static\n   Category exists(String name) {    \n-    return Hierarchy._default.exists(name);\n+    return _default.exists(name);\n   }\n \n   /** \n@@ -506,9 +513,9 @@ Enumeration getCurrentCategories() {\n     // The accumlation in v is necessary because not all elements in\n     // HierarchyMaintainer.ht are Category objects as there might be some\n     // ProvisionNodes as well.       \n-    Vector v = new Vector(Hierarchy._default.ht.size());\n+    Vector v = new Vector(_default.ht.size());\n     \n-    Enumeration elems = Hierarchy._default.ht.elements();\n+    Enumeration elems = _default.ht.elements();\n     while(elems.hasMoreElements()) {\n       Object o = elems.nextElement();\n       if(o instanceof Category) {\n@@ -517,6 +524,19 @@ Enumeration getCurrentCategories() {\n     }\n     return v.elements();\n   }\n+\n+\n+  /**\n+     Return the default Hierarchy instance.\n+\n+     @since 1.0\n+   */\n+  public \n+  static \n+  Hierarchy getDefaultHierarchy() {\n+    return _default;\n+  }\n+\n   \n  /**\n      Retrieve a category with named as the <code>name</code>\n@@ -532,7 +552,7 @@ Enumeration getCurrentCategories() {\n   public\n   static\n   Category getInstance(String name) {\n-    return Hierarchy._default.getInstance(name);\n+    return _default.getInstance(name);\n   }\t\n \n  /**\n@@ -567,7 +587,7 @@ Category getInstance(Class clazz) {\n   public\n   static\n   Category getInstance(String name, CategoryFactory factory) {\n-    return Hierarchy._default.getInstance(name, factory);\n+    return _default.getInstance(name, factory);\n   }\t\n \n   \n@@ -605,7 +625,7 @@ Priority getPriority() {\n   public\n   static\n   Category getRoot() {\n-    return Hierarchy._default.getRoot();\n+    return _default.getRoot();\n   }\n \n   /**\n@@ -958,7 +978,7 @@ void setResourceBundle(ResourceBundle bundle) {\n   public\n   static\n   void shutdown() {\n-    Hierarchy._default.shutdown();\n+    _default.shutdown();\n   }\n \n   ",
-                "raw_url": "https://github.com/apache/log4j/raw/5b78ffe04c143e4cfb22a5be72acc63ead4f9b4f/src/java/org/apache/log4j/Category.java",
-                "sha": "4fe42f12b41307961e2b6f021101a420725f95e5",
-                "status": "modified"
-            },
-            {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/log4j/blob/5b78ffe04c143e4cfb22a5be72acc63ead4f9b4f/src/java/org/apache/log4j/Hierarchy.java",
-                "changes": 19,
-                "contents_url": "https://api.github.com/repos/apache/log4j/contents/src/java/org/apache/log4j/Hierarchy.java?ref=5b78ffe04c143e4cfb22a5be72acc63ead4f9b4f",
-                "deletions": 18,
-                "filename": "src/java/org/apache/log4j/Hierarchy.java",
-                "patch": "@@ -46,12 +46,6 @@\n \n */\n public class Hierarchy {\n-\n-  // default is a language reserved term, we exceptionally prefix with\n-  // an undescore.\n-  static \n-  public \n-  final Hierarchy _default =  new Hierarchy(new RootCategory(Priority.DEBUG));\n   \n   static \n   private\n@@ -184,17 +178,6 @@ else if (o instanceof ProvisionNode) {\n   }\n \n \n-  /**\n-     Return the default Hierarchy instance.\n-\n-     @since 0.9.0\n-   */\n-  public \n-  static \n-  Hierarchy getDefaultHierarchy() {\n-    return _default;\n-  }\n-\n   /**\n      Get the root of this hierarchy.\n      \n@@ -345,7 +328,7 @@ void shutdown() {\n     // begin by closing nested appenders\n     root.closeNestedAppenders();\n \n-    synchronized(Hierarchy._default.ht) {\n+    synchronized(ht) {\n       Enumeration cats = Category.getCurrentCategories();\n       while(cats.hasMoreElements()) {\n \tCategory c = (Category) cats.nextElement();",
-                "raw_url": "https://github.com/apache/log4j/raw/5b78ffe04c143e4cfb22a5be72acc63ead4f9b4f/src/java/org/apache/log4j/Hierarchy.java",
-                "sha": "a1c2084bd41faf471fbbe1f057db1108e1f0b8c8",
-                "status": "modified"
-            },
-            {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/log4j/blob/5b78ffe04c143e4cfb22a5be72acc63ead4f9b4f/src/java/org/apache/log4j/PropertyConfigurator.java",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/log4j/contents/src/java/org/apache/log4j/PropertyConfigurator.java?ref=5b78ffe04c143e4cfb22a5be72acc63ead4f9b4f",
-                "deletions": 1,
-                "filename": "src/java/org/apache/log4j/PropertyConfigurator.java",
-                "patch": "@@ -471,7 +471,7 @@ void parseCatsAndRenderers(Properties props) {\n       if(key.startsWith(CATEGORY_PREFIX)) {\n \tString categoryName = key.substring(CATEGORY_PREFIX.length());\t\n \tString value =  OptionConverter.findAndSubst(key, props);\n-\tCategory cat = Hierarchy._default.getInstance(categoryName, \n+\tCategory cat = Category._default.getInstance(categoryName, \n \t\t\t\t\t\t     categoryFactory);\n \tsynchronized(cat) {\n \t  parseCategory(props, cat, key, categoryName, value);",
-                "raw_url": "https://github.com/apache/log4j/raw/5b78ffe04c143e4cfb22a5be72acc63ead4f9b4f/src/java/org/apache/log4j/PropertyConfigurator.java",
-                "sha": "21b2b640d60747307a88e371ddf4c914311f04dc",
-                "status": "modified"
-            },
-            {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/log4j/blob/5b78ffe04c143e4cfb22a5be72acc63ead4f9b4f/src/java/org/apache/log4j/StressCategory.java",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/log4j/contents/src/java/org/apache/log4j/StressCategory.java?ref=5b78ffe04c143e4cfb22a5be72acc63ead4f9b4f",
-                "deletions": 1,
-                "filename": "src/java/org/apache/log4j/StressCategory.java",
-                "patch": "@@ -111,7 +111,7 @@ void createLoop(int n) {\n       }\n       test();\n       // Clear hash table for next round\n-      Hierarchy._default.clear();\n+      Category._default.clear();\n     }\n     else {      \n       ct[n]  = null;",
-                "raw_url": "https://github.com/apache/log4j/raw/5b78ffe04c143e4cfb22a5be72acc63ead4f9b4f/src/java/org/apache/log4j/StressCategory.java",
-                "sha": "fe007ff9cd970194a6ff42ee38817c35410739cf",
-                "status": "modified"
-            },
-            {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/log4j/blob/5b78ffe04c143e4cfb22a5be72acc63ead4f9b4f/src/java/org/apache/log4j/test/UnitTestCategory.java",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/log4j/contents/src/java/org/apache/log4j/test/UnitTestCategory.java?ref=5b78ffe04c143e4cfb22a5be72acc63ead4f9b4f",
-                "deletions": 1,
-                "filename": "src/java/org/apache/log4j/test/UnitTestCategory.java",
-                "patch": "@@ -64,7 +64,7 @@ void setUp() {\n   public\n   void tearDown() {\n     // Regular users should not use the clear method lightly!\n-    Hierarchy.getDefaultHierarchy().clear();\n+    Category.getDefaultHierarchy().clear();\n     BasicConfigurator.resetConfiguration();\n     a1 = null;\n     a2 = null;",
-                "raw_url": "https://github.com/apache/log4j/raw/5b78ffe04c143e4cfb22a5be72acc63ead4f9b4f/src/java/org/apache/log4j/test/UnitTestCategory.java",
-                "sha": "b084d0636b2a783e339a333cbf8d6b6f3964a475",
-                "status": "modified"
-            }
-        ],
-        "message": "Moved the Hiearchy._default variable to Category._default such that the Hiearchy class does no longer\nhave a static initiliazer. This fixes a very confusing NullPointerException occuring on rare occasions.\n\n\ngit-svn-id: https://svn.apache.org/repos/asf/logging/log4j/trunk@308898 13f79535-47bb-0310-9956-ffa450edef68",
-        "parent": "https://github.com/apache/log4j/commit/fdcb56270f83fee9c310d2914d4aba13a60925b8",
-        "patched_files": [
-            "PropertyConfigurator.java",
-            "Category.java"
-        ],
-        "repo": "log4j",
-        "unit_tests": [
-            "CategoryTest.java",
-            "PropertyConfiguratorTest.java"
-        ]
-    },
-    "log4j_8d99ce2": {
-        "bug_id": "log4j_8d99ce2",
-        "commit": "https://github.com/apache/log4j/commit/8d99ce2467199fc18ee30ec5d67d81ee3e4e1c6e",
-        "file": [
-            {
-                "additions": 10,
-                "blob_url": "https://github.com/apache/log4j/blob/8d99ce2467199fc18ee30ec5d67d81ee3e4e1c6e/docs/HISTORY.txt",
-                "changes": 13,
-                "contents_url": "https://api.github.com/repos/apache/log4j/contents/docs/HISTORY.txt?ref=8d99ce2467199fc18ee30ec5d67d81ee3e4e1c6e",
-                "deletions": 3,
-                "filename": "docs/HISTORY.txt",
-                "patch": "@@ -8,24 +8,31 @@\n    [D] Changes affect a method or property which was previously marked as \n        deprecated.\n \n+  December XX, 2004\n+ - Release of version 1.3alpha-4\n+\n+ - Fixed Bugzilla 15198: TelnetAppender: NullPointerException if\n+   SocketHandler not initialized.\n+\n+\n   November 25, 2004\n \n- - Release of version 1.3apha-3\n+ - Release of version 1.3alpha-3\n  \n  - Classes are built with the javac debug setting on.\n  - Fixed unset activeFile bug in SlidingWindowRollingPolicy.\n  \n   November 25, 2004\n \n- - Release of version 1.3apha-2\n+ - Release of version 1.3alpha-2\n  \n  - The deprecated DOMConfigrator was mistakenly left as the default\n    configrator for XML files.  This has been fixed and JoranConfigrator\n    now is the default configrator for XML files.\n  \n  November 24th, 2004\n \n- - Release of version 1.3apha-1\n+ - Release of version 1.3alpha-1\n \n  - Log4j now uses itself for its own logging. For more details refer to\n    ",
-                "raw_url": "https://github.com/apache/log4j/raw/8d99ce2467199fc18ee30ec5d67d81ee3e4e1c6e/docs/HISTORY.txt",
-                "sha": "8244bb12dcc505893f41663ceca42a5f5acae23e",
-                "status": "modified"
-            },
             {
                 "additions": 9,
-                "blob_url": "https://github.com/apache/log4j/blob/8d99ce2467199fc18ee30ec5d67d81ee3e4e1c6e/src/java/org/apache/log4j/net/TelnetAppender.java",
-                "changes": 11,
-                "contents_url": "https://api.github.com/repos/apache/log4j/contents/src/java/org/apache/log4j/net/TelnetAppender.java?ref=8d99ce2467199fc18ee30ec5d67d81ee3e4e1c6e",
-                "deletions": 2,
-                "filename": "src/java/org/apache/log4j/net/TelnetAppender.java",
-                "patch": "@@ -73,7 +73,7 @@ public void activateOptions() {\n       sh = new SocketHandler(port);\n       sh.start();\n     } catch (Exception e) {\n-      e.printStackTrace();\n+        getLogger().error(\"Could not active TelnetAppender options: \", e);\n     }\n   }\n \n@@ -87,12 +87,19 @@ public void setPort(int port) {\n \n   /** shuts down the appender. */\n   public void close() {\n-    sh.finalize();\n+      if(sh != null) {\n+          sh.finalize();\n+      }\n   }\n \n   /** Handles a log event.  For this appender, that means writing the\n     message to each connected client.  */\n   protected void append(LoggingEvent event) {\n+      if(sh == null) {\n+          getLogger().warn(\"SocketHandler is null, not sending event.\");\n+          return;\n+      }\n+\n     sh.send(this.layout.format(event));\n \n     if (layout.ignoresThrowable()) {",
-                "raw_url": "https://github.com/apache/log4j/raw/8d99ce2467199fc18ee30ec5d67d81ee3e4e1c6e/src/java/org/apache/log4j/net/TelnetAppender.java",
-                "sha": "af514c08c75996278a1788a123971b826b298fac",
-                "status": "modified"
-            }
-        ],
-        "message": "Bugzilla 15198: TelnetAppender: NullPointerException if SocketHandler not initialized.\n\nPR:\nObtained from:\nSubmitted by:\nReviewed by:\n\n\ngit-svn-id: https://svn.apache.org/repos/asf/logging/log4j/trunk@311037 13f79535-47bb-0310-9956-ffa450edef68",
-        "parent": "https://github.com/apache/log4j/commit/7817b8477a40ae2831fc76dc2f347c04171da803",
-        "patched_files": [
-            "TelnetAppender.java"
-        ],
-        "repo": "log4j",
-        "unit_tests": [
-            "TelnetAppenderTest.java"
-        ]
-    },
-    "log4j_e87c632": {
-        "bug_id": "log4j_e87c632",
-        "commit": "https://github.com/apache/log4j/commit/e87c632e10235c397fcc485cca3b94b8d9fed593",
-        "file": [
-            {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/log4j/blob/e87c632e10235c397fcc485cca3b94b8d9fed593/build.xml",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/log4j/contents/build.xml?ref=e87c632e10235c397fcc485cca3b94b8d9fed593",
-                "deletions": 1,
-                "filename": "build.xml",
-                "patch": "@@ -17,7 +17,7 @@\n   <!-- prefixed with \"env\". -->\n   <property environment=\"env\"/>\n \n-  <property name=\"version\" value=\"1.2.7\"/>\n+  <property name=\"version\" value=\"1.2.8\"/>\n \n   <!-- The base directory relative to which most targets are built -->\n   <property name=\"base\" value=\".\"/>",
-                "raw_url": "https://github.com/apache/log4j/raw/e87c632e10235c397fcc485cca3b94b8d9fed593/build.xml",
-                "sha": "7ddc86b541ab344874c56e6aa37242b279b2c741",
-                "status": "modified"
-            },
-            {
-                "additions": 17,
-                "blob_url": "https://github.com/apache/log4j/blob/e87c632e10235c397fcc485cca3b94b8d9fed593/docs/HISTORY",
-                "changes": 17,
-                "contents_url": "https://api.github.com/repos/apache/log4j/contents/docs/HISTORY?ref=e87c632e10235c397fcc485cca3b94b8d9fed593",
-                "deletions": 0,
-                "filename": "docs/HISTORY",
-                "patch": "@@ -5,6 +5,23 @@\n        client code. \n  [***] Changes requiring important modifications to existing client code.\n \n+ - February 18th, 2003\n+\n+http://nagoya.apache.org/bugzilla/show_bug.cgi?id=11570\n+\n+\n+XML Appender throws NullPointerException when logging null\n+\n+ - Fixed bug #11570 whereby XMLAppender would throw a\n+   NullPointerException if the input message was null. Many thanks to\n+   David Vandegrift for reporting the bug and to Hendrik Brummermann for\n+   supplying the patch. [*]\n+\n+ - Fixed bug #12366 whereby various versions of Xerces would not parse\n+   log4j configuration scripts expressed in XML format. [*]\n+\n+ - Fixed bug #15599. SocketAppender now honors ReconnectionDelay of 0.\n+   Many thanks to Scott Schram for reporting the bug and providing the fix. [*]\n \n  October 9th, 2002\n ",
-                "raw_url": "https://github.com/apache/log4j/raw/e87c632e10235c397fcc485cca3b94b8d9fed593/docs/HISTORY",
-                "sha": "524ea9d394233ef6d87a00baf86b21608822dcab",
+                "blob_url": "https://github.com/apache/log4j/blob/60bd3dbdf1bc7f5cb335fddea5d1159cc626d6bf/src/java/org/apache/log4j/chainsaw/ChainsawAppenderHandler.java",
+                "changes": 30,
+                "contents_url": "https://api.github.com/repos/apache/log4j/contents/src/java/org/apache/log4j/chainsaw/ChainsawAppenderHandler.java?ref=60bd3dbdf1bc7f5cb335fddea5d1159cc626d6bf",
+                "deletions": 21,
+                "filename": "src/java/org/apache/log4j/chainsaw/ChainsawAppenderHandler.java",
+                "patch": "@@ -16,20 +16,9 @@\n \n package org.apache.log4j.chainsaw;\n \n-import org.apache.log4j.AppenderSkeleton;\n-import org.apache.log4j.LogManager;\n-import org.apache.log4j.helpers.LogLog;\n-import org.apache.log4j.net.SocketReceiver;\n-import org.apache.log4j.rule.ExpressionRule;\n-import org.apache.log4j.rule.Rule;\n-import org.apache.log4j.spi.LoggingEvent;\n-import org.apache.log4j.spi.LoggingEventFieldResolver;\n-\n import java.beans.PropertyChangeListener;\n import java.beans.PropertyChangeSupport;\n-\n import java.util.ArrayList;\n-import java.util.Collection;\n import java.util.HashMap;\n import java.util.Iterator;\n import java.util.List;\n@@ -38,6 +27,15 @@\n \n import javax.swing.event.EventListenerList;\n \n+import org.apache.log4j.AppenderSkeleton;\n+import org.apache.log4j.LogManager;\n+import org.apache.log4j.helpers.LogLog;\n+import org.apache.log4j.net.SocketReceiver;\n+import org.apache.log4j.rule.ExpressionRule;\n+import org.apache.log4j.rule.Rule;\n+import org.apache.log4j.spi.LoggingEvent;\n+import org.apache.log4j.spi.LoggingEventFieldResolver;\n+\n \n /**\n  * A handler class that either extends a particular appender hierarchy or can be bound\n@@ -100,16 +98,6 @@ public void append(LoggingEvent event) {\n     worker.enqueue(event);\n   }\n \n-  /**\n-   * Allows a Collection of events to be posted into this handler\n-   */\n-  public void appendBatch(Collection events) {\n-    for (Iterator iter = events.iterator(); iter.hasNext();) {\n-      LoggingEvent element = (LoggingEvent) iter.next();\n-      append(element);\n-    }\n-  }\n-\n   public void close() {\n   }\n ",
+                "raw_url": "https://github.com/apache/log4j/raw/60bd3dbdf1bc7f5cb335fddea5d1159cc626d6bf/src/java/org/apache/log4j/chainsaw/ChainsawAppenderHandler.java",
+                "sha": "dcce47633eb113511a278262c3b959e52708b56e",
                 "status": "modified"
             },
             {
                 "additions": 6,
-                "blob_url": "https://github.com/apache/log4j/blob/e87c632e10235c397fcc485cca3b94b8d9fed593/docs/manual.html",
-                "changes": 11,
-                "contents_url": "https://api.github.com/repos/apache/log4j/contents/docs/manual.html?ref=e87c632e10235c397fcc485cca3b94b8d9fed593",
-                "deletions": 5,
-                "filename": "docs/manual.html",
-                "patch": "@@ -22,11 +22,12 @@ <h1>Short introduction to log4j</h1>\n       distribution. This document is based on the article <a\n       href=\"http://www.javaworld.com/jw-11-2000/jw-1122-log4j.html\">\"Log4j\n       delivers control over logging\"</a> published in November 2000\n-      edition of <a\n-      href=\"http://www.javaworld.com\">JavaWorld</a>. However, the\n-      present article contains more detailed and up to date\n-      information. The short manual also borrows some text from the\n-      book \"log4j: the Manual\" by the same author (yours truly).\n+      edition of JavaWorld. However, the present article contains more\n+      detailed and up to date information. The present short manual\n+      also borrows some text from <a\n+      href=\"http://www.flashline.com/components/view.jsp?prodid=4702&affiliateid=657173\">\n+      \"<em>The complete log4j manual</em>\"</a> by the same author\n+      (yours truly).\n \n \n <h2>Abstract</h2>",
-                "raw_url": "https://github.com/apache/log4j/raw/e87c632e10235c397fcc485cca3b94b8d9fed593/docs/manual.html",
-                "sha": "e946f9d9abf3d4e546dfe7c988a4aee39ad42b8b",
-                "status": "modified"
-            },
-            {
-                "additions": 5,
-                "blob_url": "https://github.com/apache/log4j/blob/e87c632e10235c397fcc485cca3b94b8d9fed593/src/java/org/apache/log4j/helpers/Transform.java",
-                "changes": 6,
-                "contents_url": "https://api.github.com/repos/apache/log4j/contents/src/java/org/apache/log4j/helpers/Transform.java?ref=e87c632e10235c397fcc485cca3b94b8d9fed593",
+                "blob_url": "https://github.com/apache/log4j/blob/60bd3dbdf1bc7f5cb335fddea5d1159cc626d6bf/src/java/org/apache/log4j/chainsaw/FileLoadAction.java",
+                "changes": 7,
+                "contents_url": "https://api.github.com/repos/apache/log4j/contents/src/java/org/apache/log4j/chainsaw/FileLoadAction.java?ref=60bd3dbdf1bc7f5cb335fddea5d1159cc626d6bf",
                 "deletions": 1,
-                "filename": "src/java/org/apache/log4j/helpers/Transform.java",
-                "patch": "@@ -71,8 +71,12 @@ static public String escapeTags(String input) {\n   * @param str The String that is inserted into an existing CDATA Section within buf.  \n   * */\n   static public void appendEscapingCDATA(StringBuffer buf, String str) {\n-    int end = str.indexOf(CDATA_END);\n+    if(str == null) {\n+      buf.append(\"\");\n+      return;\n+    } \n     \n+    int end = str.indexOf(CDATA_END);\n     if (end < 0) {\n       buf.append(str);\n       return;",
-                "raw_url": "https://github.com/apache/log4j/raw/e87c632e10235c397fcc485cca3b94b8d9fed593/src/java/org/apache/log4j/helpers/Transform.java",
-                "sha": "d02b63ed751daf4b0dacbf2f57d7258b2a3b14a1",
+                "filename": "src/java/org/apache/log4j/chainsaw/FileLoadAction.java",
+                "patch": "@@ -21,6 +21,7 @@\n import java.io.IOException;\n import java.net.URL;\n import java.util.HashMap;\n+import java.util.Iterator;\n import java.util.Map;\n import java.util.Vector;\n \n@@ -32,6 +33,7 @@\n import org.apache.log4j.Decoder;\n import org.apache.log4j.Logger;\n import org.apache.log4j.helpers.Constants;\n+import org.apache.log4j.spi.LoggingEvent;\n \n \n /**\n@@ -147,7 +149,10 @@ public String getDescription() {\n           public void run() {\n             try {\n               Vector events = decoder.decode(urlToUse);\n-              parent.handler.appendBatch(events);\n+              Iterator iter = events.iterator();\n+              while (iter.hasNext()) {\n+                  parent.handler.append((LoggingEvent)iter.next());\n+              }\n             } catch (IOException e1) {\n               // TODO Handle the error with a nice msg\n               LOG.error(e1);",
+                "raw_url": "https://github.com/apache/log4j/raw/60bd3dbdf1bc7f5cb335fddea5d1159cc626d6bf/src/java/org/apache/log4j/chainsaw/FileLoadAction.java",
+                "sha": "4e98d1b4c6cb227ea1876a92b6d4bbfedeef286a",
                 "status": "modified"
             },
             {
                 "additions": 8,
-                "blob_url": "https://github.com/apache/log4j/blob/e87c632e10235c397fcc485cca3b94b8d9fed593/src/java/org/apache/log4j/net/SocketAppender.java",
-                "changes": 11,
-                "contents_url": "https://api.github.com/repos/apache/log4j/contents/src/java/org/apache/log4j/net/SocketAppender.java?ref=e87c632e10235c397fcc485cca3b94b8d9fed593",
-                "deletions": 3,
-                "filename": "src/java/org/apache/log4j/net/SocketAppender.java",
-                "patch": "@@ -194,9 +194,14 @@ void connect(InetAddress address, int port) {\n       cleanUp();\n       oos = new ObjectOutputStream(new Socket(address, port).getOutputStream());\n     } catch(IOException e) {\n-      LogLog.error(\"Could not connect to remote log4j server at [\"\n-\t\t   +address.getHostName()+\"]. We will try again later.\", e);\n-      fireConnector();\n+\n+      String msg = \"Could not connect to remote log4j server at [\"\n+\t+address.getHostName()+\"].\";\n+      if(reconnectionDelay > 0) {\n+        msg += \" We will try again later.\";\n+\tfireConnector(); // fire the connector thread\n+      } \n+      LogLog.error(msg, e);\n     }\n   }\n ",
-                "raw_url": "https://github.com/apache/log4j/raw/e87c632e10235c397fcc485cca3b94b8d9fed593/src/java/org/apache/log4j/net/SocketAppender.java",
-                "sha": "ddb4145e61de38205d0a162dbf70f54274c1b030",
+                "blob_url": "https://github.com/apache/log4j/blob/60bd3dbdf1bc7f5cb335fddea5d1159cc626d6bf/src/java/org/apache/log4j/chainsaw/help/release-notes.html",
+                "changes": 9,
+                "contents_url": "https://api.github.com/repos/apache/log4j/contents/src/java/org/apache/log4j/chainsaw/help/release-notes.html?ref=60bd3dbdf1bc7f5cb335fddea5d1159cc626d6bf",
+                "deletions": 1,
+                "filename": "src/java/org/apache/log4j/chainsaw/help/release-notes.html",
+                "patch": "@@ -9,9 +9,16 @@ <h2>Release Notes</h2>\n \n \n <h3>1.99.99 (18th May 2004 10:35 GMT+10)</h3>\n+\n+<h2>21 May 2004</h2>\n+<ul>\n+ <li>Corrected a bug in XML decoders which caused an exceptio when rendering the exception column - discovered by Stephen Pain.</li>\n+<li>Events loaded from an XML-formatted file are now processed like other events (throttled based on responsiveness setting and conforming to cyclic buffer limits) - discovered by Stephen Pain.</li>\n+</ul>\n+\n <h2>20 May 2004</h2>\n <ul>\n- <li>Corrected a bug in the XML decoders which prevented XML-formatted events from being processed.</li>\n+ <li>Corrected a bug in the XML decoders which prevented XML-formatted events from being processed - discovered by Stephen Pain.</li>\n </ul>\n \n <h2>18 May 2004</h2>",
+                "raw_url": "https://github.com/apache/log4j/raw/60bd3dbdf1bc7f5cb335fddea5d1159cc626d6bf/src/java/org/apache/log4j/chainsaw/help/release-notes.html",
+                "sha": "9677be0a401cb8ce97efbb0b5f32950c618802c5",
                 "status": "modified"
             },
             {
-                "additions": 25,
-                "blob_url": "https://github.com/apache/log4j/blob/e87c632e10235c397fcc485cca3b94b8d9fed593/src/xdocs/documentation.xml",
-                "changes": 31,
-                "contents_url": "https://api.github.com/repos/apache/log4j/contents/src/xdocs/documentation.xml?ref=e87c632e10235c397fcc485cca3b94b8d9fed593",
-                "deletions": 6,
-                "filename": "src/xdocs/documentation.xml",
-                "patch": "@@ -10,18 +10,22 @@\n \n     <section name=\"Official log4j documentation\">\n \n-      <p>The following documentation is included with the standard log4j\n-\tdistribution and also browsable online:</p>\n+      <p>With the exception of the complete manual, the following\n+\tdocumentation is included with the standard log4j distribution\n+\tand also browsable online:\n+      </p>\n       \n       <ul>\n \t<p>\n-\t  <a href=\"http://www.flashline.com/components/view.jsp?prodid=4702&amp;affiliateid=657173\"><img align=\"right\" src=\"images/coverSmall.png\"></img></a>\n-\t  <li><a href=\"manual.html\"><b>short manual</b></a>,\n+\t  <a\n+\t  href=\"https://www.qos.ch/shop/products/clm_t.jsp\"><img\n+\t  align=\"right\" src=\"images/coverSmall.png\"></img></a> <li><a\n+\t  href=\"manual.html\"><b>short manual</b></a>,\n \t  </li>\n \t</p>\n \n \t<p>\n-\t  <li><a href=\"http://www.flashline.com/components/view.jsp?prodid=4702&amp;affiliateid=657173\"><b>complete manual</b></a> (commercial), \n+\t  <li><a href=\"https://www.qos.ch/shop/products/clm_t.jsp\"><b>complete manual</b></a> (commercial), \n \t  </li>\n \t</p>\n \t\n@@ -72,6 +76,9 @@\n \t    Build Flexible Logs With log4j</a> by Vikram Goyal\n \t</li></p>\n \n+\t<p><li><a\n+\thref=\"http://supportweb.cs.bham.ac.uk/documentation/tutorials/docsystem/build/tutorials/log4j/log4j.html\">log4j</a>\n+\tby Ashley J.S Mills, University Of Birmingham</li></p>\n \n \t<p><li><a href=\"http://www.builder.com.com/article.jhtml?id=u00820020124kev01.htm\">\n \t    Add logging to your Java Applications</a> by Kevin Brown\n@@ -94,7 +101,19 @@\n \n \t</li></p>\n \n-      </ul>\n+\t<p><li> <a href=\"http://qos.ch/logging/sc.html\">Supporting the\n+\t  log4j <code>RepositorySelector</code></a> by Ceki\n+\t  G&#252;lc&#252;\n+\t</li></p>\n+\n+         <p><li> <a href=\"http://rei1.m-plify.com/log4j/\">Log4j class\n+         diagrams</a>, courtesy of David Tonhofer\n+            </li>\n+         </p>\n+\n+\t<p><li> <a href=\"http://www.jug-l.org/log4j.html\">Advanced\n+\t  Log4j</a> Louisville JUG presentation by Jonathan Cowherd </li></p>\n+      </ul> \n \n       <p>If you would like your log4j-relateed article to be listed\n \t  here, then please send a note to the <a",
-                "raw_url": "https://github.com/apache/log4j/raw/e87c632e10235c397fcc485cca3b94b8d9fed593/src/xdocs/documentation.xml",
-                "sha": "293419bd71d69be26fd1c3682cc38b754409fce4",
+                "additions": 2,
+                "blob_url": "https://github.com/apache/log4j/blob/60bd3dbdf1bc7f5cb335fddea5d1159cc626d6bf/src/java/org/apache/log4j/xml/UtilLoggingXMLDecoder.java",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/log4j/contents/src/java/org/apache/log4j/xml/UtilLoggingXMLDecoder.java?ref=60bd3dbdf1bc7f5cb335fddea5d1159cc626d6bf",
+                "deletions": 1,
+                "filename": "src/java/org/apache/log4j/xml/UtilLoggingXMLDecoder.java",
+                "patch": "@@ -368,8 +368,9 @@ private Vector decodeEvents(Document document) {\n       } else {\n         info = LocationInfo.NA_LOCATION_INFO;\n       }\n+\n       if (exception == null) {\n-        exception = new String[]{};\n+          exception = new String[]{\"\"};\n       }\n       \n       LoggingEvent loggingEvent = new LoggingEvent();",
+                "raw_url": "https://github.com/apache/log4j/raw/60bd3dbdf1bc7f5cb335fddea5d1159cc626d6bf/src/java/org/apache/log4j/xml/UtilLoggingXMLDecoder.java",
+                "sha": "7875e42842e9de0ec5009b2b4b1506cfe5ee4af0",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/log4j/blob/60bd3dbdf1bc7f5cb335fddea5d1159cc626d6bf/src/java/org/apache/log4j/xml/XMLDecoder.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/log4j/contents/src/java/org/apache/log4j/xml/XMLDecoder.java?ref=60bd3dbdf1bc7f5cb335fddea5d1159cc626d6bf",
+                "deletions": 1,
+                "filename": "src/java/org/apache/log4j/xml/XMLDecoder.java",
+                "patch": "@@ -383,7 +383,7 @@ private Vector decodeEvents(Document document) {\n         info = LocationInfo.NA_LOCATION_INFO;\n       }\n       if (exception == null) {\n-          exception = new String[]{};\n+          exception = new String[]{\"\"};\n       }\n       \n       LoggingEvent loggingEvent = new LoggingEvent();",
+                "raw_url": "https://github.com/apache/log4j/raw/60bd3dbdf1bc7f5cb335fddea5d1159cc626d6bf/src/java/org/apache/log4j/xml/XMLDecoder.java",
+                "sha": "710322eb63e03ed86b9129dc47c2bb4657638985",
+                "status": "modified"
+            }
+        ],
+        "message": "Corrected xmldecoder bug - null exceptions should be assigned a single-element empty string to prevent npes\nCorrected file-load of xml formatted events to conform to responsiveness and cyclic buffer settings - both issues discovered by Stephen Pain\n\n\ngit-svn-id: https://svn.apache.org/repos/asf/logging/log4j/trunk@310596 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/log4j/commit/130b3181d10b8f89ee785ff0a0e608b9c3001ca3",
+        "patched_files": [
+            "XMLDecoder.java"
+        ],
+        "repo": "log4j",
+        "unit_tests": [
+            "XMLDecoderTest.java"
+        ]
+    },
+    "log4j_ec94f45": {
+        "bug_id": "log4j_ec94f45",
+        "commit": "https://github.com/apache/log4j/commit/ec94f456bf72408e8dc9353eeaabe2cafb2533fc",
+        "file": [
+            {
+                "additions": 0,
+                "blob_url": "https://github.com/apache/log4j/blob/ec94f456bf72408e8dc9353eeaabe2cafb2533fc/src/java/org/apache/log4j/xml/Log4jEntityResolver.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/log4j/contents/src/java/org/apache/log4j/xml/Log4jEntityResolver.java?ref=ec94f456bf72408e8dc9353eeaabe2cafb2533fc",
+                "deletions": 2,
+                "filename": "src/java/org/apache/log4j/xml/Log4jEntityResolver.java",
+                "patch": "@@ -23,8 +23,6 @@\n public class Log4jEntityResolver implements EntityResolver {\n \n   public InputSource resolveEntity (String publicId, String systemId) {\n-    System.err.println(\"piblicID: [\"+publicId+\"]\");\n-    System.err.println(\"systemId: [\"+systemId+\"]\");\n     if (systemId.endsWith(\"log4j.dtd\")) {\n       Class clazz = getClass();\n       InputStream in = clazz.getResourceAsStream(\"/org/apache/log4j/xml/log4j.dtd\");",
+                "raw_url": "https://github.com/apache/log4j/raw/ec94f456bf72408e8dc9353eeaabe2cafb2533fc/src/java/org/apache/log4j/xml/Log4jEntityResolver.java",
+                "sha": "68ff3793abe67e3b8b3894f6c3ee55419e3cd675",
+                "status": "modified"
+            },
+            {
+                "additions": 13,
+                "blob_url": "https://github.com/apache/log4j/blob/ec94f456bf72408e8dc9353eeaabe2cafb2533fc/src/java/org/apache/log4j/xml/XMLDecoder.java",
+                "changes": 15,
+                "contents_url": "https://api.github.com/repos/apache/log4j/contents/src/java/org/apache/log4j/xml/XMLDecoder.java?ref=ec94f456bf72408e8dc9353eeaabe2cafb2533fc",
+                "deletions": 2,
+                "filename": "src/java/org/apache/log4j/xml/XMLDecoder.java",
+                "patch": "@@ -47,6 +47,10 @@\n  * Decodes Logging Events in XML formated into elements that are used by\n  * Chainsaw.\n  *\n+ * This decoder can process either:\n+ *  - a collection of log4j:event nodes ONLY (no XML declaration nor eventSet node), or \n+ *  - the XML declaration, log4j:eventSet root node AND containing log4j:event nodes (all required)\n+ * \n  * NOTE:  Only a single LoggingEvent is returned from the decode method\n  * even though the DTD supports multiple events nested in an eventSet.\n  *\n@@ -114,9 +118,13 @@ private Document parse(String data) {\n        */\n       StringBuffer buf = new StringBuffer(1024);\n \n-      buf.append(BEGINPART);\n+      if (!(data.substring(0, data.indexOf(\" \")).toLowerCase().startsWith(\"<?xml\"))) {\n+        buf.append(BEGINPART);\n+      }\n       buf.append(data);\n-      buf.append(ENDPART);\n+      if (!(data.endsWith(ENDPART))) {\n+        buf.append(ENDPART);\n+      }\n \n       InputSource inputSource =\n         new InputSource(new StringReader(buf.toString()));\n@@ -379,6 +387,9 @@ private Vector decodeEvents(Document document) {\n       } else {\n         info = LocationInfo.NA_LOCATION_INFO;\n       }\n+      if (exception == null) {\n+          exception = new String[]{};\n+      }\n       \n       LoggingEvent loggingEvent = new LoggingEvent();\n       loggingEvent.setLogger(logger);",
+                "raw_url": "https://github.com/apache/log4j/raw/ec94f456bf72408e8dc9353eeaabe2cafb2533fc/src/java/org/apache/log4j/xml/XMLDecoder.java",
+                "sha": "6b17f81f6fbb3a96b2202042b5b2562a78255c37",
+                "status": "modified"
+            }
+        ],
+        "message": "Added support in XMLDecoder for xml documents conforming to log4j.dtd which include the XML declaration and doctype declaration\nAssigning exception to an empty string array if no exception provided in the decoded event (prevents NPEs when the exception is accessed)\nRemoved system.err msgs in log4jentityresolver\n\n\ngit-svn-id: https://svn.apache.org/repos/asf/logging/log4j/trunk@310585 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/log4j/commit/a709e76c787f44786d718c366b2c477de8b7bc6f",
+        "patched_files": [
+            "XMLDecoder.java"
+        ],
+        "repo": "log4j",
+        "unit_tests": [
+            "XMLDecoderTest.java"
+        ]
+    },
+    "log4j_f390932": {
+        "bug_id": "log4j_f390932",
+        "commit": "https://github.com/apache/log4j/commit/f39093206f57fb3b69d51d6f0690fa95ee4e068c",
+        "file": [
+            {
+                "additions": 5,
+                "blob_url": "https://github.com/apache/log4j/blob/f39093206f57fb3b69d51d6f0690fa95ee4e068c/src/java/org/apache/log4j/chainsaw/FileLoadAction.java",
+                "changes": 7,
+                "contents_url": "https://api.github.com/repos/apache/log4j/contents/src/java/org/apache/log4j/chainsaw/FileLoadAction.java?ref=f39093206f57fb3b69d51d6f0690fa95ee4e068c",
+                "deletions": 2,
+                "filename": "src/java/org/apache/log4j/chainsaw/FileLoadAction.java",
+                "patch": "@@ -99,10 +99,13 @@ public String getDescription() {\n           }\n         });\n \n-      chooser.showOpenDialog(parent);\n-\n+      int i = chooser.showOpenDialog(parent);\n+      if(i != JFileChooser.APPROVE_OPTION) {\n+       return; \n+      }\n       File selectedFile = chooser.getSelectedFile();\n \n+      \n       try {\n         url = selectedFile.toURL();\n         name = selectedFile.getName();",
+                "raw_url": "https://github.com/apache/log4j/raw/f39093206f57fb3b69d51d6f0690fa95ee4e068c/src/java/org/apache/log4j/chainsaw/FileLoadAction.java",
+                "sha": "4995a2374e7faee2b99f2675c40f492f663e81a4",
+                "status": "modified"
+            },
+            {
+                "additions": 7,
+                "blob_url": "https://github.com/apache/log4j/blob/f39093206f57fb3b69d51d6f0690fa95ee4e068c/src/java/org/apache/log4j/chainsaw/help/release-notes.html",
+                "changes": 7,
+                "contents_url": "https://api.github.com/repos/apache/log4j/contents/src/java/org/apache/log4j/chainsaw/help/release-notes.html?ref=f39093206f57fb3b69d51d6f0690fa95ee4e068c",
+                "deletions": 0,
+                "filename": "src/java/org/apache/log4j/chainsaw/help/release-notes.html",
+                "patch": "@@ -8,6 +8,13 @@\n <h1>Release Notes</h2>\n \n <h1>1.99.99</h2>\n+\n+<h2>4 Aug 2004</h2>\n+<ul>\n+<li>Fixed Bug 30443 - When opening an XML file, if you hit cancel, Chainsaw opened the file anyway</li>\n+<li>Fixed Bug 30444 - NPE when trying to open an XML file where one or more events may be spread over a large (>100) number of lines.</li>\n+</ul>\n+\n <h2>31 July 2004</h2>\n <ul>\n <li>Corrected 'clear refine focus' bug.</li>",
+                "raw_url": "https://github.com/apache/log4j/raw/f39093206f57fb3b69d51d6f0690fa95ee4e068c/src/java/org/apache/log4j/chainsaw/help/release-notes.html",
+                "sha": "a812159e76ed57f90dbd130b046367e1863af997",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/log4j/blob/f39093206f57fb3b69d51d6f0690fa95ee4e068c/src/java/org/apache/log4j/chainsaw/version/VersionManager.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/log4j/contents/src/java/org/apache/log4j/chainsaw/version/VersionManager.java?ref=f39093206f57fb3b69d51d6f0690fa95ee4e068c",
+                "deletions": 1,
+                "filename": "src/java/org/apache/log4j/chainsaw/version/VersionManager.java",
+                "patch": "@@ -10,7 +10,7 @@\n \n     private static final VersionManager instance = new VersionManager();\n     \n-    private static final String VERSION_INFO = \"1.99.99 (31 July 2004)\";\n+    private static final String VERSION_INFO = \"1.99.99 (4 Aug 2004)\";\n     \n     public static final VersionManager getInstance() {\n         return instance;",
+                "raw_url": "https://github.com/apache/log4j/raw/f39093206f57fb3b69d51d6f0690fa95ee4e068c/src/java/org/apache/log4j/chainsaw/version/VersionManager.java",
+                "sha": "7fd9578e447ae558badaf812be8384b90c94ecb1",
                 "status": "modified"
             },
             {
                 "additions": 21,
-                "blob_url": "https://github.com/apache/log4j/blob/e87c632e10235c397fcc485cca3b94b8d9fed593/src/xdocs/download.xml",
-                "changes": 48,
-                "contents_url": "https://api.github.com/repos/apache/log4j/contents/src/xdocs/download.xml?ref=e87c632e10235c397fcc485cca3b94b8d9fed593",
-                "deletions": 27,
-                "filename": "src/xdocs/download.xml",
-                "patch": "@@ -9,14 +9,14 @@\n   <meta name=\"keywords\" content=\"java, logging, tracing, component, framework, API, log4j\"/>\n <body>\n \n-    <section name=\"log4j version 1.2.7\">\n-      <p>log4j 1.2.7 is available in <a\n-\thref=\"../jakarta-log4j-1.2.7.tar.gz\"><b>TAR.GZ</b></a> format\n-\tor in <a href=\"../jakarta-log4j-1.2.7.zip\"><b>ZIP</b></a>\n+    <section name=\"log4j version 1.2.8\">\n+      <p>log4j 1.2.8 is available in <a\n+\thref=\"../jakarta-log4j-1.2.8.tar.gz\"><b>TAR.GZ</b></a> format\n+\tor in <a href=\"../jakarta-log4j-1.2.8.zip\"><b>ZIP</b></a>\n \tformat.\n       </p>\n \n-      <p>As of release 1.2.7 log4j now searches for the file log4j.xml\n+      <p>As of release 1.2.8 log4j now searches for the file log4j.xml\n         as well as the file log4j.properties during\n         initialization. See the <a href=\"HISTORY\">HISTORY</a> file for\n         the firther details.\n@@ -42,14 +42,15 @@\n \trenaming of the <code>CategoryFactory</code> class to\n \t<code>LoggerFactory</code> class such that subclasses of\n \t<code>Category</code> class must be modified and\n-\trecompiled. By the way, <b>we strongly discourage casual users\n-\tfrom subclassing the <code>Category</code> or\n-\t<code>Logger</code> classes.</b>\n+\trecompiled. <em>The recommended pattern for extending the\n+\t<code>Logger</code> class is wrapping. Moreover, we strongly\n+\tdiscourage casual users from subclassing the\n+\t<code>Category</code> or <code>Logger</code> classes. </em>\n       </p>\n \n       <p>We also maintain a list of <a href=\"earlier.html\">earlier\n \t  versions</a> of log4j for download, intended for the curious\n-\t  paleontologist -- there seems to be thousands of them!\n+\t  paleontologist -- there seems to be quite a few of them!\n       </p>\n \n \n@@ -76,33 +77,26 @@\n \n \t<!-- ============================================================================== -->\n \n-\t<dt><a href=\"http://www.japhy.de/configLog4j\"><b>configLog4j</b></a></dt>\n+<!--\t<dt><a href=\"http://www.japhy.de/configLog4j\"><b>configLog4j</b></a></dt>\n \n \t<dd>A graphical log4j configuration editor by Tobias\n \tDezulian.</dd>\n-\n+-->\n \t<!-- ============================================================================== -->\n \n \t<dt>\n \t  <a\n-\thref=\"http://support.klopotek.de/log4j/jdbc/index.html\"><b>JDBCAppender</b></a>\n+\thref=\"http://www.mannhaupt.com/danko/projects/\"><b>JDBCAppender</b></a>\n+\t</dt> \n \n-\t</dt> <dd>A <code>JDBCAppender</code> by <a\n-\thref=\"mailto:t.fenner@klopotek.de\">Thomas Fenner</a>. Note\n-\tthat log4j 1.2 ships with another <code>JDBCAppender</code>\n-\twritten by Kevin Steppe.\n+        <dd>A powerful <code>JDBCAppender</code> by Danko Mannhaupt\n+\t  who continues the work of Thomas Fenner. You might find\n+\t  this JDBCAppender more suitable then the one that ships with\n+\t  log4j 1.2. \n \t</dd>\n \n \t<!-- ============================================================================== -->\t\n \t\n-\t<dt><a\n-\thref=\"http://developer.jini.org/exchange/projects/log\"><b>JINI\n-\tlogging service</b></a> (registration required)</dt>\n-\n-\t<dd>A log4j wrapper for JINI by Jerome Bernard.</dd>\n-\n-\t<!-- ============================================================================== -->\n-\n \t<dt><a href=\"http://qos.ch/\"><b>log4j<em>ME</em></b></a></dt>\n \n \t<dd>Log4j<em>ME</em>, or log4j MiniEdition, is based on the\n@@ -139,9 +133,9 @@\n \t</dt> \n \n \t<dd>Another full-featured graphical log viewer. After a merger\n-\t  with a service-orinted company and a change in\n-\t  business-orientation, the owners of LogFactor5 have decided\n-\t  to donate their product to the log4j project.\n+\t  and the subsequent change in business-orientation, the\n+\t  owners of LogFactor5 have decided to donate their product to\n+\t  the log4j project.\n \t</dd>\n \n \t<!-- ============================================================================== -->",
-                "raw_url": "https://github.com/apache/log4j/raw/e87c632e10235c397fcc485cca3b94b8d9fed593/src/xdocs/download.xml",
-                "sha": "c6e4b3c23e56457b16789e59a35431107b8965b0",
+                "blob_url": "https://github.com/apache/log4j/blob/f39093206f57fb3b69d51d6f0690fa95ee4e068c/src/java/org/apache/log4j/xml/XMLDecoder.java",
+                "changes": 25,
+                "contents_url": "https://api.github.com/repos/apache/log4j/contents/src/java/org/apache/log4j/xml/XMLDecoder.java?ref=f39093206f57fb3b69d51d6f0690fa95ee4e068c",
+                "deletions": 4,
+                "filename": "src/java/org/apache/log4j/xml/XMLDecoder.java",
+                "patch": "@@ -25,6 +25,7 @@\n import java.util.HashMap;\n import java.util.Hashtable;\n import java.util.Iterator;\n+import java.util.List;\n import java.util.Map;\n import java.util.Vector;\n \n@@ -156,10 +157,20 @@ public Vector decode(URL url) throws IOException {\n \n     String line = null;\n     try {\n+        /**\n+         * Keep reading in the lines until we find the end of record line\n+         * \n+         * NOTE: this might chew a bit more memory than the previous implementation which\n+         * read in line blocks of 100, but allows a HUGE event spread over 100+ lines to be decode correctly.\n+         */\n         while ((line = reader.readLine()) != null) {\n-            StringBuffer buffer = new StringBuffer(line);\n-            for (int i = 0;i<100;i++) {\n-                buffer.append(reader.readLine());\n+            StringBuffer buffer = new StringBuffer(512);\n+            while(line!=null && line.indexOf(RECORD_END)==-1) {\n+                buffer.append(line).append(\"\\n\");\n+                line = reader.readLine();\n+            }\n+            if(line!=null) {\n+             buffer.append(line);   \n             }\n             v.addAll(decodeEvents(buffer.toString()));\n         }\n@@ -177,10 +188,16 @@ public Vector decode(URL url) throws IOException {\n   }\n \n   public Vector decodeEvents(String document) {\n+    /**\n+     * NOTE: due to the logic above, which should read in the string containing the WHOLE event text,\n+     * there should be no need to track partial events, but I have not changed the code just in case....\n+     * \n+     * Paul Smith 4th August 2004\n+     */\n     if (document != null) {\n       document = document.trim();\n       if (document.equals(\"\")) {\n-        return null;\n+        return new Vector();\n       } else {\n       \tString newDoc=null;\n       \tString newPartialEvent=null;",
+                "raw_url": "https://github.com/apache/log4j/raw/f39093206f57fb3b69d51d6f0690fa95ee4e068c/src/java/org/apache/log4j/xml/XMLDecoder.java",
+                "sha": "b75e67934cd1ae3c36564a6fe1cdc50b1b7e7479",
                 "status": "modified"
             }
         ],
-        "message": " - Fixed bug #11570 whereby XMLAppender would throw a\n   NullPointerException if the input message was null. Many thanks to\n   David Vandegrift for reporting the bug and to Hendrik Brummermann for\n   supplying the patch. [*]\n\n - Fixed bug #12366 whereby various versions of Xerces would not parse\n   log4j configuration scripts expressed in XML format. [*]\n\n - Fixed bug #15599. SocketAppender now honors ReconnectionDelay of 0.\n   Many thanks to Scott Schram for reporting the bug and providing the fix. [*]\n\n\nPR:\nObtained from:\nSubmitted by:\nReviewed by:\n\n\ngit-svn-id: https://svn.apache.org/repos/asf/logging/log4j/branches/v1_2-branch@309738 13f79535-47bb-0310-9956-ffa450edef68",
-        "parent": "https://github.com/apache/log4j/commit/680d100f2796942ce90262035bf757a9fc6421df",
+        "message": "Changes for Bugs 30443 & 30444\n\n30443 - The FileLoadAction class ignored the user's cancel action and loaded the file anyway\n\n30444 - An XML file containing log4j events that were over 100 lines would not be imported correctly and generate an NPE.   Changed the logic\nto keep reading in lines until it reached the end of record, or end of file before attempting to decode the text.\n\nPR: 30443 30444\n\n\ngit-svn-id: https://svn.apache.org/repos/asf/logging/log4j/trunk@310724 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/log4j/commit/0c10342f90783fde2e34faa145616d21784069c0",
         "patched_files": [
-            "SocketAppender.java"
+            "XMLDecoder.java"
         ],
         "repo": "log4j",
         "unit_tests": [
-            "SocketAppenderTest.java"
+            "XMLDecoderTest.java"
         ]
     }
 }

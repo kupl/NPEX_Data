@@ -82,9 +82,9 @@
         "message": "[ZEPPELIN-1917] Improve python.conda interpreter\n\n### What is this PR for?\n\nAdd missing commands to the `python.conda` interpreter\n\n- `conda info`\n- `conda list`\n- `conda create`\n- `conda install`\n- `conda uninstall (alias of remove)`\n- `conda env *`\n\n#### Implementation Detail\n\nThe reason I modified `PythonProcess` is due to NPE\n\n```java\n// https://github.com/apache/zeppelin/blob/master/python/src/main/java/org/apache/zeppelin/python/PythonProcess.java#L107-L118\n\n  public String sendAndGetResult(String cmd) throws IOException {\n    writer.println(cmd);\n    writer.println();\n    writer.println(\"\\\"\" + STATEMENT_END + \"\\\"\");\n    StringBuilder output = new StringBuilder();\n    String line = null;\n\n    // NPE when line is null\n    while (!(line = reader.readLine()).contains(STATEMENT_END)) {\n      logger.debug(\"Read line from python shell : \" + line);\n      output.append(line + \"\\n\");\n    }\n    return output.toString();\n  }\n```\n\n```\njava.lang.NullPointerException\nat org.apache.zeppelin.python.PythonProcess.sendAndGetResult(PythonProcess.java:113)\nat org.apache.zeppelin.python.PythonInterpreter.sendCommandToPython(PythonInterpreter.java:250)\nat org.apache.zeppelin.python.PythonInterpreter.bootStrapInterpreter(PythonInterpreter.java:272)\nat org.apache.zeppelin.python.PythonInterpreter.open(PythonInterpreter.java:100)\nat org.apache.zeppelin.python.PythonCondaInterpreter.restartPythonProcess(PythonCondaInterpreter.java:139)\nat org.apache.zeppelin.python.PythonCondaInterpreter.interpret(PythonCondaInterpreter.java:88)\nat org.apache.zeppelin.interpreter.LazyOpenInterpreter.interpret(LazyOpenInterpreter.java:94)\nat org.apache.zeppelin.interpreter.remote.RemoteInterpreterServer$InterpretJob.jobRun(RemoteInterpreterServer.java:494)\nat org.apache.zeppelin.scheduler.Job.run(Job.java:175)\nat org.apache.zeppelin.scheduler.FIFOScheduler$1.run(FIFOScheduler.java:139)\nat java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:471)\nat java.util.concurrent.FutureTask.run(FutureTask.java:262)\nat java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask.access$201(ScheduledThreadPoolExecutor.java:178)\nat java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask.run(ScheduledThreadPoolExecutor.java:292)\nat java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1145)\nat java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:615)\nat java.lang.Thread.run(Thread.java:745)\n```\n\n### What type of PR is it?\n[Improvement | Refactoring]\n\n### Todos\n* [x] - info\n* [x] - list\n* [x] - create\n* [x] - install\n* [x] - uninstall (= remove)\n* [x] - env *\n\n### What is the Jira issue?\n\n[ZEPPELIN-1917](https://issues.apache.org/jira/browse/ZEPPELIN-1917)\n\n### How should this be tested?\n\n1. Install [miniconda](http://conda.pydata.org/miniconda.html)\n2. Make sure that your python interpreter can use `conda` (check the Interpreter Binding page)\n3. Remove `test` conda env since we will create in the following section\n\n```sh\n$ conda env remove --yes --name test\n```\n\n4. Run these commands with `%python.conda`\n\n```\n%python.conda info\n%python.conda env list\n%python.conda create --name test\n\n# you should be able to see `test` in the list\n%python.conda env list\n%python.conda activate pymysql\n%python.conda install pymysql\n\n# you should be able to import\n%python\nimport pymysql.cursors\n\n%python.conda uninstall pymysql\n%python.conda deactivate pymysql\n\n# you should be able to see `No module named pymysql.cursor` since we deactivated\n%python\nimport pymysql.cursors\n```\n\n### Screenshots (if appropriate)\n\n![conda-screenshot](https://cloud.githubusercontent.com/assets/4968473/21747565/98c0e366-d5ad-11e6-8000-e293996089fa.gif)\n\n### Questions:\n* Does the licenses files need update? - NO\n* Is there breaking changes for older versions? - NO\n* Does this needs documentation? - NO\n\nAuthor: 1ambda <1amb4a@gmail.com>\n\nCloses #1868 from 1ambda/ZEPPELIN-1917/improve-conda-interpreter and squashes the following commits:\n\n3ba171a [1ambda] fix: Wrap output style\n292ed6d [1ambda] refactor: Throw exception in runCommand\n2d4aa7d [1ambda] test: Add some tests\n49a4a11 [1ambda] feat: Supports other env commands\n6eb7e92 [1ambda] fix: NPE in PythonProcess\n9c5dd86 [1ambda] refactor: Activate, Deactivate\nf955889 [1ambda] fix: minor\n935cb89 [1ambda] refactor: Abstract commands\nb1c4c9f [1ambda] feat: Add conda remove (uninstall)\ne539c42 [1ambda] feat: Add conda install\n4f58fa2 [1ambda] feat: Add conda create\n7da132d [1ambda] docs: Add missing conda list description\n929ca8a [1ambda] feat: Make conda output beautiful\n0c6ebb4 [1ambda] feat: Add list conda command\n017c76f [1ambda] refactor: Import InterpreterResult.{Code, Type} to short codes\nb8a5154 [1ambda] refactor: Simplify exception flow so private funcs don't need care exceptions\n64d4bef [1ambda] style: Rename some funcs\nafc456d [1ambda] refactor: Add private to member vars\nf36fc74 [1ambda] feat: Add info command\n2eb9bf5 [1ambda] style: Remove useless newlines\nbd2564e [1ambda] refactor: PythonCondaInterpreter.interpret\nf0d69bc [1ambda] fix: Use specific command for env list in conda",
         "parent": "https://github.com/apache/zeppelin/commit/2b0e2a41cb7e0d7fc160d5c9193413ffe4d94f68",
         "patched_files": [
-            "PythonProcess.java",
             "conda_usage.java",
-            "PythonCondaInterpreter.java"
+            "PythonCondaInterpreter.java",
+            "PythonProcess.java"
         ],
         "repo": "zeppelin",
         "unit_tests": [
@@ -250,7 +250,9 @@
         ],
         "message": "[ZEPPELIN-1837] Fix possible reason of DepInterpreterTest failure\n\n### What is this PR for?\nFix possible reason of DepInterpreterTest failure\n\n### What type of PR is it?\n[Bug Fix]\n\n### What is the Jira issue?\n[ZEPPELIN-1837](https://issues.apache.org/jira/browse/ZEPPELIN-1837)\n\n### Questions:\n* Does the licenses files need update? No\n* Is there breaking changes for older versions? No\n* Does this needs documentation? No\n\nDepInterpreterTest will use random temporary folder for repo\n\n`DefaultRepositorySystem.resolveDependencies` throws NPE at line 352\nif `ArtifactResolutionException` is thrown during `collectDependencies`.\nArtifact is found but it is impossible to download it (for example folder\ncan't be created)\n\nI think the reason is that several tests use \"local-repo\" folder for repository.\nWhile one test tries to download artifact, another deletes repository\n(or some another distructive thing)\n\nAuthor: Igor Drozdov <igor_drozdov@epam.com>\n\nCloses #1782 from DrIgor/ZEPPELIN-1837 and squashes the following commits:\n\na2af135 [Igor Drozdov] Fix possible reason of DepInterpreterTest failure",
         "parent": "https://github.com/apache/zeppelin/commit/61aeeaf10f340879337b6f19c5a9b3aaaa4eca9e",
-        "patched_files": [],
+        "patched_files": [
+            "DepInterpreter.java"
+        ],
         "repo": "zeppelin",
         "unit_tests": [
             "DepInterpreterTest.java"
@@ -527,34 +529,34 @@
         "message": "[ZEPPELIN-1320] Run zeppelin interpreter process as web front end user\n\nHave recreated this from https://github.com/apache/zeppelin/pull/1322\n### What is this PR for?\n\nWhile running a Notebook using shell, spark, python uses same user as which zeppelin server is running. Which means these interprets have same permission on file system as zeppelin server.\nIMO users should be able to impersonate themselves as a complete security system.\n### What type of PR is it?\n\n[Improvement]\n### Todos\n- [x] - Update doc\n- [x] - FIX NPEs\n- [x] - FIX CI\n### What is the Jira issue?\n- [ZEPPELIN-1320](https://issues.apache.org/jira/browse/ZEPPELIN-1320)\n### How should this be tested?\n- Enable shiro auth in shiro.ini\n- Add ssh key for the same user you want to try and impersonate (say user1).\n\n```\nadduser user1\nssh-keygen\nssh user1localhost mkdir -p .ssh\ncat ~/.ssh/id_rsa.pub | ssh user1localhost 'cat >> .ssh/authorized_keys'\n```\n- Start zeppelin server, try and run following in paragraph in a notebook\n- Go to interpreter setting page, and enable \"User Impersonate\" in any of the interpreter (in my example its shell interpreter)\n\n```\n%sh\nwhoami\n```\n\nCheck that it should run as new user, i.e. \"user1\"\n### Screenshots (if appropriate)\n\n![user impersonate](https://cloud.githubusercontent.com/assets/674497/20213127/f32fdc52-a82c-11e6-8e33-aebd6a943c5f.gif)\n\n### Questions:\n- Does the licenses files need update? no\n- Is there breaking changes for older versions? no\n- Does this needs documentation? yes\n\nAuthor: Prabhjyot Singh <prabhjyotsingh@gmail.org>\n\nCloses #1554 from prabhjyotsingh/ZEPPELIN-1320-2 and squashes the following commits:\n\ndc69c9d [Prabhjyot Singh] @Leemoonsoo review comment: making ZEPPELIN_SSH_COMMAND configurable\n1b26cc0 [Prabhjyot Singh] add doc\n5a76839 [Prabhjyot Singh] show User Impersonate only when interpreter setting is \"per user\" and \"isolated\"\n02c3084 [Prabhjyot Singh] Merge remote-tracking branch 'origin/master' into ZEPPELIN-1320-2\n03b2f20 [Prabhjyot Singh] use user instead of \"\"\n0ff80ec [Prabhjyot Singh] Merge remote-tracking branch 'origin/master' into ZEPPELIN-1320-2\ndd0731d [Prabhjyot Singh] fix missing test cases\naff1bf0 [Prabhjyot Singh] user should have option to run these interpreters as different user.",
         "parent": "https://github.com/apache/zeppelin/commit/f28c2b308e063fcc92b7bd1e56c4e743fd20f18f",
         "patched_files": [
+            "RemoteAngularObject.java",
+            "RemoteInterpreter.java",
+            "RemoteScheduler.java",
+            "InterpreterOption.java",
             "interpreter.java",
-            "RemoteInterpreterRunningProcess.java",
+            "DistributedResourcePool.java",
+            "user-impersonation.java",
             "RemoteInterpreterProcess.java",
             "interpreter-create.java",
-            "RemoteInterpreterManagedProcess.java",
-            "index.java",
-            "RemoteInterpreter.java",
-            "RemoteInterpreterOutputTestStream.java",
-            "DistributedResourcePool.java",
-            "processenduser.java",
-            "RemoteScheduler.java",
-            "user-impersonation.java",
-            "InterpreterFactory.java",
             "_navigation.java",
-            "zeppelin-env.java",
-            "InterpreterOption.java",
-            "RemoteAngularObject.java",
-            "Paragraph.java"
+            "InterpreterFactory.java",
+            "RemoteInterpreterOutputTestStream.java",
+            "RemoteInterpreterManagedProcess.java",
+            "Paragraph.java",
+            "RemoteInterpreterRunningProcess.java",
+            "index.java",
+            "processenduser.java",
+            "zeppelin-env.java"
         ],
         "repo": "zeppelin",
         "unit_tests": [
-            "RemoteInterpreterTest.java",
             "InterpreterFactoryTest.java",
-            "RemoteSchedulerTest.java",
-            "ParagraphTest.java",
-            "DistributedResourcePoolTest.java",
             "RemoteAngularObjectTest.java",
-            "RemoteInterpreterProcessTest.java"
+            "RemoteInterpreterProcessTest.java",
+            "ParagraphTest.java",
+            "RemoteSchedulerTest.java",
+            "DistributedResourcePoolTest.java",
+            "RemoteInterpreterTest.java"
         ]
     },
     "zeppelin_3a12f30": {
@@ -900,26 +902,26 @@
         "message": "ZEPPELIN-1345 - Create a custom matplotlib backend that natively supports inline plotting in a python interpreter cell\n\n### What is this PR for?\n\nThis PR is the first of two major steps needed to improve matplotlib integration in Zeppelin (ZEPPELIN-1344). The latter, which is a plotting backend with fully interactive tools enabled, will be done afterwards in a separate PR. This PR specifically for automatically displaying output from calls to matplotlib plotting functions inline with each paragraph. Thanks to the addition of post-execute hooks (ZEPPELIN-1423), there is no need to call any `show()` function to display an inline plot, just like in Jupyter.\n### What type of PR is it?\n\nImprovement\n### Todos\n\nThe main code has been written and anyone who reads this is encouraged to test it, but there are a few minor todos:\n- [x] - Add unit tests\n- [x] - Add documentation\n- [x] - Add screenshot showing iterative plotting with angular mode\n### What is the Jira issue?\n\n[ZEPPELIN-1345](https://issues.apache.org/jira/browse/ZEPPELIN-1345)\n### How should this be tested?\n\nIn a pyspark or python paragraph, enter and run\n\n``` python\nimport matplotlib.pyplot as plt\nplt.plot([1, 2, 3])\n```\n\nThe plot should be displayed automatically without calling any `show()` function whatsoever. A special method called `configure_mpl()` can also be used to modify the inline plotting behavior. For example,\n\n``` python\nz.configure_mpl(close=False, angular=True)\nplt.plot([1, 2, 3])\n```\n\nallows for iterative updates to the plot provided you have PY4J installed for your python installation (which of course is always the case if you use pypsark). To clarify, this feature only currently works with pyspark (not python as there are no `angularBind()` and `angularUnbind()` methods yet). Doing something like:\n\n```\nplt.plot([3, 2, 1])\n```\n\nwill update the plot that was generated by the previous paragraph by leveraging Zeppelin's Angular Display System. However, by setting `close=False`, matplotlib will no longer automatically close figures so it is now up to the user to explicitly close each figure instance they create. There's quite a bit more options for `z.configure_mpl()`, but I will save that discussion for the documentation.\n### Screenshots (if appropriate)\n![img](http://i.imgur.com/e1xHKnV.gif)\n\n### Questions:\n- Does the licenses files need update? No\n- Is there breaking changes for older versions? No\n- Does this needs documentation? Yes\n\nAuthor: Alex Goodman <agoodm@users.noreply.github.com>\n\nCloses #1534 from agoodm/ZEPPELIN-1345 and squashes the following commits:\n\n9ef6ff7 [Alex Goodman] Move mpl backend files to /interpreter\n24f89c6 [Alex Goodman] Catch potential NullPointerExceptions from hook registry\nbdb584e [Alex Goodman] Make sure expressions are printed when no plots are shown\n22b6fe4 [Alex Goodman] Remove unused variable\nd3d1aa0 [Alex Goodman] Fix CI test failure\nc90d204 [Alex Goodman] Update spark.md\nbcf0bf3 [Alex Goodman] Update python.md for new matplotlib integration\nc9b65a5 [Alex Goodman] Add iterative plotting example image\n8029a05 [Alex Goodman] Update python/README.md\nf2d9e86 [Alex Goodman] Exclude tests are excluded in python/pom.xml\n86b1c90 [Alex Goodman] Fix tutorial notebook not loading\nc37b00f [Alex Goodman] Fix legend in tutorial notebook\na321d79 [Alex Goodman] Update python.md\n82350e3 [Alex Goodman] Update matplotlib tutorial notebook\n9792f97 [Alex Goodman] Add unit tests\n8b9b973 [Alex Goodman] Fix NullPointerExceptions in unit tests\n82135ad [Alex Goodman] Removed unused variable\nf9c9498 [Alex Goodman] Added support for Angular Display System\nedf750a [Alex Goodman] Add new matplotlib backend for python/pyspark interpreters",
         "parent": "https://github.com/apache/zeppelin/commit/34621717df173749f677d02ace334870d06f529d",
         "patched_files": [
-            ".java",
+            "PySparkInterpreter.java",
+            "spark.java",
+            "mpl_config.java",
+            "note.java",
             "zeppelin_pyspark.java",
+            "distribution.java",
+            "python.java",
+            "backend_zinline.java",
+            "README.java",
             "matplotlibAngularExample.java",
             "bootstrap.java",
-            "backend_zinline.java",
+            ".java",
             "PythonInterpreter.java",
-            "pom.java",
-            "PySparkInterpreter.java",
-            "note.java",
-            "spark.java",
-            "python.java",
-            "README.java",
-            "mpl_config.java",
-            "distribution.java"
+            "pom.java"
         ],
         "repo": "zeppelin",
         "unit_tests": [
             "PythonInterpreterMatplotlibTest.java",
-            "PySparkInterpreterTest.java",
-            "PythonInterpreterTest.java"
+            "PythonInterpreterTest.java",
+            "PySparkInterpreterTest.java"
         ]
     },
     "zeppelin_47ac1d4": {
@@ -1018,8 +1020,8 @@
         "message": "[ZEPPELIN-3014] NPE bug fix and Error message enhancement with Kylin Interpreter\n\n### What is this PR for?\nA few sentences describing the overall goals of the pull request's commits.\nFirst time? Check out the contributing guide - https://zeppelin.apache.org/contribution/contributions.html\n\n### What type of PR is it?\nBug Fix\n\n### Todos\n* [ ] - Task\n\n### What is the Jira issue?\n* https://issues.apache.org/jira/browse/ZEPPELIN-3014\n\n### How should this be tested?\n*  Setup Travis CI as described on https://zeppelin.apache.org/contribution/contributions.html#continuous-integration\n* Use existing unit tests in kylin module.\n\n### Screenshots (if appropriate)\n\n#### before: NPE when result set is empty\n![image](https://user-images.githubusercontent.com/18542573/32154048-f1b8ba58-bcfb-11e7-98cc-98cdf484f2d5.png)\n#### after: no NPE when result set is empty, just an empty table\n![image](https://user-images.githubusercontent.com/18542573/32154069-110215d0-bcfc-11e7-87e9-cc049001f1c7.png)\n\n#### before: when query fails, only error code is returned, no error message\n![image](https://user-images.githubusercontent.com/18542573/32154088-29651938-bcfc-11e7-9e66-cd2cfccba054.png)\n#### after: when query fails, both error code and error message are displayed to users\n![image](https://user-images.githubusercontent.com/18542573/32154096-3d3ab01c-bcfc-11e7-8cf3-d710d96b8c5a.png)\n\n### Questions:\n* Does the licenses files need update? No.\n* Is there breaking changes for older versions? No.\n* Does this needs documentation? No.\n\nAuthor: Liu <jinxliu@ebay.com>\n\nCloses #2645 from jinxliu/kylin-intp-new and squashes the following commits:\n\nd5692bf [Liu] refactor\n85b6424 [Liu] add test for empty result set\n4596470 [Liu] ZEPPELIN-3014: NPE bug fix and Error message enhancement with Kylin Interpreter",
         "parent": "https://github.com/apache/zeppelin/commit/3505625c26a45df14d6412b73da0b33aac68e908",
         "patched_files": [
-            "KylinInterpreter.java",
-            "KylinErrorResponse.java"
+            "KylinErrorResponse.java",
+            "KylinInterpreter.java"
         ],
         "repo": "zeppelin",
         "unit_tests": [
@@ -1117,6 +1119,60 @@
         "repo": "zeppelin",
         "unit_tests": [
             "InterpreterSettingManagerTest.java"
+        ]
+    },
+    "zeppelin_685eb92": {
+        "bug_id": "zeppelin_685eb92",
+        "commit": "https://github.com/apache/zeppelin/commit/685eb9249d1c1d821ce57f1ed0559f1539dfbe69",
+        "file": [
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/zeppelin/blob/685eb9249d1c1d821ce57f1ed0559f1539dfbe69/zeppelin-server/src/main/java/org/apache/zeppelin/utils/SecurityUtils.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/zeppelin/contents/zeppelin-server/src/main/java/org/apache/zeppelin/utils/SecurityUtils.java?ref=685eb9249d1c1d821ce57f1ed0559f1539dfbe69",
+                "deletions": 2,
+                "filename": "zeppelin-server/src/main/java/org/apache/zeppelin/utils/SecurityUtils.java",
+                "patch": "@@ -53,7 +53,7 @@\n   private static final HashSet<String> EMPTY_HASHSET = Sets.newHashSet();\n   private static boolean isEnabled = false;\n   private static final Logger log = LoggerFactory.getLogger(SecurityUtils.class);\n-  \n+\n   public static void setIsEnabled(boolean value) {\n     isEnabled = value;\n   }\n@@ -147,7 +147,9 @@ public static Collection getRealmsList() {\n                     new SimplePrincipalCollection(subject.getPrincipal(), realm.getName()),\n                     ((LdapRealm) realm).getContextFactory()\n             );\n-            roles = new HashSet<>(auth.getRoles());\n+            if (auth != null) {\n+              roles = new HashSet<>(auth.getRoles());\n+            }\n           } catch (NamingException e) {\n             log.error(\"Can't fetch roles\", e);\n           }",
+                "raw_url": "https://github.com/apache/zeppelin/raw/685eb9249d1c1d821ce57f1ed0559f1539dfbe69/zeppelin-server/src/main/java/org/apache/zeppelin/utils/SecurityUtils.java",
+                "sha": "f9f5f228ff02d6dad3010c0b019150179f9b2f7f",
+                "status": "modified"
+            }
+        ],
+        "message": "ZEPPELIN-3332 Zeppelin login fails with NPE if ldapRealm.authorizationEnabled is not set true\n\n### What is this PR for?\nSimply fixes NPE by checking for null\n\n### What type of PR is it?\nBug Fix\n\n### What is the Jira issue?\nhttps://issues.apache.org/jira/browse/ZEPPELIN-3332\n\n### Questions:\nDoes the licenses files need update? No\nIs there breaking changes for older versions? No\nDoes this needs documentation? No\n\nAuthor: bag_of_tricks <falbani@hortonworks.com>\n\nCloses #2911 from felixalbani/ZEPPELIN-3332 and squashes the following commits:\n\nc6ccf4189 [bag_of_tricks] ZEPPELIN-3332\n622333eb9 [bag_of_tricks] Revert \"ZEPPELIN-3332\"\ndd7d37dac [bag_of_tricks] ZEPPELIN-3332",
+        "parent": "https://github.com/apache/zeppelin/commit/7a9572d67e4f02c6ad49ac091d6bc542732c19fc",
+        "patched_files": [
+            "SecurityUtils.java"
+        ],
+        "repo": "zeppelin",
+        "unit_tests": [
+            "SecurityUtilsTest.java"
+        ]
+    },
+    "zeppelin_6bd3cd0": {
+        "bug_id": "zeppelin_6bd3cd0",
+        "commit": "https://github.com/apache/zeppelin/commit/6bd3cd01ba05e2d43baf1330295c4217abf32f92",
+        "file": [
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/zeppelin/blob/6bd3cd01ba05e2d43baf1330295c4217abf32f92/zeppelin-zengine/src/main/java/com/nflabs/zeppelin/driver/ZeppelinDriverFactory.java",
+                "changes": 7,
+                "contents_url": "https://api.github.com/repos/apache/zeppelin/contents/zeppelin-zengine/src/main/java/com/nflabs/zeppelin/driver/ZeppelinDriverFactory.java?ref=6bd3cd01ba05e2d43baf1330295c4217abf32f92",
+                "deletions": 1,
+                "filename": "zeppelin-zengine/src/main/java/com/nflabs/zeppelin/driver/ZeppelinDriverFactory.java",
+                "patch": "@@ -56,6 +56,7 @@ public ZeppelinDriverFactory(String driverRootDir, URI [] uriList) throws Zeppel\n \t\t}\n \t\t\n \t\tFile root = new File(driverRootDir);\n+\t\tlogger.info(\"Driver directory \"+root.getAbsolutePath());\n \t\tFile[] drivers = root.listFiles();\n \t\tif (drivers!=null) {\n \t\t\tfor (File d : drivers) {\n@@ -67,6 +68,7 @@ public ZeppelinDriverFactory(String driverRootDir, URI [] uriList) throws Zeppel\n \t\tif (uriList!=null) {\n \t\t\tfor (URI uri : uriList) {\n \t\t\t\turis.put(uri.getScheme(), uri.getSchemeSpecificPart());\n+\t\t\t\tlogger.info(\"Add configuration name=\"+uri.getScheme()+\", connectionUrl=\"+uri.getSchemeSpecificPart());\n \t\t\t\tif (defaultDriverName == null) {\n \t\t\t\t\tdefaultDriverName = uri.getScheme();\n \t\t\t\t}\n@@ -130,7 +132,7 @@ private URLClassLoader loadLibrary(File path){\n \t\t\tReflections reflections = new Reflections(packages);\n \t\t\tSet<Class<? extends ZeppelinDriver>> driverClasses = reflections.getSubTypesOf(ZeppelinDriver.class);\n \t\t\tfor(Class c : driverClasses){\n-\t\t\t\tif(MockDriver.class.isAssignableFrom(c)==false){\n+\t\t\t\tif(c!=null && MockDriver.class.isAssignableFrom(c)==false){\n \t\t\t\t\tlogger.info(\"Found driver \"+c.getName()+\" cl=\"+cl);\n \t\t\t\t\tConstructor<ZeppelinDriver> constructor = c.getConstructor(new Class []{});\n \t\t\t\t\tZeppelinDriver driver = constructor.newInstance();\n@@ -191,6 +193,9 @@ private URLClassLoader loadLibrary(File path){\n \t */\n \tpublic ZeppelinDriver getDriver(String name) throws ZeppelinDriverException{\n \t\tString uri = uris.get(name);\n+\t\tif(uri==null) {\n+\t\t\tthrow new ZeppelinDriverException(\"Can't find uri from name \"+name);\n+\t\t}\n \t\ttry {\n \t\t\treturn getDriverByUrl(uri);\n \t\t} catch (Exception e) {",
+                "raw_url": "https://github.com/apache/zeppelin/raw/6bd3cd01ba05e2d43baf1330295c4217abf32f92/zeppelin-zengine/src/main/java/com/nflabs/zeppelin/driver/ZeppelinDriverFactory.java",
+                "sha": "ff43eb91f1dd71ed53d86d7fa435fcc15adca5d8",
+                "status": "modified"
+            }
+        ],
+        "message": "Handle NPE",
+        "parent": "https://github.com/apache/zeppelin/commit/b2a302f67e901de0b22f6b39a71fd8ac24c5521e",
+        "patched_files": [
+            "ZeppelinDriverFactory.java"
+        ],
+        "repo": "zeppelin",
+        "unit_tests": [
+            "ZeppelinDriverFactoryTest.java"
         ]
     },
     "zeppelin_6caf587": {
@@ -1307,20 +1363,20 @@
         "message": "[ZEPPELIN-3090] Support KnoxSSO Authentication\n\n### What is this PR for?\nZeppelin to support KnoxSSO Authentication method.\n\n### What type of PR is it?\n[Bug Fix | Improvement]\n\n### What is the Jira issue?\n* [https://issues.apache.org/jira/browse/ZEPPELIN-3090](https://issues.apache.org/jira/browse/ZEPPELIN-3090)\n\n### How should this be tested?\nThis will require new shiro conf\n```\nknoxJwtRealm = org.apache.zeppelin.realm.jwt.KnoxJwtRealm\nknoxJwtRealm.providerUrl = https://domain.example.com/\nknoxJwtRealm.login = gateway/knoxsso/knoxauth/login.html\nknoxJwtRealm.logout = gateway/knoxssout/api/v1/webssout\nknoxJwtRealm.redirectParam = originalUrl\nknoxJwtRealm.cookieName = hadoop-jwt\nknoxJwtRealm.publicKeyPath = /etc/zeppelin/conf/knox-sso.pem\nknoxJwtRealm.groupPrincipalMapping = group.principal.mapping\nknoxJwtRealm.principalMapping = principal.mapping\n```\nRefer screenshot section for demo\n\n### Screenshots (if appropriate)\n![after](https://user-images.githubusercontent.com/674497/33554955-ae8d1874-d924-11e7-88fa-0f06a1b28519.gif)\n\n### Questions:\n* Does the licenses files need update? yes\n* Is there breaking changes for older versions? no\n* Does this needs documentation? yes\n\nAuthor: Prabhjyot Singh <prabhjyotsingh@gmail.com>\nAuthor: prabhjyotsingh <prabhjyotsingh@gmail.com>\n\nCloses #2694 from prabhjyotsingh/KNOX_SSO and squashes the following commits:\n\n05ed844ac [Prabhjyot Singh] Add unit test case\n187b5678f [Prabhjyot Singh] fix failing \"  PersonalizeActionsIT.testGraphAction:263 The output of graph mode is not changed\" test.\n51f13521c [Prabhjyot Singh] Merge remote-tracking branch 'origin/master' into KNOX_SSO\n153176450 [Prabhjyot Singh] Add more validation to KnoxAuthenticationFilter.\n123349fc5 [Prabhjyot Singh] remove System.out.println, and some of the redundent lines, added more comment\nc79979acf [Prabhjyot Singh] Check for expired/deleted SSO cookie\nc9a137f76 [Prabhjyot Singh] Merge remote-tracking branch 'origin/master' into KNOX_SSO\ndbca0107a [Prabhjyot Singh] Add documentation for KNOX SSO\n99541765d [Prabhjyot Singh] use default config\n547c7b391 [Prabhjyot Singh] updating LICENSE\n067a3e620 [prabhjyotsingh] fix \"javax.servlet.ServletException: java.lang.NullPointerException\"\n564005ff5 [Prabhjyot Singh] remove \"hadoop-common.version\" dependency\n355b475c5 [Prabhjyot Singh] knox sso",
         "parent": "https://github.com/apache/zeppelin/commit/ed468003323b984b0249d40d88c2378cc65950de",
         "patched_files": [
-            "KnoxAuthenticationFilter.java",
-            "LICENSE.java",
-            "AbstractTestRestApi.java",
-            "PrincipalMappingException.java",
-            "navbar.java",
-            "PrincipalMapper.java",
+            "KnoxJwtRealm.java",
             "JWTAuthenticationToken.java",
-            "shiro.java",
-            "LoginRestApi.java",
+            "KnoxAuthenticationFilter.java",
             "SimplePrincipalMapper.java",
-            "app.java",
+            "shiro.java",
+            "PrincipalMapper.java",
             "pom.java",
+            "LoginRestApi.java",
+            "app.java",
+            "navbar.java",
+            "AbstractTestRestApi.java",
             "shiro_authentication.java",
-            "KnoxJwtRealm.java"
+            "PrincipalMappingException.java",
+            "LICENSE.java"
         ],
         "repo": "zeppelin",
         "unit_tests": [
@@ -1381,31 +1437,31 @@
             "HeliumBundleFactoryTest.java"
         ]
     },
-    "zeppelin_78e2e91": {
-        "bug_id": "zeppelin_78e2e91",
-        "commit": "https://github.com/apache/zeppelin/commit/78e2e912b6f9014e9a83c929cde339dcb8459bdc",
+    "zeppelin_767a50b": {
+        "bug_id": "zeppelin_767a50b",
+        "commit": "https://github.com/apache/zeppelin/commit/767a50b4164ef323ef18160485d226c013c7c00d",
         "file": [
             {
-                "additions": 2,
-                "blob_url": "https://github.com/apache/zeppelin/blob/78e2e912b6f9014e9a83c929cde339dcb8459bdc/zeppelin-zengine/src/main/java/org/apache/zeppelin/interpreter/InterpreterSettingManager.java",
-                "changes": 3,
-                "contents_url": "https://api.github.com/repos/apache/zeppelin/contents/zeppelin-zengine/src/main/java/org/apache/zeppelin/interpreter/InterpreterSettingManager.java?ref=78e2e912b6f9014e9a83c929cde339dcb8459bdc",
-                "deletions": 1,
-                "filename": "zeppelin-zengine/src/main/java/org/apache/zeppelin/interpreter/InterpreterSettingManager.java",
-                "patch": "@@ -514,7 +514,8 @@ private Properties convertInterpreterProperties(Map<String, InterpreterProperty>\n         }\n       }\n     } catch (NullPointerException e) {\n-      logger.warn(\"Couldn't get interpreter editor setting\");\n+      // Use `debug` level because this log occurs frequently\n+      logger.debug(\"Couldn't get interpreter editor setting\");\n     }\n     return editor;\n   }",
-                "raw_url": "https://github.com/apache/zeppelin/raw/78e2e912b6f9014e9a83c929cde339dcb8459bdc/zeppelin-zengine/src/main/java/org/apache/zeppelin/interpreter/InterpreterSettingManager.java",
-                "sha": "f0315919f86ce9f500f78ef9e3dddf433776be33",
+                "additions": 0,
+                "blob_url": "https://github.com/apache/zeppelin/blob/767a50b4164ef323ef18160485d226c013c7c00d/spark/interpreter/src/main/java/org/apache/zeppelin/spark/NewSparkInterpreter.java",
+                "changes": 43,
+                "contents_url": "https://api.github.com/repos/apache/zeppelin/contents/spark/interpreter/src/main/java/org/apache/zeppelin/spark/NewSparkInterpreter.java?ref=767a50b4164ef323ef18160485d226c013c7c00d",
+                "deletions": 43,
+                "filename": "spark/interpreter/src/main/java/org/apache/zeppelin/spark/NewSparkInterpreter.java",
+                "patch": "@@ -81,7 +81,6 @@ public void open() throws InterpreterException {\n     try {\n       String scalaVersion = extractScalaVersion();\n       LOGGER.info(\"Using Scala Version: \" + scalaVersion);\n-      setupConfForPySpark();\n       SparkConf conf = new SparkConf();\n       for (Map.Entry<Object, Object> entry : getProperties().entrySet()) {\n         if (!StringUtils.isBlank(entry.getValue().toString())) {\n@@ -126,48 +125,6 @@ public void open() throws InterpreterException {\n     }\n   }\n \n-  private void setupConfForPySpark() {\n-    String sparkHome = getProperty(\"SPARK_HOME\");\n-    File pysparkFolder = null;\n-    if (sparkHome == null) {\n-      String zeppelinHome =\n-          new DefaultInterpreterProperty(\"ZEPPELIN_HOME\", \"zeppelin.home\", \"../../\")\n-              .getValue().toString();\n-      pysparkFolder = new File(zeppelinHome,\n-          \"interpreter\" + File.separator + \"spark\" + File.separator + \"pyspark\");\n-    } else {\n-      pysparkFolder = new File(sparkHome, \"python\" + File.separator + \"lib\");\n-    }\n-\n-    ArrayList<String> pysparkPackages = new ArrayList<>();\n-    for (File file : pysparkFolder.listFiles()) {\n-      if (file.getName().equals(\"pyspark.zip\")) {\n-        pysparkPackages.add(file.getAbsolutePath());\n-      }\n-      if (file.getName().startsWith(\"py4j-\")) {\n-        pysparkPackages.add(file.getAbsolutePath());\n-      }\n-    }\n-\n-    if (pysparkPackages.size() != 2) {\n-      throw new RuntimeException(\"Not correct number of pyspark packages: \" +\n-          StringUtils.join(pysparkPackages, \",\"));\n-    }\n-    // Distribute two libraries(pyspark.zip and py4j-*.zip) to workers\n-    System.setProperty(\"spark.files\", mergeProperty(System.getProperty(\"spark.files\", \"\"),\n-        StringUtils.join(pysparkPackages, \",\")));\n-    System.setProperty(\"spark.submit.pyFiles\", mergeProperty(\n-        System.getProperty(\"spark.submit.pyFiles\", \"\"), StringUtils.join(pysparkPackages, \",\")));\n-\n-  }\n-\n-  private String mergeProperty(String originalValue, String appendedValue) {\n-    if (StringUtils.isBlank(originalValue)) {\n-      return appendedValue;\n-    }\n-    return originalValue + \",\" + appendedValue;\n-  }\n-\n   @Override\n   public void close() {\n     LOGGER.info(\"Close SparkInterpreter\");",
+                "raw_url": "https://github.com/apache/zeppelin/raw/767a50b4164ef323ef18160485d226c013c7c00d/spark/interpreter/src/main/java/org/apache/zeppelin/spark/NewSparkInterpreter.java",
+                "sha": "fcfee277cea5df8c3c358bb395beb973b8d90dfc",
                 "status": "modified"
             }
         ],
-        "message": "[ZEPPELIN-2211] Too many WARN logs: \"Couldn't get interpreter editor setting\"\n\n### What is this PR for?\n\nevery time we insert invalid backend magic (e.g `sparc`), `InterpreterSettingManager` throws WARN log.\n\nI changed the log level to debug because\n\n- WARN level should not be used for this kind of situation.\n- This log doesn't provide any useful information for user.  So info level is not proper as well.\n\nI attached a screenshot.\n\n### What type of PR is it?\n[Improvement]\n\n### Todos\n\nNONE\n\n### What is the Jira issue?\n\n[ZEPPELIN-2211](https://issues.apache.org/jira/browse/ZEPPELIN-2211)\n\n### How should this be tested?\n\n- Insert invalid magic in your paragraph. For example `sparc` or `marcdown`\n\n### Screenshots (if appropriate)\n\n![interpreter_setting_manager](https://cloud.githubusercontent.com/assets/4968473/24235266/cbecbbf4-0fdf-11e7-9fcc-f1a95a5e82ab.gif)\n\n### Questions:\n* Does the licenses files need update? - NO\n* Is there breaking changes for older versions? - NO\n* Does this needs documentation? - NO\n\nAuthor: 1ambda <1amb4a@gmail.com>\n\nCloses #2179 from 1ambda/ZEPPELIN-2211/change-log-level-ISM-NPE and squashes the following commits:\n\ne333c1c [1ambda] fix: Change log level to debug from warn",
-        "parent": "https://github.com/apache/zeppelin/commit/15641d0981395a0b52b1d05de7a81e6261dedd2d",
+        "message": "ZEPPELIN-3531. Don't look for py4j in NewSparkInterpreter\n\n### What is this PR for?\nJust remove setupConfForPySpark in NewSparkInterpreter as it is not necessary and will cause NPE when the node launch spark interpreter doesn't have spark installed in yarn cluster mode.\n\n### What type of PR is it?\n[Bug Fix]\n\n### Todos\n* [ ] - Task\n\n### What is the Jira issue?\n* https://issues.apache.org/jira/browse/ZEPPELIN-3531\n\n### How should this be tested?\n* CI pass & Manually tested in a 3 node cluster\n\n### Screenshots (if appropriate)\n\n### Questions:\n* Does the licenses files need update? No\n* Is there breaking changes for older versions? No\n* Does this needs documentation? No\n\nAuthor: Jeff Zhang <zjffdu@apache.org>\n\nCloses #3008 from zjffdu/ZEPPELIN-3531 and squashes the following commits:\n\ne8b2969e9 [Jeff Zhang] ZEPPELIN-3531. Don't look for py4j in NewSparkInterpreter",
+        "parent": "https://github.com/apache/zeppelin/commit/6fc3057d529691e697361ef9a67e21cac75e21ed",
         "patched_files": [
-            "InterpreterSettingManager.java"
+            "NewSparkInterpreter.java"
         ],
         "repo": "zeppelin",
         "unit_tests": [
-            "InterpreterSettingManagerTest.java"
+            "NewSparkInterpreterTest.java"
         ]
     },
     "zeppelin_7954d80": {
@@ -1685,20 +1741,20 @@
         "message": "[ZEPPELIN-1376] Add proxy credentials for dependency repo for corporate firewall use-cases\n\n### What is this PR for?\nWhen using Zeppelin behind corporate firewall, sometimes the dependencies download just fails silently. This PR has 2 objectives:\n\n* add proxy credentials information for dependencies repo\n* raise clear error message in case of dependencies download failure\n\nThere are 3 commits.\n\nThe first one add extra inputs in the form for adding new repository\n\n![add_repo](https://cloud.githubusercontent.com/assets/1532977/18017489/0b486fda-6bd2-11e6-90c7-ceda18c53575.png)\n\nThe second commit fixes some issues and display a clear and explicit error message when download of dependencies fail.\n\nBefore that, when the download fails, we can see the below behaviour\n\n![irrelevant_double_error_message](https://cloud.githubusercontent.com/assets/1532977/18017541/3cf0de1e-6bd2-11e6-8285-af03f222e8d2.gif)\n\n* the error message is displayed twice because the call twice the method `checkDownloadingDependencies();`. One in the success callback of:\n\n```javascript\n $scope.updateInterpreterSetting = function(form, settingId) {\n              ...\n            $http.put(baseUrlSrv.getRestApiBase() + '/interpreter/setting/' + settingId, request)\n              .success(function(data, status, headers, config) {\n                $scope.interpreterSettings[index] = data.body;\n                removeTMPSettings(index);\n                thisConfirm.close();\n                checkDownloadingDependencies();\n                $route.reload();\n              })\n              .error(function(data, status, headers, config) {\n             ...\n    };\n```\n\nAnother call is inside success callback of `getInterpreterSettings()`\n\n```javascript\nvar getInterpreterSettings = function() {\n      $http.get(baseUrlSrv.getRestApiBase() + '/interpreter/setting')\n      .success(function(data, status, headers, config) {\n        $scope.interpreterSettings = data.body;\n        checkDownloadingDependencies();\n      }).error(function(data, status, headers, config) {\n      ....\n```\n\nThe problem is that `$route.reload();` in the success callback of `updateInterpreterSetting()` will trigger `init()` then `getInterpreterSettings()` so `checkDownloadingDependencies()` is called twice.\n\nI remove the call to `checkDownloadingDependencies()` from success callback of `updateInterpreterSetting()`\n\nThe second modification is on class `DependencyResolver`. In the screen capture above, we get a **cryptic** NullPointerException coming from `DefaultRepositorySystem`. I now catch this NPE to wrap it into a more sensible and clearer exception:\n\n```java\n\n  public List<ArtifactResult> getArtifactsWithDep(String dependency,\n    Collection<String> excludes) throws RepositoryException {\n    Artifact artifact = new DefaultArtifact(dependency);\n    DependencyFilter classpathFilter = DependencyFilterUtils.classpathFilter(JavaScopes.COMPILE);\n    PatternExclusionsDependencyFilter exclusionFilter =\n            new PatternExclusionsDependencyFilter(excludes);\n\n    CollectRequest collectRequest = new CollectRequest();\n    collectRequest.setRoot(new Dependency(artifact, JavaScopes.COMPILE));\n\n    synchronized (repos) {\n      for (RemoteRepository repo : repos) {\n        collectRequest.addRepository(repo);\n      }\n    }\n    DependencyRequest dependencyRequest = new DependencyRequest(collectRequest,\n            DependencyFilterUtils.andFilter(exclusionFilter, classpathFilter));\n\n //Catch NPE thrown by aether and give a proper error message\n    try {\n      return system.resolveDependencies(session, dependencyRequest).getArtifactResults();\n    } catch (NullPointerException ex) {\n      throw new RepositoryException(String.format(\"Cannot fetch dependencies for %s\", dependency));\n    }\n  }\n```\n\nThe result is much more cleaner\n\n![dependencies_download_error_popup](https://cloud.githubusercontent.com/assets/1532977/18033855/1be5fe9a-6d2e-11e6-91f9-2f5ea66cab26.gif)\n\nThe last commit is just doc update\n\n![updated_docs](https://cloud.githubusercontent.com/assets/1532977/18017797/97302f14-6bd3-11e6-97cc-77bd52f25cde.png)\n\n### What type of PR is it?\n[Improvement]\n\n### Todos\n* [ ] - Code Review\n* [ ] - Simple test with no Internet connection\n* [ ] - Test within a corporate firewall env with a third-party dependency, requiring download\n\n### What is the Jira issue?\n**[ZEPPELIN-1376]**\n\n### How should this be tested?\n\n##### Simple test\n* `git fetch origin pull/1369/head:WebProxy`\n* `git checkout WebProxy`\n* `mvn clean package -DskipTests`\n* `bin/zeppelin-daemon.sh restart`\n* disconnect from the Internet (pull out the cable, shutdown wifi ...)\n* add a random dependency to the Spark interpreter (take `info.archinnov:achilles-core:4.2.2` for example)\n* validate the change, you should see an error popup on the top-right corner saying that Zeppelin cannot download the dependency\n\n##### Corporate firewall test\n* follow the steps above for simple test\n* create a new repository (see how to **[here]**) and set the proxy information\n* retry the steps above to ensure that the download is successful\n\n### Screenshots (if appropriate)\nSee above\n\n### Questions:\n* Does the licenses files need update? --> **NO**\n* Is there breaking changes for older versions? --> **NO**\n* Does this needs documentation?  --> **YES, DONE**\n\n[ZEPPELIN-1376]: https://issues.apache.org/jira/browse/ZEPPELIN-1376\n[here]: http://localhost:4000/manual/dependencymanagement.html\n\nAuthor: DuyHai DOAN <doanduyhai@gmail.com>\nAuthor: doanduyhai <doanduyhai@apache.org>\n\nCloses #1369 from doanduyhai/ZEPPELIN-1376 and squashes the following commits:\n\nb8d44e7 [doanduyhai] [ZEPPELIN-1376] Improve error popup display\n177fbd3 [DuyHai DOAN] [ZEPPELIN-1376] Fixes JS bug to display error popup for other interpreters\n9f76ef4 [DuyHai DOAN] [ZEPPELIN-1376] Do not repeat the same error popup multiple times\nb264193 [DuyHai DOAN] [ZEPPELIN-1376] Add unit test and fix impl for DependencyResolver to catch NPE\n1913a0a [DuyHai DOAN] [ZEPPELIN-1376] Update documentation\nf01be9b [DuyHai DOAN] [ZEPPELIN-1376] Raise clear error message in case of dependencies download failure\n6f2b6f8 [DuyHai DOAN] [ZEPPELIN-1376] Add proxy credentials information for dependencies repo",
         "parent": "https://github.com/apache/zeppelin/commit/821b61bb6bdc8ed0622aad04b3c6918ee73f52c5",
         "patched_files": [
-            "InterpreterRestApi.java",
-            "home.java",
-            "DependencyResolver.java",
             "dependencymanagement.java",
-            "interpreter.java",
-            "notebook.java",
             "jobmanager.java",
-            "credential.java",
-            "configuration.java",
-            "InterpreterFactory.java",
-            "repository-dialog.java",
+            "interpreter.java",
             "AbstractDependencyResolver.java",
+            "home.java",
+            "InterpreterFactory.java",
+            "credential.java",
             "app.java",
+            "InterpreterRestApi.java",
+            "configuration.java",
+            "notebook.java",
             "Repository.java",
+            "repository-dialog.java",
+            "DependencyResolver.java",
             "interpreter-add-repo2.java"
         ],
         "repo": "zeppelin",
@@ -1870,8 +1926,8 @@
         "message": "ZEPPELIN-3309. Import/Clone user not set in Paragraph causes NPE.\n\nWhat is this PR for?\nDuring Import/Clone Paragraph set \"user\" to eliminate NPEs thrown in Helium and other functions leaving unusable notebooks.\n\nWhat type of PR is it?\n[Bug Fix]\n\nTodos\n\nWhat is the Jira issue?\nhttps://issues.apache.org/jira/browse/ZEPPELIN-3309\n\nHow should this be tested?\nManually tested using Import/Clone of Notebooks and attempt to adjust bound interpreters\n\nScreenshots (if appropriate)\n\nQuestions:\nDoes the licenses files need update? No\nIs there breaking changes for older versions? No\nDoes this needs documentation? No\nAuthor: Greg Senia gseniaapache.org\n\nAuthor: gss2002 <greg@senia.org>\n\nCloses #2855 from gss2002/ZEPPELIN-3309 and squashes the following commits:\n\nb8c35c9 [gss2002] ZEPPELIN-3309. Import/Clone user not set in Paragraph causes NPE.",
         "parent": "https://github.com/apache/zeppelin/commit/f4a798b6230b4f2389ad7ea9b41818b15d9ab5a7",
         "patched_files": [
-            "Note.java",
-            "Notebook.java"
+            "Notebook.java",
+            "Note.java"
         ],
         "repo": "zeppelin",
         "unit_tests": [
@@ -2259,43 +2315,39 @@
         "message": "ZEPPELIN-501 Notebook search\n\n### What is this PR for?\nThis PR has for goal to allow the user to search through the code in all the paragraphs *and notebook names* in all the notebooks\n\nIt add a simple 'search bar' to the nav-bar of Zeppelin WebApp, and an in-memory fulltext search index of paragraphs to the backend.\n\nThe search is pretty basic now, fine-tuning it for better search over all types of source code will be a subject of further work.\n\n### What type of PR is it?\nFeature\n\n### Todos\n* [x] - Fix typos :dancer: b853aa6\n* [x] - fix js issue in js console felizbear 29da337\n* [x] - update index on paragraph CRUD:\n  - [x] Read (initial work)\n  - [x] Create\\Delete 825b266\n  - [x] Update e915a69\n  - [x] Delete paragraph\n* [x] - add license to zeppelin-distribution/src/bin_license/LICENSE (backend for lucene, not sure about angular-resource as it is part of the AngularJS codebase, but will add just in case) c00b516\n* [x] - add missing Apache headers ded9c3b felizbear 29da337\n* [x] - fix CI (~~was failing RAT on zengine Too many files with unapproved license: 2~~, now flacky integration test AKA [ZEPPELIN-510](https://issues.apache.org/jira/browse/ZEPPELIN-510))\n* [x] - index notebook names e80c3e5, felizbear 29da337\n* [x] - make NotebookRepoSync.sync() package private again  5a18bc8\n* [x] - NPE on persisting changes of existing notebook\n* [x] - reduce log verbosity\n\n### Is there a relevant Jira issue?\nhttps://issues.apache.org/jira/browse/ZEPPELIN-501\n\n### How should this be tested?\nOutline the steps to test the PR here.\n\n### Screenshots (if appropriate)\n![screen shot 2015-12-15 at 19 49 18](https://cloud.githubusercontent.com/assets/5582506/11808681/34d004e8-a365-11e5-9452-ea616029073c.png)\n\n![screen shot 2015-12-15 at 19 52 03](https://cloud.githubusercontent.com/assets/5582506/11808699/5dc023ce-a365-11e5-953d-c23235446f9c.png)\n\n### Questions:\n* Does the licenses files need update? Yes, added to license files\n* Is there breaking changes for older versions? No\n* Does this needs documentation? Yes\n\nThis work is a collaboration with felizbear who contributed major parts of the frontend changes.\n\nAuthor: Alexander Bezzubov <bzz@apache.org>\nAuthor: felizbear <ilya@nflabs.com>\nAuthor: Alexander <abezzubov@nflabs.com>\n\nCloses #534 from bzz/notebook-search and squashes the following commits:\n\nc7f1d35 [Alexander Bezzubov] ZEPPELIN-501: refactoring, extract SearchService interface + Lucen-based impl\ne3af25c [Alexander Bezzubov] ZEPPELIN-501: muting more search logs info->debug\nc77d53b [Alexander Bezzubov] ZEPPELIN-501: fix + test for bug in index key structure\n78f69a3 [Alexander Bezzubov] ZEPPELIN-501: update index on paragraph delete\n73a28bb [Alexander Bezzubov] ZEPPELIN-501: fix NPE on Note creation by NotebookRepo, \\wo DI constructor\ncf44b1f [Alexander Bezzubov] ZEPPELIN-501: fix NPE on double-delete\nd2b44ac [Alexander Bezzubov] ZEPPELIN-501: stop printing whole note in logs\nf30e6c8 [Alexander Bezzubov] Merge branch 'master' into notebook-search\nda69c07 [Alexander Bezzubov] ZEPPELIN-501: validate notes before update index\n5f47890 [Alexander Bezzubov] ZEPPELIN-501: fix bug (merge artefact) that failed CI befor\ne915a69 [Alexander Bezzubov] ZEPPELIN-501: update notebooks on save + tests\n3f20904 [Alexander Bezzubov] ZEPPELIN-501: refactoring, compiler warning in Paragraph.java\n40cf9e8 [Alexander Bezzubov] ZEPPELIN-501: refactoring, cleaning compiler warnings in Notebook.java\n6a3906f [Alexander Bezzubov] Merge branch 'master' into notebook-search\n2b2f8dc [Alexander Bezzubov] Merge branch 'master' into notebook-search\n44235eb [Alexander Bezzubov] ZEPPELIN-501: refactoring, cleaning compiler warnings in Note.java\neb7878a [Alexander Bezzubov] Merge branch 'master' into notebook-search\n0ce8a92 [Alexander Bezzubov] ZEPPELIN-501: add missing logger\n6da1dc9 [Alexander Bezzubov] Merge branch 'master' into notebook-search\n8c0f29a [Alexander Bezzubov] ZEPPELIN-501: fixing NPE in tests \\w mocks\n825b266 [Alexander Bezzubov] ZEPPELIN-501: refactoring + handling index Create\\Delete\nb13d5fb [Alexander Bezzubov] Merge branch 'master' into notebook-search\n009b290 [Alexander Bezzubov] ZEPPELIN-501: muting logs back\n0efc00e [Alexander Bezzubov] Merge branch 'master' into notebook-search\nb0b2c54 [Alexander Bezzubov] ZEPPELIN-501: refactoring, renames + verbose logging ON\n36b2467 [Alexander Bezzubov] ZEPPELIN-501: add default val for Note.name\nc7ae983 [Alexander Bezzubov] Merge branch 'master' into notebook-search\nded9c3b [Alexander Bezzubov] ZEPPELIN-501: adding missing license headers\ncd2173e [Alexander Bezzubov] ZEPPELIN-501: tixing fypo in docs, again :see_no_evil:\n1952847 [Alexander Bezzubov] ZEPPELIN-501: minor test update\n6180c86 [Alexander Bezzubov] ZEPPELIN-501: mute logs, invalid notes do not fail all indexing\n29da337 [Alexander] Merge pull request #7 from felizbear/search-fix\nc00b516 [Alexander Bezzubov] ZEPPELIN-501: update LICENCE file with new deps\n5a18bc8 [Alexander Bezzubov] ZEPPELIN-501: restore NotebookRepoSync.sync() visibility + compiler warning cleanup\nfcbff3d [felizbear] add missing apache license info to a source file\n00f0315 [felizbear] handle notebooks is search results\n7d06686 [felizbear] fix search-related bug in notebook controller\ne80c3e5 [Alexander Bezzubov] ZEPPELIN-501: Indexing notebook names\nb853aa6 [Alexander Bezzubov] ZEPPELIN-501: fixing typos in docs\n82c7dd7 [Alexander Bezzubov] ZEPPELIN-501: reverting accidental changes\n71ec51f [felizbear] clear search field on navigation to home view (/)\n1e1357c [felizbear] redirect to notebook and scroll to paragraph from search view\n09d44d2 [Alexander Bezzubov] Search: re-index note on every change\nb2b93c4 [Alexander Bezzubov] Search: refatoring, move SearchService from NotebookRepoSync -> Notebook\n08fe806 [Alexander Bezzubov] Search: adding tests\n63a4e05 [Alexander Bezzubov] Search: adding search API docs\n98f4e59 [Alexander Bezzubov] Search: refactoring, rename fragment -> snippet\n5c1e3e4 [Alexander Bezzubov] Refatoring - removing old annotations\ne363ed4 [Alexander Bezzubov] Search: make jshint happy\n7aad5cf [Alexander Bezzubov] Search: make checkstyle happy\n6ccd6f1 [Alexander Bezzubov] Search: nuke compiler warnings in NotebookRestApi\naa5ddb3 [felizbear] center search results on screen\n227c6b4 [felizbear] update search results view: add panels for results\n865925c [felizbear] highlight syntax and search terms in search results\n9ca8628 [Alexander Bezzubov] Search: merge first 3 fragments + full paragraph in search result\n11127f0 [felizbear] style search widget for notebook search\ndb246fa [Alexander Bezzubov] Search: highlighting added using fragments\nc2c2a52 [Alexander Bezzubov] Search: backend indexing using Lucene added to zengine\n163a465 [Alexander Bezzubov] Search: add search/result-list and switch to\nbc2458a [Alexander Bezzubov] Get rid of compiler warnings\n3900b60 [Alexander Bezzubov] Search: disabling UI on disconnect\n7880237 [Alexander Bezzubov] Search: backend REST API scetch /notebooks/search?q=... added\nc5928f9 [Alexander Bezzubov] Search: form added to navbar in frontend",
         "parent": "https://github.com/apache/zeppelin/commit/d4396887d032d2b6595afcd66b612739c26735f0",
         "patched_files": [
-            "result-list.java",
-            "NotebookRepoSync.java",
-            "navbar.java",
-            "rest-notebook.java",
-            "index.java",
-            "notebook.java",
-            "LuceneSearch.java",
-            "NotebookRestApi.java",
-            "LICENSE.java",
-            "app.java",
-            "search.java",
-            "Paragraph.java",
-            "bower.java",
-            "Notebook.java",
-            "karma.java",
-            "pom.java",
-            "SearchService.java",
-            "VFSNotebookRepo.java",
-            "ZeppelinRestApi.java",
             "Job.java",
-            "NotebookServer.java",
+            "ZeppelinRestApi.java",
+            "rest-notebook.java",
+            "Note.java",
+            "karma.java",
+            "search.java",
+            "SearchService.java",
+            "navbar.java",
+            "NotebookRestApi.java",
+            "NotebookRepoSync.java",
+            "result-list.java",
+            "app.java",
+            "bower.java",
+            "VFSNotebookRepo.java",
+            "notebook.java",
+            "Paragraph.java",
+            "Notebook.java",
+            "LuceneSearch.java",
             "ZeppelinServer.java",
-            "Note.java"
+            "pom.java",
+            "index.java",
+            "NotebookServer.java",
+            "LICENSE.java"
         ],
         "repo": "zeppelin",
         "unit_tests": [
-            "LuceneSearchTest.java",
             "VFSNotebookRepoTest.java",
-            "ZeppelinRestApiTest.java",
-            "NotebookServerTest.java",
             "NotebookTest.java",
-            "JobTest.java",
-            "ParagraphTest.java",
-            "NoteTest.java",
-            "ZeppelinServerTest.java",
+            "LuceneSearchTest.java",
             "NotebookRepoSyncTest.java",
-            "NotebookRestApiTest.java"
+            "NotebookServerTest.java",
+            "ZeppelinRestApiTest.java",
+            "ParagraphTest.java"
         ]
     },
     "zeppelin_83469be": {
@@ -2487,29 +2539,29 @@
         "parent": "https://github.com/apache/zeppelin/commit/f1a2471302ed3a6d89f70e3b85c9c20eeddf2056",
         "patched_files": [
             "InterpreterRestApi.java",
-            "NoteInfo.java",
+            "ZeppelinHubRepo.java",
+            "VFSNotebookRepo.java",
+            "S3NotebookRepo.java",
+            "Paragraph.java",
             "Notebook.java",
             "NotebookRestApi.java",
-            "NotebookServer.java",
-            "ZeppelinHubRepo.java",
-            "HeliumApplicationFactory.java",
-            "S3NotebookRepo.java",
-            "VFSNotebookRepo.java",
             "Note.java",
-            "Paragraph.java"
+            "HeliumApplicationFactory.java",
+            "NoteInfo.java",
+            "NotebookServer.java"
         ],
         "repo": "zeppelin",
         "unit_tests": [
             "VFSNotebookRepoTest.java",
-            "InterpreterRestApiTest.java",
-            "HeliumApplicationFactoryTest.java",
             "NotebookTest.java",
-            "NotebookServerTest.java",
-            "ZeppelinSparkClusterTest.java",
-            "ParagraphTest.java",
-            "NoteTest.java",
+            "NotebookRestApiTest.java",
             "ZeppelinHubRepoTest.java",
-            "NotebookRestApiTest.java"
+            "ZeppelinSparkClusterTest.java",
+            "InterpreterRestApiTest.java",
+            "NotebookServerTest.java",
+            "HeliumApplicationFactoryTest.java",
+            "ParagraphTest.java",
+            "NoteTest.java"
         ]
     },
     "zeppelin_85ee2dd": {
@@ -2571,12 +2623,10 @@
         "message": "[ZEPPELIN-2431] Corrected deletion of notes by incorrect interpreter.json\n\n## What is this PR for?\n\nWe sometimes can not delete a note, or we will be accompanied by an NPE for deleting a note.\n\nThis problem occurs when:\nWhen interpreter.json 's note binding is wrong, or there is a problem.\nIf you are configuring an interpreter that is not through zeppelin's user interface.\nAs a result, it happens when synchronization of notes deletion and setting retention is not normal.\nTherefore, we should add handling for note deletion and exception handling for nonexistent interpreter bindings.\nIt reduces the synchronization problem of interpreter.json.\n\n### What type of PR is it?\nBug Fix\n\n### What is the Jira issue?\nhttps://issues.apache.org/jira/browse/ZEPPELIN-2431\n\n### How should this be tested?\n1. zeppelin stop\n2. edit con/interpreter.json and `interpreterBindings`\n  fix any notes or incorrect information.\n  for example\n  ```\n    },\n  \"interpreterBindings\": {\n    \"2CFS9YSM5\": [\n      \"2CFRR1D3TINVALIDINVALIDINVALID\", <-- edit\n      \"2CFZ1JKUR\",\n      \"2CEAJK1VW\",\n      \"2CGSESWBH\",\n      \"2CERNPGW5\",\n   }\n  ```\n3. zeppelin start\n4. You can try remove invalid interpreter bind note on web. (on example = `2CFS9YSM5`)\n\nresult :\nIf the modifications to this PR are not reflected,\nIt will not be deleted or an error will appear on the server.\nAlso, the interpreterBindings information in interpreter.json does not respond to delete events.\n\n### Screenshots (if appropriate)\nproblem animation\n![cantremove](https://cloud.githubusercontent.com/assets/10525473/25327785/7031f960-2910-11e7-88c7-d322da21290c.gif)\n\n### Questions:\n* Does the licenses files need update? no\n* Is there breaking changes for older versions? no\n* Does this needs documentation? no\n\nAuthor: CloverHearts <cloverheartsdev@gmail.com>\n\nCloses #2278 from cloverhearts/fix/invalidsyncInterpreterJson and squashes the following commits:\n\n35da524c [CloverHearts] notebook interpreter binding synchronization process",
         "parent": "https://github.com/apache/zeppelin/commit/c8cd1cf5065605269cf83ebc8fe7b265337e34a2",
         "patched_files": [
-            "InterpreterSettingManager.java",
             "Notebook.java"
         ],
         "repo": "zeppelin",
         "unit_tests": [
-            "InterpreterSettingManagerTest.java",
             "NotebookTest.java"
         ]
     },
@@ -2612,12 +2662,10 @@
         "message": "[ZEPPELIN-2152] Fix for npe in Helium loading when no proxies are set\n\n### What is this PR for?\nEmergency fix for npe when calling Helium and with no proxies env variables set.\n\n### What type of PR is it?\nBug Fix\n\n### What is the Jira issue?\nhttps://issues.apache.org/jira/browse/ZEPPELIN-2152\n\n### How should this be tested?\n* clone new zeppelin repository\n* unset http_proxy/https_proxy env variables (if set)\n* build ` mvn clean package -DskipTests;`\n* start zeppelin instance\n\n### Questions:\n* Does the licenses files need update? No\n* Is there breaking changes for older versions? No\n* Does this needs documentation? No\n\nAuthor: Nelson Costa <nelson.costa85@gmail.com>\n\nCloses #2380 from necosta/zeppelin2152-patch and squashes the following commits:\n\ncb25cd7 [Nelson Costa] [ZEPPELIN-2152] Fix for npe in Helium loading when no proxies are set",
         "parent": "https://github.com/apache/zeppelin/commit/87480056a0b10effaf5556d000f8d0c5186848d0",
         "patched_files": [
-            "HeliumBundleFactory.java",
-            "HeliumOnlineRegistry.java"
+            "HeliumBundleFactory.java"
         ],
         "repo": "zeppelin",
         "unit_tests": [
-            "HeliumOnlineRegistryTest.java",
             "HeliumBundleFactoryTest.java"
         ]
     },
@@ -2680,8 +2728,8 @@
         "message": "[HOTFIX] Fix NullPointerException\tat org.apache.zeppelin.notebook.Paragraph.getRepl(Paragraph.java:204)\n\n### What is this PR for?\nWhen notebook is being loaded, following error is raised after #836\n\n```\nCaused by: java.lang.NullPointerException\n\tat org.apache.zeppelin.notebook.Paragraph.getRepl(Paragraph.java:204)\n\tat org.apache.zeppelin.notebook.Paragraph.getCurrentRepl(Paragraph.java:208)\n\tat org.apache.zeppelin.helium.Helium.suggestApp(Helium.java:138)\n\tat org.apache.zeppelin.rest.HeliumRestApi.suggest(HeliumRestApi.java:83)\n\tat sun.reflect.NativeMethodAccessorImpl.invoke0(Native Method)\n\tat sun.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:57)\n\tat sun.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)\n\tat java.lang.reflect.Method.invoke(Method.java:606)\n\tat org.apache.cxf.service.invoker.AbstractInvoker.performInvocation(AbstractInvoker.java:180)\n\tat org.apache.cxf.service.invoker.AbstractInvoker.invoke(AbstractInvoker.java:96)\n\t... 50 more\n```\n\n### What type of PR is it?\nHotfix\n\n### Todos\n* [x] - Fix\n\n### What is the Jira issue?\nZEPPELIN-732, ZEPPELIN-1075\n\n### How should this be tested?\nRun Zeppelin and load any notebook. And see if there're unexpected exception raised.\n\n### Questions:\n* Does the licenses files need update? no\n* Is there breaking changes for older versions? no\n* Does this needs documentation? no\n\nAuthor: Lee moon soo <moon@apache.org>\n\nCloses #1150 from Leemoonsoo/fix_npe and squashes the following commits:\n\n10746f5 [Lee moon soo] adjust indentation\n0471042 [Lee moon soo] Add unittest\n3e8697b [Lee moon soo] Set interpreter factory into paragraph right after loaded",
         "parent": "https://github.com/apache/zeppelin/commit/9ca485589e915202bb6890f0529d71daee6c21d6",
         "patched_files": [
-            "Note.java",
-            "Notebook.java"
+            "Notebook.java",
+            "Note.java"
         ],
         "repo": "zeppelin",
         "unit_tests": [
@@ -3123,48 +3171,47 @@
         "message": "[ZEPPELIN-1210] Run interpreter per user\n\n### What is this PR for?\nEnabling each user to run same interpreter.\n\n### What type of PR is it?\n[Improvement]\n\n### What is the Jira issue?\nhttps://issues.apache.org/jira/browse/ZEPPELIN-1210\n\n### How should this be tested?\n1. Enable shiro to use authentication mode\n1. Check `per user` in your interpreter tab\n1. Run different paragraphs with different users\n  1. Run `%spark sc.version`, you will see the two `res0: ...` in your paragraphs\n\n### Screenshots (if appropriate)\n\n### Questions:\n* Does the licenses files need update? No\n* Is there breaking changes for older versions? No\n* Does this needs documentation? No\n\nAuthor: CloverHearts <cloverheartsdev@gmail.com>\nAuthor: Jongyoul Lee <jongyoul@gmail.com>\n\nCloses #1265 from jongyoul/ZEPPELIN-1210 and squashes the following commits:\n\n48a0d8e [Jongyoul Lee] Fixed ZEPPELIN-1542 Fixed flaky test\ne84703d [Jongyoul Lee] Fixed ZEPPELIN-1542\nad80951 [Jongyoul Lee] Fixed some wrong logic of getInterpreterInstanceKey\ncee39f4 [Jongyoul Lee] Fixed to pass shiro information to InterpreterFactory from ZeppelinServer\n5e7da34 [Jongyoul Lee] Changed instanceKey and processKey for dealing with new UI\nd201950 [CloverHearts] fix eqeqeq issue for frontweb\nb18bff4 [CloverHearts] implement frontend for interpreter per user mode and misc mode\n1f64e52 [CloverHearts] change default value for pernote and peruser\n787a366 [CloverHearts] change Back-end test cases and member type (perNote, perUser)\n8586e1f [CloverHearts] change ui for interpreter running Per x mode\n0b5d671 [Jongyoul Lee] Fixed the style\n960bde1 [Jongyoul Lee] Removed SecurityUtils.getPrincipal Added fromMessage.principal to get right user\n01c7cf1 [Jongyoul Lee] Fixed NPE while testing ZeppelinSparkClusterTest\n1fb50ab [Jongyoul Lee] Fixed NPE while testing ZeppelinSparkClusterTest\nd1c4344 [Jongyoul Lee] Fixed getEditorSetting for having users' info\n12a27db [Jongyoul Lee] Fixed test after rebase\n510942b [Jongyoul Lee] Fixed test after rebase\ncb66946 [Jongyoul Lee] Fixed test after rebase\n18b39bd [Jongyoul Lee] Fixed test after rebase\ndaa634f [Jongyoul Lee] Fixed some tests after rebase\ned558be [Jongyoul Lee] Fixed some tests after rebase\nfa7fccb [Jongyoul Lee] Fixed destroying process of remoteInterpreterProcess\n0a73241 [Jongyoul Lee] Fixed conflict while rebasing.\ndf423d3 [Jongyoul Lee] Fixed NotebookRestApiTest\nb151366 [Jongyoul Lee] Fixed some codes after rebase\na32afd7 [Jongyoul Lee] Fixed some tests\n7b7eb78 [Jongyoul Lee] Fixed some tests\n47cc668 [Jongyoul Lee] Fixed tests to use AuthenticationInfo\n012cf99 [Jongyoul Lee] Fixed some mismatch after rebase\n9a03d40 [Jongyoul Lee] Reverted some value to default ones\n8589545 [Jongyoul Lee] Added option in UI\nccbedc1 [Jongyoul Lee] WIP\n94dfed2 [Jongyoul Lee] WIP\n6480d1d [Jongyoul Lee] resolved conflicts",
         "parent": "https://github.com/apache/zeppelin/commit/a3a2e4d340d14f9d6c4c7c85dd16425714f442b2",
         "patched_files": [
-            "log4j.java",
-            "InterpreterSetting.java",
-            "InterpreterRestApi.java",
-            "interpreter.java",
-            "NotebookRepoSync.java",
-            "InterpreterGroup.java",
-            "Notebook.java",
-            "HeliumApplicationFactory.java",
-            "VFSNotebookRepo.java",
-            "shiro.java",
-            "interpreter-create.java",
-            "ZeppelinRestApi.java",
-            "LuceneSearch.java",
             "RemoteInterpreter.java",
+            "InterpreterOption.java",
+            "interpreter.java",
+            "ZeppelinRestApi.java",
+            "shiro.java",
+            "Note.java",
+            "HeliumApplicationFactory.java",
+            "interpreter-create.java",
             "NotebookRestApi.java",
             "InterpreterFactory.java",
-            "NotebookServer.java",
+            "NotebookRepoSync.java",
+            "InterpreterRestApi.java",
+            "InterpreterSetting.java",
+            "VFSNotebookRepo.java",
+            "Paragraph.java",
+            "Notebook.java",
+            "LuceneSearch.java",
             "ZeppelinServer.java",
-            "InterpreterOption.java",
+            "InterpreterGroup.java",
             "SecurityUtils.java",
-            "Note.java",
-            "Paragraph.java"
+            "log4j.java",
+            "NotebookServer.java"
         ],
         "repo": "zeppelin",
         "unit_tests": [
-            "VFSNotebookRepoTest.java",
-            "LuceneSearchTest.java",
-            "RemoteInterpreterTest.java",
-            "ZeppelinRestApiTest.java",
-            "InterpreterRestApiTest.java",
-            "HeliumApplicationFactoryTest.java",
+            "NoteInterpreterLoaderTest.java",
             "InterpreterFactoryTest.java",
-            "NotebookServerTest.java",
+            "VFSNotebookRepoTest.java",
             "NotebookTest.java",
-            "InterpreterSettingTest.java",
-            "ZeppelinSparkClusterTest.java",
-            "ParagraphTest.java",
-            "NoteTest.java",
-            "ZeppelinServerTest.java",
-            "NotebookRepoSyncTest.java",
             "NotebookRestApiTest.java",
-            "NoteInterpreterLoaderTest.java"
+            "LuceneSearchTest.java",
+            "ParagraphTest.java",
+            "NotebookRepoSyncTest.java",
+            "ZeppelinSparkClusterTest.java",
+            "SecurityUtilsTest.java",
+            "InterpreterRestApiTest.java",
+            "NotebookServerTest.java",
+            "HeliumApplicationFactoryTest.java",
+            "ZeppelinRestApiTest.java",
+            "RemoteInterpreterTest.java",
+            "NoteTest.java"
         ]
     },
     "zeppelin_927f482": {
@@ -3204,8 +3251,7 @@
         ],
         "repo": "zeppelin",
         "unit_tests": [
-            "ZeppelinRestApiTest.java",
-            "NoteTest.java"
+            "ZeppelinRestApiTest.java"
         ]
     },
     "zeppelin_9a610a7": {
@@ -3435,32 +3481,32 @@
         "message": "[ZEPPELIN-1845] InterpreterFactory.createOrGetInterpreterList fails when interpreter mode is \"perUser\": \"scoped\"\n\n### What is this PR for?\nWhen trying to add a paragraph, whose default interpreter is running in mode `\"perUser\": \"scoped\"` fails with following exception\n\n```\nERROR [2016-12-22 11:52:18,784] ({qtp112466394-59} NotebookServer.java[onMessage]:318) - Can't handle message\njava.lang.NullPointerException\n\tat java.util.concurrent.ConcurrentHashMap.get(ConcurrentHashMap.java:936)\n\tat java.util.concurrent.ConcurrentHashMap.containsKey(ConcurrentHashMap.java:964)\n\tat org.apache.zeppelin.interpreter.InterpreterFactory.createOrGetInterpreterList(InterpreterFactory.java:1219)\n\tat org.apache.zeppelin.interpreter.InterpreterFactory.getInterpreter(InterpreterFactory.java:1333)\n\tat org.apache.zeppelin.notebook.Paragraph.isValidInterpreter(Paragraph.java:598)\n\tat org.apache.zeppelin.notebook.Paragraph.getMagic(Paragraph.java:587)\n\tat org.apache.zeppelin.notebook.Note.setParagraphMagic(Note.java:506)\n\tat org.apache.zeppelin.notebook.Note.insertParagraph(Note.java:316)\n\tat org.apache.zeppelin.socket.NotebookServer.insertParagraph(NotebookServer.java:1330)\n\tat org.apache.zeppelin.socket.NotebookServer.onMessage(NotebookServer.java:241)\n\tat org.apache.zeppelin.socket.NotebookSocket.onWebSocketText(NotebookSocket.java:59)\n\tat org.eclipse.jetty.websocket.common.events.JettyListenerEventDriver.onTextMessage(JettyListenerEventDriver.java:128)\n\tat org.eclipse.jetty.websocket.common.message.SimpleTextMessage.messageComplete(SimpleTextMessage.java:69)\n\tat org.eclipse.jetty.websocket.common.events.AbstractEventDriver.appendMessage(AbstractEventDriver.java:65)\n\tat org.eclipse.jetty.websocket.common.events.JettyListenerEventDriver.onTextFrame(JettyListenerEventDriver.java:122)\n\tat org.eclipse.jetty.websocket.common.events.AbstractEventDriver.incomingFrame(AbstractEventDriver.java:161)\n\tat org.eclipse.jetty.websocket.common.WebSocketSession.incomingFrame(WebSocketSession.java:309)\n\tat org.eclipse.jetty.websocket.common.extensions.ExtensionStack.incomingFrame(ExtensionStack.java:214)\n\tat org.eclipse.jetty.websocket.common.Parser.notifyFrame(Parser.java:220)\n\tat org.eclipse.jetty.websocket.common.Parser.parse(Parser.java:258)\n\tat org.eclipse.jetty.websocket.common.io.AbstractWebSocketConnection.readParse(AbstractWebSocketConnection.java:632)\n\tat org.eclipse.jetty.websocket.common.io.AbstractWebSocketConnection.onFillable(AbstractWebSocketConnection.java:480)\n\tat org.eclipse.jetty.io.AbstractConnection$2.run(AbstractConnection.java:544)\n\tat org.eclipse.jetty.util.thread.QueuedThreadPool.runJob(QueuedThreadPool.java:635)\n\tat org.eclipse.jetty.util.thread.QueuedThreadPool$3.run(QueuedThreadPool.java:555)\n\tat java.lang.Thread.run(Thread.java:745)\n```\n\n### What type of PR is it?\n[Bug Fix]\n\n### What is the Jira issue?\n* [ZEPPELIN-1845](https://issues.apache.org/jira/browse/ZEPPELIN-1845)\n\n### How should this be tested?\nOutline the steps to test the PR here.\n\n### Screenshots (if appropriate)\nBefore:\n![before](https://cloud.githubusercontent.com/assets/674497/21417398/4d7535da-c840-11e6-81aa-42290ff75617.gif)\n\nAfter:\n![after](https://cloud.githubusercontent.com/assets/674497/21417399/4d7554f2-c840-11e6-951c-44c7a23e191b.gif)\n\n### Questions:\n* Does the licenses files need update? N/A\n* Is there breaking changes for older versions? N/A\n* Does this needs documentation? N/A\n\nAuthor: Prabhjyot Singh <prabhjyotsingh@gmail.com>\n\nCloses #1790 from prabhjyotsingh/ZEPPELIN-1845 and squashes the following commits:\n\n6459318 [Prabhjyot Singh] Both insertParagraph, addParagraph should accept and set AuthenticationInfo into paragraph",
         "parent": "https://github.com/apache/zeppelin/commit/2321cde58cac43a16d12eb34b8e1e32e81606774",
         "patched_files": [
-            "InterpreterRestApi.java",
-            "NotebookRepoSync.java",
-            "LuceneSearch.java",
-            "Notebook.java",
-            "NotebookServer.java",
-            "HeliumApplicationFactory.java",
             "GitNotebookRepo.java",
+            "InterpreterRestApi.java",
             "VFSNotebookRepo.java",
             "ZeppelinRestApi.java",
+            "Notebook.java",
+            "NotebookRestApi.java",
+            "HeliumApplicationFactory.java",
             "Note.java",
-            "NotebookRestApi.java"
+            "LuceneSearch.java",
+            "NotebookServer.java",
+            "NotebookRepoSync.java"
         ],
         "repo": "zeppelin",
         "unit_tests": [
-            "VFSNotebookRepoTest.java",
-            "LuceneSearchTest.java",
-            "ZeppelinRestApiTest.java",
-            "InterpreterRestApiTest.java",
-            "HeliumApplicationFactoryTest.java",
             "GitNotebookRepoTest.java",
-            "NotebookServerTest.java",
+            "VFSNotebookRepoTest.java",
             "NotebookTest.java",
-            "ZeppelinSparkClusterTest.java",
+            "NotebookRestApiTest.java",
+            "LuceneSearchTest.java",
             "NotebookRepoSyncTest.java",
-            "NoteTest.java",
-            "NotebookRestApiTest.java"
+            "ZeppelinSparkClusterTest.java",
+            "InterpreterRestApiTest.java",
+            "NotebookServerTest.java",
+            "HeliumApplicationFactoryTest.java",
+            "ZeppelinRestApiTest.java",
+            "NoteTest.java"
         ]
     },
     "zeppelin_a4f1914": {
@@ -3488,33 +3534,6 @@
         "repo": "zeppelin",
         "unit_tests": [
             "PythonInterpreterTest.java"
-        ]
-    },
-    "zeppelin_a54a3ac": {
-        "bug_id": "zeppelin_a54a3ac",
-        "commit": "https://github.com/apache/zeppelin/commit/a54a3ac181fa34a0ff1c3c423cac07f9e1013a33",
-        "file": [
-            {
-                "additions": 3,
-                "blob_url": "https://github.com/apache/zeppelin/blob/a54a3ac181fa34a0ff1c3c423cac07f9e1013a33/zeppelin-zengine/src/main/java/org/apache/zeppelin/notebook/Note.java",
-                "changes": 6,
-                "contents_url": "https://api.github.com/repos/apache/zeppelin/contents/zeppelin-zengine/src/main/java/org/apache/zeppelin/notebook/Note.java?ref=a54a3ac181fa34a0ff1c3c423cac07f9e1013a33",
-                "deletions": 3,
-                "filename": "zeppelin-zengine/src/main/java/org/apache/zeppelin/notebook/Note.java",
-                "patch": "@@ -93,7 +93,7 @@ private void generateId() {\n   public String id() {\n     return id;\n   }\n-  \n+\n   public String getId() {\n     return id;\n   }\n@@ -174,7 +174,7 @@ public void addCloneParagraph(Paragraph srcParagraph) {\n       paragraphs.add(newParagraph);\n     }\n   }\n-  \n+\n   /**\n    * Insert paragraph in given index.\n    *\n@@ -323,7 +323,7 @@ public void run(String paragraphId) {\n     if (intp == null) {\n       throw new InterpreterException(\"Interpreter \" + p.getRequiredReplName() + \" not found\");\n     }\n-    if ((Boolean) p.getConfig().get(\"enabled\")) {\n+    if (p.getConfig().get(\"enabled\") == null || (Boolean) p.getConfig().get(\"enabled\")) {\n       intp.getScheduler().submit(p);\n     }\n   }",
-                "raw_url": "https://github.com/apache/zeppelin/raw/a54a3ac181fa34a0ff1c3c423cac07f9e1013a33/zeppelin-zengine/src/main/java/org/apache/zeppelin/notebook/Note.java",
-                "sha": "66a63c84975952aefbbbfa76b4c5a70ab21b8184",
-                "status": "modified"
-            }
-        ],
-        "message": "[ZEPPELIN-475] NullPointerException when run notebook generated before ZEPPELIN-387\n\n`p.getConfig().get(\"enabled\")` can be null when Zeppelin load notebook generated before ZEPPELIN-387.\n\nThis PR fixes ZEPPELIN-475 by assuming \"true\" when `p.getConfig().get(\"enabled\")` is null.\n\nAuthor: Lee moon soo <moon@apache.org>\n\nCloses #491 from Leemoonsoo/ZEPPELIN-475 and squashes the following commits:\n\ne6a459f [Lee moon soo] Assume \"enabled\" is true, when it is not defined.",
-        "parent": "https://github.com/apache/zeppelin/commit/c39bdb836a16f52bd80f729f150a20acc6384f03",
-        "patched_files": [
-            "Note.java"
-        ],
-        "repo": "zeppelin",
-        "unit_tests": [
-            "NoteTest.java"
         ]
     },
     "zeppelin_ab5ce62": {
@@ -4213,68 +4232,66 @@
         "message": "[ZEPPELIN-513] Dedicated interpreter session per notebook\n\n### What is this PR for?\n\nCurrently, all notebooks that binded to the same interpreter setting shares the same interpreter instance.\nFor example, let's say there're `spark-production` interpreter setting and all notebooks are using it.\nThen all notebooks share a single instance of SparkInterpreter, and that result all the variables are being shared across the notebook.\n\nBut sometimes isolated name space for variables per notebook is preferred. In this case we can create per notebook interpreter instance.\n\nThis PR provides generalized facility to provides per notebook interpreter instance, not only for SparkInterpreter but for any other existing interpreter without modification.\n\n**Design**\n\nIt provides toggle switch that user turn on / turn off this mode per interpreter setting.\nWhen per notebook interpreter is turned on, it still creates a single remote interpreter process per interpreter setting. But inside of the process, each notebook will have it's own interpreter instance and the instance is terminated automatically on removal of notebook or unbinding note from interpreter setting.\n\n**SparkInterpreter**\n\nBecause of the design keeps single remote interpreter process and creates multiple interpreter instance inside of it, SparkInterpreter become a problem. While multiple SparkContext can not be created on a single process. So this PR try to, create per notebook scala compiler instance, but share single SparkContext instance. In this way, each notebook can run job concurrently by leveraging fairscheduler of SparkContext without running multiple Spark application (SparkContext).\n\nAnd this approach is inspired by https://github.com/piyush-mukati/incubator-zeppelin/tree/parallel_scheduler_support_spark, this PR trying to generalize it for all other interpreters.\n\n### What type of PR is it?\nFeature\n\n### Todos\n* [x] - Per note interpreter session\n* [x] - Scala compiler instance per note and share a single SparkContext (SparkInterpreter)\n* [x] - Handle Spark class server correctly\n* [x] - Handle SparkInterpreter Progressbar correctly\n\n### Is there a relevant Jira issue?\n\nhttps://issues.apache.org/jira/browse/ZEPPELIN-513\n\n### How should this be tested?\n\nCheck \"Per note session\" of your Spark interpreter setting.\nAnd create two different notebook and check scala variables are not shared.\n\n### Screenshots (if appropriate)\n\nCheckbox to enable\n![image](https://cloud.githubusercontent.com/assets/1540981/13270280/e6db3686-da41-11e5-9408-8eaa9c2a7350.png)\n\nHow it works for SparkInterpreter\n![per_note_session](https://cloud.githubusercontent.com/assets/1540981/13135855/3c01f26c-d5c9-11e5-864b-30fc4e9f61d1.gif)\n\n### Questions:\n* Does the licenses files need update? no\n* Is there breaking changes for older versions? no\n* Does this needs documentation? yes\n\nAuthor: Lee moon soo <moon@apache.org>\n\nThis patch had conflicts when merged, resolved by\nCommitter: Lee moon soo <moon@apache.org>\n\nCloses #703 from Leemoonsoo/notebook_interpreter_session and squashes the following commits:\n\n222066c [Lee moon soo] Use nanoTime\n8287eb9 [Lee moon soo] Fix style\n45af2df [Lee moon soo] Prevent infinitely waiting loop\n438b212 [Lee moon soo] Fix typo on the comment\nb091b7e [Lee moon soo] Move numReferenceOfSparkContext.incrementAndGet() to the end of open() method\n4d2533f [Lee moon soo] Per note session -> Separate Interpreter for each note\n7b073f6 [Lee moon soo] Merge branch 'master' into notebook_interpreter_session\nfeabb5f [Lee moon soo] Handle NPE when closing interpreters in group spark.\n5047217 [Lee moon soo] Restore angularObject correctly\n1f03ebb [Lee moon soo] Merge branch 'master' into notebook_interpreter_session\n7730cf3 [Lee moon soo] Add document for per note session mode\ndedf93f [Lee moon soo] Nullcheck\n72b2235 [Lee moon soo] Protect SparkContext creation\nf2299d6 [Lee moon soo] Handle scheduler termination correctly when unbind, bind interpreter\n269c27d [Lee moon soo] Fix unittest\n4299b87 [Lee moon soo] Share a SparkContext across ScalaCompilers\ncc33c25 [Lee moon soo] Add more unittests\n6dd981a [Lee moon soo] update interpreter module test\n1d1638c [Lee moon soo] Fix test\n58e5f91 [Lee moon soo] Update spark interpreter\n366b651 [Lee moon soo] Don't destroy interpreter on note memove or change bindings when interpreter.option.perNoteSession is false\nfc9cb3f [Lee moon soo] interpreter session aware interpreter factory\ned1ab0d [Lee moon soo] zeppelin-interpreter note session support\n5787984 [Lee moon soo] Add option for per note session interpreter",
         "parent": "https://github.com/apache/zeppelin/commit/738c10e211f851f4ced7b4e6b2f2368b3885f734",
         "patched_files": [
-            "InterpreterSetting.java",
-            "InterpreterRestApi.java",
-            "DepInterpreter.java",
-            "SchedulerFactory.java",
-            "MockInterpreter1.java",
-            "NotebookRestApi.java",
-            "spark.java",
-            "Interpreter.java",
-            "DistributedResourcePool.java",
-            "RemoteInterpreterOutputTestStream.java",
             "RemoteScheduler.java",
-            "RemoteInterpreterEventPoller.java",
-            "MockInterpreterB.java",
+            "RemoteInterpreter.java",
             "interpreter_persession.java",
+            "InterpreterOption.java",
+            "PySparkInterpreter.java",
+            "DepInterpreter.java",
+            "interpreter.java",
+            "spark.java",
+            "InterpreterInfoSerializer.java",
+            "DistributedResourcePool.java",
+            "RemoteInterpreterEventPoller.java",
+            "RemoteInterpreterProcess.java",
+            "writingzeppelininterpreter.java",
+            "RemoteAngularObjectRegistry.java",
+            "InterpreterSettingListForNoteBind.java",
+            "NoteInterpreterLoader.java",
+            "InterpreterRestApi.java",
+            "InterpreterSetting.java",
+            "UpdateInterpreterSettingRequest.java",
+            "MockInterpreterB.java",
+            "NewInterpreterSettingRequest.java",
             "JsonResponse.java",
             "SparkInterpreter.java",
-            "InterpreterOption.java",
-            "Paragraph.java",
+            "MockInterpreter1.java",
             "RemoteAngularObject.java",
-            "interpreter.java",
-            "InterpreterGroup.java",
-            "NewInterpreterSettingRequest.java",
-            "InterpreterSettingListForNoteBind.java",
-            "writingzeppelininterpreter.java",
-            "interpreter_binding.java",
-            "Notebook.java",
             "interpreters.java",
-            "RemoteInterpreterProcess.java",
-            "PySparkInterpreter.java",
+            "Interpreter.java",
+            "RemoteInterpreterServer.java",
             "interpreter-create.java",
             "RemoteInterpreterService.java",
-            "SparkSqlInterpreter.java",
-            "RemoteInterpreter.java",
-            "InterpreterInfoSerializer.java",
-            "RemoteAngularObjectRegistry.java",
-            "UpdateInterpreterSettingRequest.java",
-            "JsonExclusionStrategy.java",
+            "NotebookRestApi.java",
             "InterpreterFactory.java",
-            "NotebookServer.java",
-            "RemoteInterpreterServer.java",
-            "NoteInterpreterLoader.java"
+            "RemoteInterpreterOutputTestStream.java",
+            "Paragraph.java",
+            "SparkSqlInterpreter.java",
+            "Notebook.java",
+            "interpreter_binding.java",
+            "InterpreterGroup.java",
+            "SchedulerFactory.java",
+            "JsonExclusionStrategy.java",
+            "NotebookServer.java"
         ],
         "repo": "zeppelin",
         "unit_tests": [
-            "DepInterpreterTest.java",
-            "NotebookRestApiTest.java",
             "SparkInterpreterTest.java",
-            "RemoteInterpreterTest.java",
-            "InterpreterRestApiTest.java",
-            "PySparkInterpreterTest.java",
+            "DepInterpreterTest.java",
             "InterpreterFactoryTest.java",
-            "RemoteSchedulerTest.java",
-            "NotebookServerTest.java",
-            "NotebookTest.java",
-            "InterpreterSettingTest.java",
-            "InterpreterTest.java",
-            "RemoteInterpreterServerTest.java",
-            "SparkSqlInterpreterTest.java",
-            "ParagraphTest.java",
-            "DistributedResourcePoolTest.java",
+            "NoteInterpreterLoaderTest.java",
             "RemoteAngularObjectTest.java",
-            "NoteInterpreterLoaderTest.java"
+            "SparkSqlInterpreterTest.java",
+            "RemoteInterpreterServerTest.java",
+            "RemoteInterpreterProcessTest.java",
+            "NotebookTest.java",
+            "ParagraphTest.java",
+            "RemoteSchedulerTest.java",
+            "InterpreterRestApiTest.java",
+            "NotebookServerTest.java",
+            "InterpreterTest.java",
+            "DistributedResourcePoolTest.java",
+            "RemoteInterpreterTest.java"
         ]
     },
     "zeppelin_baab124": {
@@ -4483,21 +4500,21 @@
         "message": "[ZEPPELIN-1657] Private/public mode for user note creation/import\n\n### What is this PR for?\nIn multi-user environment when users create a notebook normally they would expect that notebook be listed only in their list/workbench. Currently Zeppelin creates/imports notes as public by default. There should be at least a way to pass through configuration to make this behaviour private be default. Should discuss whether it's public or private by default.\n\n### What type of PR is it?\nImprovement\n\n### Todos\n* [x] - set permissions on create/import\n* [x] - test\n* [x] - review, feedback, decide whether public/private by default\n* [x] - pass through env. config\n\n### What is the Jira issue?\n[ZEPPELIN-1657](https://issues.apache.org/jira/browse/ZEPPELIN-1657)\n\n### How should this be tested?\n1. set `zeppelin.notebook.public` property as false in `zeppelin-site.xml`\n2. login as user1 and create noteA, note should appear in your list of notes\n3. logout and login as user2, shouldn't be able to see noteA\n\n### Screenshots (if appropriate)\nTBD\n\n### Questions:\n* Does the licenses files need update? no\n* Is there breaking changes for older versions? no\n* Does this needs documentation? maybe\n\nAuthor: Khalid Huseynov <khalidhnv@gmail.com>\n\nCloses #1625 from khalidhuseynov/feat/public-note-create and squashes the following commits:\n\n010c262 [Khalid Huseynov] fix test: set state back\nfc91b2f [Khalid Huseynov] add description to install config\nf862ae1 [Khalid Huseynov] fix InterpreterFactory test\n876b798 [Khalid Huseynov] fix vfs testSave npe\n1a945e8 [Khalid Huseynov] add test\n496b80c [Khalid Huseynov] read env var from conf file directly\n28abffa [Khalid Huseynov] set permissions on note create and import\n44297a4 [Khalid Huseynov] set new note permissions\n9732409 [Khalid Huseynov] add variable to ZeppelinConfiguration\n4062af0 [Khalid Huseynov] add var to env.sh\nb7f28b3 [Khalid Huseynov] add property to site.xml",
         "parent": "https://github.com/apache/zeppelin/commit/3eae4e0711924721db49b4e3b840282ca987a80c",
         "patched_files": [
-            "ZeppelinConfiguration.java",
-            "NotebookAuthorization.java",
             "zeppelin-site.java",
-            "InterpreterFactory.java",
-            "Notebook.java",
-            "install.java",
             "VFSNotebookRepo.java",
+            "Notebook.java",
+            "NotebookAuthorization.java",
+            "install.java",
+            "ZeppelinConfiguration.java",
+            "InterpreterFactory.java",
             "zeppelin-env.java"
         ],
         "repo": "zeppelin",
         "unit_tests": [
-            "InterpreterFactoryTest.java",
+            "VFSNotebookRepoTest.java",
             "ZeppelinConfigurationTest.java",
-            "NotebookTest.java",
-            "VFSNotebookRepoTest.java"
+            "InterpreterFactoryTest.java",
+            "NotebookTest.java"
         ]
     },
     "zeppelin_d343348": {
@@ -4544,8 +4561,8 @@
         "message": "[ZEPPELIN-1136] NPE in Zeppelin Logs\n\n### What is this PR for?\nAccess Zeppelin without configuring any security, Zeppelin shows anoymous user and notice the NPE in Zeppelin logs.\n\n```\nERROR [2016-07-08 17:45:17,879] ({qtp1800659519-45} SecurityRestApi.java[getUserList]:120) - Exception in retrieving Users from realms\njava.lang.NullPointerException\n\tat org.apache.zeppelin.rest.GetUserList.getUserList(GetUserList.java:60)\n\tat org.apache.zeppelin.rest.SecurityRestApi.getUserList(SecurityRestApi.java:108)\n\tat sun.reflect.NativeMethodAccessorImpl.invoke0(Native Method)\n\tat sun.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:62)\n\tat sun.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)\n\tat java.lang.reflect.Method.invoke(Method.java:497)\n\tat org.apache.cxf.service.invoker.AbstractInvoker.performInvocation(AbstractInvoker.java:180)\n\tat org.apache.cxf.service.invoker.AbstractInvoker.invoke(AbstractInvoker.java:96)\n```\n\n### What type of PR is it?\n[Bug Fix]\n\n### What is the Jira issue?\n* [ZEPPELIN-1136](https://issues.apache.org/jira/browse/ZEPPELIN-1136)\n\n### How should this be tested?\nHave shiro.ini with just following (minimal) content\n\n```\n[urls]\n/api/version = anon\n/** = anon\n#/** = authc\n```\n\nand observe in logs, there should be no error logs.\n\n### Questions:\n* Does the licenses files need update? n/a\n* Is there breaking changes for older versions? n/a\n* Does this needs documentation? n/a\n\nAuthor: Prabhjyot Singh <prabhjyotsingh@gmail.com>\n\nCloses #1154 from prabhjyotsingh/ZEPPELIN-1136 and squashes the following commits:\n\n6aa03ea [Prabhjyot Singh] add unit test for search API\naf461f0 [Prabhjyot Singh] ZEPPELIN-1136 NPE in Zeppelin Logs",
         "parent": "https://github.com/apache/zeppelin/commit/df8c36defdc85a2c618c5b654e72edd8e4b6ee3b",
         "patched_files": [
-            "SecurityRestApi.java",
-            "GetUserList.java"
+            "GetUserList.java",
+            "SecurityRestApi.java"
         ],
         "repo": "zeppelin",
         "unit_tests": [
@@ -5138,68 +5155,71 @@
         "message": "[ZEPPELIN-619] Shared Resource pool across interpreter processes\n\n### What is this PR for?\nThis is sub task of https://issues.apache.org/jira/browse/ZEPPELIN-533.\nIt provides shared resource pool to exchange data across interpreter processes.\n\n### What type of PR is it?\nFeature\n\n### Is there a relevant Jira issue?\nhttps://issues.apache.org/jira/browse/ZEPPELIN-619\n\n### How should this be tested?\ncreate two different spark interpreter settings.\ncreate two different notebooks each bind different spark interpreter setting.\n\nput an object from one notebook.\nread the object from the other notebook. (from the other interpreter process)\n\nSee screenshot\n\n### Screenshots (if appropriate)\n![resource_pool](https://cloud.githubusercontent.com/assets/1540981/12409095/db4e142e-be1b-11e5-91e2-4b91c5b39dc3.gif)\n\n### Questions:\n* Does the licenses files need update? no\n* Is there breaking changes for older versions? no\n* Does this needs documentation? javadoc included.\n\nAuthor: Lee moon soo <moon@apache.org>\n\nThis patch had conflicts when merged, resolved by\nCommitter: Lee moon soo <moon@apache.org>\n\nCloses #655 from Leemoonsoo/resource_pool and squashes the following commits:\n\n7b53f8b [Lee moon soo] Fix style\n27b2ac5 [Lee moon soo] connector.getAllResourceExcept(id()) -> connector.getAllResource()\nf46abd7 [Lee moon soo] Refactor get() method\n2945a90 [Lee moon soo] ConcurrentHashMap instead of Collections.synchronizedMap()\n8150466 [Lee moon soo] Remove synchronize block\n6ac84e1 [Lee moon soo] Nullcheck before access InterpreterGroup\nc96c168 [Lee moon soo] Merge branch 'master' into resource_pool\nc3cb0d6 [Lee moon soo] Handling exception\n14269d9 [Lee moon soo] Handling NPE\n0d15577 [Lee moon soo] Add license header\n0af0cd0 [Lee moon soo] null check interpreterGroup. Do not log expected exceptions\n9d288fe [Lee moon soo] update test\n263f580 [Lee moon soo] ZeppelinContext provides api for resource pool\nb85dc59 [Lee moon soo] Fix test\n2be9902 [Lee moon soo] Update test\n0f6cb98 [Lee moon soo] distributed resource pool across interpreter processes\n91f75e0 [Lee moon soo] distributed resource pool",
         "parent": "https://github.com/apache/zeppelin/commit/218a3b5bca1dcbc3746b653a6db568bebf40720e",
         "patched_files": [
-            "ByteBufferInputStream.java",
-            "JDBCInterpreter.java",
-            "FlinkInterpreter.java",
-            "IgniteInterpreter.java",
-            "ZeppelinContext.java",
-            "RemoteInterpreterEvent.java",
-            "RemoteInterpreterContext.java",
-            "RemoteInterpreterResult.java",
-            "DistributedResourcePool.java",
-            "RemoteInterpreterOutputTestStream.java",
-            "RemoteResource.java",
             "RemoteScheduler.java",
-            "RemoteInterpreterEventPoller.java",
-            "ScaldingInterpreter.java",
-            "MockInterpreterResourcePool.java",
-            "IgniteSqlInterpreter.java",
-            "RemoteInterpreterEventType.java",
-            "SparkInterpreter.java",
-            "LocalResourcePool.java",
-            "RemoteInterpreterEventClient.java",
-            "Paragraph.java",
-            "RemoteAngularObject.java",
-            "ResourceSet.java",
-            "InterpreterGroup.java",
-            "RemoteInterpreterUtils.java",
-            "Notebook.java",
-            "ResourceId.java",
+            "RemoteInterpreter.java",
+            "DepInterpreter.java",
+            "DistributedResourcePool.java",
+            "RemoteInterpreterEvent.java",
             "RemoteInterpreterProcess.java",
+            "RemoteInterpreterEventPoller.java",
+            "RemoteInterpreterResult.java",
+            "LocalResourcePool.java",
+            "InterpreterContext.java",
+            "IgniteInterpreter.java",
+            "RemoteResource.java",
+            "ScaldingInterpreter.java",
+            "RemoteInterpreterEventClient.java",
+            "ResourceSet.java",
+            "RemoteInterpreterEventType.java",
+            "RemoteInterpreterContext.java",
+            "SparkInterpreter.java",
+            "RemoteInterpreterUtils.java",
+            "ResourcePoolConnector.java",
+            "JDBCInterpreter.java",
+            "RemoteAngularObject.java",
+            "ResourceId.java",
+            "RemoteInterpreterServer.java",
             "ResourcePool.java",
             "RemoteInterpreterService.java",
-            "SparkSqlInterpreter.java",
-            "RemoteInterpreter.java",
-            "Resource.java",
+            "IgniteSqlInterpreter.java",
+            "ZeppelinContext.java",
             "InterpreterFactory.java",
-            "ResourcePoolConnector.java",
-            "RemoteInterpreterServer.java",
-            "InterpreterContext.java"
+            "MockInterpreterResourcePool.java",
+            "RemoteInterpreterOutputTestStream.java",
+            "Paragraph.java",
+            "FlinkInterpreter.java",
+            "SparkSqlInterpreter.java",
+            "HiveInterpreter.java",
+            "Notebook.java",
+            "InterpreterGroup.java",
+            "Resource.java",
+            "ByteBufferInputStream.java"
         ],
         "repo": "zeppelin",
         "unit_tests": [
             "InterpreterContextTest.java",
-            "SparkInterpreterTest.java",
-            "InterpreterFactoryTest.java",
-            "RemoteSchedulerTest.java",
-            "RemoteAngularObjectTest.java",
-            "HiveInterpreterTest.java",
-            "LocalResourcePoolTest.java",
-            "NotebookTest.java",
-            "RemoteInterpreterServerTest.java",
-            "ParagraphTest.java",
-            "ScaldingInterpreterTest.java",
-            "DepInterpreterTest.java",
-            "RemoteInterpreterTest.java",
             "ResourceSetTest.java",
-            "JDBCInterpreterTest.java",
-            "ResourceTest.java",
             "SparkSqlInterpreterTest.java",
-            "DistributedResourcePoolTest.java",
             "FlinkInterpreterTest.java",
+            "JDBCInterpreterTest.java",
+            "IgniteInterpreterTest.java",
+            "LocalResourcePoolTest.java",
+            "ResourceTest.java",
+            "InterpreterFactoryTest.java",
+            "RemoteAngularObjectTest.java",
+            "RemoteInterpreterProcessTest.java",
+            "ScaldingInterpreterTest.java",
             "IgniteSqlInterpreterTest.java",
+            "DistributedResourcePoolTest.java",
+            "SparkInterpreterTest.java",
             "RemoteInterpreterUtilsTest.java",
-            "IgniteInterpreterTest.java"
+            "RemoteInterpreterServerTest.java",
+            "NotebookTest.java",
+            "RemoteInterpreterTest.java",
+            "HiveInterpreterTest.java",
+            "DepInterpreterTest.java",
+            "RemoteSchedulerTest.java",
+            "ParagraphTest.java"
         ]
     },
     "zeppelin_df5933d": {
@@ -5345,14 +5365,12 @@
         "message": "[ZEPPELIN-1594] Support personalized mode\n\n### What is this PR for?\nEnabling \"Personalized Mode\" for specific note\n\n### What type of PR is it?\n[Feature]\n\n### Todos\n* [x] - Backend work for supporting that feature\n* [x] - Develop front-end UI\n\n### What is the Jira issue?\n* https://issues.apache.org/jira/browse/ZEPPELIN-1594\n\n### How should this be tested?\n1. config.personalizedMode = true in note.json\n1. Navigate some jobs in two different browser\n\n### Screenshots (if appropriate)\n\n### Questions:\n* Does the licenses files need update? No\n* Is there breaking changes for older versions? No\n* Does this needs documentation? No\n\nAuthor: Jongyoul Lee <jl@Jongyouls-MacBook-Pro.local>\nAuthor: CloverHearts <cloverheartsdev@gmail.com>\nAuthor: CloverHearts <cloverhearts@users.noreply.github.com>\n\nCloses #1753 from jongyoul/ZEPPELIN-1594 and squashes the following commits:\n\na9d8f7e [CloverHearts] change mode name shared to collaboration and dialog message (#5)\n70f68d8 [Jongyoul Lee] Fixed dynamic forms Fixed NPE while broadcasting userParagraphsMap\n2c7bd39 [CloverHearts] broadcast bugfix\nf59d26a [CloverHearts] implement update personalized mode websocket event in backend\n9fcb7f8 [CloverHearts] implement ui\n20425e7 [CloverHearts] add toggleNotePersonalizedMode and ui\n4fabd88 [Jongyoul Lee] Fixed style\na7c91f1 [Jongyoul Lee] Fixed the bug while not using personalized mode\nf627278 [Jongyoul Lee] Supported personalized mode",
         "parent": "https://github.com/apache/zeppelin/commit/4b5bee4431ad1c935bc6ad1c75fe421950269c9f",
         "patched_files": [
+            "Paragraph.java",
             "NotebookServer.java",
-            "Job.java",
-            "Note.java",
-            "Paragraph.java"
+            "Note.java"
         ],
         "repo": "zeppelin",
         "unit_tests": [
-            "JobTest.java",
             "NotebookServerTest.java",
             "ParagraphTest.java",
             "NoteTest.java"
@@ -5765,53 +5783,49 @@
         "message": "ZEPPELIN-1692: Ability to access Spark jobs UI from the paragraph\n\n### What is this PR for?\nA paragraph execution may result in spark job(s).\nAdding ability to access the spark job UI(corresponding to the job generated by the paragraph run), directly from the paragraph.\n\n### What type of PR is it?\nImprovement\n\n### Todos\n* [x]  Write tests\n\n### What is the Jira issue?\nZEPPELIN-1692\n\n### How should this be tested?\nRun paragraphs with spark code(scala, pyspark, sql, R).\nThe paragraph will display a button on the top right corner, which on click will open up the corresponding job UI\n\n### Screenshots (if appropriate)\n![spark_jobs](https://cloud.githubusercontent.com/assets/5082742/20488337/a07fe35a-b02c-11e6-9400-db9f1c10df90.gif)\n\n### Questions:\n* Does the licenses files need update? NA\n* Is there breaking changes for older versions? NA\n* Does this needs documentation? NA\n\nAuthor: Karup <karuppayya@outlook.com>\nAuthor: karuppayya <karuppayya1990@gmail.com>\nAuthor: karuppayya <karuppayyar@qubole.com>\n\nCloses #1663 from karuppayya/ZEPPELIN-1692 and squashes the following commits:\n\n4253d0b [Karup] Fix bad rebase\nd7eb3b6 [Karup] Fix paragraph.js\n8e2cd85 [Karup] tryout: fix selenium tests based on moons suggstion\n732b0a4 [karuppayya] Fix test\n890107d [Karup] Fix test - tryout\ned4685c [Karup] Fix tooltip\nd27221d [Karup] Adding license header\n87214a7 [Karup] Fix incorrect rebase\n19513a6 [Karup] Send para runtimeinfos via websocker, but dont persist in json\n09fc0e2 [Karup] Fix compilation\nfc44d9b [Karup] Address review comments\nb837c6c [karuppayya] Fix incorrect variable used\n42d92ac [karuppayya] Fix test\nd4e54e8 [karuppayya] Address review feedbacks\n1a45284 [Karup] Fix test\n717eedf [Karup] Add tests , refactor\n25379aa [Karup] Clear job urls when we clear output\n7383c0a [Karup] Address review comments\ne2cd4db [karuppayya] Fix NPE in tests\n3d9a573 [karuppayya] Fix NPE and some refactoring\n9b3a3e2 [karuppayya] Fix checkstyle\nf16422f [karuppayya] Ability to view spark job urls in each paragraph",
         "parent": "https://github.com/apache/zeppelin/commit/cbe68d227e9ea05b8bfc02527e7409d7cfb28358",
         "patched_files": [
-            "InterpreterSetting.java",
-            "InterpreterRestApi.java",
-            "SparkRInterpreter.java",
-            "websocketEvents.java",
-            "Utils.java",
-            "ZeppelinContext.java",
-            "AbstractZeppelinIT.java",
-            "RemoteInterpreterOutputTestStream.java",
             "RemoteScheduler.java",
-            "ParagraphRuntimeInfo.java",
-            "RemoteInterpreterEventPoller.java",
-            "NotebookTypeAdapterFactory.java",
-            "RemoteInterpreterEventType.java",
-            "paragraph-control.java",
-            "SparkInterpreter.java",
-            "RemoteEventClientWrapper.java",
-            "RemoteInterpreterEventClient.java",
-            "Paragraph.java",
-            "Message.java",
-            "RemoteInterpreterUtils.java",
-            "Notebook.java",
             "PySparkInterpreter.java",
-            "RemoteInterpreterService.java",
-            "SparkSqlInterpreter.java",
-            "RemoteInterpreterProcessListener.java",
             "paragraph.java",
+            "Utils.java",
+            "RemoteInterpreterEventPoller.java",
+            "ParagraphRuntimeInfo.java",
+            "InterpreterRestApi.java",
+            "RemoteInterpreterEventClient.java",
+            "InterpreterSetting.java",
+            "RemoteInterpreterEventType.java",
+            "websocketEvents.java",
+            "SparkInterpreter.java",
+            "SparkRInterpreter.java",
+            "paragraph-control.java",
+            "Note.java",
+            "RemoteInterpreterService.java",
+            "RemoteEventClientWrapper.java",
+            "ZeppelinContext.java",
             "RemoteEventClient.java",
-            "NotebookServer.java",
+            "RemoteInterpreterOutputTestStream.java",
+            "NotebookTypeAdapterFactory.java",
+            "Message.java",
+            "Paragraph.java",
+            "SparkSqlInterpreter.java",
+            "Notebook.java",
+            "RemoteInterpreterProcessListener.java",
             "ZeppelinServer.java",
-            "Note.java"
+            "AbstractZeppelinIT.java",
+            "RemoteInterpreterUtils.java",
+            "NotebookServer.java"
         ],
         "repo": "zeppelin",
         "unit_tests": [
-            "SparkRInterpreterTest.java",
             "SparkInterpreterTest.java",
-            "InterpreterRestApiTest.java",
-            "PySparkInterpreterTest.java",
-            "RemoteSchedulerTest.java",
-            "NotebookServerTest.java",
-            "NoteTest.java",
-            "NotebookTest.java",
-            "InterpreterSettingTest.java",
-            "SparkSqlInterpreterTest.java",
-            "TestUtils.java",
             "RemoteInterpreterUtilsTest.java",
-            "ZeppelinServerTest.java",
-            "ParagraphTest.java"
+            "NoteTest.java",
+            "SparkSqlInterpreterTest.java",
+            "NotebookTest.java",
+            "RemoteSchedulerTest.java",
+            "InterpreterRestApiTest.java",
+            "NotebookServerTest.java",
+            "ParagraphTest.java",
+            "PySparkInterpreterTest.java"
         ]
     },
     "zeppelin_eb84aa2": {

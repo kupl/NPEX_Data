@@ -92,85 +92,43 @@
             "AccessServiceTest.java"
         ]
     },
-    "kylin_0e675cf": {
-        "bug_id": "kylin_0e675cf",
-        "commit": "https://github.com/apache/kylin/commit/0e675cf2cbaa9f2bc9a520aaef82443641efb8ca",
+    "kylin_089b200": {
+        "bug_id": "kylin_089b200",
+        "commit": "https://github.com/apache/kylin/commit/089b200e5123e1685de15eb95a67bee0d075658a",
         "file": [
             {
-                "additions": 6,
-                "blob_url": "https://github.com/apache/kylin/blob/0e675cf2cbaa9f2bc9a520aaef82443641efb8ca/engine-mr/src/main/java/org/apache/kylin/engine/mr/common/JobInfoConverter.java",
-                "changes": 7,
-                "contents_url": "https://api.github.com/repos/apache/kylin/contents/engine-mr/src/main/java/org/apache/kylin/engine/mr/common/JobInfoConverter.java?ref=0e675cf2cbaa9f2bc9a520aaef82443641efb8ca",
-                "deletions": 1,
-                "filename": "engine-mr/src/main/java/org/apache/kylin/engine/mr/common/JobInfoConverter.java",
-                "patch": "@@ -63,11 +63,16 @@ public static JobInstance parseToJobInstance(AbstractExecutable job, Map<String,\n     }\n \n     public static JobInstance.JobStep parseToJobStep(AbstractExecutable task, int i, Output stepOutput) {\n-        Preconditions.checkNotNull(stepOutput);\n         JobInstance.JobStep result = new JobInstance.JobStep();\n         result.setId(task.getId());\n         result.setName(task.getName());\n         result.setSequenceID(i);\n+\n+        if (stepOutput == null) {\n+            result.setStatus(JobStepStatusEnum.ERROR);\n+            return result;\n+        }\n+\n         result.setStatus(parseToJobStepStatus(stepOutput.getState()));\n         for (Map.Entry<String, String> entry : stepOutput.getExtra().entrySet()) {\n             if (entry.getKey() != null && entry.getValue() != null) {",
-                "raw_url": "https://github.com/apache/kylin/raw/0e675cf2cbaa9f2bc9a520aaef82443641efb8ca/engine-mr/src/main/java/org/apache/kylin/engine/mr/common/JobInfoConverter.java",
-                "sha": "ec5aef1f0c16a7ea9c78938049710023b82b1b1a",
+                "additions": 18,
+                "blob_url": "https://github.com/apache/kylin/blob/089b200e5123e1685de15eb95a67bee0d075658a/storage/src/main/java/org/apache/kylin/storage/hbase/coprocessor/endpoint/HbaseServerKVIterator.java",
+                "changes": 31,
+                "contents_url": "https://api.github.com/repos/apache/kylin/contents/storage/src/main/java/org/apache/kylin/storage/hbase/coprocessor/endpoint/HbaseServerKVIterator.java?ref=089b200e5123e1685de15eb95a67bee0d075658a",
+                "deletions": 13,
+                "filename": "storage/src/main/java/org/apache/kylin/storage/hbase/coprocessor/endpoint/HbaseServerKVIterator.java",
+                "patch": "@@ -22,18 +22,15 @@\n import org.apache.commons.io.IOUtils;\n import org.apache.hadoop.hbase.Cell;\n import org.apache.hadoop.hbase.regionserver.RegionScanner;\n-import org.apache.kylin.common.util.BytesUtil;\n-import org.apache.kylin.invertedindex.index.TableRecordInfoDigest;\n-import org.apache.kylin.invertedindex.model.IIDesc;\n import org.apache.kylin.invertedindex.model.IIRow;\n import org.slf4j.Logger;\n import org.slf4j.LoggerFactory;\n \n import java.io.Closeable;\n import java.io.IOException;\n-import java.util.ArrayList;\n import java.util.Iterator;\n import java.util.List;\n+import java.util.NoSuchElementException;\n \n /**\n  * Created by honma on 11/10/14.\n@@ -56,32 +53,40 @@ public void close() throws IOException {\n \n         private final RegionScanner regionScanner;\n         private final IIRow row = new IIRow();\n-        private boolean hasMore = true;\n         List<Cell> results = Lists.newArrayList();\n \n+        private boolean hasMore;\n+\n         IIRowIterator(RegionScanner innerScanner) {\n             this.regionScanner = innerScanner;\n+            try {\n+                hasMore = regionScanner.nextRaw(results);\n+            } catch (IOException e) {\n+                throw new RuntimeException(e);\n+            }\n         }\n \n         @Override\n         public boolean hasNext() {\n-            return hasMore;\n+            return !results.isEmpty();\n         }\n \n         @Override\n         public IIRow next() {\n-            results.clear();\n-            try {\n-                hasMore = regionScanner.next(results);\n-            } catch (IOException e) {\n-                throw new RuntimeException(e);\n-            }\n             if (results.size() < 1) {\n-                throw new IllegalStateException(\"Hbase row contains less than 1 cell\");\n+                throw new NoSuchElementException();\n             }\n             for (Cell c : results) {\n                 row.updateWith(c);\n             }\n+            results.clear();\n+            try {\n+                if (hasMore) {\n+                    hasMore = regionScanner.next(results);\n+                }\n+            } catch (IOException e) {\n+                throw new RuntimeException(e);\n+            }\n             return row;\n         }\n ",
+                "raw_url": "https://github.com/apache/kylin/raw/089b200e5123e1685de15eb95a67bee0d075658a/storage/src/main/java/org/apache/kylin/storage/hbase/coprocessor/endpoint/HbaseServerKVIterator.java",
+                "sha": "d6c8c2902564c8d129e808f44fb3ba5f51284a32",
                 "status": "modified"
-            }
-        ],
-        "message": "KYLIN-2707 Fix NPE in JobInfoConverter",
-        "parent": "https://github.com/apache/kylin/commit/0dc2cd4665efd32d2f782e53382f86e5dadb720a",
-        "patched_files": [
-            "JobInfoConverter.java"
-        ],
-        "repo": "kylin",
-        "unit_tests": [
-            "JobInfoConverterTest.java"
-        ]
-    },
-    "kylin_14be33f": {
-        "bug_id": "kylin_14be33f",
-        "commit": "https://github.com/apache/kylin/commit/14be33f8f16d20bb18500934d56272a30face1b8",
-        "file": [
+            },
             {
                 "additions": 2,
-                "blob_url": "https://github.com/apache/kylin/blob/14be33f8f16d20bb18500934d56272a30face1b8/tool/src/main/java/org/apache/kylin/tool/ToolUtil.java",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/kylin/contents/tool/src/main/java/org/apache/kylin/tool/ToolUtil.java?ref=14be33f8f16d20bb18500934d56272a30face1b8",
-                "deletions": 0,
-                "filename": "tool/src/main/java/org/apache/kylin/tool/ToolUtil.java",
-                "patch": "@@ -50,6 +50,8 @@ public static String getHBaseMetaStoreId() throws IOException {\n             final String metaStoreName = KylinConfig.getInstanceFromEnv().getMetadataUrlPrefix();\n             final HTableDescriptor desc = hbaseAdmin.getTableDescriptor(TableName.valueOf(metaStoreName));\n             return desc.getValue(HBaseConnection.HTABLE_UUID_TAG);\n+        } catch (Exception e) {\n+            return null;\n         }\n     }\n ",
-                "raw_url": "https://github.com/apache/kylin/raw/14be33f8f16d20bb18500934d56272a30face1b8/tool/src/main/java/org/apache/kylin/tool/ToolUtil.java",
-                "sha": "494f4fea86a04a3d40d39441788bc303755b3c49",
+                "blob_url": "https://github.com/apache/kylin/blob/089b200e5123e1685de15eb95a67bee0d075658a/streaming/src/main/java/org/apache/kylin/streaming/KafkaRequester.java",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/kylin/contents/streaming/src/main/java/org/apache/kylin/streaming/KafkaRequester.java?ref=089b200e5123e1685de15eb95a67bee0d075658a",
+                "deletions": 1,
+                "filename": "streaming/src/main/java/org/apache/kylin/streaming/KafkaRequester.java",
+                "patch": "@@ -76,7 +76,8 @@ private static SimpleConsumer getSimpleConsumer(Broker broker, int timeout, int\n         if (consumerCache.containsKey(key)) {\n             return consumerCache.get(key);\n         } else {\n-            return consumerCache.putIfAbsent(key, new SimpleConsumer(broker.host(), broker.port(), timeout, bufferSize, clientId));\n+            consumerCache.putIfAbsent(key, new SimpleConsumer(broker.host(), broker.port(), timeout, bufferSize, clientId));\n+            return consumerCache.get(key);\n         }\n     }\n ",
+                "raw_url": "https://github.com/apache/kylin/raw/089b200e5123e1685de15eb95a67bee0d075658a/streaming/src/main/java/org/apache/kylin/streaming/KafkaRequester.java",
+                "sha": "76f152855145df71902cf7708aa38cd168c106e9",
                 "status": "modified"
             }
         ],
-        "message": "minor, fix NPE on diag",
-        "parent": "https://github.com/apache/kylin/commit/de2f75458b3a5d76390173fdd9359eadbcb11764",
+        "message": "fix npe",
+        "parent": "https://github.com/apache/kylin/commit/3e0abe49bf80651965060cef4a3e5188011000df",
         "patched_files": [
-            "ToolUtil.java"
+            "KafkaRequester.java"
         ],
         "repo": "kylin",
         "unit_tests": [
-            "ToolUtilTest.java"
-        ]
-    },
-    "kylin_2415fd9": {
-        "bug_id": "kylin_2415fd9",
-        "commit": "https://github.com/apache/kylin/commit/2415fd9e65b7bf483c375eda7d074c6804edb60e",
-        "file": [
-            {
-                "additions": 4,
-                "blob_url": "https://github.com/apache/kylin/blob/2415fd9e65b7bf483c375eda7d074c6804edb60e/server-base/src/main/java/org/apache/kylin/rest/util/ValidateUtil.java",
-                "changes": 6,
-                "contents_url": "https://api.github.com/repos/apache/kylin/contents/server-base/src/main/java/org/apache/kylin/rest/util/ValidateUtil.java?ref=2415fd9e65b7bf483c375eda7d074c6804edb60e",
-                "deletions": 2,
-                "filename": "server-base/src/main/java/org/apache/kylin/rest/util/ValidateUtil.java",
-                "patch": "@@ -122,8 +122,10 @@ public void validateColumn(String project, String table, Collection<String> colu\n         ProjectInstance prj = projectService.getProjectManager().getProject(project);\n         AclEntity ae = accessService.getAclEntity(\"ProjectInstance\", prj.getUuid());\n         Acl acl = accessService.getAcl(ae);\n-        for (AccessControlEntry ace : acl.getEntries()) {\n-            allUsers.add(((PrincipalSid) ace.getSid()).getPrincipal());\n+        if (acl != null && acl.getEntries() != null) {\n+            for (AccessControlEntry ace : acl.getEntries()) {\n+                allUsers.add(((PrincipalSid) ace.getSid()).getPrincipal());\n+            }\n         }\n         return allUsers;\n     }",
-                "raw_url": "https://github.com/apache/kylin/raw/2415fd9e65b7bf483c375eda7d074c6804edb60e/server-base/src/main/java/org/apache/kylin/rest/util/ValidateUtil.java",
-                "sha": "7e513aeb07029dae76e9b4ca7453b2485714b73f",
-                "status": "modified"
-            }
-        ],
-        "message": "minor, fix NPE in ACL ValidateUtil getALlUsers",
-        "parent": "https://github.com/apache/kylin/commit/bd7cb9c9570f3d3cb0ceeb8f4c6be81853eb59bd",
-        "patched_files": [
-            "ValidateUtil.java"
-        ],
-        "repo": "kylin",
-        "unit_tests": [
-            "ValidateUtilTest.java"
+            "KafkaRequesterTest.java"
         ]
     },
     "kylin_263791d": {
@@ -403,17 +361,17 @@
         "message": "KYLIN-3396 NPE throws when materialize lookup table to HBase\n\nSigned-off-by: shaofengshi <shaofengshi@apache.org>",
         "parent": "https://github.com/apache/kylin/commit/e3dcafb097d04f50f22994dc722d8bc0736dccbb",
         "patched_files": [
+            "UpdateCubeAfterSnapshotStep.java",
+            "JobBuilderSupport.java",
             "HBaseLookupMaterializer.java",
-            "CubeService.java",
+            "LookupSnapshotJobBuilder.java",
+            "ILookupMaterializer.java",
             "BatchCubingJobBuilder2.java",
+            "UpdateCubeInfoAfterBuildStep.java",
             "BatchConstants.java",
             "LookupMaterializeContext.java",
             "LookupTableToHFileJob.java",
-            "UpdateCubeInfoAfterBuildStep.java",
-            "JobBuilderSupport.java",
-            "ILookupMaterializer.java",
-            "LookupSnapshotJobBuilder.java",
-            "UpdateCubeAfterSnapshotStep.java",
+            "CubeService.java",
             "HBaseLookupMRSteps.java"
         ],
         "repo": "kylin",
@@ -423,31 +381,31 @@
             "LookupMaterializeContextTest.java"
         ]
     },
-    "kylin_3003d9f": {
-        "bug_id": "kylin_3003d9f",
-        "commit": "https://github.com/apache/kylin/commit/3003d9fba7c0b20a74785cbc431f9e708e775418",
+    "kylin_32d7244": {
+        "bug_id": "kylin_32d7244",
+        "commit": "https://github.com/apache/kylin/commit/32d724440657fd97462d4d10f9a5d91ba0d5a6da",
         "file": [
             {
-                "additions": 6,
-                "blob_url": "https://github.com/apache/kylin/blob/3003d9fba7c0b20a74785cbc431f9e708e775418/query/src/main/java/org/apache/kylin/query/schema/OLAPTable.java",
-                "changes": 13,
-                "contents_url": "https://api.github.com/repos/apache/kylin/contents/query/src/main/java/org/apache/kylin/query/schema/OLAPTable.java?ref=3003d9fba7c0b20a74785cbc431f9e708e775418",
-                "deletions": 7,
-                "filename": "query/src/main/java/org/apache/kylin/query/schema/OLAPTable.java",
-                "patch": "@@ -43,13 +43,13 @@\n import org.apache.calcite.sql.type.SqlTypeName;\n import org.apache.calcite.sql.type.SqlTypeUtil;\n import org.apache.calcite.util.ImmutableBitSet;\n-import org.apache.kylin.metadata.MetadataManager;\n import org.apache.kylin.metadata.datatype.DataType;\n import org.apache.kylin.metadata.model.ColumnDesc;\n import org.apache.kylin.metadata.model.DataModelDesc;\n import org.apache.kylin.metadata.model.FunctionDesc;\n import org.apache.kylin.metadata.model.MeasureDesc;\n import org.apache.kylin.metadata.model.TableDesc;\n+import org.apache.kylin.metadata.model.TblColRef;\n import org.apache.kylin.metadata.project.ProjectManager;\n import org.apache.kylin.metadata.realization.IRealization;\n import org.apache.kylin.metadata.realization.RealizationType;\n@@ -198,14 +198,13 @@ else if (precision >= 0)\n             }\n         }\n         //2. All integer measures in non-cube realizations\n-        MetadataManager metadataManager = MetadataManager.getInstance(olapSchema.getConfig());\n         for (IRealization realization : mgr.listAllRealizations(olapSchema.getProjectName())) {\n             if (realization.getType() == RealizationType.INVERTED_INDEX && realization.getModel().isFactTable(sourceTable.getIdentity())) {\n-                DataModelDesc dataModelDesc = realization.getModel();\n-                for (String metricColumn : dataModelDesc.getMetrics()) {\n-                    ColumnDesc columnDesc = metadataManager.getColumnDesc(dataModelDesc.getRootFactTable().getTableIdentity() + \".\" + metricColumn);\n-                    if (columnDesc.getType().isIntegerFamily() && !columnDesc.getType().isBigInt())\n-                        updateColumns.add(columnDesc);\n+                DataModelDesc model = realization.getModel();\n+                for (String metricColumn : model.getMetrics()) {\n+                    TblColRef col = model.findColumn(metricColumn);\n+                    if (col.getType().isIntegerFamily() && !col.getType().isBigInt())\n+                        updateColumns.add(col.getColumnDesc());\n                 }\n             }\n         }",
-                "raw_url": "https://github.com/apache/kylin/raw/3003d9fba7c0b20a74785cbc431f9e708e775418/query/src/main/java/org/apache/kylin/query/schema/OLAPTable.java",
-                "sha": "c33c4edadc4dfa385272ac132b1f2c58e8df40ef",
+                "additions": 11,
+                "blob_url": "https://github.com/apache/kylin/blob/32d724440657fd97462d4d10f9a5d91ba0d5a6da/core-metadata/src/main/java/org/apache/kylin/metadata/MetadataManager.java",
+                "changes": 21,
+                "contents_url": "https://api.github.com/repos/apache/kylin/contents/core-metadata/src/main/java/org/apache/kylin/metadata/MetadataManager.java?ref=32d724440657fd97462d4d10f9a5d91ba0d5a6da",
+                "deletions": 10,
+                "filename": "core-metadata/src/main/java/org/apache/kylin/metadata/MetadataManager.java",
+                "patch": "@@ -39,6 +39,7 @@\n import org.apache.kylin.metadata.model.ExternalFilterDesc;\n import org.apache.kylin.metadata.model.TableDesc;\n import org.apache.kylin.metadata.model.TableExtDesc;\n+import org.apache.kylin.metadata.model.TableRef;\n import org.apache.kylin.metadata.project.ProjectInstance;\n import org.apache.kylin.metadata.project.ProjectManager;\n import org.slf4j.Logger;\n@@ -395,6 +396,7 @@ private TableExtDesc reloadTableExtAt(String path) throws IOException {\n         // remove old json\n         if (name == null) {\n             getStore().deleteResource(path);\n+            return null;\n         }\n \n         srcTableExdMap.putLocal(name, t);\n@@ -495,28 +497,27 @@ public DataModelDesc getDataModelDesc(String name) {\n     }\n \n     public boolean isTableInModel(String tableName, String projectName) throws IOException {\n-        for (DataModelDesc modelDesc : getModels(projectName)) {\n-            if (modelDesc.getAllTables().contains(tableName.toUpperCase())) {\n-                return true;\n-            }\n-        }\n-        return false;\n+        return getModelsUsingTable(tableName, projectName).size() > 0;\n     }\n \n     public List<String> getModelsUsingTable(String tableName, String projectName) throws IOException {\n         List<String> models = new ArrayList<>();\n         for (DataModelDesc modelDesc : getModels(projectName)) {\n-            if (modelDesc.getAllTables().contains(tableName.toUpperCase())) {\n-                models.add(modelDesc.getName());\n+            for(TableRef tableRef : modelDesc.getAllTables()){\n+                if(tableRef.getTableName().equalsIgnoreCase(tableName)){\n+                    models.add(modelDesc.getName());\n+                }\n             }\n         }\n         return models;\n     }\n \n     public boolean isTableInAnyModel(String tableName) {\n         for (DataModelDesc modelDesc : getModels()) {\n-            if (modelDesc.getAllTables().contains(tableName.toUpperCase())) {\n-                return true;\n+            for(TableRef tableRef : modelDesc.getAllTables()){\n+                if(tableRef.getTableName().equalsIgnoreCase(tableName)){\n+                    return true;\n+                }\n             }\n         }\n         return false;",
+                "raw_url": "https://github.com/apache/kylin/raw/32d724440657fd97462d4d10f9a5d91ba0d5a6da/core-metadata/src/main/java/org/apache/kylin/metadata/MetadataManager.java",
+                "sha": "7290d4c95896c17c8d5cbd871cb6779269d52937",
                 "status": "modified"
             }
         ],
-        "message": "minor, fix NPE in OLAPTable",
-        "parent": "https://github.com/apache/kylin/commit/1c2c43cb88d2abc5a1ea1cbf18cbede02fe8c4f5",
+        "message": "minor, fix NPE and check table using by model code in MetadataManager",
+        "parent": "https://github.com/apache/kylin/commit/a9ee6d33eca53f67d9d4dd1da52b6fbfe98cb510",
         "patched_files": [
-            "OLAPTable.java"
+            "MetadataManager.java"
         ],
         "repo": "kylin",
         "unit_tests": [
-            "OLAPTableTest.java"
+            "MetadataManagerTest.java"
         ]
     },
     "kylin_3bb93c3": {
@@ -502,60 +460,6 @@
         "repo": "kylin",
         "unit_tests": [
             "CubeControllerTest.java"
-        ]
-    },
-    "kylin_444302b": {
-        "bug_id": "kylin_444302b",
-        "commit": "https://github.com/apache/kylin/commit/444302b2afe05940ec8fed43f437d8cd1ffbf62c",
-        "file": [
-            {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/kylin/blob/444302b2afe05940ec8fed43f437d8cd1ffbf62c/engine-mr/src/main/java/org/apache/kylin/engine/mr/common/MapReduceExecutable.java",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/kylin/contents/engine-mr/src/main/java/org/apache/kylin/engine/mr/common/MapReduceExecutable.java?ref=444302b2afe05940ec8fed43f437d8cd1ffbf62c",
-                "deletions": 1,
-                "filename": "engine-mr/src/main/java/org/apache/kylin/engine/mr/common/MapReduceExecutable.java",
-                "patch": "@@ -74,7 +74,7 @@ protected void onExecuteStart(ExecutableContext executableContext) {\n             try {\n                 Configuration conf = HadoopUtil.getCurrentConfiguration();\n                 Job job = new Cluster(conf).getJob(JobID.forName(mrJobId));\n-                if (job.getJobState() == JobStatus.State.FAILED) {\n+                if (job == null || job.getJobState() == JobStatus.State.FAILED) {\n                     //remove previous mr job info\n                     super.onExecuteStart(executableContext);\n                 } else {",
-                "raw_url": "https://github.com/apache/kylin/raw/444302b2afe05940ec8fed43f437d8cd1ffbf62c/engine-mr/src/main/java/org/apache/kylin/engine/mr/common/MapReduceExecutable.java",
-                "sha": "19d888cf09b6b3d0307199cab6726857f8614fd0",
-                "status": "modified"
-            }
-        ],
-        "message": "KYLIN-1581 NPE in Job engine when execute MR job",
-        "parent": "https://github.com/apache/kylin/commit/96bd3c455ffb2fd37466bd4cfc0ce9a5866925d3",
-        "patched_files": [
-            "MapReduceExecutable.java"
-        ],
-        "repo": "kylin",
-        "unit_tests": [
-            "MapReduceExecutableTest.java"
-        ]
-    },
-    "kylin_4632254": {
-        "bug_id": "kylin_4632254",
-        "commit": "https://github.com/apache/kylin/commit/4632254541ce25dc1b3ca8c812d0ae8af3195f86",
-        "file": [
-            {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/kylin/blob/4632254541ce25dc1b3ca8c812d0ae8af3195f86/common/src/main/java/org/apache/kylin/common/KylinConfig.java",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/kylin/contents/common/src/main/java/org/apache/kylin/common/KylinConfig.java?ref=4632254541ce25dc1b3ca8c812d0ae8af3195f86",
-                "deletions": 1,
-                "filename": "common/src/main/java/org/apache/kylin/common/KylinConfig.java",
-                "patch": "@@ -452,7 +452,7 @@ public int getHBaseKeyValueSize() {\n     }\n \n     public String getHbaseDefaultCompressionCodec() {\n-        return getOptional(HTABLE_DEFAULT_COMPRESSION_CODEC);\n+        return getOptional(HTABLE_DEFAULT_COMPRESSION_CODEC, \"\");\n \n     }\n ",
-                "raw_url": "https://github.com/apache/kylin/raw/4632254541ce25dc1b3ca8c812d0ae8af3195f86/common/src/main/java/org/apache/kylin/common/KylinConfig.java",
-                "sha": "deb2eda77bc7f23583a4508b62187061fd1970d2",
-                "status": "modified"
-            }
-        ],
-        "message": "KYLIN_956, fix NPE when there is no value for kylin.hbase.default.compression.codec",
-        "parent": "https://github.com/apache/kylin/commit/dd53d7138fc27fce2bb16167fa5a81176915f78d",
-        "patched_files": [
-            "KylinConfig.java"
-        ],
-        "repo": "kylin",
-        "unit_tests": [
-            "KylinConfigTest.java"
         ]
     },
     "kylin_4a1a4de": {
@@ -687,12 +591,10 @@
         "message": "KYLIN-3742 Fix DataRequest for NPE and add some javadoc",
         "parent": "https://github.com/apache/kylin/commit/6da979581476e80db1524dff919d3d9c55d7448b",
         "patched_files": [
-            "StreamingSegmentManager.java",
-            "Coordinator.java"
+            "StreamingSegmentManager.java"
         ],
         "repo": "kylin",
         "unit_tests": [
-            "CoordinatorTest.java",
             "StreamingSegmentManagerTest.java"
         ]
     },
@@ -748,33 +650,6 @@
         "repo": "kylin",
         "unit_tests": [
             "JobInfoConverterTest.java"
-        ]
-    },
-    "kylin_4f32927": {
-        "bug_id": "kylin_4f32927",
-        "commit": "https://github.com/apache/kylin/commit/4f32927558ff6ebc1899241af87e93bd2747e242",
-        "file": [
-            {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/kylin/blob/4f32927558ff6ebc1899241af87e93bd2747e242/core-common/src/main/java/org/apache/kylin/common/KylinVersion.java",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/kylin/contents/core-common/src/main/java/org/apache/kylin/common/KylinVersion.java?ref=4f32927558ff6ebc1899241af87e93bd2747e242",
-                "deletions": 1,
-                "filename": "core-common/src/main/java/org/apache/kylin/common/KylinVersion.java",
-                "patch": "@@ -126,7 +126,7 @@ public static void main(String[] args) {\n     public static String getKylinClientInformation() {\n         StringBuilder buf = new StringBuilder();\n \n-        buf.append(\"kylin.home: \").append(new File(KylinConfig.getKylinHome()).getAbsolutePath()).append(\"\\n\");\n+        buf.append(\"kylin.home: \").append(KylinConfig.getKylinHome() == null ? \"UNKNOWN\" : new File(KylinConfig.getKylinHome()).getAbsolutePath()).append(\"\\n\");\n         buf.append(\"kylin.version:\").append(KylinVersion.getCurrentVersion()).append(\"\\n\");\n         buf.append(\"commit:\").append(getGitCommitInfo()).append(\"\\n\");\n         buf.append(\"os.name:\").append(System.getProperty(\"os.name\")).append(\"\\n\");",
-                "raw_url": "https://github.com/apache/kylin/raw/4f32927558ff6ebc1899241af87e93bd2747e242/core-common/src/main/java/org/apache/kylin/common/KylinVersion.java",
-                "sha": "d1d2f7a8a345ffdb37e31f2269acd643cbe068f9",
-                "status": "modified"
-            }
-        ],
-        "message": "minor, fix an NPE",
-        "parent": "https://github.com/apache/kylin/commit/cabd2f9cb9f4fd50c21bcfcaceb37c1fa122bb94",
-        "patched_files": [
-            "KylinVersion.java"
-        ],
-        "repo": "kylin",
-        "unit_tests": [
-            "KylinVersionTest.java"
         ]
     },
     "kylin_4fb7eee": {
@@ -865,8 +740,8 @@
         ],
         "repo": "kylin",
         "unit_tests": [
-            "QueryServiceTest.java",
-            "PushDownUtilTest.java"
+            "PushDownUtilTest.java",
+            "QueryServiceTest.java"
         ]
     },
     "kylin_5ec65be": {
@@ -950,33 +825,6 @@
             "StringUtilTest.java"
         ]
     },
-    "kylin_714b225": {
-        "bug_id": "kylin_714b225",
-        "commit": "https://github.com/apache/kylin/commit/714b225122bd6686ef6e1c1d7075bc662b5a6eb2",
-        "file": [
-            {
-                "additions": 2,
-                "blob_url": "https://github.com/apache/kylin/blob/714b225122bd6686ef6e1c1d7075bc662b5a6eb2/server-base/src/main/java/org/apache/kylin/rest/service/AclService.java",
-                "changes": 4,
-                "contents_url": "https://api.github.com/repos/apache/kylin/contents/server-base/src/main/java/org/apache/kylin/rest/service/AclService.java?ref=714b225122bd6686ef6e1c1d7075bc662b5a6eb2",
-                "deletions": 2,
-                "filename": "server-base/src/main/java/org/apache/kylin/rest/service/AclService.java",
-                "patch": "@@ -151,9 +151,9 @@ public Acl readAclById(ObjectIdentity object, List<Sid> sids) throws NotFoundExc\n             for (ObjectIdentity oid : oids) {\n                 AclRecord record = aclStore.getResource(getQueryKeyById(String.valueOf(oid.getIdentifier())),\n                         AclRecord.class, SERIALIZER);\n-                if (record != null) {\n+                if (record != null && record.getOwnerInfo() != null) {\n                     SidInfo owner = record.getOwnerInfo();\n-                    Sid ownerSid = (null == owner) ? null : (owner.isPrincipal() ? new PrincipalSid(owner.getSid()) : new GrantedAuthoritySid(owner.getSid()));\n+                    Sid ownerSid = owner.isPrincipal() ? new PrincipalSid(owner.getSid()) : new GrantedAuthoritySid(owner.getSid());\n                     boolean entriesInheriting = record.isEntriesInheriting();\n \n                     Acl parentAcl = null;",
-                "raw_url": "https://github.com/apache/kylin/raw/714b225122bd6686ef6e1c1d7075bc662b5a6eb2/server-base/src/main/java/org/apache/kylin/rest/service/AclService.java",
-                "sha": "fe31bd94c50c22859b39f2cc01cae4529513eb7c",
-                "status": "modified"
-            }
-        ],
-        "message": "KYLIN-2778 avoid NPE in AclService.java",
-        "parent": "https://github.com/apache/kylin/commit/4f16f1cdc61f9bd01edad27151abff1bf4aa3596",
-        "patched_files": [
-            "AclService.java"
-        ],
-        "repo": "kylin",
-        "unit_tests": [
-            "AclServiceTest.java"
-        ]
-    },
     "kylin_75667ee": {
         "bug_id": "kylin_75667ee",
         "commit": "https://github.com/apache/kylin/commit/75667eedc7648c10dddbf3161ed9001bab07344e",
@@ -1043,99 +891,6 @@
             "ExecutableManagerTest.java"
         ]
     },
-    "kylin_7a5469e": {
-        "bug_id": "kylin_7a5469e",
-        "commit": "https://github.com/apache/kylin/commit/7a5469e07f68aaa882a3d924b8f4d99cc2660cf7",
-        "file": [
-            {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/kylin/blob/7a5469e07f68aaa882a3d924b8f4d99cc2660cf7/common/src/main/java/org/apache/kylin/common/KylinConfig.java",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/kylin/contents/common/src/main/java/org/apache/kylin/common/KylinConfig.java?ref=7a5469e07f68aaa882a3d924b8f4d99cc2660cf7",
-                "deletions": 1,
-                "filename": "common/src/main/java/org/apache/kylin/common/KylinConfig.java",
-                "patch": "@@ -452,7 +452,7 @@ public int getHBaseKeyValueSize() {\n     }\n \n     public String getHbaseDefaultCompressionCodec() {\n-        return getOptional(HTABLE_DEFAULT_COMPRESSION_CODEC);\n+        return getOptional(HTABLE_DEFAULT_COMPRESSION_CODEC, \"\");\n \n     }\n ",
-                "raw_url": "https://github.com/apache/kylin/raw/7a5469e07f68aaa882a3d924b8f4d99cc2660cf7/common/src/main/java/org/apache/kylin/common/KylinConfig.java",
-                "sha": "deb2eda77bc7f23583a4508b62187061fd1970d2",
-                "status": "modified"
-            }
-        ],
-        "message": "KYLIN_956, fix NPE when there is no value for kylin.hbase.default.compression.codec",
-        "parent": "https://github.com/apache/kylin/commit/74ceea9723e1b56f2b8be135109c29e7f6aa6e44",
-        "patched_files": [
-            "KylinConfig.java"
-        ],
-        "repo": "kylin",
-        "unit_tests": [
-            "KylinConfigTest.java"
-        ]
-    },
-    "kylin_81750e2": {
-        "bug_id": "kylin_81750e2",
-        "commit": "https://github.com/apache/kylin/commit/81750e2e1b86ffd6275a05a528ef53fa064aed23",
-        "file": [
-            {
-                "additions": 7,
-                "blob_url": "https://github.com/apache/kylin/blob/81750e2e1b86ffd6275a05a528ef53fa064aed23/common/src/main/java/org/apache/kylin/common/util/StringUtil.java",
-                "changes": 8,
-                "contents_url": "https://api.github.com/repos/apache/kylin/contents/common/src/main/java/org/apache/kylin/common/util/StringUtil.java?ref=81750e2e1b86ffd6275a05a528ef53fa064aed23",
-                "deletions": 1,
-                "filename": "common/src/main/java/org/apache/kylin/common/util/StringUtil.java",
-                "patch": "@@ -21,6 +21,8 @@\n import java.util.ArrayList;\n import java.util.Collection;\n \n+import org.apache.commons.lang.StringUtils;\n+\n /**\n  * Created with IntelliJ IDEA. User: lukhan Date: 12/2/13 Time: 11:43 AM To\n  * change this template use File | Settings | File Templates.\n@@ -56,7 +58,11 @@ public static void toUpperCaseArray(String[] source, String[] target) {\n             }\n         }\n     }\n-\n+    \n+    public static String noBlank(String str, String dft) {\n+        return StringUtils.isBlank(str) ? dft : str;\n+    }\n+    \n     public static String dropSuffix(String str, String suffix) {\n         if (str.endsWith(suffix))\n             return str.substring(0, str.length() - suffix.length());",
-                "raw_url": "https://github.com/apache/kylin/raw/81750e2e1b86ffd6275a05a528ef53fa064aed23/common/src/main/java/org/apache/kylin/common/util/StringUtil.java",
-                "sha": "dbf338056be51d87dc2e32ac39c25dc213cdfcf5",
-                "status": "modified"
-            },
-            {
-                "additions": 3,
-                "blob_url": "https://github.com/apache/kylin/blob/81750e2e1b86ffd6275a05a528ef53fa064aed23/job/src/main/java/org/apache/kylin/job/cube/CubingJob.java",
-                "changes": 5,
-                "contents_url": "https://api.github.com/repos/apache/kylin/contents/job/src/main/java/org/apache/kylin/job/cube/CubingJob.java?ref=81750e2e1b86ffd6275a05a528ef53fa064aed23",
-                "deletions": 2,
-                "filename": "job/src/main/java/org/apache/kylin/job/cube/CubingJob.java",
-                "patch": "@@ -25,6 +25,7 @@\n \n import org.apache.commons.lang3.StringUtils;\n import org.apache.commons.lang3.tuple.Pair;\n+import org.apache.kylin.common.util.StringUtil;\n import org.apache.kylin.job.common.MapReduceExecutable;\n import org.apache.kylin.job.constant.ExecutableConstants;\n import org.apache.kylin.job.execution.AbstractExecutable;\n@@ -91,8 +92,8 @@ public String getSegmentIds() {\n         content = content.replaceAll(\"\\\\$\\\\{duration\\\\}\", getDuration() / 60000 + \"mins\");\n         content = content.replaceAll(\"\\\\$\\\\{mr_waiting\\\\}\", getMapReduceWaitTime() / 60000 + \"mins\");\n         content = content.replaceAll(\"\\\\$\\\\{last_update_time\\\\}\", new Date(getLastModified()).toString());\n-        content = content.replaceAll(\"\\\\$\\\\{submitter\\\\}\", getSubmitter());\n-        content = content.replaceAll(\"\\\\$\\\\{error_log\\\\}\", logMsg);\n+        content = content.replaceAll(\"\\\\$\\\\{submitter\\\\}\", StringUtil.noBlank(getSubmitter(), \"missing submitter\"));\n+        content = content.replaceAll(\"\\\\$\\\\{error_log\\\\}\", StringUtil.noBlank(logMsg, \"no error log\"));\n \n         try {\n             InetAddress inetAddress = InetAddress.getLocalHost();",
-                "raw_url": "https://github.com/apache/kylin/raw/81750e2e1b86ffd6275a05a528ef53fa064aed23/job/src/main/java/org/apache/kylin/job/cube/CubingJob.java",
-                "sha": "760a6c32e6cc4bd73c6cb4539b6f53b6e849533c",
-                "status": "modified"
-            }
-        ],
-        "message": "minor, fix NPE in CubingJob.formatNotifications()",
-        "parent": "https://github.com/apache/kylin/commit/279430a861c431d9680bd09b2c6087c7711e5503",
-        "patched_files": [
-            "StringUtil.java"
-        ],
-        "repo": "kylin",
-        "unit_tests": [
-            "StringUtilTest.java"
-        ]
-    },
-    "kylin_8a2e128": {
-        "bug_id": "kylin_8a2e128",
-        "commit": "https://github.com/apache/kylin/commit/8a2e128c12460d63e581ceef182f9b287da623d6",
-        "file": [
-            {
-                "additions": 24,
-                "blob_url": "https://github.com/apache/kylin/blob/8a2e128c12460d63e581ceef182f9b287da623d6/job/src/main/java/org/apache/kylin/job/hadoop/cube/MetadataCleanupJob.java",
-                "changes": 44,
-                "contents_url": "https://api.github.com/repos/apache/kylin/contents/job/src/main/java/org/apache/kylin/job/hadoop/cube/MetadataCleanupJob.java?ref=8a2e128c12460d63e581ceef182f9b287da623d6",
-                "deletions": 20,
-                "filename": "job/src/main/java/org/apache/kylin/job/hadoop/cube/MetadataCleanupJob.java",
-                "patch": "@@ -107,33 +107,37 @@ public void cleanup() throws Exception {\n         for (String resourceRoot : new String[]{ResourceStore.SNAPSHOT_RESOURCE_ROOT}) {\n             ArrayList<String> snapshotTables = getStore().listResources(resourceRoot);\n \n-            for (String snapshotTable : snapshotTables) {\n-                ArrayList<String> snapshotNames = getStore().listResources(snapshotTable);\n-                if (snapshotNames != null)\n-                    for (String snapshot : snapshotNames) {\n-                        if (!activeResourceList.contains(snapshot)) {\n-                            if (isOlderThanThreshold(getStore().getResourceTimestamp(snapshot)))\n-                                toDeleteResource.add(snapshot);\n+            if (snapshotTables != null) {\n+                for (String snapshotTable : snapshotTables) {\n+                    ArrayList<String> snapshotNames = getStore().listResources(snapshotTable);\n+                    if (snapshotNames != null)\n+                        for (String snapshot : snapshotNames) {\n+                            if (!activeResourceList.contains(snapshot)) {\n+                                if (isOlderThanThreshold(getStore().getResourceTimestamp(snapshot)))\n+                                    toDeleteResource.add(snapshot);\n+                            }\n                         }\n-                    }\n+                }\n             }\n         }\n \n         // three level resources, only dictionaries\n         ArrayList<String> dictTables = getStore().listResources(ResourceStore.DICT_RESOURCE_ROOT);\n \n-        for (String table : dictTables) {\n-            ArrayList<String> tableColNames = getStore().listResources(table);\n-            if (tableColNames != null)\n-                for (String tableCol : tableColNames) {\n-                    ArrayList<String> dictionaries = getStore().listResources(tableCol);\n-                    if (dictionaries != null)\n-                        for (String dict : dictionaries)\n-                            if (!activeResourceList.contains(dict)) {\n-                                if (isOlderThanThreshold(getStore().getResourceTimestamp(dict)))\n-                                    toDeleteResource.add(dict);\n-                            }\n-                }\n+        if (dictTables != null) {\n+            for (String table : dictTables) {\n+                ArrayList<String> tableColNames = getStore().listResources(table);\n+                if (tableColNames != null)\n+                    for (String tableCol : tableColNames) {\n+                        ArrayList<String> dictionaries = getStore().listResources(tableCol);\n+                        if (dictionaries != null)\n+                            for (String dict : dictionaries)\n+                                if (!activeResourceList.contains(dict)) {\n+                                    if (isOlderThanThreshold(getStore().getResourceTimestamp(dict)))\n+                                        toDeleteResource.add(dict);\n+                                }\n+                    }\n+            }\n         }\n \n ",
-                "raw_url": "https://github.com/apache/kylin/raw/8a2e128c12460d63e581ceef182f9b287da623d6/job/src/main/java/org/apache/kylin/job/hadoop/cube/MetadataCleanupJob.java",
-                "sha": "8b842770621273c02349cfbe627c7670d9e85c3f",
-                "status": "modified"
-            }
-        ],
-        "message": "KYLIN-901 fix a NPE",
-        "parent": "https://github.com/apache/kylin/commit/aad62c256ece98ee33cc9cdc9462f44b3a353ec9",
-        "patched_files": [
-            "MetadataCleanupJob.java"
-        ],
-        "repo": "kylin",
-        "unit_tests": [
-            "MetadataCleanupJobTest.java"
-        ]
-    },
     "kylin_8b6d211": {
         "bug_id": "kylin_8b6d211",
         "commit": "https://github.com/apache/kylin/commit/8b6d21133aab18b65ae571d9463089283b7dcbe1",
@@ -1168,40 +923,11 @@
         "message": "KYLIN-875 Fix CI, NPE in DictionaryManager.decideSourceData()",
         "parent": "https://github.com/apache/kylin/commit/5500cbba042975699a98b8ccb75ffb364ae5c199",
         "patched_files": [
-            "ResourceStore.java",
             "DictionaryManager.java"
         ],
         "repo": "kylin",
         "unit_tests": [
-            "DictionaryManagerTest.java",
-            "ResourceStoreTest.java"
-        ]
-    },
-    "kylin_8be842e": {
-        "bug_id": "kylin_8be842e",
-        "commit": "https://github.com/apache/kylin/commit/8be842e9b845477541c2569ae1c2484e9d627214",
-        "file": [
-            {
-                "additions": 2,
-                "blob_url": "https://github.com/apache/kylin/blob/8be842e9b845477541c2569ae1c2484e9d627214/tool/src/main/java/org/apache/kylin/tool/CubeMetaExtractor.java",
-                "changes": 5,
-                "contents_url": "https://api.github.com/repos/apache/kylin/contents/tool/src/main/java/org/apache/kylin/tool/CubeMetaExtractor.java?ref=8be842e9b845477541c2569ae1c2484e9d627214",
-                "deletions": 3,
-                "filename": "tool/src/main/java/org/apache/kylin/tool/CubeMetaExtractor.java",
-                "patch": "@@ -65,6 +65,7 @@\n import com.fasterxml.jackson.databind.ObjectMapper;\n import com.fasterxml.jackson.databind.SerializationFeature;\n import com.fasterxml.jackson.databind.node.ObjectNode;\n+import com.google.common.base.Preconditions;\n import com.google.common.collect.Lists;\n import com.google.common.collect.Sets;\n \n@@ -172,6 +173,7 @@ protected void executeExtract(OptionsHelper optionsHelper, File exportDir) throw\n             String projectNames = optionsHelper.getOptionValue(OPTION_PROJECT);\n             for (String projectName : projectNames.split(\",\")) {\n                 ProjectInstance projectInstance = projectManager.getProject(projectName);\n+                Preconditions.checkNotNull(projectInstance, \"Project \" + projectName + \" does not exist.\");\n                 requireProject(projectInstance);\n             }\n         } else if (optionsHelper.hasOption(OPTION_CUBE)) {\n@@ -202,9 +204,6 @@ protected void executeExtract(OptionsHelper optionsHelper, File exportDir) throw\n     }\n \n     private void requireProject(ProjectInstance projectInstance) throws IOException {\n-        if (projectInstance == null) {\n-            throw new IllegalArgumentException(\"Project \" + projectInstance.getName() + \" does not exist\");\n-        }\n         addRequired(projectInstance.getResourcePath());\n         List<RealizationEntry> realizationEntries = projectInstance.getRealizationEntries();\n         for (RealizationEntry realizationEntry : realizationEntries) {",
-                "raw_url": "https://github.com/apache/kylin/raw/8be842e9b845477541c2569ae1c2484e9d627214/tool/src/main/java/org/apache/kylin/tool/CubeMetaExtractor.java",
-                "sha": "188524db8162a3da368e611d7d2562e71e3b5b11",
-                "status": "modified"
-            }
-        ],
-        "message": "KYLIN-2510 Fix unintended NPE in CubeMetaExtractor",
-        "parent": "https://github.com/apache/kylin/commit/dde297e48a6886f662cd153c6f834f7e26560522",
-        "patched_files": [
-            "CubeMetaExtractor.java"
-        ],
-        "repo": "kylin",
-        "unit_tests": [
-            "CubeMetaExtractorTest.java"
+            "DictionaryManagerTest.java"
         ]
     },
     "kylin_9414670": {
@@ -1428,15 +1154,42 @@
         "message": "KYLIN-2799 Building cube with percentile measure encounter with NullPointerException\n\nSigned-off-by: Billy Liu <billyliu@apache.org>",
         "parent": "https://github.com/apache/kylin/commit/15d6063cf982ce3f0299631962f6582cec246460",
         "patched_files": [
-            "PercentileCounterSerializer.java",
             "PercentileCounter.java",
-            "PercentileSerializer.java",
-            "KylinKryoRegistrator.java"
+            "PercentileCounterSerializer.java",
+            "KylinKryoRegistrator.java",
+            "PercentileSerializer.java"
         ],
         "repo": "kylin",
         "unit_tests": [
             "PercentileSerializerTest.java",
             "PercentileCounterTest.java"
+        ]
+    },
+    "kylin_b32cc95": {
+        "bug_id": "kylin_b32cc95",
+        "commit": "https://github.com/apache/kylin/commit/b32cc9545a76657570c4a3353469ded43892c772",
+        "file": [
+            {
+                "additions": 10,
+                "blob_url": "https://github.com/apache/kylin/blob/b32cc9545a76657570c4a3353469ded43892c772/engine-mr/src/main/java/org/apache/kylin/engine/mr/steps/MergeCuboidMapper.java",
+                "changes": 10,
+                "contents_url": "https://api.github.com/repos/apache/kylin/contents/engine-mr/src/main/java/org/apache/kylin/engine/mr/steps/MergeCuboidMapper.java?ref=b32cc9545a76657570c4a3353469ded43892c772",
+                "deletions": 0,
+                "filename": "engine-mr/src/main/java/org/apache/kylin/engine/mr/steps/MergeCuboidMapper.java",
+                "patch": "@@ -129,6 +129,11 @@ protected void setup(Context context) throws IOException, InterruptedException {\n             List<TblColRef> columns = measureType.getColumnsNeedDictionary(measureDesc.getFunction());\n             boolean needReEncode = false;\n             for (TblColRef col : columns) {\n+                //handle the column that all records is null\n+                if (sourceCubeSegment.getDictionary(col) == null) {\n+                    continue;\n+                }\n+\n                 if (!sourceCubeSegment.getDictionary(col).equals(mergedCubeSegment.getDictionary(col))) {\n                     oldDicts.put(col, sourceCubeSegment.getDictionary(col));\n                     newDicts.put(col, mergedCubeSegment.getDictionary(col));\n@@ -249,6 +254,11 @@ public void doMap(Text key, Text value, Context context) throws IOException, Int\n     }\n \n     private Boolean checkNeedMerging(TblColRef col) throws IOException {\n+        //handle the column that all records is null\n+        if (sourceCubeSegment.getDictionary(col) == null) {\n+            return false;\n+        }\n+\n         Boolean ret = dimensionsNeedDict.get(col);\n         if (ret != null)\n             return ret;",
+                "raw_url": "https://github.com/apache/kylin/raw/b32cc9545a76657570c4a3353469ded43892c772/engine-mr/src/main/java/org/apache/kylin/engine/mr/steps/MergeCuboidMapper.java",
+                "sha": "acf14031744855bb88d63d31dcb6259c134dc3ce",
+                "status": "modified"
+            }
+        ],
+        "message": "KYLIN-2433 Fix NPE in MergeCuboidMapper",
+        "parent": "https://github.com/apache/kylin/commit/6d11dd1d27a74fe50cd4fa58d2acf26f728f82e7",
+        "patched_files": [
+            "MergeCuboidMapper.java"
+        ],
+        "repo": "kylin",
+        "unit_tests": [
+            "MergeCuboidMapperTest.java"
         ]
     },
     "kylin_b8f2292": {
@@ -1547,31 +1300,31 @@
             "JdbcHiveInputBaseTest.java"
         ]
     },
-    "kylin_c94d218": {
-        "bug_id": "kylin_c94d218",
-        "commit": "https://github.com/apache/kylin/commit/c94d2182904b0f1174eaba2504ce242b7d509168",
+    "kylin_c7bb364": {
+        "bug_id": "kylin_c7bb364",
+        "commit": "https://github.com/apache/kylin/commit/c7bb3640f83ae9f934311654715b0f3f52f8fea6",
         "file": [
             {
-                "additions": 11,
-                "blob_url": "https://github.com/apache/kylin/blob/c94d2182904b0f1174eaba2504ce242b7d509168/server-base/src/main/java/org/apache/kylin/rest/controller/StreamingController.java",
-                "changes": 16,
-                "contents_url": "https://api.github.com/repos/apache/kylin/contents/server-base/src/main/java/org/apache/kylin/rest/controller/StreamingController.java?ref=c94d2182904b0f1174eaba2504ce242b7d509168",
-                "deletions": 5,
-                "filename": "server-base/src/main/java/org/apache/kylin/rest/controller/StreamingController.java",
-                "patch": "@@ -26,9 +26,9 @@\n import org.apache.kylin.common.KylinConfig;\n import org.apache.kylin.common.util.JsonUtil;\n import org.apache.kylin.engine.mr.HadoopUtil;\n-import org.apache.kylin.metadata.streaming.StreamingConfig;\n import org.apache.kylin.metadata.MetadataManager;\n import org.apache.kylin.metadata.model.TableDesc;\n+import org.apache.kylin.metadata.streaming.StreamingConfig;\n import org.apache.kylin.rest.exception.BadRequestException;\n import org.apache.kylin.rest.exception.ForbiddenException;\n import org.apache.kylin.rest.exception.InternalErrorException;\n@@ -104,6 +104,10 @@ public StreamingRequest saveStreamingConfig(@RequestBody StreamingRequest stream\n \n         String project = streamingRequest.getProject();\n         TableDesc tableDesc = deserializeTableDesc(streamingRequest);\n+        if (null == tableDesc) {\n+            throw new BadRequestException(\"Failed to add streaming table.\");\n+        }\n+\n         StreamingConfig streamingConfig = deserializeSchemalDesc(streamingRequest);\n         KafkaConfig kafkaConfig = deserializeKafkaSchemalDesc(streamingRequest);\n         boolean saveStreamingSuccess = false, saveKafkaSuccess = false;\n@@ -235,10 +239,12 @@ private TableDesc deserializeTableDesc(StreamingRequest streamingRequest) {\n             throw new InternalErrorException(\"Failed to deal with the request:\" + e.getMessage(), e);\n         }\n \n-        String[] dbTable = HadoopUtil.parseHiveTableName(desc.getName());\n-        desc.setName(dbTable[1]);\n-        desc.setDatabase(dbTable[0]);\n-        desc.getIdentity();\n+        if (null != desc) {\n+            String[] dbTable = HadoopUtil.parseHiveTableName(desc.getName());\n+            desc.setName(dbTable[1]);\n+            desc.setDatabase(dbTable[0]);\n+            desc.getIdentity();\n+        }\n         return desc;\n     }\n ",
-                "raw_url": "https://github.com/apache/kylin/raw/c94d2182904b0f1174eaba2504ce242b7d509168/server-base/src/main/java/org/apache/kylin/rest/controller/StreamingController.java",
-                "sha": "e04ebc838b33499b72f4c18e7f8132358be43e03",
+                "additions": 12,
+                "blob_url": "https://github.com/apache/kylin/blob/c7bb3640f83ae9f934311654715b0f3f52f8fea6/job/src/main/java/org/apache/kylin/job/inmemcubing/InMemCubeBuilder.java",
+                "changes": 22,
+                "contents_url": "https://api.github.com/repos/apache/kylin/contents/job/src/main/java/org/apache/kylin/job/inmemcubing/InMemCubeBuilder.java?ref=c7bb3640f83ae9f934311654715b0f3f52f8fea6",
+                "deletions": 10,
+                "filename": "job/src/main/java/org/apache/kylin/job/inmemcubing/InMemCubeBuilder.java",
+                "patch": "@@ -142,23 +142,25 @@ public void build(BlockingQueue<List<String>> input, ICuboidWriter output) throw\n             cuboidResult.table.close();\n         }\n     }\n-    \n+\n     TreeMap<Long, CuboidResult> build(BlockingQueue<List<String>> input) throws IOException {\n         final TreeMap<Long, CuboidResult> result = new TreeMap<Long, CuboidResult>();\n         ICuboidCollector collector = new ICuboidCollector() {\n             @Override\n             public void collect(CuboidResult cuboidResult) {\n-                result.put(cuboidResult.cuboidId, cuboidResult);\n+                synchronized (result) {\n+                    result.put(cuboidResult.cuboidId, cuboidResult);\n+                }\n             }\n         };\n         build(input, collector);\n         return result;\n     }\n-    \n+\n     static interface ICuboidCollector {\n         public void collect(CuboidResult result);\n     }\n-    \n+\n     static class CuboidResult {\n         public long cuboidId;\n         public GridTable table;\n@@ -207,7 +209,7 @@ private void build(BlockingQueue<List<String>> input, ICuboidCollector collector\n \n         throwExceptionIfAny();\n     }\n-    \n+\n     public void abort() {\n         interrupt(taskThreads);\n     }\n@@ -216,7 +218,7 @@ private void start(Thread... threads) {\n         for (Thread t : threads)\n             t.start();\n     }\n-    \n+\n     private void interrupt(Thread... threads) {\n         for (Thread t : threads)\n             t.interrupt();\n@@ -264,7 +266,7 @@ private void throwExceptionIfAny() throws IOException {\n     public boolean isAllCuboidDone() {\n         return taskCuboidCompleted.get() == totalCuboidCount;\n     }\n-    \n+\n     private class CuboidTaskThread extends Thread {\n         private int id;\n \n@@ -397,10 +399,10 @@ private CuboidResult updateCuboidResult(long cuboidId, GridTable table, int nRow\n         if (aggrCacheMB <= 0) {\n             aggrCacheMB = (int) Math.ceil(1.0 * nRows / baseResult.nRows * baseResult.aggrCacheMB);\n         }\n-        \n+\n         CuboidResult result = new CuboidResult(cuboidId, table, nRows, timeSpent, aggrCacheMB);\n         taskCuboidCompleted.incrementAndGet();\n-        \n+\n         resultCollector.collect(result);\n         return result;\n     }\n@@ -651,6 +653,6 @@ private void buildGTRecord(List<String> row, GTRecord record) {\n         private byte[] toBytes(String v) {\n             return v == null ? null : Bytes.toBytes(v);\n         }\n-        \n+\n     }\n }",
+                "raw_url": "https://github.com/apache/kylin/raw/c7bb3640f83ae9f934311654715b0f3f52f8fea6/job/src/main/java/org/apache/kylin/job/inmemcubing/InMemCubeBuilder.java",
+                "sha": "761199cda7146c8937087b4b44fb6f868b9f80eb",
                 "status": "modified"
             }
         ],
-        "message": "KYLIN-2209 fix potential NPE\n\nSigned-off-by: Li Yang <liyang@apache.org>",
-        "parent": "https://github.com/apache/kylin/commit/c0b87039eb45ee94c6ecab71e27d14ee81bac8e2",
+        "message": "minor, fix concurrent NPE in InMemCubeBuilder",
+        "parent": "https://github.com/apache/kylin/commit/ddac497a2cf62bccba8618829a03e3be1a030098",
         "patched_files": [
-            "StreamingController.java"
+            "InMemCubeBuilder.java"
         ],
         "repo": "kylin",
         "unit_tests": [
-            "StreamingControllerTest.java"
+            "InMemCubeBuilderTest.java"
         ]
     },
     "kylin_ca42b92": {
@@ -1599,114 +1352,6 @@
         "repo": "kylin",
         "unit_tests": [
             "ProjectManagerTest.java"
-        ]
-    },
-    "kylin_cafddd3": {
-        "bug_id": "kylin_cafddd3",
-        "commit": "https://github.com/apache/kylin/commit/cafddd37b85dd94c4eda1319637e464ae0e0409f",
-        "file": [
-            {
-                "additions": 6,
-                "blob_url": "https://github.com/apache/kylin/blob/cafddd37b85dd94c4eda1319637e464ae0e0409f/core-cube/src/main/java/org/apache/kylin/cube/CubeInstance.java",
-                "changes": 7,
-                "contents_url": "https://api.github.com/repos/apache/kylin/contents/core-cube/src/main/java/org/apache/kylin/cube/CubeInstance.java?ref=cafddd37b85dd94c4eda1319637e464ae0e0409f",
-                "deletions": 1,
-                "filename": "core-cube/src/main/java/org/apache/kylin/cube/CubeInstance.java",
-                "patch": "@@ -125,7 +125,12 @@ public CubeDesc getDescriptor() {\n \n     @Override\n     public DataModelDesc getDataModelDesc() {\n-        return this.getDescriptor().getModel();\n+        CubeDesc cubeDesc = this.getDescriptor();\n+        if (cubeDesc != null) {\n+            return cubeDesc.getModel();\n+        } else {\n+            return null;\n+        }\n     }\n \n     public boolean isReady() {",
-                "raw_url": "https://github.com/apache/kylin/raw/cafddd37b85dd94c4eda1319637e464ae0e0409f/core-cube/src/main/java/org/apache/kylin/cube/CubeInstance.java",
-                "sha": "d89e736e218943c00b71f7a22f54552164296543",
-                "status": "modified"
-            }
-        ],
-        "message": "KYLIN-1464 prevent NullPointerException when CubeDesc init failed due to IllegalStateException\n\nSigned-off-by: Hongbin Ma <mahongbin@apache.org>",
-        "parent": "https://github.com/apache/kylin/commit/455bbc8093072d3c4b9a1f7a11a77a5bf9e567f3",
-        "patched_files": [
-            "CubeInstance.java"
-        ],
-        "repo": "kylin",
-        "unit_tests": [
-            "CubeInstanceTest.java"
-        ]
-    },
-    "kylin_cc1ca2d": {
-        "bug_id": "kylin_cc1ca2d",
-        "commit": "https://github.com/apache/kylin/commit/cc1ca2d32b508a758bd85d3da58006d70eeb9104",
-        "file": [
-            {
-                "additions": 10,
-                "blob_url": "https://github.com/apache/kylin/blob/cc1ca2d32b508a758bd85d3da58006d70eeb9104/engine-mr/src/main/java/org/apache/kylin/engine/mr/steps/MetadataCleanupJob.java",
-                "changes": 18,
-                "contents_url": "https://api.github.com/repos/apache/kylin/contents/engine-mr/src/main/java/org/apache/kylin/engine/mr/steps/MetadataCleanupJob.java?ref=cc1ca2d32b508a758bd85d3da58006d70eeb9104",
-                "deletions": 8,
-                "filename": "engine-mr/src/main/java/org/apache/kylin/engine/mr/steps/MetadataCleanupJob.java",
-                "patch": "@@ -111,15 +111,17 @@ public void cleanup() throws Exception {\n         for (String resourceRoot : new String[]{ResourceStore.SNAPSHOT_RESOURCE_ROOT, ResourceStore.CUBE_STATISTICS_ROOT}) {\n             ArrayList<String> snapshotTables = getStore().listResources(resourceRoot);\n \n-            for (String snapshotTable : snapshotTables) {\n-                ArrayList<String> snapshotNames = getStore().listResources(snapshotTable);\n-                if (snapshotNames != null)\n-                    for (String snapshot : snapshotNames) {\n-                        if (!activeResourceList.contains(snapshot)) {\n-                            if (isOlderThanThreshold(getStore().getResourceTimestamp(snapshot)))\n-                                toDeleteResource.add(snapshot);\n+            if (snapshotTables != null) {\n+                for (String snapshotTable : snapshotTables) {\n+                    ArrayList<String> snapshotNames = getStore().listResources(snapshotTable);\n+                    if (snapshotNames != null)\n+                        for (String snapshot : snapshotNames) {\n+                            if (!activeResourceList.contains(snapshot)) {\n+                                if (isOlderThanThreshold(getStore().getResourceTimestamp(snapshot)))\n+                                    toDeleteResource.add(snapshot);\n+                            }\n                         }\n-                    }\n+                }\n             }\n         }\n ",
-                "raw_url": "https://github.com/apache/kylin/raw/cc1ca2d32b508a758bd85d3da58006d70eeb9104/engine-mr/src/main/java/org/apache/kylin/engine/mr/steps/MetadataCleanupJob.java",
-                "sha": "43bdf6ef3f5fa2051f533eaf0cdcfc9130b7cf28",
-                "status": "modified"
-            }
-        ],
-        "message": "KYLIN-901 fix a NPE",
-        "parent": "https://github.com/apache/kylin/commit/d8fcfeac84f4fce4217ec955d0cfbd7303332e4c",
-        "patched_files": [
-            "MetadataCleanupJob.java"
-        ],
-        "repo": "kylin",
-        "unit_tests": [
-            "MetadataCleanupJobTest.java"
-        ]
-    },
-    "kylin_d48e5eb": {
-        "bug_id": "kylin_d48e5eb",
-        "commit": "https://github.com/apache/kylin/commit/d48e5eb6905a1bd7e4263e8efef8e451088d326f",
-        "file": [
-            {
-                "additions": 14,
-                "blob_url": "https://github.com/apache/kylin/blob/d48e5eb6905a1bd7e4263e8efef8e451088d326f/tool/src/main/java/org/apache/kylin/tool/CubeMetaExtractor.java",
-                "changes": 21,
-                "contents_url": "https://api.github.com/repos/apache/kylin/contents/tool/src/main/java/org/apache/kylin/tool/CubeMetaExtractor.java?ref=d48e5eb6905a1bd7e4263e8efef8e451088d326f",
-                "deletions": 7,
-                "filename": "tool/src/main/java/org/apache/kylin/tool/CubeMetaExtractor.java",
-                "patch": "@@ -321,13 +321,7 @@ private void retrieveResourcePath(IRealization realization) {\n \n             dealWithStreaming(cube);\n \n-            for (TableRef table : modelDesc.getAllTables()) {\n-                String tableName = table.getTableIdentity();\n-                addRequired(TableDesc.concatResourcePath(tableName));\n-                addOptional(TableDesc.concatExdResourcePath(tableName));\n-            }\n-\n-            addRequired(DataModelDesc.concatResourcePath(modelDesc.getName()));\n+            retrieveDataModelDesc(modelDesc);\n             addRequired(CubeDesc.concatResourcePath(cubeDesc.getName()));\n \n             if (includeSegments) {\n@@ -389,6 +383,19 @@ private void retrieveResourcePath(IRealization realization) {\n         }\n     }\n \n+    private void retrieveDataModelDesc(DataModelDesc modelDesc) {\n+        if (modelDesc == null) {\n+            return;\n+        }\n+        for (TableRef table : modelDesc.getAllTables()) {\n+            String tableName = table.getTableIdentity();\n+            addRequired(TableDesc.concatResourcePath(tableName));\n+            addOptional(TableDesc.concatExdResourcePath(tableName));\n+        }\n+\n+        addRequired(DataModelDesc.concatResourcePath(modelDesc.getName()));\n+    }\n+\n     private void addRequired(String record) {\n         logger.info(\"adding required resource {}\", record);\n         requiredResources.add(record);",
-                "raw_url": "https://github.com/apache/kylin/raw/d48e5eb6905a1bd7e4263e8efef8e451088d326f/tool/src/main/java/org/apache/kylin/tool/CubeMetaExtractor.java",
-                "sha": "5bfe96b91c49a03571f3b477fe0d9485481989f2",
-                "status": "modified"
-            }
-        ],
-        "message": "minor, fix model desc NPE in diagnosis, broken cube can be exported",
-        "parent": "https://github.com/apache/kylin/commit/6ce341dbdfd02f06fbc9c0013e2638e4a5954879",
-        "patched_files": [
-            "CubeMetaExtractor.java"
-        ],
-        "repo": "kylin",
-        "unit_tests": [
-            "CubeMetaExtractorTest.java"
-        ]
-    },
-    "kylin_d7cf675": {
-        "bug_id": "kylin_d7cf675",
-        "commit": "https://github.com/apache/kylin/commit/d7cf675541771000ff37f164070a686e61f7fa8f",
-        "file": [
-            {
-                "additions": 12,
-                "blob_url": "https://github.com/apache/kylin/blob/d7cf675541771000ff37f164070a686e61f7fa8f/engine-mr/src/main/java/org/apache/kylin/engine/mr/steps/MetadataCleanupJob.java",
-                "changes": 22,
-                "contents_url": "https://api.github.com/repos/apache/kylin/contents/engine-mr/src/main/java/org/apache/kylin/engine/mr/steps/MetadataCleanupJob.java?ref=d7cf675541771000ff37f164070a686e61f7fa8f",
-                "deletions": 10,
-                "filename": "engine-mr/src/main/java/org/apache/kylin/engine/mr/steps/MetadataCleanupJob.java",
-                "patch": "@@ -122,16 +122,18 @@ public void cleanup() throws Exception {\n         // three level resources, only dictionaries\n         NavigableSet<String> dictTables = getStore().listResources(ResourceStore.DICT_RESOURCE_ROOT);\n \n-        for (String table : dictTables) {\n-            NavigableSet<String> tableColNames = getStore().listResources(table);\n-            if (tableColNames != null)\n-                for (String tableCol : tableColNames) {\n-                    NavigableSet<String> dictionaries = getStore().listResources(tableCol);\n-                    if (dictionaries != null)\n-                        for (String dict : dictionaries)\n-                            if (isOlderThanThreshold(getStore().getResourceTimestamp(dict)))\n-                                toDeleteResource.add(dict);\n-                }\n+        if (dictTables != null) {\n+            for (String table : dictTables) {\n+                NavigableSet<String> tableColNames = getStore().listResources(table);\n+                if (tableColNames != null)\n+                    for (String tableCol : tableColNames) {\n+                        NavigableSet<String> dictionaries = getStore().listResources(tableCol);\n+                        if (dictionaries != null)\n+                            for (String dict : dictionaries)\n+                                if (isOlderThanThreshold(getStore().getResourceTimestamp(dict)))\n+                                    toDeleteResource.add(dict);\n+                    }\n+            }\n         }\n \n         Set<String> activeResourceList = Sets.newHashSet();",
-                "raw_url": "https://github.com/apache/kylin/raw/d7cf675541771000ff37f164070a686e61f7fa8f/engine-mr/src/main/java/org/apache/kylin/engine/mr/steps/MetadataCleanupJob.java",
-                "sha": "f3ab31065200c744a3f7290b7ec772e8776aef75",
-                "status": "modified"
-            }
-        ],
-        "message": "minor, fix NPE when metastore cleanup\n\nSigned-off-by: shaofengshi <shaofengshi@apache.org>",
-        "parent": "https://github.com/apache/kylin/commit/696fb89aa2eb684408d1009218f80fe323dffd3b",
-        "patched_files": [
-            "MetadataCleanupJob.java"
-        ],
-        "repo": "kylin",
-        "unit_tests": [
-            "MetadataCleanupJobTest.java"
         ]
     },
     "kylin_dcd12b0": {
@@ -1816,82 +1461,15 @@
         "message": "KYLIN-867 fix a NPE in CacheServiceTest",
         "parent": "https://github.com/apache/kylin/commit/eb86239c22bfb292ea854442848a8ee62be16d11",
         "patched_files": [
+            "CacheService.java",
             "CubeService.java",
-            "HybridInstance.java",
-            "CacheService.java"
+            "HybridInstance.java"
         ],
         "repo": "kylin",
         "unit_tests": [
+            "test_kylin_cube_without_slr_desc.java",
             "CacheServiceTest.java",
-            "CubeServiceTest.java",
-            "HybridInstanceTest.java",
-            "test_kylin_cube_without_slr_desc.java"
-        ]
-    },
-    "kylin_de2f754": {
-        "bug_id": "kylin_de2f754",
-        "commit": "https://github.com/apache/kylin/commit/de2f75458b3a5d76390173fdd9359eadbcb11764",
-        "file": [
-            {
-                "additions": 7,
-                "blob_url": "https://github.com/apache/kylin/blob/de2f75458b3a5d76390173fdd9359eadbcb11764/server/src/main/java/org/apache/kylin/rest/service/DiagnosisService.java",
-                "changes": 7,
-                "contents_url": "https://api.github.com/repos/apache/kylin/contents/server/src/main/java/org/apache/kylin/rest/service/DiagnosisService.java?ref=de2f75458b3a5d76390173fdd9359eadbcb11764",
-                "deletions": 0,
-                "filename": "server/src/main/java/org/apache/kylin/rest/service/DiagnosisService.java",
-                "patch": "@@ -63,4 +63,11 @@ public String dumpJobDiagnosisInfo(String jobId) throws IOException {\n         jobInfoExtractor.execute(args);\n         return jobInfoExtractor.getExportDest();\n     }\n+\n+    public static void main(String args1[]) {\n+        String[] args = { \"-project\", \"learn_kylin\", \"-destDir\", Files.createTempDir().getAbsolutePath() };\n+        logger.info(\"DiagnosisInfoCLI args: \" + args);\n+        DiagnosisInfoCLI diagnosisInfoCli = new DiagnosisInfoCLI();\n+        diagnosisInfoCli.execute(args);\n+    }\n }",
-                "raw_url": "https://github.com/apache/kylin/raw/de2f75458b3a5d76390173fdd9359eadbcb11764/server/src/main/java/org/apache/kylin/rest/service/DiagnosisService.java",
-                "sha": "b530586f72663d59cba9157b1fc9da2f21715cd4",
-                "status": "modified"
-            }
-        ],
-        "message": "minor, fix an NPE",
-        "parent": "https://github.com/apache/kylin/commit/4f32927558ff6ebc1899241af87e93bd2747e242",
-        "patched_files": [
-            "DiagnosisService.java"
-        ],
-        "repo": "kylin",
-        "unit_tests": [
-            "DiagnosisServiceTest.java"
-        ]
-    },
-    "kylin_e2c688d": {
-        "bug_id": "kylin_e2c688d",
-        "commit": "https://github.com/apache/kylin/commit/e2c688d5419d77658e03ad11e37a75dc771a9005",
-        "file": [
-            {
-                "additions": 4,
-                "blob_url": "https://github.com/apache/kylin/blob/e2c688d5419d77658e03ad11e37a75dc771a9005/core-common/src/main/java/org/apache/kylin/common/util/StringUtil.java",
-                "changes": 4,
-                "contents_url": "https://api.github.com/repos/apache/kylin/contents/core-common/src/main/java/org/apache/kylin/common/util/StringUtil.java?ref=e2c688d5419d77658e03ad11e37a75dc771a9005",
-                "deletions": 0,
-                "filename": "core-common/src/main/java/org/apache/kylin/common/util/StringUtil.java",
-                "patch": "@@ -67,6 +67,10 @@ public static void toUpperCaseArray(String[] source, String[] target) {\n         }\n     }\n \n+    public static String noBlank(String str, String dft) {\n+        return StringUtils.isBlank(str) ? dft : str;\n+    }\n+    \n     public static String dropSuffix(String str, String suffix) {\n         if (str.endsWith(suffix))\n             return str.substring(0, str.length() - suffix.length());",
-                "raw_url": "https://github.com/apache/kylin/raw/e2c688d5419d77658e03ad11e37a75dc771a9005/core-common/src/main/java/org/apache/kylin/common/util/StringUtil.java",
-                "sha": "249726ff02270f1c6d88c04e66aded1c70cf735c",
-                "status": "modified"
-            },
-            {
-                "additions": 3,
-                "blob_url": "https://github.com/apache/kylin/blob/e2c688d5419d77658e03ad11e37a75dc771a9005/engine-mr/src/main/java/org/apache/kylin/engine/mr/CubingJob.java",
-                "changes": 8,
-                "contents_url": "https://api.github.com/repos/apache/kylin/contents/engine-mr/src/main/java/org/apache/kylin/engine/mr/CubingJob.java?ref=e2c688d5419d77658e03ad11e37a75dc771a9005",
-                "deletions": 5,
-                "filename": "engine-mr/src/main/java/org/apache/kylin/engine/mr/CubingJob.java",
-                "patch": "@@ -29,6 +29,7 @@\n \n import org.apache.commons.lang3.StringUtils;\n import org.apache.commons.lang3.tuple.Pair;\n+import org.apache.kylin.common.util.StringUtil;\n import org.apache.kylin.cube.CubeInstance;\n import org.apache.kylin.cube.CubeManager;\n import org.apache.kylin.cube.CubeSegment;\n@@ -122,9 +123,6 @@ public String getSegmentIds() {\n         default:\n             return null;\n         }\n-        if (logMsg == null) {\n-            logMsg = \"no error message\";\n-        }\n         String content = ExecutableConstants.NOTIFY_EMAIL_TEMPLATE;\n         content = content.replaceAll(\"\\\\$\\\\{job_name\\\\}\", getName());\n         content = content.replaceAll(\"\\\\$\\\\{result\\\\}\", state.toString());\n@@ -134,8 +132,8 @@ public String getSegmentIds() {\n         content = content.replaceAll(\"\\\\$\\\\{duration\\\\}\", getDuration() / 60000 + \"mins\");\n         content = content.replaceAll(\"\\\\$\\\\{mr_waiting\\\\}\", getMapReduceWaitTime() / 60000 + \"mins\");\n         content = content.replaceAll(\"\\\\$\\\\{last_update_time\\\\}\", new Date(getLastModified()).toString());\n-        content = content.replaceAll(\"\\\\$\\\\{submitter\\\\}\", getSubmitter());\n-        content = content.replaceAll(\"\\\\$\\\\{error_log\\\\}\", logMsg);\n+        content = content.replaceAll(\"\\\\$\\\\{submitter\\\\}\", StringUtil.noBlank(getSubmitter(), \"missing submitter\"));\n+        content = content.replaceAll(\"\\\\$\\\\{error_log\\\\}\", StringUtil.noBlank(logMsg, \"no error message\"));\n \n         try {\n             InetAddress inetAddress = InetAddress.getLocalHost();",
-                "raw_url": "https://github.com/apache/kylin/raw/e2c688d5419d77658e03ad11e37a75dc771a9005/engine-mr/src/main/java/org/apache/kylin/engine/mr/CubingJob.java",
-                "sha": "bee030f98eebbb49096c25af712a14a7113b90c6",
-                "status": "modified"
-            }
-        ],
-        "message": "minor, fix NPE in CubingJob.formatNotifications()",
-        "parent": "https://github.com/apache/kylin/commit/18e43e0aca2b0c6a306f5cb2f0198d4a04215d50",
-        "patched_files": [
-            "StringUtil.java"
-        ],
-        "repo": "kylin",
-        "unit_tests": [
-            "StringUtilTest.java"
+            "CubeServiceTest.java"
         ]
     },
     "kylin_e53257d": {
@@ -1982,8 +1560,47 @@
         ],
         "repo": "kylin",
         "unit_tests": [
-            "PartitionDescTest.java",
-            "StorageURLTest.java"
+            "StorageURLTest.java",
+            "PartitionDescTest.java"
+        ]
+    },
+    "kylin_efd533f": {
+        "bug_id": "kylin_efd533f",
+        "commit": "https://github.com/apache/kylin/commit/efd533fc4e6f1812f09f39dd0211ba697fb88d1a",
+        "file": [
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/kylin/blob/efd533fc4e6f1812f09f39dd0211ba697fb88d1a/invertedindex/src/main/java/org/apache/kylin/invertedindex/index/TableRecordInfoDigest.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/kylin/contents/invertedindex/src/main/java/org/apache/kylin/invertedindex/index/TableRecordInfoDigest.java?ref=efd533fc4e6f1812f09f39dd0211ba697fb88d1a",
+                "deletions": 0,
+                "filename": "invertedindex/src/main/java/org/apache/kylin/invertedindex/index/TableRecordInfoDigest.java",
+                "patch": "@@ -72,6 +72,10 @@ public boolean isMetrics(int col) {\n \t\treturn isMetric[col];\n \t}\n \n+    public boolean[] isMetrics() {\n+        return isMetric;\n+    }\n+\n \tpublic int getColumnCount() {\n \t\treturn nColumns;\n \t}",
+                "raw_url": "https://github.com/apache/kylin/raw/efd533fc4e6f1812f09f39dd0211ba697fb88d1a/invertedindex/src/main/java/org/apache/kylin/invertedindex/index/TableRecordInfoDigest.java",
+                "sha": "35482d06911aad3bad2a716529b0567672cc5946",
+                "status": "modified"
+            },
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/kylin/blob/efd533fc4e6f1812f09f39dd0211ba697fb88d1a/metadata/src/main/java/org/apache/kylin/metadata/model/TableDesc.java",
+                "changes": 5,
+                "contents_url": "https://api.github.com/repos/apache/kylin/contents/metadata/src/main/java/org/apache/kylin/metadata/model/TableDesc.java?ref=efd533fc4e6f1812f09f39dd0211ba697fb88d1a",
+                "deletions": 2,
+                "filename": "metadata/src/main/java/org/apache/kylin/metadata/model/TableDesc.java",
+                "patch": "@@ -74,6 +74,9 @@ public String getResourcePathV1() {\n     }\n \n     public String getIdentity() {\n+        if (identity == null) {\n+            identity = String.format(\"%s.%s\", this.getDatabase().toUpperCase(), this.getName()).toUpperCase();\n+        }\n         return identity;\n     }\n \n@@ -157,8 +160,6 @@ public int compare(ColumnDesc col1, ColumnDesc col2) {\n                 col.init(this);\n             }\n         }\n-\n-        this.identity = String.format(\"%s.%s\", this.getDatabase().toUpperCase(), this.getName()).toUpperCase();\n     }\n \n     @Override",
+                "raw_url": "https://github.com/apache/kylin/raw/efd533fc4e6f1812f09f39dd0211ba697fb88d1a/metadata/src/main/java/org/apache/kylin/metadata/model/TableDesc.java",
+                "sha": "95a1d81f3a8cb3e44d43ea6298e42de35c1d3482",
+                "status": "modified"
+            }
+        ],
+        "message": "fix NPE",
+        "parent": "https://github.com/apache/kylin/commit/dd85db452b0dd05afa0544fb246aac73bc94575c",
+        "patched_files": [
+            "TableDesc.java"
+        ],
+        "repo": "kylin",
+        "unit_tests": [
+            "TableDescTest.java"
         ]
     },
     "kylin_fd745c8": {

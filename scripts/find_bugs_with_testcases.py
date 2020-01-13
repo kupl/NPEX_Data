@@ -86,7 +86,7 @@ def find_unit_tests(commit):
 
 def do_commit(commit, output):
     repo = commit['repo']
-    git_http = "https://github.com/apache/%s" % repo
+    git_http = "git://github.com/apache/%s" % repo
     commit_id = commit['commit'].split('/')[-1]
     bug_id = "%s_%s" % (repo, commit_id[:7])
     print('doing %s...' % bug_id)

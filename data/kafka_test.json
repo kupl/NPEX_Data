@@ -43,13 +43,40 @@
         "message": "MINOR: Fix metric collection NPE during shutdown\n\nCollecting socket server metrics during shutdown may throw NullPointerException\n\nAuthor: Xavier L\u00e9aut\u00e9 <xavier@confluent.io>\n\nReviewers: Ismael Juma <ismael@juma.me.uk>\n\nCloses #2221 from xvrl/fix-metrics-npe-on-shutdown",
         "parent": "https://github.com/apache/kafka/commit/1949a76bc4189534b853e21c476bb11172fa3fc9",
         "patched_files": [
-            "SocketServer.java",
-            "Metrics.java"
+            "Metrics.java",
+            "SocketServer.java"
         ],
         "repo": "kafka",
         "unit_tests": [
-            "SocketServerTest.java",
-            "MetricsTest.java"
+            "MetricsTest.java",
+            "SocketServerTest.java"
+        ]
+    },
+    "kafka_00a58f8": {
+        "bug_id": "kafka_00a58f8",
+        "commit": "https://github.com/apache/kafka/commit/00a58f8e1e0c82c2948a8fdfacf812ec4865b339",
+        "file": [
+            {
+                "additions": 16,
+                "blob_url": "https://github.com/apache/kafka/blob/00a58f8e1e0c82c2948a8fdfacf812ec4865b339/connect/runtime/src/main/java/org/apache/kafka/connect/storage/KafkaConfigStorage.java",
+                "changes": 20,
+                "contents_url": "https://api.github.com/repos/apache/kafka/contents/connect/runtime/src/main/java/org/apache/kafka/connect/storage/KafkaConfigStorage.java?ref=00a58f8e1e0c82c2948a8fdfacf812ec4865b339",
+                "deletions": 4,
+                "filename": "connect/runtime/src/main/java/org/apache/kafka/connect/storage/KafkaConfigStorage.java",
+                "patch": "@@ -286,6 +286,7 @@ public void putConnectorConfig(String connector, Map<String, String> properties)\n         }\n \n         try {\n+            log.debug(\"Writing connector configuration for connector \" + connector + \" configuration: \" + properties);\n             configLog.send(CONNECTOR_KEY(connector), serializedConfig);\n             configLog.readToEnd().get(READ_TO_END_TIMEOUT_MS, TimeUnit.MILLISECONDS);\n         } catch (InterruptedException | ExecutionException | TimeoutException e) {\n@@ -334,6 +335,7 @@ public void putTaskConfigs(Map<ConnectorTaskId, Map<String, String>> configs) {\n             Struct connectConfig = new Struct(TASK_CONFIGURATION_V0);\n             connectConfig.put(\"properties\", taskConfigEntry.getValue());\n             byte[] serializedConfig = converter.fromConnectData(topic, TASK_CONFIGURATION_V0, connectConfig);\n+            log.debug(\"Writing configuration for task \" + taskConfigEntry.getKey() + \" configuration: \" + taskConfigEntry.getValue());\n             configLog.send(TASK_KEY(taskConfigEntry.getKey()), serializedConfig);\n         }\n \n@@ -348,6 +350,7 @@ public void putTaskConfigs(Map<ConnectorTaskId, Map<String, String>> configs) {\n                 Struct connectConfig = new Struct(CONNECTOR_TASKS_COMMIT_V0);\n                 connectConfig.put(\"tasks\", taskCountEntry.getValue());\n                 byte[] serializedConfig = converter.fromConnectData(topic, CONNECTOR_TASKS_COMMIT_V0, connectConfig);\n+                log.debug(\"Writing commit for connector \" + taskCountEntry.getKey() + \" with \" + taskCountEntry.getValue() + \" tasks.\");\n                 configLog.send(COMMIT_TASKS_KEY(taskCountEntry.getKey()), serializedConfig);\n             }\n \n@@ -396,6 +399,7 @@ public void onCompletion(Throwable error, ConsumerRecord<String, byte[]> record)\n                 synchronized (lock) {\n                     if (value.value() == null) {\n                         // Connector deletion will be written as a null value\n+                        log.info(\"Removed connector \" + connectorName + \" due to null configuration. This is usually intentional and does not indicate an issue.\");\n                         connectorConfigs.remove(connectorName);\n                     } else {\n                         // Connector configs can be applied and callbacks invoked immediately\n@@ -405,9 +409,10 @@ public void onCompletion(Throwable error, ConsumerRecord<String, byte[]> record)\n                         }\n                         Object newConnectorConfig = ((Map<String, Object>) value.value()).get(\"properties\");\n                         if (!(newConnectorConfig instanceof Map)) {\n-                            log.error(\"Invalid data for connector config: properties filed should be a Map but is \" + newConnectorConfig.getClass());\n+                            log.error(\"Invalid data for connector config (\" + connectorName + \"): properties filed should be a Map but is \" + newConnectorConfig.getClass());\n                             return;\n                         }\n+                        log.debug(\"Updating configuration for connector \" + connectorName + \" configuation: \" + newConnectorConfig);\n                         connectorConfigs.put(connectorName, (Map<String, String>) newConnectorConfig);\n                     }\n                 }\n@@ -421,13 +426,13 @@ public void onCompletion(Throwable error, ConsumerRecord<String, byte[]> record)\n                         return;\n                     }\n                     if (!(value.value() instanceof Map)) {\n-                        log.error(\"Ignoring task configuration because it is in the wrong format: \" + value.value());\n+                        log.error(\"Ignoring task configuration for task \" + taskId + \" because it is in the wrong format: \" + value.value());\n                         return;\n                     }\n \n                     Object newTaskConfig = ((Map<String, Object>) value.value()).get(\"properties\");\n                     if (!(newTaskConfig instanceof Map)) {\n-                        log.error(\"Invalid data for task config: properties filed should be a Map but is \" + newTaskConfig.getClass());\n+                        log.error(\"Invalid data for task config (\" + taskId + \"): properties filed should be a Map but is \" + newTaskConfig.getClass());\n                         return;\n                     }\n \n@@ -436,6 +441,7 @@ public void onCompletion(Throwable error, ConsumerRecord<String, byte[]> record)\n                         deferred = new HashMap<>();\n                         deferredTaskUpdates.put(taskId.connector(), deferred);\n                     }\n+                    log.debug(\"Storing new config for task \" + taskId + \" this will wait for a commit message before the new config will take effect. New config: \" + newTaskConfig);\n                     deferred.put(taskId, (Map<String, String>) newTaskConfig);\n                 }\n             } else if (record.key().startsWith(COMMIT_TASKS_PREFIX)) {\n@@ -464,7 +470,7 @@ public void onCompletion(Throwable error, ConsumerRecord<String, byte[]> record)\n                     // resolve this (i.e., get the connector to recommit its configuration). This inconsistent state is\n                     // exposed in the snapshots provided via ClusterConfigState so they are easy to handle.\n                     if (!(value.value() instanceof Map)) { // Schema-less, so we get maps instead of structs\n-                        log.error(\"Ignoring connector tasks configuration commit because it is in the wrong format: \" + value.value());\n+                        log.error(\"Ignoring connector tasks configuration commit for connector \" + connectorName + \" because it is in the wrong format: \" + value.value());\n                         return;\n                     }\n \n@@ -476,11 +482,17 @@ public void onCompletion(Throwable error, ConsumerRecord<String, byte[]> record)\n                     // update of all tasks that are expected based on the number of tasks in the commit message.\n                     Map<String, Set<Integer>> updatedConfigIdsByConnector = taskIdsByConnector(deferred);\n                     Set<Integer> taskIdSet = updatedConfigIdsByConnector.get(connectorName);\n+                    if (taskIdSet == null) {\n+                        //TODO: Figure out why this happens (KAFKA-3321)\n+                        log.error(\"Received a commit message for connector \" + connectorName + \" but there is no matching configuration for tasks in this connector. This should never happen.\");\n+                        return;\n+                    }\n                     if (!completeTaskIdSet(taskIdSet, newTaskCount)) {\n                         // Given the logic for writing commit messages, we should only hit this condition due to compacted\n                         // historical data, in which case we would not have applied any updates yet and there will be no\n                         // task config data already committed for the connector, so we shouldn't have to clear any data\n                         // out. All we need to do is add the flag marking it inconsistent.\n+                        log.debug(\"We have an incomplete set of task configs for connector \" + connectorName + \" probably due to compaction. So we are not doing anything with the new configuration.\");\n                         inconsistent.add(connectorName);\n                     } else {\n                         if (deferred != null) {",
+                "raw_url": "https://github.com/apache/kafka/raw/00a58f8e1e0c82c2948a8fdfacf812ec4865b339/connect/runtime/src/main/java/org/apache/kafka/connect/storage/KafkaConfigStorage.java",
+                "sha": "6a06fecb4b4346eb2b58489f9f63855fa2d8b84e",
+                "status": "modified"
+            }
+        ],
+        "message": "KAFKA-2944: Replaced the NPE with a nicer error and clean exit and added debug message to assist with figuring this out.\n\n\u2026ssage to assist with figuring this out.\n\nAuthor: Gwen Shapira <cshapi@gmail.com>\n\nReviewers: Ewen Cheslack-Postava <ewen@confluent.io>\n\nCloses #993 from gwenshap/KAFKA-2944",
+        "parent": "https://github.com/apache/kafka/commit/9cd65c46a71cb07276f23838aa55747efc32674c",
+        "patched_files": [
+            "KafkaConfigStorage.java"
+        ],
+        "repo": "kafka",
+        "unit_tests": [
+            "KafkaConfigStorageTest.java"
         ]
     },
     "kafka_0a7f2bf": {
@@ -116,6 +143,33 @@
         "repo": "kafka",
         "unit_tests": [
             "StreamsMetadataStateTest.java"
+        ]
+    },
+    "kafka_10394aa": {
+        "bug_id": "kafka_10394aa",
+        "commit": "https://github.com/apache/kafka/commit/10394aa80153db27e7672a949c91b436724b0ead",
+        "file": [
+            {
+                "additions": 16,
+                "blob_url": "https://github.com/apache/kafka/blob/10394aa80153db27e7672a949c91b436724b0ead/streams/src/main/java/org/apache/kafka/streams/processor/internals/StreamPartitionAssignor.java",
+                "changes": 30,
+                "contents_url": "https://api.github.com/repos/apache/kafka/contents/streams/src/main/java/org/apache/kafka/streams/processor/internals/StreamPartitionAssignor.java?ref=10394aa80153db27e7672a949c91b436724b0ead",
+                "deletions": 14,
+                "filename": "streams/src/main/java/org/apache/kafka/streams/processor/internals/StreamPartitionAssignor.java",
+                "patch": "@@ -229,24 +229,26 @@ public Subscription subscription(Set<String> topics) {\n         if (internalTopicManager != null) {\n             log.debug(\"Starting to validate internal source topics in partition assignor.\");\n \n-            for (Map.Entry<String, Set<TaskId>> entry : internalSourceTopicToTaskIds.entrySet()) {\n-                String topic = streamThread.jobId + \"-\" + entry.getKey();\n+            if (internalSourceTopicToTaskIds != null) {\n+                for (Map.Entry<String, Set<TaskId>> entry : internalSourceTopicToTaskIds.entrySet()) {\n+                    String topic = streamThread.jobId + \"-\" + entry.getKey();\n \n-                // should have size 1 only\n-                int numPartitions = -1;\n-                for (TaskId task : entry.getValue()) {\n-                    numPartitions = task.partition;\n-                }\n+                    // should have size 1 only\n+                    int numPartitions = -1;\n+                    for (TaskId task : entry.getValue()) {\n+                        numPartitions = task.partition;\n+                    }\n \n-                internalTopicManager.makeReady(topic, numPartitions);\n+                    internalTopicManager.makeReady(topic, numPartitions);\n \n-                // wait until the topic metadata has been propagated to all brokers\n-                List<PartitionInfo> partitions;\n-                do {\n-                    partitions = streamThread.restoreConsumer.partitionsFor(topic);\n-                } while (partitions == null || partitions.size() != numPartitions);\n+                    // wait until the topic metadata has been propagated to all brokers\n+                    List<PartitionInfo> partitions;\n+                    do {\n+                        partitions = streamThread.restoreConsumer.partitionsFor(topic);\n+                    } while (partitions == null || partitions.size() != numPartitions);\n \n-                metadata.update(topic, partitions);\n+                    metadata.update(topic, partitions);\n+                }\n             }\n \n             log.info(\"Completed validating internal source topics in partition assignor.\");",
+                "raw_url": "https://github.com/apache/kafka/raw/10394aa80153db27e7672a949c91b436724b0ead/streams/src/main/java/org/apache/kafka/streams/processor/internals/StreamPartitionAssignor.java",
+                "sha": "7d89573d1e0c1726d6a2fcca6b5e2978be2042f6",
+                "status": "modified"
+            }
+        ],
+        "message": "KAFKA-3324; NullPointerException in StreamPartitionAssignor\n\nAuthor: Michael G. Noll <michael@confluent.io>\n\nReviewers: Ewen Cheslack-Postava <ewen@confluent.io>\n\nCloses #1001 from miguno/KAFKA-3324",
+        "parent": "https://github.com/apache/kafka/commit/b9eda22d71aa9896cac90798c7e888a04f14549d",
+        "patched_files": [
+            "StreamPartitionAssignor.java"
+        ],
+        "repo": "kafka",
+        "unit_tests": [
+            "StreamPartitionAssignorTest.java"
         ]
     },
     "kafka_105ab47": {
@@ -186,10 +240,10 @@
         "message": "KAFKA-6015; Fix NPE in RecordAccumulator after ProducerId reset\n\nIt is possible for batches with sequence numbers to be in the `deque` while at the same time the in flight batches in the `TransactionManager` are removed due to a producerId reset.\n\nIn this case, when the batches in the `deque` are drained, we will get a `NullPointerException` in the background thread due to this line:\n\n```java\nif (first.hasSequence() && first.baseSequence() != transactionManager.nextBatchBySequence(first.topicPartition).baseSequence())\n```\n\nParticularly, `transactionManager.nextBatchBySequence` will return null, because there no inflight batches being tracked.\n\nIn this patch, we simply allow the batches in the `deque` to be drained if there are no in flight batches being tracked in the TransactionManager. If they succeed, well and good. If the responses come back with an error, the batces will be ultimately failed in the producer with an `OutOfOrderSequenceException` when the response comes back.\n\nAuthor: Apurva Mehta <apurva@confluent.io>\n\nReviewers: Jason Gustafson <jason@confluent.io>\n\nCloses #4022 from apurvam/KAFKA-6015-npe-in-record-accumulator",
         "parent": "https://github.com/apache/kafka/commit/10cd98cc894b88c5d1e24fc54c66361ad9914df2",
         "patched_files": [
-            "RecordAccumulator.java",
-            "ProducerStateManager.java",
+            "TransactionManager.java",
             "Sender.java",
-            "TransactionManager.java"
+            "RecordAccumulator.java",
+            "ProducerStateManager.java"
         ],
         "repo": "kafka",
         "unit_tests": [
@@ -278,10 +332,10 @@
         "message": "KafkaController NPE in SessionExpireListener; patched by Yang Ye; reviewed by Jun Rao, Neha Narkhede; KAFKA-464\n\ngit-svn-id: https://svn.apache.org/repos/asf/incubator/kafka/branches/0.8@1374467 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/kafka/commit/60735b7ad6ef15f25ae9e432c2fc566bec535e31",
         "patched_files": [
-            "KafkaServer.java",
-            "KafkaController.java",
             "ZookeeperConsumerConnector.java",
-            "KafkaScheduler.java"
+            "KafkaController.java",
+            "KafkaScheduler.java",
+            "KafkaServer.java"
         ],
         "repo": "kafka",
         "unit_tests": [
@@ -340,8 +394,8 @@
         "repo": "kafka",
         "unit_tests": [
             "WindowKeySchemaTest.java",
-            "InMemoryWindowStoreTest.java",
-            "InMemorySessionStoreTest.java"
+            "InMemorySessionStoreTest.java",
+            "InMemoryWindowStoreTest.java"
         ]
     },
     "kafka_1659ca1": {
@@ -412,14 +466,13 @@
         "message": "KAFKA-4901; Make ProduceRequest thread-safe\n\nIf request logging is enabled, `ProduceRequest` can be accessed\nand mutated concurrently from a network thread (which calls\n`toString`) and a request handler thread (which calls\n`clearPartitionRecords()`).\n\nThat can lead to a `ConcurrentModificationException` when iterating\nthe `partitionRecords` map.\n\nThe underlying thread-safety issue has existed since the server\nstarted using the Java implementation of ProduceRequest in 0.10.0.\nHowever, we were incorrectly not clearing the underlying struct until\n0.10.2, so `toString` itself was thread-safe until that change. In 0.10.2,\n`toString` is no longer thread-safe and we could potentially see a\n`NullPointerException` given the right set of interleavings between\n`toString` and `clearPartitionRecords` although we haven't seen that\nhappen yet.\n\nIn trunk, we changed the requests to have a `toStruct` method\ninstead of creating a struct in the constructor and `toString` was\nno longer printing the contents of the `Struct`. This accidentally\nfixed the race condition, but it meant that request logging was less\nuseful.\n\nA couple of days ago, `AbstractRequest.toString` was changed to\nprint the contents of the request by calling `toStruct().toString()`\nand reintroduced the race condition. The impact is more visible\nbecause we iterate over a `HashMap`, which proactively\nchecks for concurrent modification (unlike arrays).\n\nWe will need a separate PR for 0.10.2.\n\nAuthor: Ismael Juma <ismael@juma.me.uk>\n\nReviewers: Jiangjie Qin <becket.qin@gmail.com>, Onur Karaman <okaraman@linkedin.com>, Jun Rao <junrao@gmail.com>\n\nCloses #2689 from ijuma/produce-request-thread-safety",
         "parent": "https://github.com/apache/kafka/commit/be11272818a06eea157ab7f6eee8905855f1cede",
         "patched_files": [
-            "RequestChannel.java",
-            "ProduceRequest.java",
             "AbstractRequest.java",
-            "KafkaApis.java"
+            "ProduceRequest.java",
+            "KafkaApis.java",
+            "RequestChannel.java"
         ],
         "repo": "kafka",
         "unit_tests": [
-            "ProduceRequestTest.java",
             "RequestResponseTest.java"
         ]
     },
@@ -460,6 +513,33 @@
         "repo": "kafka",
         "unit_tests": [
             "LogTest.java"
+        ]
+    },
+    "kafka_1d19ac9": {
+        "bug_id": "kafka_1d19ac9",
+        "commit": "https://github.com/apache/kafka/commit/1d19ac9fea5b3344a0cdd00ee8c58ab8a22a5579",
+        "file": [
+            {
+                "additions": 17,
+                "blob_url": "https://github.com/apache/kafka/blob/1d19ac9fea5b3344a0cdd00ee8c58ab8a22a5579/streams/src/main/java/org/apache/kafka/streams/processor/internals/StreamPartitionAssignor.java",
+                "changes": 35,
+                "contents_url": "https://api.github.com/repos/apache/kafka/contents/streams/src/main/java/org/apache/kafka/streams/processor/internals/StreamPartitionAssignor.java?ref=1d19ac9fea5b3344a0cdd00ee8c58ab8a22a5579",
+                "deletions": 18,
+                "filename": "streams/src/main/java/org/apache/kafka/streams/processor/internals/StreamPartitionAssignor.java",
+                "patch": "@@ -188,6 +188,7 @@ public Subscription subscription(Set<String> topics) {\n \n         // ensure the co-partitioning topics within the group have the same number of partitions,\n         // and enforce the number of partitions for those internal topics.\n+        internalSourceTopicToTaskIds = new HashMap<>();\n         Map<Integer, Set<String>> sourceTopicGroups = new HashMap<>();\n         Map<Integer, Set<String>> internalSourceTopicGroups = new HashMap<>();\n         for (Map.Entry<Integer, TopologyBuilder.TopicsInfo> entry : topicGroups.entrySet()) {\n@@ -229,37 +230,35 @@ public Subscription subscription(Set<String> topics) {\n         if (internalTopicManager != null) {\n             log.debug(\"Starting to validate internal source topics in partition assignor.\");\n \n-            if (internalSourceTopicToTaskIds != null) {\n-                for (Map.Entry<String, Set<TaskId>> entry : internalSourceTopicToTaskIds.entrySet()) {\n-                    String topic = streamThread.jobId + \"-\" + entry.getKey();\n+            for (Map.Entry<String, Set<TaskId>> entry : internalSourceTopicToTaskIds.entrySet()) {\n+                String topic = streamThread.jobId + \"-\" + entry.getKey();\n \n-                    // should have size 1 only\n-                    int numPartitions = -1;\n-                    for (TaskId task : entry.getValue()) {\n-                        numPartitions = task.partition;\n-                    }\n+                // should have size 1 only\n+                int numPartitions = -1;\n+                for (TaskId task : entry.getValue()) {\n+                    numPartitions = task.partition;\n+                }\n \n-                    internalTopicManager.makeReady(topic, numPartitions);\n+                internalTopicManager.makeReady(topic, numPartitions);\n \n-                    // wait until the topic metadata has been propagated to all brokers\n-                    List<PartitionInfo> partitions;\n-                    do {\n-                        partitions = streamThread.restoreConsumer.partitionsFor(topic);\n-                    } while (partitions == null || partitions.size() != numPartitions);\n+                // wait until the topic metadata has been propagated to all brokers\n+                List<PartitionInfo> partitions;\n+                do {\n+                    partitions = streamThread.restoreConsumer.partitionsFor(topic);\n+                } while (partitions == null || partitions.size() != numPartitions);\n \n-                    metadata.update(topic, partitions);\n-                }\n+                metadata.update(topic, partitions);\n             }\n \n             log.info(\"Completed validating internal source topics in partition assignor.\");\n         }\n+        internalSourceTopicToTaskIds.clear();\n \n         // get the tasks as partition groups from the partition grouper\n         Map<TaskId, Set<TopicPartition>> partitionsForTask = streamThread.partitionGrouper.partitionGroups(sourceTopicGroups, metadata);\n \n-        // add tasks to state topic subscribers\n+        // add tasks to state change log topic subscribers\n         stateChangelogTopicToTaskIds = new HashMap<>();\n-        internalSourceTopicToTaskIds = new HashMap<>();\n         for (TaskId task : partitionsForTask.keySet()) {\n             for (String topicName : topicGroups.get(task.topicGroupId).stateChangelogTopics) {\n                 Set<TaskId> tasks = stateChangelogTopicToTaskIds.get(topicName);",
+                "raw_url": "https://github.com/apache/kafka/raw/1d19ac9fea5b3344a0cdd00ee8c58ab8a22a5579/streams/src/main/java/org/apache/kafka/streams/processor/internals/StreamPartitionAssignor.java",
+                "sha": "1b3bf101b65404a996ed8c0d60ec7a19b7524a46",
+                "status": "modified"
+            }
+        ],
+        "message": "HOTFIX: Avoid NPE in StreamsPartitionAssignor\n\nAuthor: Guozhang Wang <wangguoz@gmail.com>\n\nReviewers: Michael G. Noll <michael@confluent.io>\n\nCloses #1004 from guozhangwang/KStreamPANPE",
+        "parent": "https://github.com/apache/kafka/commit/079c88178dff4b3a4c9de55629e7d15b60e5f562",
+        "patched_files": [
+            "StreamPartitionAssignor.java"
+        ],
+        "repo": "kafka",
+        "unit_tests": [
+            "StreamPartitionAssignorTest.java"
         ]
     },
     "kafka_1f52881": {
@@ -518,13 +598,14 @@
         "message": "KAFKA-3642: Fix NPE from ProcessorStateManager when the changelog topic not exists\n\nIssue: https://issues.apache.org/jira/browse/KAFKA-3642\n\nAuthor: Yuto Kawamura <kawamuray.dadada@gmail.com>\n\nReviewers: Guozhang Wang <wangguoz@gmail.com>\n\nCloses #1289 from kawamuray/KAFKA-3642-streams-NPE",
         "parent": "https://github.com/apache/kafka/commit/62253539d87e1ccb353673ed96adc98fb2d854ae",
         "patched_files": [
-            "StreamPartitionAssignor.java",
+            "ProcessorStateManager.java",
             "MockConsumer.java",
-            "ProcessorStateManager.java"
+            "StreamPartitionAssignor.java"
         ],
         "repo": "kafka",
         "unit_tests": [
             "MockConsumerTest.java",
+            "StreamPartitionAssignorTest.java",
             "ProcessorStateManagerTest.java"
         ]
     },
@@ -584,13 +665,13 @@
         "message": "KAFKA-8142: Fix NPE for nulls in Headers (#6484)\n\nReviewers: Bill Bejeck <bill@confluent.io>, Guozhang Wang <guozhang@confluent.io>",
         "parent": "https://github.com/apache/kafka/commit/3124b070666d3b8cdc0e96067e69b8e7a6245742",
         "patched_files": [
-            "ProcessorRecordContext.java",
-            "RecordHeaders.java"
+            "RecordHeaders.java",
+            "ProcessorRecordContext.java"
         ],
         "repo": "kafka",
         "unit_tests": [
-            "ProcessorRecordContextTest.java",
-            "RecordHeadersTest.java"
+            "RecordHeadersTest.java",
+            "ProcessorRecordContextTest.java"
         ]
     },
     "kafka_1f8527b": {
@@ -643,8 +724,8 @@
         ],
         "repo": "kafka",
         "unit_tests": [
-            "SensorTest.java",
-            "MetricsTest.java"
+            "MetricsTest.java",
+            "SensorTest.java"
         ]
     },
     "kafka_218e6a5": {
@@ -718,8 +799,8 @@
         "message": "KAFKA-7434: Fix NPE in DeadLetterQueueReporter\n\n*More detailed description of your change,\nif necessary. The PR title and PR message become\nthe squashed commit message, so use a separate\ncomment to ping reviewers.*\n\n*Summary of testing strategy (including rationale)\nfor the feature or bug fix. Unit and/or integration\ntests are expected for any behaviour change and\nsystem tests should be considered for larger changes.*\n\nAuthor: Micha\u0142 Borowiecki <mbor81@gmail.com>\n\nReviewers: Arjun Satish <arjun@confluent.io>, Ewen Cheslack-Postava <ewen@confluent.io>\n\nCloses #5700 from mihbor/KAFKA-7434",
         "parent": "https://github.com/apache/kafka/commit/cb21bca400359e6b7e61555578b7539f27d9d2ff",
         "patched_files": [
-            "ErrorReporter.java",
-            "DeadLetterQueueReporter.java"
+            "DeadLetterQueueReporter.java",
+            "ErrorReporter.java"
         ],
         "repo": "kafka",
         "unit_tests": [
@@ -1051,12 +1132,12 @@
         "message": "KAFKA-5047: NullPointerException while using GlobalKTable in KafkaStreams\n\nSkip null keys when initializing GlobalKTables. This is inline with what happens during normal processing.\n\nAuthor: Damian Guy <damian.guy@gmail.com>\n\nReviewers: Michael G. Noll, Eno Thereska, Matthias J. Sax, Guozhang Wang\n\nCloses #2834 from dguy/kafka-5047",
         "parent": "https://github.com/apache/kafka/commit/14ab3dcc6c70d5bd4b21d99e0b97332ea332ac07",
         "patched_files": [
-            "StoreChangelogReader.java",
             "KTable.java",
+            "GlobalStateManagerImpl.java",
             "StateRestorer.java",
+            "StoreChangelogReader.java",
             "MockRestoreCallback.java",
-            "GlobalKTable.java",
-            "GlobalStateManagerImpl.java"
+            "GlobalKTable.java"
         ],
         "repo": "kafka",
         "unit_tests": [
@@ -1266,27 +1347,27 @@
         "message": "KAFKA-4163: NPE in StreamsMetadataState during re-balance operations\n\nDuring rebalance operations the Cluster object gets set to Cluster.empty(). This can result in NPEs when doing certain operation on StreamsMetadataState. This should throw a StreamsException if the Cluster is empty as it is not yet (re-)initialized\n\nAuthor: Damian Guy <damian.guy@gmail.com>\n\nReviewers: Eno Thereska, Guozhang Wang\n\nCloses #1845 from dguy/streams-meta-hotfix",
         "parent": "https://github.com/apache/kafka/commit/70afd5f9dd2eddc784a24fa2518992ef3371f0a4",
         "patched_files": [
-            "WrappingStoreProvider.java",
-            "CompositeReadOnlyKeyValueStore.java",
-            "QueryableStoreProvider.java",
-            "StreamsMetadata.java",
             "StateStoreProviderStub.java",
-            "CompositeReadOnlyWindowStore.java",
-            "ReadOnlyWindowStoreStub.java",
-            "KafkaStreams.java",
             "StreamsMetadataState.java",
-            "StreamThreadStateStoreProvider.java"
+            "StreamsMetadata.java",
+            "KafkaStreams.java",
+            "QueryableStoreProvider.java",
+            "ReadOnlyWindowStoreStub.java",
+            "CompositeReadOnlyWindowStore.java",
+            "CompositeReadOnlyKeyValueStore.java",
+            "StreamThreadStateStoreProvider.java",
+            "WrappingStoreProvider.java"
         ],
         "repo": "kafka",
         "unit_tests": [
+            "WrappingStoreProviderTest.java",
             "CompositeReadOnlyKeyValueStoreTest.java",
+            "QueryableStoreProviderTest.java",
+            "QueryableStateIntegrationTest.java",
             "StreamsMetadataStateTest.java",
             "StreamThreadStateStoreProviderTest.java",
-            "CompositeReadOnlyWindowStoreTest.java",
-            "QueryableStoreProviderTest.java",
             "KafkaStreamsTest.java",
-            "QueryableStateIntegrationTest.java",
-            "WrappingStoreProviderTest.java"
+            "CompositeReadOnlyWindowStoreTest.java"
         ]
     },
     "kafka_3e48bdb": {
@@ -1387,7 +1468,6 @@
         "message": "KAFKA-2755: Suspicious reference forwarding cause NPE on handleDescribeGroup.\n\n\u2026xistent consumer group\n\nAuthor: Ashish Singh <asingh@cloudera.com>\n\nReviewers: Guozhang Wang\n\nCloses #435 from SinghAsDev/KAFKA-2755",
         "parent": "https://github.com/apache/kafka/commit/7eee11451e1f0d17efa27775becfb370a9894d56",
         "patched_files": [
-            "AdminClient.java",
             "GroupCoordinator.java"
         ],
         "repo": "kafka",
@@ -1439,11 +1519,12 @@
         "message": "KAFKA-4269: Update topic subscription when regex pattern specified out of topicGroups method\n\n\u2026d out of topicGroups method. The topicGroups method only called from StreamPartitionAssignor when KafkaStreams object  is the leader, needs to be executed for clients.\n\nAuthor: bbejeck <bbejeck@gmail.com>\n\nReviewers: Damian Guy <damian.guy@gmail.com>, Guozhang Wang <wangguoz@gmail.com>\n\nCloses #2005 from bbejeck/KAFKA-4269_multiple_kstream_instances_mult_consumers_npe",
         "parent": "https://github.com/apache/kafka/commit/17cb4fe52f74fcc1b7c43baa4649e0a4aba80fa3",
         "patched_files": [
-            "StreamPartitionAssignor.java",
-            "TopologyBuilder.java"
+            "TopologyBuilder.java",
+            "StreamPartitionAssignor.java"
         ],
         "repo": "kafka",
         "unit_tests": [
+            "StreamPartitionAssignorTest.java",
             "TopologyBuilderTest.java"
         ]
     },
@@ -1596,13 +1677,11 @@
         "message": "KAFKA-1180 WhiteList topic filter gets a NullPointerException on complex Regex patch by Joe Stein, reviewed by Joel Koshy",
         "parent": "https://github.com/apache/kafka/commit/fc0e03f79131746da81c05c12e056862c08d79d4",
         "patched_files": [
-            "Utils.java",
             "TopicCount.java",
-            "TopicFilter.java"
+            "Utils.java"
         ],
         "repo": "kafka",
         "unit_tests": [
-            "UtilsTest.java",
             "TopicFilterTest.java",
             "TestUtils.java"
         ]
@@ -1819,31 +1898,31 @@
         "message": "KAFKA-8933; Fix NPE in DefaultMetadataUpdater after authentication failure (#7682)\n\nThis patch fixes an NPE in `DefaultMetadataUpdater` due to an inconsistency in event expectations. Whenever there is an authentication failure, we were treating it as a failed update even if was from a separate connection from an inflight metadata request. This patch fixes the problem by making the `MetadataUpdater` api clearer in terms of the events that are handled.\r\n\r\nReviewers: Stanislav Kozlovski <stanislav_kozlovski@outlook.com>, Rajini Sivaram <rajinisivaram@googlemail.com>",
         "parent": "https://github.com/apache/kafka/commit/95581f33f3f0a3dfb8769a2aa782cc11ffe1dccd",
         "patched_files": [
+            "AdminMetadataManager.java",
+            "NetworkClient.java",
+            "ProducerMetadata.java",
             "BrokerApiVersionsCommand.java",
+            "MetadataUpdater.java",
+            "ConsumerNetworkClient.java",
+            "KafkaConsumer.java",
+            "Fetcher.java",
+            "WorkerGroupMember.java",
             "MockSelector.java",
             "KafkaProducer.java",
             "Metadata.java",
-            "AdminMetadataManager.java",
-            "ProducerMetadata.java",
-            "KafkaConsumer.java",
-            "Fetcher.java",
-            "MetadataUpdater.java",
-            "WorkerGroupMember.java",
-            "NetworkClient.java",
-            "ManualMetadataUpdater.java",
-            "ConsumerNetworkClient.java"
+            "ManualMetadataUpdater.java"
         ],
         "repo": "kafka",
         "unit_tests": [
-            "NetworkClientTest.java",
-            "AdminMetadataManagerTest.java",
-            "ProducerMetadataTest.java",
-            "ClientAuthenticationFailureTest.java",
-            "FetcherTest.java",
-            "KafkaConsumerTest.java",
             "ConsumerNetworkClientTest.java",
+            "KafkaConsumerTest.java",
+            "KafkaProducerTest.java",
             "MetadataTest.java",
-            "KafkaProducerTest.java"
+            "ProducerMetadataTest.java",
+            "FetcherTest.java",
+            "ClientAuthenticationFailureTest.java",
+            "NetworkClientTest.java",
+            "AdminMetadataManagerTest.java"
         ]
     },
     "kafka_5d89365": {
@@ -1922,8 +2001,8 @@
         ],
         "repo": "kafka",
         "unit_tests": [
-            "TestJaasConfig.java",
-            "JaasContextTest.java"
+            "JaasContextTest.java",
+            "TestJaasConfig.java"
         ]
     },
     "kafka_5ecac84": {
@@ -2094,12 +2173,12 @@
         "parent": "https://github.com/apache/kafka/commit/b38b74bb77e6d12e4ea74b51216bdc15e47dbbce",
         "patched_files": [
             "KafkaServer.java",
-            "ControllerTestUtils.java",
-            "ReplicaStateMachine.java",
-            "ZkUtils.java",
-            "PartitionStateMachine.java",
             "KafkaController.java",
-            "ControllerChannelManager.java"
+            "ZkUtils.java",
+            "ControllerChannelManager.java",
+            "ReplicaStateMachine.java",
+            "PartitionStateMachine.java",
+            "ControllerTestUtils.java"
         ],
         "repo": "kafka",
         "unit_tests": [
@@ -2449,16 +2528,16 @@
         "message": "KAFKA-7228: Set errorHandlingMetrics for dead letter queue\n\nDLQ reporter does not get a `errorHandlingMetrics` object when created by the worker. This results in an NPE.\n\nSigned-off-by: Arjun Satish <arjunconfluent.io>\n\n*More detailed description of your change,\nif necessary. The PR title and PR message become\nthe squashed commit message, so use a separate\ncomment to ping reviewers.*\n\n*Summary of testing strategy (including rationale)\nfor the feature or bug fix. Unit and/or integration\ntests are expected for any behaviour change and\nsystem tests should be considered for larger changes.*\n\nAuthor: Arjun Satish <arjun@confluent.io>\n\nReviewers: Konstantine Karantasis <konstantine@confluent.io>, Ewen Cheslack-Postava <ewen@confluent.io>\n\nCloses #5440 from wicknicks/KAFKA-7228",
         "parent": "https://github.com/apache/kafka/commit/596c6c0c0b27c13f2017c770ea37cd39e27e5dcf",
         "patched_files": [
-            "ErrorReporter.java",
-            "LogReporter.java",
+            "DeadLetterQueueReporter.java",
             "Worker.java",
-            "DeadLetterQueueReporter.java"
+            "ErrorReporter.java",
+            "LogReporter.java"
         ],
         "repo": "kafka",
         "unit_tests": [
-            "ErrorReporterTest.java",
+            "ErrorHandlingTaskTest.java",
             "WorkerTest.java",
-            "ErrorHandlingTaskTest.java"
+            "ErrorReporterTest.java"
         ]
     },
     "kafka_7334222": {
@@ -2518,14 +2597,14 @@
         "parent": "https://github.com/apache/kafka/commit/d7f8ec8628ee18326d22f6a58c787629a8faf307",
         "patched_files": [
             "StreamTask.java",
-            "AssignedTasks.java",
             "AssignedStreamsTasks.java",
-            "import-control.java"
+            "import-control.java",
+            "AssignedTasks.java"
         ],
         "repo": "kafka",
         "unit_tests": [
-            "StreamTaskTest.java",
-            "AssignedStreamsTasksTest.java"
+            "AssignedStreamsTasksTest.java",
+            "StreamTaskTest.java"
         ]
     },
     "kafka_783900c": {
@@ -2702,16 +2781,16 @@
         "message": "KAFKA-7324: NPE due to lack of SASLExtensions in SASL/OAUTHBEARER (#5552)\n\nSet empty extensions if null is passed in.\r\n\r\nReviewers: Satish Duggana <sduggana@hortonworks.com>, Stanislav Kozlovski <stanislav_kozlovski@outlook.com>, Rajini Sivaram <rajinisivaram@googlemail.com>",
         "parent": "https://github.com/apache/kafka/commit/9e23af3115ddfbf311f6b37c273327b3fa8e9a14",
         "patched_files": [
-            "SaslExtensions.java",
-            "SaslExtensionsCallback.java",
             "OAuthBearerClientInitialResponse.java",
-            "OAuthBearerSaslClient.java"
+            "OAuthBearerSaslClient.java",
+            "SaslExtensions.java",
+            "SaslExtensionsCallback.java"
         ],
         "repo": "kafka",
         "unit_tests": [
-            "SaslExtensionsTest.java",
             "OAuthBearerSaslClientTest.java",
-            "OAuthBearerClientInitialResponseTest.java"
+            "OAuthBearerClientInitialResponseTest.java",
+            "SaslExtensionsTest.java"
         ]
     },
     "kafka_80d78f8": {
@@ -2810,13 +2889,12 @@
         "parent": "https://github.com/apache/kafka/commit/7f4e3ccde820eedd962b4cfd3abaecd8a49b83a8",
         "patched_files": [
             "RoundRobinAssignor.java",
-            "RangeAssignor.java",
-            "AbstractPartitionAssignor.java"
+            "AbstractPartitionAssignor.java",
+            "RangeAssignor.java"
         ],
         "repo": "kafka",
         "unit_tests": [
             "RangeAssignorTest.java",
-            "AbstractPartitionAssignorTest.java",
             "RoundRobinAssignorTest.java"
         ]
     },
@@ -3033,15 +3111,14 @@
         "message": "KAFKA-5325; Avoid and handle exceptions for Kerberos re-login\n\nIf producer creates a connection during Kerberos re-login (after logout,\nbefore login), there are no principals in the subject and\n`SaslClientAuthenticator.configure` may throw an exception while trying\nto determine the principal. A socket channel is created and its key\nregistered with the selector, but the `RuntimeException` thrown leaves\nthe key registered with the selector without adding the channel to the\nchannel list. This results in an infinite loop of `NullPointerExceptions`.\nThe PR applies two fixes:\n\n1. Convert the `RuntimeException` to a meaningful `KafkaException`\n2. Handle any exception in `buildChannel`, cleanup and throw `IOException`.\nRetries will take care of re-connections.\n\nAuthor: Rajini Sivaram <rajinisivaram@googlemail.com>\n\nReviewers: Jun Rao <junrao@gmail.com>, Ismael Juma <ismael@juma.me.uk>\n\nCloses #3208 from rajinisivaram/KAFKA-5325",
         "parent": "https://github.com/apache/kafka/commit/2bb48a4fa45422d0773f2f4ea5b38328d3c173ac",
         "patched_files": [
-            "Selector.java",
             "SaslClientAuthenticator.java",
-            "SaslServerAuthenticator.java"
+            "SaslServerAuthenticator.java",
+            "Selector.java"
         ],
         "repo": "kafka",
         "unit_tests": [
-            "SaslAuthenticatorTest.java",
             "SelectorTest.java",
-            "SaslServerAuthenticatorTest.java"
+            "SaslAuthenticatorTest.java"
         ]
     },
     "kafka_9e81ec9": {
@@ -3069,69 +3146,6 @@
         "repo": "kafka",
         "unit_tests": [
             "KafkaConsumerTest.java"
-        ]
-    },
-    "kafka_9e894aa": {
-        "bug_id": "kafka_9e894aa",
-        "commit": "https://github.com/apache/kafka/commit/9e894aa0173b14d64a900bcf780d6b7809368384",
-        "file": [
-            {
-                "additions": 3,
-                "blob_url": "https://github.com/apache/kafka/blob/9e894aa0173b14d64a900bcf780d6b7809368384/core/src/main/scala/kafka/utils/timer/Timer.scala",
-                "changes": 5,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/main/scala/kafka/utils/timer/Timer.scala?ref=9e894aa0173b14d64a900bcf780d6b7809368384",
-                "deletions": 2,
-                "filename": "core/src/main/scala/kafka/utils/timer/Timer.scala",
-                "patch": "@@ -51,8 +51,9 @@ class Timer(taskExecutor: ExecutorService, tickMs: Long = 1, wheelSize: Int = 20\n \n   private def addTimerTaskEntry(timerTaskEntry: TimerTaskEntry): Unit = {\n     if (!timingWheel.add(timerTaskEntry)) {\n-      // already expired\n-      taskExecutor.submit(timerTaskEntry.timerTask)\n+      // Already expired or cancelled\n+      if (!timerTaskEntry.cancelled)\n+        taskExecutor.submit(timerTaskEntry.timerTask)\n     }\n   }\n ",
-                "raw_url": "https://github.com/apache/kafka/raw/9e894aa0173b14d64a900bcf780d6b7809368384/core/src/main/scala/kafka/utils/timer/Timer.scala",
-                "sha": "bdd0e75b93e4bcd7c08481708a8d92150335c560",
-                "status": "modified"
-            },
-            {
-                "additions": 6,
-                "blob_url": "https://github.com/apache/kafka/blob/9e894aa0173b14d64a900bcf780d6b7809368384/core/src/main/scala/kafka/utils/timer/TimerTask.scala",
-                "changes": 8,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/main/scala/kafka/utils/timer/TimerTask.scala?ref=9e894aa0173b14d64a900bcf780d6b7809368384",
-                "deletions": 2,
-                "filename": "core/src/main/scala/kafka/utils/timer/TimerTask.scala",
-                "patch": "@@ -33,11 +33,15 @@ trait TimerTask extends Runnable {\n     synchronized {\n       // if this timerTask is already held by an existing timer task entry,\n       // we will remove such an entry first.\n-      if (timerTaskEntry != null && timerTaskEntry != entry) {\n+      if (timerTaskEntry != null && timerTaskEntry != entry)\n         timerTaskEntry.remove()\n-      }\n+\n       timerTaskEntry = entry\n     }\n   }\n \n+  private[timer] def getTimerTaskEntry(): TimerTaskEntry = {\n+    timerTaskEntry\n+  }\n+\n }",
-                "raw_url": "https://github.com/apache/kafka/raw/9e894aa0173b14d64a900bcf780d6b7809368384/core/src/main/scala/kafka/utils/timer/TimerTask.scala",
-                "sha": "d6b3a2eb3f70a15500913780303b81e1d90666dd",
-                "status": "modified"
-            },
-            {
-                "additions": 47,
-                "blob_url": "https://github.com/apache/kafka/blob/9e894aa0173b14d64a900bcf780d6b7809368384/core/src/main/scala/kafka/utils/timer/TimerTaskList.scala",
-                "changes": 65,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/main/scala/kafka/utils/timer/TimerTaskList.scala?ref=9e894aa0173b14d64a900bcf780d6b7809368384",
-                "deletions": 18,
-                "filename": "core/src/main/scala/kafka/utils/timer/TimerTaskList.scala",
-                "patch": "@@ -52,36 +52,53 @@ private[timer] class TimerTaskList(taskCounter: AtomicInteger) extends Delayed {\n       var entry = root.next\n       while (entry ne root) {\n         val nextEntry = entry.next\n-        f(entry.timerTask)\n+\n+        if (!entry.cancelled) f(entry.timerTask)\n+\n         entry = nextEntry\n       }\n     }\n   }\n \n   // Add a timer task entry to this list\n   def add(timerTaskEntry: TimerTaskEntry): Unit = {\n-    synchronized {\n-      // put the timer task entry to the end of the list. (root.prev points to the tail entry)\n-      val tail = root.prev\n-      timerTaskEntry.next = root\n-      timerTaskEntry.prev = tail\n-      timerTaskEntry.list = this\n-      tail.next = timerTaskEntry\n-      root.prev = timerTaskEntry\n-      taskCounter.incrementAndGet()\n+    var done = false\n+    while (!done) {\n+      // Remove the timer task entry if it is already in any other list\n+      // We do this outside of the sync block below to avoid deadlocking.\n+      // We may retry until timerTaskEntry.list becomes null.\n+      timerTaskEntry.remove()\n+\n+      synchronized {\n+        timerTaskEntry.synchronized {\n+          if (timerTaskEntry.list == null) {\n+            // put the timer task entry to the end of the list. (root.prev points to the tail entry)\n+            val tail = root.prev\n+            timerTaskEntry.next = root\n+            timerTaskEntry.prev = tail\n+            timerTaskEntry.list = this\n+            tail.next = timerTaskEntry\n+            root.prev = timerTaskEntry\n+            taskCounter.incrementAndGet()\n+            done = true\n+          }\n+        }\n+      }\n     }\n   }\n \n   // Remove the specified timer task entry from this list\n   def remove(timerTaskEntry: TimerTaskEntry): Unit = {\n     synchronized {\n-      if (timerTaskEntry.list != null) {\n-        timerTaskEntry.next.prev = timerTaskEntry.prev\n-        timerTaskEntry.prev.next = timerTaskEntry.next\n-        timerTaskEntry.next = null\n-        timerTaskEntry.prev = null\n-        timerTaskEntry.list = null\n-        taskCounter.decrementAndGet()\n+      timerTaskEntry.synchronized {\n+        if (timerTaskEntry.list eq this) {\n+          timerTaskEntry.next.prev = timerTaskEntry.prev\n+          timerTaskEntry.prev.next = timerTaskEntry.next\n+          timerTaskEntry.next = null\n+          timerTaskEntry.prev = null\n+          timerTaskEntry.list = null\n+          taskCounter.decrementAndGet()\n+        }\n       }\n     }\n   }\n@@ -116,6 +133,7 @@ private[timer] class TimerTaskList(taskCounter: AtomicInteger) extends Delayed {\n \n private[timer] class TimerTaskEntry(val timerTask: TimerTask) {\n \n+  @volatile\n   var list: TimerTaskList = null\n   var next: TimerTaskEntry = null\n   var prev: TimerTaskEntry = null\n@@ -124,8 +142,19 @@ private[timer] class TimerTaskEntry(val timerTask: TimerTask) {\n   // setTimerTaskEntry will remove it.\n   if (timerTask != null) timerTask.setTimerTaskEntry(this)\n \n+  def cancelled: Boolean = {\n+    timerTask.getTimerTaskEntry != this\n+  }\n+\n   def remove(): Unit = {\n-    if (list != null) list.remove(this)\n+    var currentList = list\n+    // If remove is called when another thread is moving the entry from a task entry list to another,\n+    // this may fail to remove the entry due to the change of value of list. Thus, we retry until the list becomes null.\n+    // In a rare case, this thread sees null and exits the loop, but the other thread insert the entry to another list later.\n+    while (currentList != null) {\n+      currentList.remove(this)\n+      currentList = list\n+    }\n   }\n \n }",
-                "raw_url": "https://github.com/apache/kafka/raw/9e894aa0173b14d64a900bcf780d6b7809368384/core/src/main/scala/kafka/utils/timer/TimerTaskList.scala",
-                "sha": "c4aeb5d20f1e3275b993b723e919cf6a12eb56b5",
-                "status": "modified"
-            },
-            {
-                "additions": 4,
-                "blob_url": "https://github.com/apache/kafka/blob/9e894aa0173b14d64a900bcf780d6b7809368384/core/src/main/scala/kafka/utils/timer/TimingWheel.scala",
-                "changes": 5,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/main/scala/kafka/utils/timer/TimingWheel.scala?ref=9e894aa0173b14d64a900bcf780d6b7809368384",
-                "deletions": 1,
-                "filename": "core/src/main/scala/kafka/utils/timer/TimingWheel.scala",
-                "patch": "@@ -125,7 +125,10 @@ private[timer] class TimingWheel(tickMs: Long, wheelSize: Int, startMs: Long, ta\n   def add(timerTaskEntry: TimerTaskEntry): Boolean = {\n     val expiration = timerTaskEntry.timerTask.expirationMs\n \n-    if (expiration < currentTime + tickMs) {\n+    if (timerTaskEntry.cancelled) {\n+      // Cancelled\n+      false\n+    } else if (expiration < currentTime + tickMs) {\n       // Already expired\n       false\n     } else if (expiration < currentTime + interval) {",
-                "raw_url": "https://github.com/apache/kafka/raw/9e894aa0173b14d64a900bcf780d6b7809368384/core/src/main/scala/kafka/utils/timer/TimingWheel.scala",
-                "sha": "f5b6efe29349a1ca243834b2eaec2cd9787d2c91",
-                "status": "modified"
-            }
-        ],
-        "message": "kafka-2226; NullPointerException in TestPurgatoryPerformance; patched by Yasuhiro Matsuda; reviewed by Onur Karaman, Guozhang Wang and Jun Rao",
-        "parent": "https://github.com/apache/kafka/commit/3d8494bca3074f49567f352f6eedd1ed008eeabd",
-        "patched_files": [
-            "Timer.java"
-        ],
-        "repo": "kafka",
-        "unit_tests": [
-            "TimerTest.java"
         ]
     },
     "kafka_9f94a77": {
@@ -3209,8 +3223,8 @@
         ],
         "repo": "kafka",
         "unit_tests": [
-            "SessionBytesStoreTest.java",
-            "InMemorySessionStoreTest.java"
+            "InMemorySessionStoreTest.java",
+            "SessionBytesStoreTest.java"
         ]
     },
     "kafka_a1f7925": {
@@ -3301,9 +3315,8 @@
         ],
         "repo": "kafka",
         "unit_tests": [
-            "NetworkClientTest.java",
-            "OffsetFetchRequestTest.java",
-            "RequestResponseTest.java"
+            "RequestResponseTest.java",
+            "NetworkClientTest.java"
         ]
     },
     "kafka_a87decb": {
@@ -3627,52 +3640,52 @@
         "message": "KAFKA-9113: Extract clients from tasks to record collectors (#7833)\n\nThis is part1 of a series of PRs for task management cleanup:\r\n\r\n1. Primarily cleanup MockRecordCollectors: remove unnecessary anonymous inheritance but just consolidate on the NoOpRecordCollector -> renamed to MockRecordCollector. Most relevant changes are unit tests that would be relying on this MockRecordCollector.\r\n\r\n2. Let StandbyContextImpl#recordCollector() to return null instead of returning a no-op collector, since in standby tasks we should ALWAYS bypass the logging logic and only use the inner store for restoreBatch. Returning null helps us to realize this assertion failed as NPE as early as possible whereas a no-op collector just hides the bug.\r\n\r\nReviewers: Guozhang Wang <wangguoz@gmail.com>",
         "parent": "https://github.com/apache/kafka/commit/16d36f1674f4867b4dc498464df20a0e8e18eb3f",
         "patched_files": [
-            "CompositeReadOnlyKeyValueStore.java",
+            "ChangeLoggingKeyValueBytesStore.java",
+            "MockInternalProcessorContext.java",
             "StreamTask.java",
-            "StoreChangeLogger.java",
-            "KeyValueSegments.java",
-            "AbstractRocksDBSegmentedBytesStore.java",
-            "TimestampedSegments.java",
             "InMemorySessionStore.java",
-            "StandbyContextImpl.java",
-            "TimeOrderedKeyValueBuffer.java",
-            "ChangeLoggingTimestampedKeyValueBytesStore.java",
-            "SegmentIterator.java",
-            "MockRecordCollector.java",
+            "MeteredWindowStore.java",
+            "ChangeLoggingSessionBytesStore.java",
+            "AbstractRocksDBSegmentedBytesStore.java",
+            "CompositeReadOnlyKeyValueStore.java",
             "MeteredTimestampedWindowStore.java",
             "ChangeLoggingWindowBytesStore.java",
             "StreamsTestUtils.java",
+            "MockRecordCollector.java",
+            "SegmentIterator.java",
             "ChangeLoggingTimestampedWindowBytesStore.java",
-            "MockInternalProcessorContext.java",
-            "ChangeLoggingKeyValueBytesStore.java",
-            "ChangeLoggingSessionBytesStore.java",
-            "MeteredWindowStore.java",
+            "RocksDBSessionStore.java",
+            "TimestampedSegments.java",
+            "StoreChangeLogger.java",
+            "TimeOrderedKeyValueBuffer.java",
             "RocksDBWindowStore.java",
-            "RocksDBSessionStore.java"
+            "StandbyContextImpl.java",
+            "KeyValueSegments.java",
+            "ChangeLoggingTimestampedKeyValueBytesStore.java"
         ],
         "repo": "kafka",
         "unit_tests": [
-            "CompositeReadOnlyKeyValueStoreTest.java",
-            "StoreChangeLoggerTest.java",
-            "ChangeLoggingSessionBytesStoreTest.java",
-            "WindowBytesStoreTest.java",
-            "MeteredTimestampedWindowStoreTest.java",
-            "RocksDBWindowStoreTest.java",
-            "ChangeLoggingTimestampedKeyValueBytesStoreTest.java",
+            "ChangeLoggingKeyValueBytesStoreTest.java",
             "SessionBytesStoreTest.java",
             "AbstractRocksDBSegmentedBytesStoreTest.java",
-            "ChangeLoggingTimestampedWindowBytesStoreTest.java",
-            "MeteredWindowStoreTest.java",
-            "TimestampedSegmentsTest.java",
+            "ChangeLoggingSessionBytesStoreTest.java",
+            "ChangeLoggingWindowBytesStoreTest.java",
+            "CompositeReadOnlyKeyValueStoreTest.java",
+            "ChangeLoggingTimestampedKeyValueBytesStoreTest.java",
+            "KeyValueSegmentsTest.java",
+            "RocksDBWindowStoreTest.java",
+            "TimeOrderedKeyValueBufferTest.java",
             "StreamTaskTest.java",
+            "ChangeLoggingTimestampedWindowBytesStoreTest.java",
+            "InMemorySessionStoreTest.java",
+            "MeteredTimestampedWindowStoreTest.java",
             "RocksDBSessionStoreTest.java",
             "SegmentIteratorTest.java",
-            "ChangeLoggingKeyValueBytesStoreTest.java",
-            "TimeOrderedKeyValueBufferTest.java",
-            "KeyValueSegmentsTest.java",
-            "KStreamSessionWindowAggregateProcessorTest.java",
-            "ChangeLoggingWindowBytesStoreTest.java",
-            "InMemorySessionStoreTest.java"
+            "WindowBytesStoreTest.java",
+            "TimestampedSegmentsTest.java",
+            "StoreChangeLoggerTest.java",
+            "MeteredWindowStoreTest.java",
+            "KStreamSessionWindowAggregateProcessorTest.java"
         ]
     },
     "kafka_b380a82": {
@@ -3809,8 +3822,8 @@
         "message": "KAFKA-4312: If filePath is empty string writeAsText should have more meaningful error message\n\n\u2026eaningful error message\n\nAuthor: bbejeck <bbejeck@gmail.com>\n\nReviewers: Guozhang Wang <wangguoz@gmail.com>\n\nCloses #2042 from bbejeck/KAFKA-4312_write_as_text_throws_NPE_empty_string",
         "parent": "https://github.com/apache/kafka/commit/c2a8b86117ede2ffda4cc4a8800b46f65ef9922d",
         "patched_files": [
-            "KTableImpl.java",
-            "KStreamImpl.java"
+            "KStreamImpl.java",
+            "KTableImpl.java"
         ],
         "repo": "kafka",
         "unit_tests": [
@@ -3850,8 +3863,8 @@
         "message": "KAFKA-7678: Avoid NPE when closing the RecordCollector (#5993)\n\nReviewers: Matthias J. Sax <matthias@confluent.io>, Bill Bejeck <bill@confluent.io>",
         "parent": "https://github.com/apache/kafka/commit/ec501f305e53a09072580fb3824048c170d32a48",
         "patched_files": [
-            "RecordCollector.java",
-            "RecordCollectorImpl.java"
+            "RecordCollectorImpl.java",
+            "RecordCollector.java"
         ],
         "repo": "kafka",
         "unit_tests": [
@@ -3890,7 +3903,8 @@
         "message": "KAFKA-4927: Fix KStreamsTestDriver to not throw NPE when KStream.to() sinks are used\n\na KStream.to() sink is also a topic\n... so the KStreamTestDriver to fetch it when required\n\nAuthor: Wim Van Leuven <wim.vanleuven@bigboards.io>\nAuthor: Wim Van Leuven <wim.vanleuven@highestpoint.biz>\n\nReviewers: Eno Thereska, Matthias J. Sax, Guozhang Wang\n\nCloses #2716 from wimvanleuven/KAFKA-4927",
         "parent": "https://github.com/apache/kafka/commit/8ace736f7121161518953b4ce2a03f36a8306e18",
         "patched_files": [
-            "KStreamTestDriver.java"
+            "KStreamTestDriver.java",
+            "KStreamBuilder.java"
         ],
         "repo": "kafka",
         "unit_tests": [
@@ -3929,8 +3943,8 @@
         "message": "MINOR: Change order of Property Check To Avoid NPE (#5528)\n\nReviewer: Matthias J. Sax <matthias@confluent.io>",
         "parent": "https://github.com/apache/kafka/commit/7c4e6724699bb6fc65112b5513848c733a03019e",
         "patched_files": [
-            "StreamsBuilder.java",
-            "InternalStreamsBuilder.java"
+            "InternalStreamsBuilder.java",
+            "StreamsBuilder.java"
         ],
         "repo": "kafka",
         "unit_tests": [
@@ -3982,8 +3996,8 @@
         "message": "KAFKA-3562; Handle topic deletion during a send\n\nFix timing window in producer by holding onto cluster object while processing send requests so that changes to cluster during metadata refresh don't cause NPE if a topic is deleted.\n\nAuthor: Rajini Sivaram <rajinisivaram@googlemail.com>\n\nReviewers: Sriharsha Chintalapani <harsha@hortonworks.com>, Ewen Cheslack-Postava <ewen@confluent.io>, Ismael Juma <ismael@juma.me.uk>\n\nCloses #1478 from rajinisivaram/KAFKA-3562",
         "parent": "https://github.com/apache/kafka/commit/383cec9cf38607cdfbda0256d3447d253dcdde7d",
         "patched_files": [
-            "KafkaProducer.java",
-            "build.java"
+            "build.java",
+            "KafkaProducer.java"
         ],
         "repo": "kafka",
         "unit_tests": [
@@ -4046,9 +4060,9 @@
         "message": "[HOT FIX] Check for null before deserializing in MeteredSessionStore  (#6575)\n\nThe fetchSession() method of SessionStore searches for a (single) specific session and returns null if none are found. This is analogous to fetch(key, time) in WindowStore or get(key) in KeyValueStore. MeteredWindowStore and MeteredKeyValueStore both check for a null result before attempting to deserialize, however MeteredSessionStore just blindly deserializes and as a result NPE is thrown when we search for a record that does not exist.\r\n\r\nReviewers: Guozhang Wang <wangguoz@gmail.com>, Bill Bejeck <bbejeck@gmail.com>, Bruno Cadonna <bruno@confluent.io>",
         "parent": "https://github.com/apache/kafka/commit/555d05971e16123a497ad423ef4786e0831b2101",
         "patched_files": [
-            "MeteredSessionStore.java",
             "MeteredKeyValueStore.java",
-            "MeteredWindowStore.java"
+            "MeteredWindowStore.java",
+            "MeteredSessionStore.java"
         ],
         "repo": "kafka",
         "unit_tests": [
@@ -4149,18 +4163,17 @@
         "message": "KAFKA-6260; Ensure selection keys are removed from all collections on socket close\n\nWhen a socket is closed, we must remove corresponding selection keys from internal collections. This fixes an NPE which is caused by attempting to access the selection key's attached channel after it had been cleared after disconnecting.\n\nAuthor: Jason Gustafson <jason@confluent.io>\n\nReviewers: Ismael Juma <ismael@juma.me.uk>, Rajini Sivaram <rajinisivaram@googlemail.com>\n\nCloses #4276 from hachikuji/KAFKA-6260",
         "parent": "https://github.com/apache/kafka/commit/18e34482e685098ebef90233d78ae803f906633a",
         "patched_files": [
-            "SslTransportLayer.java",
             "TransportLayer.java",
-            "Selector.java",
             "PlaintextTransportLayer.java",
+            "SslTransportLayer.java",
+            "Selector.java",
             "KafkaChannel.java"
         ],
         "repo": "kafka",
         "unit_tests": [
-            "SslTransportLayerTest.java",
             "SelectorTest.java",
-            "KafkaChannelTest.java",
-            "SslSelectorTest.java"
+            "SslSelectorTest.java",
+            "SslTransportLayerTest.java"
         ]
     },
     "kafka_d06da1b": {
@@ -4238,7 +4251,8 @@
         ],
         "repo": "kafka",
         "unit_tests": [
-            "RegexSourceIntegrationTest.java"
+            "RegexSourceIntegrationTest.java",
+            "StreamPartitionAssignorTest.java"
         ]
     },
     "kafka_d9369de": {
@@ -4297,16 +4311,15 @@
         "message": "KAFKA-6728: Corrected the worker\u2019s instantiation of the HeaderConverter\n\n## Summary of the problem\nWhen the `header.converter` is not specified in the worker config or the connector config, a bug in the `Plugins` test causes it to never instantiate the `HeaderConverter` instance, even though there is a default value.\n\nThis is a problem as soon as the connector deals with headers, either in records created by a source connector or in messages on the Kafka topics consumed by a sink connector. As soon as that happens, a NPE occurs.\n\nA workaround is to explicitly set the `header.converter` configuration property, but this was added in AK 1.1 and thus means that upgrading to AK 1.1 will not be backward compatible and will require this configuration change.\n\n## The Changes\n\nThe `Plugins.newHeaderConverter` methods were always returning null if the `header.converter` configuration value was not specified in the supplied connector or worker configuration. Thus, even though the `header.converter` property has a default, it was never being used.\n\nThe fix was to only check whether a `header.converter` property was specified when the connector configuration was being used, and if no such property exists in the connector configuration to return null. Then, when the worker configuration is being used, the method simply gets the `header.converter` value (or the default if no value was explicitly set).\n\nAlso, the ConnectorConfig had the same default value for the `header.converter` property as the WorkerConfig, but this resulted in very confusing log messages that implied the default header converter should be used even when the worker config specified the `header.converter` value. By removing the default, the log messages now make sense, and the Worker still properly instantiates the correct header converter.\n\nFinally, updated comments and added log messages to make it more clear which converters are being used and how they are being converted.\n\n## Testing\n\nSeveral new unit tests for `Plugins.newHeaderConverter` were added to check the various behavior. Additionally, the runtime JAR with these changes was built and inserted into an AK 1.1 installation, and a source connector was manually tested with 8 different combinations of settings for the `header.converter` configuration:\n\n1. default value\n1. worker configuration has `header.converter` explicitly set to the default\n1. worker configuration has `header.converter` set to a custom `HeaderConverter` implementation in the same plugin\n1. worker configuration has `header.converter` set to a custom `HeaderConverter` implementation in a _different_ plugin\n1. connector configuration has `header.converter` explicitly set to the default\n1. connector configuration has `header.converter` set to a custom `HeaderConverter` implementation in the same plugin\n1. connector configuration has `header.converter` set to a custom `HeaderConverter` implementation in a _different_ plugin\n1. worker configuration has `header.converter` explicitly set to the default, and the connector configuration has `header.converter` set to a custom `HeaderConverter` implementation in a _different_ plugin\n\nThe worker created the correct `HeaderConverter` implementation with the correct configuration in all of these tests.\n\nFinally, the default configuration was used with the aforementioned custom source connector that generated records with headers, and an S3 connector that consumes the records with headers (but didn't do anything with them). This test also passed.\n\nAuthor: Randall Hauch <rhauch@gmail.com>\n\nReviewers: Ewen Cheslack-Postava <ewen@confluent.io>\n\nCloses #4815 from rhauch/kafka-6728",
         "parent": "https://github.com/apache/kafka/commit/67077ebbcf24448e48d6223dc7090d5d94ea7780",
         "patched_files": [
-            "Plugins.java",
             "ConnectorConfig.java",
-            "Worker.java"
+            "Worker.java",
+            "Plugins.java"
         ],
         "repo": "kafka",
         "unit_tests": [
-            "ConnectorConfigTest.java",
-            "TestPlugins.java",
+            "PluginsTest.java",
             "WorkerTest.java",
-            "PluginsTest.java"
+            "ConnectorConfigTest.java"
         ]
     },
     "kafka_e2ec2d7": {
@@ -4365,9 +4378,9 @@
         "message": "KAFKA-7044; Fix Fetcher.fetchOffsetsByTimes and NPE in describe consumer group (#5627)\n\nA call to `kafka-consumer-groups --describe --group ...` can result in NullPointerException for two reasons:\r\n1)  `Fetcher.fetchOffsetsByTimes()` may return too early, without sending list offsets request for topic partitions that are not in cached metadata.\r\n2) `ConsumerGroupCommand.getLogEndOffsets()` and `getLogStartOffsets()` assumed that endOffsets()/beginningOffsets() which eventually call Fetcher.fetchOffsetsByTimes(), would return a map with all the topic partitions passed to endOffsets()/beginningOffsets() and that values are not null. Because of (1), null values were possible if some of the topic partitions were already known (in metadata cache) and some not (metadata cache did not have entries for some of the topic partitions). However, even with fixing (1), endOffsets()/beginningOffsets() may return a map with some topic partitions missing, when list offset request returns a non-retriable error. This happens in corner cases such as message format on broker is before 0.10, or maybe in cases of some other errors. \r\n\r\nTesting:\r\n-- added unit test to verify fix in Fetcher.fetchOffsetsByTimes() \r\n-- did some manual testing with `kafka-consumer-groups --describe`, causing NPE. Was not able to reproduce any NPE cases with DescribeConsumerGroupTest.scala,\r\n\r\nReviewers: Jason Gustafson <jason@confluent.io>",
         "parent": "https://github.com/apache/kafka/commit/79ad9026a667469a2013ce82961c0c90f3bb0877",
         "patched_files": [
-            "Fetcher.java",
+            "ConsumerGroupCommand.java",
             "suppressions.java",
-            "ConsumerGroupCommand.java"
+            "Fetcher.java"
         ],
         "repo": "kafka",
         "unit_tests": [
@@ -4577,8 +4590,8 @@
         "parent": "https://github.com/apache/kafka/commit/ce7fe8fe5f8333e1e6936e2198713211bfb0dfe5",
         "patched_files": [
             "GlobalStateManagerImpl.java",
-            "AbstractStateManager.java",
-            "ProcessorStateManager.java"
+            "ProcessorStateManager.java",
+            "AbstractStateManager.java"
         ],
         "repo": "kafka",
         "unit_tests": [

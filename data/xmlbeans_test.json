@@ -86,69 +86,6 @@
             "XmlBeansTests.java"
         ]
     },
-    "xmlbeans_2d2f528": {
-        "bug_id": "xmlbeans_2d2f528",
-        "commit": "https://github.com/apache/xmlbeans/commit/2d2f5281280b9ec45115de4918b818f093d9dd6b",
-        "file": [
-            {
-                "additions": 7,
-                "blob_url": "https://github.com/apache/xmlbeans/blob/2d2f5281280b9ec45115de4918b818f093d9dd6b/src/typeimpl/org/apache/xmlbeans/impl/schema/SchemaParticleImpl.java",
-                "changes": 7,
-                "contents_url": "https://api.github.com/repos/apache/xmlbeans/contents/src/typeimpl/org/apache/xmlbeans/impl/schema/SchemaParticleImpl.java?ref=2d2f5281280b9ec45115de4918b818f093d9dd6b",
-                "deletions": 0,
-                "filename": "src/typeimpl/org/apache/xmlbeans/impl/schema/SchemaParticleImpl.java",
-                "patch": "@@ -123,6 +123,13 @@ public void setMaxOccurs(BigInteger max)\n \n     public SchemaParticle[] getParticleChildren()\n     {\n+        if (_particleChildren == null)\n+        {\n+            assert _particleType != SchemaParticle.ALL &&\n+                _particleType != SchemaParticle.SEQUENCE &&\n+                _particleType != SchemaParticle.CHOICE;\n+            return null;\n+        }\n         SchemaParticle[] result = new SchemaParticle[_particleChildren.length];\n         System.arraycopy(_particleChildren, 0, result, 0, _particleChildren.length);\n         return result;",
-                "raw_url": "https://github.com/apache/xmlbeans/raw/2d2f5281280b9ec45115de4918b818f093d9dd6b/src/typeimpl/org/apache/xmlbeans/impl/schema/SchemaParticleImpl.java",
-                "sha": "047d95fc2df32463c03de19b6b569be407086ae8",
-                "status": "modified"
-            },
-            {
-                "additions": 5,
-                "blob_url": "https://github.com/apache/xmlbeans/blob/2d2f5281280b9ec45115de4918b818f093d9dd6b/src/typeimpl/org/apache/xmlbeans/impl/schema/SchemaTypeCodePrinter.java",
-                "changes": 7,
-                "contents_url": "https://api.github.com/repos/apache/xmlbeans/contents/src/typeimpl/org/apache/xmlbeans/impl/schema/SchemaTypeCodePrinter.java?ref=2d2f5281280b9ec45115de4918b818f093d9dd6b",
-                "deletions": 2,
-                "filename": "src/typeimpl/org/apache/xmlbeans/impl/schema/SchemaTypeCodePrinter.java",
-                "patch": "@@ -974,8 +974,11 @@ String javaTypeForProperty(SchemaProperty sProp)\n                 return \"java.util.Calendar\";\n \n             case SchemaProperty.JAVA_ENUM:\n-                SchemaType sType = sProp.javaBasedOnType().getBaseEnumType();\n-                return findJavaType(sType).replace('$', '.') + \".Enum\";\n+                SchemaType sType = sProp.javaBasedOnType();\n+                if (sType.getSimpleVariety() == SchemaType.UNION)\n+                    sType = sType.getUnionCommonBaseType();\n+                assert sType.getBaseEnumType() != null;\n+                return findJavaType(sType.getBaseEnumType()).replace('$', '.') + \".Enum\";\n \n             case SchemaProperty.JAVA_OBJECT:\n                 return \"java.lang.Object\";",
-                "raw_url": "https://github.com/apache/xmlbeans/raw/2d2f5281280b9ec45115de4918b818f093d9dd6b/src/typeimpl/org/apache/xmlbeans/impl/schema/SchemaTypeCodePrinter.java",
-                "sha": "f50af2e349a7a66f440eb7addc06cf798d304a4e",
-                "status": "modified"
-            },
-            {
-                "additions": 17,
-                "blob_url": "https://github.com/apache/xmlbeans/blob/2d2f5281280b9ec45115de4918b818f093d9dd6b/src/typeimpl/org/apache/xmlbeans/impl/schema/StscImporter.java",
-                "changes": 19,
-                "contents_url": "https://api.github.com/repos/apache/xmlbeans/contents/src/typeimpl/org/apache/xmlbeans/impl/schema/StscImporter.java?ref=2d2f5281280b9ec45115de4918b818f093d9dd6b",
-                "deletions": 2,
-                "filename": "src/typeimpl/org/apache/xmlbeans/impl/schema/StscImporter.java",
-                "patch": "@@ -257,7 +257,7 @@ private static URI parseURI(String s)\n     }\n \n     //workaround for Sun bug # 4723726\n-    private static URI resolve(URI base, String child)\n+    public static URI resolve(URI base, String child)\n         throws URISyntaxException\n     {\n         URI childUri = new URI(child);\n@@ -268,11 +268,26 @@ private static URI resolve(URI base, String child)\n         // URI is pointing at something nested inside a jar, we seem to have\n         // to this ourselves to make sure that the nested jar url gets\n         // resolved correctly\n-        if (childUri.equals(ruri) &&\n+        if (childUri.equals(ruri) && !childUri.isAbsolute() &&\n           (base.getScheme().equals(\"jar\") || base.getScheme().equals(\"zip\"))) {\n             String r = base.toString();\n             int lastslash = r.lastIndexOf('/');\n             r = r.substring(0,lastslash) + \"/\" + childUri;\n+            // Sun's implementation of URI doesn't support references to the\n+            // parent directory (\"/..\") in the part after \"!/\" so we have to\n+            // remove these ourselves\n+            int slashDotDotIndex = r.lastIndexOf(\"/..\");\n+            int exclPointSlashIndex = r.lastIndexOf(\"!/\");\n+            while (slashDotDotIndex >= 0 && slashDotDotIndex > exclPointSlashIndex)\n+            {\n+                int prevSlashIndex = r.lastIndexOf(\"/\", slashDotDotIndex - 1);\n+                if (prevSlashIndex >= exclPointSlashIndex)\n+                {\n+                    String temp = r.substring(slashDotDotIndex + 3);\n+                    r = r.substring(0, prevSlashIndex).concat(temp);\n+                }\n+                slashDotDotIndex = r.lastIndexOf(\"/..\");\n+            }\n             return URI.create(r);\n         }\n ",
-                "raw_url": "https://github.com/apache/xmlbeans/raw/2d2f5281280b9ec45115de4918b818f093d9dd6b/src/typeimpl/org/apache/xmlbeans/impl/schema/StscImporter.java",
-                "sha": "e9ce1da3d3f4b2cab67e68695d4dc74bdc59ee28",
-                "status": "modified"
-            },
-            {
-                "additions": 5,
-                "blob_url": "https://github.com/apache/xmlbeans/blob/2d2f5281280b9ec45115de4918b818f093d9dd6b/src/xmlpublic/org/apache/xmlbeans/XmlBeans.java",
-                "changes": 9,
-                "contents_url": "https://api.github.com/repos/apache/xmlbeans/contents/src/xmlpublic/org/apache/xmlbeans/XmlBeans.java?ref=2d2f5281280b9ec45115de4918b818f093d9dd6b",
-                "deletions": 4,
-                "filename": "src/xmlpublic/org/apache/xmlbeans/XmlBeans.java",
-                "patch": "@@ -530,7 +530,7 @@ public static SchemaTypeLoader loadXsd(XmlObject[] schemas, XmlOptions options)\n      */\n     public static SchemaTypeSystem compileXsd(XmlObject[] schemas, SchemaTypeLoader typepath, XmlOptions options) throws XmlException\n     {\n-        return compileXmlBeans(null, null, schemas, null, typepath!=null ? typepath : getContextTypeLoader(), null, options);\n+        return compileXmlBeans(null, null, schemas, null, typepath, null, options);\n     }\n \n     /**\n@@ -578,7 +578,7 @@ public static SchemaTypeSystem compileXsd(XmlObject[] schemas, SchemaTypeLoader\n      */\n     public static SchemaTypeSystem compileXsd(SchemaTypeSystem system, XmlObject[] schemas, SchemaTypeLoader typepath, XmlOptions options) throws XmlException\n     {\n-        return compileXmlBeans(null, system, schemas, null, typepath != null ? typepath : getContextTypeLoader(), null, options);\n+        return compileXmlBeans(null, system, schemas, null, typepath, null, options);\n     }\n \n     /**\n@@ -611,7 +611,8 @@ public static SchemaTypeSystem compileXsd(SchemaTypeSystem system, XmlObject[] s\n      *\n      * <p>The optional SchemaTypeLoader argument will be\n      * consulted for already-compiled schema types which may be linked\n-     * while processing the given schemas.</p>\n+     * while processing the given schemas. If not specified, the context\n+     * typeloader (as returned by {@link #getContextTypeLoader}) will be used.</p>\n      *\n      * <p>The optional {@link Filer} argument is used to create new binary or source\n      * files which are the product of the compilation.  If the Filer is null, the\n@@ -646,7 +647,7 @@ public static SchemaTypeSystem compileXmlBeans(String name, SchemaTypeSystem sys\n \n         try\n         {\n-            return (SchemaTypeSystem)_compilationMethod.invoke(null, new Object[] { name, system, schemas, config, typepath, filer, options });\n+            return (SchemaTypeSystem)_compilationMethod.invoke(null, new Object[] { name, system, schemas, config, typepath != null ? typepath : getContextTypeLoader(), filer, options });\n         }\n         catch (IllegalAccessException e)\n         {",
-                "raw_url": "https://github.com/apache/xmlbeans/raw/2d2f5281280b9ec45115de4918b818f093d9dd6b/src/xmlpublic/org/apache/xmlbeans/XmlBeans.java",
-                "sha": "84c38e4830ac73bdfbc14ecf04c66ef8359eec25",
-                "status": "modified"
-            }
-        ],
-        "message": "Fixed a few NPEs.\nMade some changes to our URI resolver to better handle references from Schemas inside jar and zip files.\n\n\ngit-svn-id: https://svn.apache.org/repos/asf/xmlbeans/trunk@160250 13f79535-47bb-0310-9956-ffa450edef68",
-        "parent": "https://github.com/apache/xmlbeans/commit/58b67d06c8f9962e8f50ba5e4e0936546626f346",
-        "patched_files": [
-            "XmlBeans.java"
-        ],
-        "repo": "xmlbeans",
-        "unit_tests": [
-            "XmlBeansTests.java"
-        ]
-    },
     "xmlbeans_aede4e7": {
         "bug_id": "xmlbeans_aede4e7",
         "commit": "https://github.com/apache/xmlbeans/commit/aede4e7190e524842c14013cd49a4e2a6fcb226f",
@@ -913,28 +850,28 @@
         "message": "- Added more tests for interface and pre/post extensions. Also, these tests are very good examples on how to use these features. Many thanks to Yana Kadiyska for contribuing these tests.\n\n- Fixed NPE in Validator.\n\nDRT: passes\n\n\ngit-svn-id: https://svn.apache.org/repos/asf/xmlbeans/trunk@110745 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/xmlbeans/commit/724ae80a9ca01ed3acffc1f69479e21ce1980f57",
         "patched_files": [
-            "ReportHandler.java",
-            "po.java",
-            "IReport.java",
-            "IFoo.java",
-            "ValidatingXMLStreamReader.java",
-            "company.java",
-            "ISetter.java",
+            "build.java",
             "SetterHandler.java",
             "FooHandler.java",
             "ISum.java",
-            "build.java"
+            "po.java",
+            "ReportHandler.java",
+            "ISetter.java",
+            "IFoo.java",
+            "company.java",
+            "ValidatingXMLStreamReader.java",
+            "IReport.java"
         ],
         "repo": "xmlbeans",
         "unit_tests": [
+            "FixedAttrTest.java",
+            "ValidatingXMLStreamReaderTests.java",
+            "ReadOnlyTest.java",
             "ExtensionsTest.java",
             "SimpleTest.java",
-            "ReadOnlyTest.java",
-            "AverageCaseTest.java",
-            "FixedAttrTest.java",
+            "MultInterfacesTest.java",
             "ValueRestrictionTest.java",
-            "ValidatingXMLStreamReaderTests.java",
-            "MultInterfacesTest.java"
+            "AverageCaseTest.java"
         ]
     },
     "xmlbeans_f30ec6f": {

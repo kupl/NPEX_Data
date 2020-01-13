@@ -287,8 +287,8 @@
         "parent": "https://github.com/apache/phoenix/commit/27a152eb03279cd30e6a633d5adbe06363c696a6",
         "patched_files": [
             "QueryCompiler.java",
-            "SQLExceptionCode.java",
-            "ProjectionCompiler.java"
+            "ProjectionCompiler.java",
+            "SQLExceptionCode.java"
         ],
         "repo": "phoenix",
         "unit_tests": [
@@ -351,8 +351,8 @@
         "message": "PHOENIX-2304 NullPointerException when using an index and a char array (Julian Jaffe, Navis, James Taylor)",
         "parent": "https://github.com/apache/phoenix/commit/18d063353d8857898b29f68aa7789d33c16b1960",
         "patched_files": [
-            "SQLExceptionCode.java",
             "QueryOptimizer.java",
+            "SQLExceptionCode.java",
             "ColumnDef.java"
         ],
         "repo": "phoenix",
@@ -516,144 +516,21 @@
         "message": "PHOENIX-1870 Fix NPE occurring during regex processing when joni library not used (Shuxiong Ye)",
         "parent": "https://github.com/apache/phoenix/commit/5a63c6360e53ec0bb52fc41b4f1856f1cc757257",
         "patched_files": [
-            "JONIPattern.java",
-            "AbstractBaseSplitter.java",
             "GuavaSplitter.java",
             "RegexpReplaceFunction.java",
-            "JavaPattern.java",
+            "AbstractBaseSplitter.java",
             "LikeExpression.java",
+            "RegexpSplitFunction.java",
+            "JONIPattern.java",
             "AbstractBasePattern.java",
-            "RegexpSplitFunction.java"
+            "JavaPattern.java"
         ],
         "repo": "phoenix",
         "unit_tests": [
-            "RegexpReplaceFunctionTest.java",
             "PatternPerformanceTest.java",
+            "RegexpReplaceFunctionTest.java",
             "RegexpSplitFunctionTest.java",
             "LikeExpressionTest.java"
-        ]
-    },
-    "phoenix_3fd6425": {
-        "bug_id": "phoenix_3fd6425",
-        "commit": "https://github.com/apache/phoenix/commit/3fd64258a75701203f8848b294eb778e958796e4",
-        "file": [
-            {
-                "additions": 22,
-                "blob_url": "https://github.com/apache/phoenix/blob/3fd64258a75701203f8848b294eb778e958796e4/phoenix-core/src/it/java/org/apache/phoenix/end2end/SequenceIT.java",
-                "changes": 22,
-                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/it/java/org/apache/phoenix/end2end/SequenceIT.java?ref=3fd64258a75701203f8848b294eb778e958796e4",
-                "deletions": 0,
-                "filename": "phoenix-core/src/it/java/org/apache/phoenix/end2end/SequenceIT.java",
-                "patch": "@@ -587,6 +587,28 @@ public void testExplainPlanValidatesSequences() throws Exception {\n         conn.close();\n     }\n     \n+    @Test\n+    public void testSelectNextValueAsInput() throws Exception {\n+        nextConnection();\n+        conn.createStatement().execute(\"CREATE SEQUENCE foo.bar START WITH 3 INCREMENT BY 2\");\n+        nextConnection();\n+        String query = \"SELECT COALESCE(NEXT VALUE FOR foo.bar,1) FROM SYSTEM.\\\"SEQUENCE\\\"\";\n+        ResultSet rs = conn.prepareStatement(query).executeQuery();\n+        assertTrue(rs.next());\n+        assertEquals(3, rs.getInt(1));\n+    }\n+    \n+    @Test\n+    public void testSelectNextValueInArithmetic() throws Exception {\n+        nextConnection();\n+        conn.createStatement().execute(\"CREATE SEQUENCE foo.bar START WITH 3 INCREMENT BY 2\");\n+        nextConnection();\n+        String query = \"SELECT NEXT VALUE FOR foo.bar+1 FROM SYSTEM.\\\"SEQUENCE\\\"\";\n+        ResultSet rs = conn.prepareStatement(query).executeQuery();\n+        assertTrue(rs.next());\n+        assertEquals(4, rs.getInt(1));\n+    }\n+    \n \tprivate void nextConnection() throws Exception {\n \t    if (conn != null) conn.close();\n \t    long ts = nextTimestamp();",
-                "raw_url": "https://github.com/apache/phoenix/raw/3fd64258a75701203f8848b294eb778e958796e4/phoenix-core/src/it/java/org/apache/phoenix/end2end/SequenceIT.java",
-                "sha": "84bfece501cf7d46a2799897b9041552819d2c7f",
-                "status": "modified"
-            },
-            {
-                "additions": 18,
-                "blob_url": "https://github.com/apache/phoenix/blob/3fd64258a75701203f8848b294eb778e958796e4/phoenix-core/src/main/java/org/apache/phoenix/compile/ExpressionCompiler.java",
-                "changes": 48,
-                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/compile/ExpressionCompiler.java?ref=3fd64258a75701203f8848b294eb778e958796e4",
-                "deletions": 30,
-                "filename": "phoenix-core/src/main/java/org/apache/phoenix/compile/ExpressionCompiler.java",
-                "patch": "@@ -99,6 +99,7 @@\n import org.apache.phoenix.schema.SortOrder;\n import org.apache.phoenix.schema.TableRef;\n import org.apache.phoenix.schema.TypeMismatchException;\n+import org.apache.phoenix.util.ExpressionUtil;\n import org.apache.phoenix.util.IndexUtil;\n import org.apache.phoenix.util.SchemaUtil;\n \n@@ -272,7 +273,7 @@ private Expression wrapGroupByExpression(Expression expression) {\n     protected Expression addExpression(Expression expression) {\n         return context.getExpressionManager().addIfAbsent(expression);\n     }\n-\n+   \n     @Override\n     /**\n      * @param node a function expression node\n@@ -282,25 +283,18 @@ public Expression visitLeave(FunctionParseNode node, List<Expression> children)\n         children = node.validate(children, context);\n         Expression expression = node.create(children, context);\n         ImmutableBytesWritable ptr = context.getTempPtr();\n-        if (node.isStateless()) {\n-            Object value = null;\n-            PDataType type = expression.getDataType();\n-            if (expression.evaluate(null, ptr)) {\n-                value = type.toObject(ptr);\n-            }\n-            return LiteralExpression.newConstant(value, type, expression.isDeterministic());\n+        if (ExpressionUtil.isConstant(expression)) {\n+            return ExpressionUtil.getConstantExpression(expression, ptr);\n         }\n-        boolean isDeterministic = true;\n         BuiltInFunctionInfo info = node.getInfo();\n         for (int i = 0; i < info.getRequiredArgCount(); i++) { \n             // Optimization to catch cases where a required argument is null resulting in the function\n             // returning null. We have to wait until after we create the function expression so that\n             // we can get the proper type to use.\n             if (node.evalToNullIfParamIsNull(context, i)) {\n                 Expression child = children.get(i);\n-                isDeterministic &= child.isDeterministic();\n-                if (child.isStateless() && (!child.evaluate(null, ptr) || ptr.getLength() == 0)) {\n-                    return LiteralExpression.newConstant(null, expression.getDataType(), isDeterministic);\n+                if (ExpressionUtil.isNull(child, ptr)) {\n+                    return ExpressionUtil.getNullExpression(expression);\n                 }\n             }\n         }\n@@ -411,7 +405,7 @@ public Expression visitLeave(CaseParseNode node, List<Expression> l) throws SQLE\n                 context.getBindManager().addParamMetaData((BindParseNode)childNode, new DelegateDatum(caseExpression));\n             }\n         }\n-        if (node.isStateless()) {\n+        if (ExpressionUtil.isConstant(caseExpression)) {\n             ImmutableBytesWritable ptr = context.getTempPtr();\n             int index = caseExpression.evaluateIndexOf(null, ptr);\n             if (index < 0) {\n@@ -473,7 +467,7 @@ public Expression visitLeave(LikeParseNode node, List<Expression> children) thro\n             }\n         }\n         Expression expression = new LikeExpression(children);\n-        if (node.isStateless()) {\n+        if (ExpressionUtil.isConstant(expression)) {\n             ImmutableBytesWritable ptr = context.getTempPtr();\n             if (!expression.evaluate(null, ptr)) {\n                 return LiteralExpression.newConstant(null, expression.isDeterministic());\n@@ -658,12 +652,10 @@ private Expression visitLeave(ArithmeticParseNode node, List<Expression> childre\n         ImmutableBytesWritable ptr = context.getTempPtr();\n \n         // If all children are literals, just evaluate now\n-        if (expression.isStateless()) {\n-            if (!expression.evaluate(null,ptr) || ptr.getLength() == 0) {\n-                return LiteralExpression.newConstant(null, expression.getDataType(), expression.isDeterministic());\n-            }\n-            return LiteralExpression.newConstant(expression.getDataType().toObject(ptr), expression.getDataType(), expression.isDeterministic());\n-        } else if (isNull) {\n+        if (ExpressionUtil.isConstant(expression)) {\n+            return ExpressionUtil.getConstantExpression(expression, ptr); \n+        } \n+        else if (isNull) {\n             return LiteralExpression.newConstant(null, expression.getDataType(), expression.isDeterministic());\n         }\n         // Otherwise create and return the expression\n@@ -1065,11 +1057,8 @@ public Expression visitLeave(StringConcatParseNode node, List<Expression> childr\n             }\n         }\n         ImmutableBytesWritable ptr = context.getTempPtr();\n-        if (expression.isStateless()) {\n-            if (!expression.evaluate(null,ptr) || ptr.getLength() == 0) {\n-                return LiteralExpression.newConstant(null, expression.getDataType(), expression.isDeterministic());\n-            }\n-            return LiteralExpression.newConstant(expression.getDataType().toObject(ptr), expression.getDataType(), expression.isDeterministic());\n+        if (ExpressionUtil.isConstant(expression)) {\n+            return ExpressionUtil.getConstantExpression(expression, ptr);\n         }\n         return wrapGroupByExpression(expression);\n     }\n@@ -1147,21 +1136,20 @@ public PDataType getDataType() {\n         }\n         ImmutableBytesWritable ptr = context.getTempPtr();\n         Object[] elements = new Object[children.size()];\n-        if (node.isStateless()) {\n-            boolean isDeterministic = true;\n+        \n+        ArrayConstructorExpression arrayExpression = new ArrayConstructorExpression(children, arrayElemDataType);\n+        if (ExpressionUtil.isConstant(arrayExpression)) {\n             for (int i = 0; i < children.size(); i++) {\n                 Expression child = children.get(i);\n-                isDeterministic &= child.isDeterministic();\n                 child.evaluate(null, ptr);\n                 Object value = arrayElemDataType.toObject(ptr, child.getDataType(), child.getSortOrder());\n                 elements[i] = LiteralExpression.newConstant(value, child.getDataType(), child.isDeterministic()).getValue();\n             }\n             Object value = PArrayDataType.instantiatePhoenixArray(arrayElemDataType, elements);\n             return LiteralExpression.newConstant(value,\n-                    PDataType.fromTypeId(arrayElemDataType.getSqlType() + PDataType.ARRAY_TYPE_BASE), isDeterministic);\n+                    PDataType.fromTypeId(arrayElemDataType.getSqlType() + PDataType.ARRAY_TYPE_BASE), true);\n         }\n         \n-        ArrayConstructorExpression arrayExpression = new ArrayConstructorExpression(children, arrayElemDataType);\n         return wrapGroupByExpression(arrayExpression);\n     }\n ",
-                "raw_url": "https://github.com/apache/phoenix/raw/3fd64258a75701203f8848b294eb778e958796e4/phoenix-core/src/main/java/org/apache/phoenix/compile/ExpressionCompiler.java",
-                "sha": "2d5e461bc7660873ff11d469b14afce1802b3c44",
-                "status": "modified"
-            },
-            {
-                "additions": 2,
-                "blob_url": "https://github.com/apache/phoenix/blob/3fd64258a75701203f8848b294eb778e958796e4/phoenix-core/src/main/java/org/apache/phoenix/expression/BaseCompoundExpression.java",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/expression/BaseCompoundExpression.java?ref=3fd64258a75701203f8848b294eb778e958796e4",
-                "deletions": 0,
-                "filename": "phoenix-core/src/main/java/org/apache/phoenix/expression/BaseCompoundExpression.java",
-                "patch": "@@ -21,6 +21,7 @@\n import java.io.DataOutput;\n import java.io.IOException;\n import java.util.ArrayList;\n+import java.util.Collections;\n import java.util.List;\n \n import org.apache.hadoop.io.WritableUtils;\n@@ -37,6 +38,7 @@\n     private boolean requiresFinalEvaluation;\n    \n     public BaseCompoundExpression() {\n+        init(Collections.<Expression>emptyList());\n     }\n     \n     public BaseCompoundExpression(List<Expression> children) {",
-                "raw_url": "https://github.com/apache/phoenix/raw/3fd64258a75701203f8848b294eb778e958796e4/phoenix-core/src/main/java/org/apache/phoenix/expression/BaseCompoundExpression.java",
-                "sha": "03df653a0da19cf188685f8cb7bf4855c94673f5",
-                "status": "modified"
-            },
-            {
-                "additions": 3,
-                "blob_url": "https://github.com/apache/phoenix/blob/3fd64258a75701203f8848b294eb778e958796e4/phoenix-core/src/main/java/org/apache/phoenix/expression/ComparisonExpression.java",
-                "changes": 5,
-                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/expression/ComparisonExpression.java?ref=3fd64258a75701203f8848b294eb778e958796e4",
-                "deletions": 2,
-                "filename": "phoenix-core/src/main/java/org/apache/phoenix/expression/ComparisonExpression.java",
-                "patch": "@@ -35,6 +35,7 @@\n import org.apache.phoenix.schema.TypeMismatchException;\n import org.apache.phoenix.schema.tuple.Tuple;\n import org.apache.phoenix.util.ByteUtil;\n+import org.apache.phoenix.util.ExpressionUtil;\n import org.apache.phoenix.util.StringUtil;\n \n import com.google.common.collect.Lists;\n@@ -59,8 +60,8 @@\n     }\n     \n     private static void addEqualityExpression(Expression lhs, Expression rhs, List<Expression> andNodes, ImmutableBytesWritable ptr) throws SQLException {\n-        boolean isLHSNull = lhs.isStateless() && (!lhs.evaluate(null, ptr) || ptr.getLength()==0);\n-        boolean isRHSNull = rhs.isStateless() && (!rhs.evaluate(null, ptr) || ptr.getLength()==0);\n+        boolean isLHSNull = ExpressionUtil.isNull(lhs, ptr);\n+        boolean isRHSNull = ExpressionUtil.isNull(rhs, ptr);\n         if (isLHSNull && isRHSNull) { // null == null will end up making the query degenerate\n             andNodes.add(LiteralExpression.newConstant(false, PDataType.BOOLEAN));\n         } else if (isLHSNull) { // AND rhs IS NULL",
-                "raw_url": "https://github.com/apache/phoenix/raw/3fd64258a75701203f8848b294eb778e958796e4/phoenix-core/src/main/java/org/apache/phoenix/expression/ComparisonExpression.java",
-                "sha": "008ae7bc2ed0181fd01ed672c88a81fd0488ab40",
-                "status": "modified"
-            },
-            {
-                "additions": 3,
-                "blob_url": "https://github.com/apache/phoenix/blob/3fd64258a75701203f8848b294eb778e958796e4/phoenix-core/src/main/java/org/apache/phoenix/expression/InListExpression.java",
-                "changes": 9,
-                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/expression/InListExpression.java?ref=3fd64258a75701203f8848b294eb778e958796e4",
-                "deletions": 6,
-                "filename": "phoenix-core/src/main/java/org/apache/phoenix/expression/InListExpression.java",
-                "patch": "@@ -36,6 +36,7 @@\n import org.apache.phoenix.schema.SortOrder;\n import org.apache.phoenix.schema.tuple.Tuple;\n import org.apache.phoenix.util.ByteUtil;\n+import org.apache.phoenix.util.ExpressionUtil;\n \n import com.google.common.collect.Lists;\n import com.google.common.collect.Sets;\n@@ -93,12 +94,8 @@ public static Expression create (List<Expression> children, boolean isNegate, Im\n         if (isNegate) { \n             expression = NotExpression.create(expression, ptr);\n         }\n-        if (expression.isStateless()) {\n-            if (!expression.evaluate(null, ptr) || ptr.getLength() == 0) {\n-                return LiteralExpression.newConstant(null,expression.getDataType(), expression.isDeterministic());\n-            }\n-            Object value = expression.getDataType().toObject(ptr);\n-            return LiteralExpression.newConstant(value, expression.getDataType(), expression.isDeterministic());\n+        if (ExpressionUtil.isConstant(expression)) {\n+            return ExpressionUtil.getConstantExpression(expression, ptr);\n         }\n         return expression;\n     }",
-                "raw_url": "https://github.com/apache/phoenix/raw/3fd64258a75701203f8848b294eb778e958796e4/phoenix-core/src/main/java/org/apache/phoenix/expression/InListExpression.java",
-                "sha": "979af0c0c142e17257090e7037b3ed832250fc87",
-                "status": "modified"
-            },
-            {
-                "additions": 2,
-                "blob_url": "https://github.com/apache/phoenix/blob/3fd64258a75701203f8848b294eb778e958796e4/phoenix-core/src/main/java/org/apache/phoenix/expression/IsNullExpression.java",
-                "changes": 3,
-                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/expression/IsNullExpression.java?ref=3fd64258a75701203f8848b294eb778e958796e4",
-                "deletions": 1,
-                "filename": "phoenix-core/src/main/java/org/apache/phoenix/expression/IsNullExpression.java",
-                "patch": "@@ -27,6 +27,7 @@\n import org.apache.phoenix.expression.visitor.ExpressionVisitor;\n import org.apache.phoenix.schema.PDataType;\n import org.apache.phoenix.schema.tuple.Tuple;\n+import org.apache.phoenix.util.ExpressionUtil;\n \n \n /**\n@@ -43,7 +44,7 @@ public static Expression create(Expression child, boolean negate, ImmutableBytes\n         if (!child.isNullable()) {\n             return LiteralExpression.newConstant(negate, PDataType.BOOLEAN, child.isDeterministic());\n         }\n-        if (child.isStateless()) {\n+        if (ExpressionUtil.isConstant(child)) {\n             boolean evaluated = child.evaluate(null, ptr);\n             return LiteralExpression.newConstant(negate ^ (!evaluated || ptr.getLength() == 0), PDataType.BOOLEAN, child.isDeterministic());\n         }",
-                "raw_url": "https://github.com/apache/phoenix/raw/3fd64258a75701203f8848b294eb778e958796e4/phoenix-core/src/main/java/org/apache/phoenix/expression/IsNullExpression.java",
-                "sha": "4162dfce9378348ee15bac12df4aeb098edce107",
-                "status": "modified"
-            },
-            {
-                "additions": 2,
-                "blob_url": "https://github.com/apache/phoenix/blob/3fd64258a75701203f8848b294eb778e958796e4/phoenix-core/src/main/java/org/apache/phoenix/expression/LiteralExpression.java",
-                "changes": 4,
-                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/expression/LiteralExpression.java?ref=3fd64258a75701203f8848b294eb778e958796e4",
-                "deletions": 2,
-                "filename": "phoenix-core/src/main/java/org/apache/phoenix/expression/LiteralExpression.java",
-                "patch": "@@ -48,8 +48,8 @@\n  * @since 0.1\n  */\n public class LiteralExpression extends BaseTerminalExpression {\n-    public static final LiteralExpression NULL_EXPRESSION = new LiteralExpression(null, false);\n-    private static final LiteralExpression ND_NULL_EXPRESSION = new LiteralExpression(null, true);\n+    public static final LiteralExpression NULL_EXPRESSION = new LiteralExpression(null, true);\n+    private static final LiteralExpression ND_NULL_EXPRESSION = new LiteralExpression(null, false);\n     private static final LiteralExpression[] TYPED_NULL_EXPRESSIONS = new LiteralExpression[PDataType.values().length * 2];\n     static {\n         for (int i = 0; i < PDataType.values().length; i++) {",
-                "raw_url": "https://github.com/apache/phoenix/raw/3fd64258a75701203f8848b294eb778e958796e4/phoenix-core/src/main/java/org/apache/phoenix/expression/LiteralExpression.java",
-                "sha": "91a3125534e2b2e991484423cf1179209963e6fb",
-                "status": "modified"
-            },
-            {
-                "additions": 2,
-                "blob_url": "https://github.com/apache/phoenix/blob/3fd64258a75701203f8848b294eb778e958796e4/phoenix-core/src/main/java/org/apache/phoenix/expression/function/FunctionExpression.java",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/expression/function/FunctionExpression.java?ref=3fd64258a75701203f8848b294eb778e958796e4",
-                "deletions": 0,
-                "filename": "phoenix-core/src/main/java/org/apache/phoenix/expression/function/FunctionExpression.java",
-                "patch": "@@ -59,6 +59,8 @@ public OrderPreserving preservesOrder() {\n     @Override\n     public final String toString() {\n         StringBuilder buf = new StringBuilder(getName() + \"(\");\n+        if (children.size()==0)\n+            return buf.append(\")\").toString();\n         for (int i = 0; i < children.size() - 1; i++) {\n             buf.append(children.get(i) + \", \");\n         }",
-                "raw_url": "https://github.com/apache/phoenix/raw/3fd64258a75701203f8848b294eb778e958796e4/phoenix-core/src/main/java/org/apache/phoenix/expression/function/FunctionExpression.java",
-                "sha": "45c3e15b20e8a011d325a060646ba41a02f45648",
-                "status": "modified"
-            },
-            {
-                "additions": 57,
-                "blob_url": "https://github.com/apache/phoenix/blob/3fd64258a75701203f8848b294eb778e958796e4/phoenix-core/src/main/java/org/apache/phoenix/util/ExpressionUtil.java",
-                "changes": 57,
-                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/util/ExpressionUtil.java?ref=3fd64258a75701203f8848b294eb778e958796e4",
-                "deletions": 0,
-                "filename": "phoenix-core/src/main/java/org/apache/phoenix/util/ExpressionUtil.java",
-                "patch": "@@ -0,0 +1,57 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one or more contributor license agreements. See the NOTICE\n+ * file distributed with this work for additional information regarding copyright ownership. The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the \"License\"); you may not use this file except in compliance with the\n+ * License. You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0 Unless required by\n+ * applicable law or agreed to in writing, software distributed under the License is distributed on an \"AS IS\" BASIS,\n+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language\n+ * governing permissions and limitations under the License.\n+ */\n+package org.apache.phoenix.util;\n+\n+import java.sql.SQLException;\n+import java.util.List;\n+\n+import org.apache.hadoop.hbase.io.ImmutableBytesWritable;\n+import org.apache.phoenix.expression.Expression;\n+import org.apache.phoenix.expression.LiteralExpression;\n+import org.apache.phoenix.expression.function.CurrentDateFunction;\n+import org.apache.phoenix.expression.function.CurrentTimeFunction;\n+import org.apache.phoenix.expression.function.FunctionExpression;\n+import org.apache.phoenix.schema.PDataType;\n+\n+import com.google.common.collect.Lists;\n+\n+public class ExpressionUtil {\n+\n+    @SuppressWarnings(\"unchecked\")\n+    private static final List<Class<? extends FunctionExpression>> OVERRIDE_LITERAL_FUNCTIONS = Lists\n+            .<Class<? extends FunctionExpression>> newArrayList(CurrentDateFunction.class, CurrentTimeFunction.class);\n+\n+    private ExpressionUtil() {}\n+\n+    public static boolean isConstant(Expression expression) {\n+        return (expression.isStateless() && expression.isDeterministic() || OVERRIDE_LITERAL_FUNCTIONS\n+                .contains(expression.getClass()));\n+    }\n+\n+    public static LiteralExpression getConstantExpression(Expression expression, ImmutableBytesWritable ptr)\n+            throws SQLException {\n+        Object value = null;\n+        PDataType type = expression.getDataType();\n+        if (expression.evaluate(null, ptr) && ptr.getLength() != 0) {\n+            value = type.toObject(ptr);\n+        }\n+        return LiteralExpression.newConstant(value, type, expression.isDeterministic());\n+    }\n+\n+    public static boolean isNull(Expression expression, ImmutableBytesWritable ptr) {\n+        return expression.isStateless() && expression.isDeterministic()\n+                && (!expression.evaluate(null, ptr) || ptr.getLength() == 0);\n+    }\n+\n+    public static LiteralExpression getNullExpression(Expression expression) throws SQLException {\n+        return LiteralExpression.newConstant(null, expression.getDataType(), expression.isDeterministic());\n+    }\n+\n+}",
-                "raw_url": "https://github.com/apache/phoenix/raw/3fd64258a75701203f8848b294eb778e958796e4/phoenix-core/src/main/java/org/apache/phoenix/util/ExpressionUtil.java",
-                "sha": "227a38531c78fff3f77d68b851b1081d737d9fa9",
-                "status": "added"
-            }
-        ],
-        "message": "PHOENIX-1001 Using NEXT VALUE FOR 'sequence' as an input to a function cause a NPE (Thomas D'Silva)",
-        "parent": "https://github.com/apache/phoenix/commit/2ab8f34d255fb0b92168fc63561ab335558d043d",
-        "patched_files": [
-            "InListExpression.java"
-        ],
-        "repo": "phoenix",
-        "unit_tests": [
-            "InListExpressionTest.java"
         ]
     },
     "phoenix_41c16a0": {
@@ -907,31 +784,30 @@
         "message": "PHOENIX-2276 Creating index on a global view on a multi-tenant table fails with NPE",
         "parent": "https://github.com/apache/phoenix/commit/4f6ee74c0a7b94282575300cfd698e78198685fb",
         "patched_files": [
-            "ConnectionQueryServicesImpl.java",
-            "WhereOptimizer.java",
-            "IndexMaintainer.java",
             "DeleteCompiler.java",
-            "ServerCacheClient.java",
-            "UpsertCompiler.java",
-            "MetaDataUtil.java",
             "MetaDataClient.java",
-            "PhoenixRuntime.java",
-            "ViewIndexIT.java",
             "TenantSpecificViewIndexIT.java",
-            "ScanUtil.java",
+            "ViewIndexIT.java",
+            "MetaDataUtil.java",
+            "WhereOptimizer.java",
+            "PhoenixRuntime.java",
             "BaseQueryPlan.java",
-            "BaseTenantSpecificViewIndexIT.java"
+            "BaseTenantSpecificViewIndexIT.java",
+            "IndexMaintainer.java",
+            "UpsertCompiler.java",
+            "ConnectionQueryServicesImpl.java",
+            "ServerCacheClient.java",
+            "ScanUtil.java"
         ],
         "repo": "phoenix",
         "unit_tests": [
-            "TenantIdByteConversionTest.java",
-            "ConnectionQueryServicesImplTest.java",
-            "IndexMaintainerTest.java",
-            "PhoenixRuntimeTest.java",
-            "ScanUtilTest.java",
-            "TenantSpecificViewIndexCompileTest.java",
             "MetaDataUtilTest.java",
-            "WhereOptimizerTest.java"
+            "TenantIdByteConversionTest.java",
+            "WhereOptimizerTest.java",
+            "PhoenixRuntimeTest.java",
+            "TenantSpecificViewIndexCompileTest.java",
+            "IndexMaintainerTest.java",
+            "ScanUtilTest.java"
         ]
     },
     "phoenix_54b3ef9": {
@@ -1116,12 +992,10 @@
         "message": "PHOENIX-1385 Adding, dropping and adding columns fails with NPE (Samarth Jain, James Taylor)",
         "parent": "https://github.com/apache/phoenix/commit/c0b617f554938ea31832a921b8caa579e87749aa",
         "patched_files": [
-            "PMetaDataImpl.java",
-            "ConnectionQueryServicesImpl.java"
+            "PMetaDataImpl.java"
         ],
         "repo": "phoenix",
         "unit_tests": [
-            "ConnectionQueryServicesImplTest.java",
             "PMetaDataImplTest.java"
         ]
     },
@@ -1189,33 +1063,6 @@
         "repo": "phoenix",
         "unit_tests": [
             "SpoolingResultIteratorTest.java"
-        ]
-    },
-    "phoenix_c0b617f": {
-        "bug_id": "phoenix_c0b617f",
-        "commit": "https://github.com/apache/phoenix/commit/c0b617f554938ea31832a921b8caa579e87749aa",
-        "file": [
-            {
-                "additions": 44,
-                "blob_url": "https://github.com/apache/phoenix/blob/c0b617f554938ea31832a921b8caa579e87749aa/phoenix-core/src/main/java/org/apache/phoenix/hbase/index/wal/IndexedKeyValue.java",
-                "changes": 46,
-                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/hbase/index/wal/IndexedKeyValue.java?ref=c0b617f554938ea31832a921b8caa579e87749aa",
-                "deletions": 2,
-                "filename": "phoenix-core/src/main/java/org/apache/phoenix/hbase/index/wal/IndexedKeyValue.java",
-                "patch": "@@ -34,7 +34,7 @@\n import org.apache.phoenix.hbase.index.util.ImmutableBytesPtr;\n \n public class IndexedKeyValue extends KeyValue {\n-    public static final byte [] COLUMN_FAMILY = Bytes.toBytes(\"INDEXEDKEYVALUE_FAKED_FAMILY\");\n+    public static final byte [] COLUMN_QUALIFIER = Bytes.toBytes(\"INDEXEDKEYVALUE_FAKED_COLUMN\");\n   \n     private static int calcHashCode(ImmutableBytesPtr indexTableName, Mutation mutation) {\n         final int prime = 31;\n@@ -71,9 +71,51 @@ public Mutation getMutation() {\n      */\n     @Override\n     public byte [] getFamily() {\n-      return COLUMN_FAMILY;\n+      return WALEdit.METAFAMILY;\n     }\n     \n+    @Override\n+    public byte[] getFamilyArray() {\n+        return WALEdit.METAFAMILY;\n+    }\n+\n+    /**\n+     * @return Family offset\n+     */\n+    @Override\n+    public int getFamilyOffset() {\n+        return 0;\n+    }\n+\n+    /**\n+     * @return Family length\n+     */\n+    @Override\n+    public byte getFamilyLength() {\n+        return (byte) WALEdit.METAFAMILY.length;\n+    }\n+\n+    @Override\n+    public byte[] getQualifierArray() {\n+        return COLUMN_QUALIFIER;\n+    }\n+\n+    /**\n+     * @return Qualifier offset\n+     */\n+    @Override\n+    public int getQualifierOffset() {\n+        return 0;\n+    }\n+\n+    /**\n+     * @return Qualifier length\n+     */\n+    @Override\n+    public int getQualifierLength() {\n+        return COLUMN_QUALIFIER.length;\n+    }\n+\n     /**\n      * This is a KeyValue that shouldn't actually be replayed/replicated, so we always mark it as \n      * an {@link WALEdit#METAFAMILY} so it isn't replayed/replicated via the normal replay mechanism",
-                "raw_url": "https://github.com/apache/phoenix/raw/c0b617f554938ea31832a921b8caa579e87749aa/phoenix-core/src/main/java/org/apache/phoenix/hbase/index/wal/IndexedKeyValue.java",
-                "sha": "0270de5530bf98491709d33ecb47a59d6f63fa64",
-                "status": "modified"
-            }
-        ],
-        "message": "PHOENIX-1381 NPE in CellUtil.matchingFamily() for IndexedKeyValue (Jeffrey Zhong)",
-        "parent": "https://github.com/apache/phoenix/commit/481d1bb878d08fc43fd1eb8f85c36244afdafe45",
-        "patched_files": [
-            "IndexedKeyValue.java"
-        ],
-        "repo": "phoenix",
-        "unit_tests": [
-            "IndexedKeyValueTest.java"
         ]
     },
     "phoenix_cd444d9": {
@@ -1431,42 +1278,15 @@
         "message": "PHOENIX-1870 Fix NPE occurring during regex processing when joni library not used",
         "parent": "https://github.com/apache/phoenix/commit/035e315794427e0914be6d0a84fb6bac5331d6a8",
         "patched_files": [
+            "RegexpSubstrFunction.java",
             "JavaPattern.java",
-            "AbstractBasePattern.java",
             "JONIPattern.java",
-            "RegexpSubstrFunction.java"
+            "AbstractBasePattern.java"
         ],
         "repo": "phoenix",
         "unit_tests": [
             "PatternPerformanceTest.java",
             "RegexpSubstrFunctionTest.java"
-        ]
-    },
-    "phoenix_fe18e96": {
-        "bug_id": "phoenix_fe18e96",
-        "commit": "https://github.com/apache/phoenix/commit/fe18e96ae429cc0e4291075177d0e0c5f5e9a5b1",
-        "file": [
-            {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/phoenix/blob/fe18e96ae429cc0e4291075177d0e0c5f5e9a5b1/phoenix-core/src/main/java/org/apache/phoenix/schema/SaltingUtil.java",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/schema/SaltingUtil.java?ref=fe18e96ae429cc0e4291075177d0e0c5f5e9a5b1",
-                "deletions": 1,
-                "filename": "phoenix-core/src/main/java/org/apache/phoenix/schema/SaltingUtil.java",
-                "patch": "@@ -38,7 +38,7 @@\n     public static final String SALTING_COLUMN_NAME = \"_SALT\";\n     public static final String SALTED_ROW_KEY_NAME = \"_SALTED_KEY\";\n     public static final PColumnImpl SALTING_COLUMN = new PColumnImpl(\n-            PNameFactory.newName(SALTING_COLUMN_NAME), null, PDataType.BINARY, 1, 0, false, 0, null, 0);\n+            PNameFactory.newName(SALTING_COLUMN_NAME), null, PDataType.BINARY, 1, 0, false, 0, SortOrder.getDefault(), 0);\n     public static final RowKeySchema VAR_BINARY_SALTED_SCHEMA = new RowKeySchemaBuilder(1)\n         .addField(SALTING_COLUMN, false, SortOrder.getDefault())\n         .addField(SchemaUtil.VAR_BINARY_DATUM, false, SortOrder.getDefault()).build();",
-                "raw_url": "https://github.com/apache/phoenix/raw/fe18e96ae429cc0e4291075177d0e0c5f5e9a5b1/phoenix-core/src/main/java/org/apache/phoenix/schema/SaltingUtil.java",
-                "sha": "f743f26aa3b1121dcc174e7aea2cec7a38ad88b4",
-                "status": "modified"
-            }
-        ],
-        "message": "Fix NPE introduced by my previous fix for Phoenix-32 - SortOrder was being passed in as null instead of ASC.\nhttps://issues.apache.org/jira/browse/PHOENIX-32",
-        "parent": "https://github.com/apache/phoenix/commit/ae131f560987039142ea5d0ed468c19d4aca565d",
-        "patched_files": [
-            "SaltingUtil.java"
-        ],
-        "repo": "phoenix",
-        "unit_tests": [
-            "SaltingUtilTest.java"
         ]
     }
 }
