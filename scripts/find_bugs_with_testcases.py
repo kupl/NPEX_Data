@@ -53,8 +53,12 @@ def find_unit_tests(commit):
     there_is_test = False
     file_names = []
     for file_data in files:
-        filename = file_data['filename']
-        classname = filename.split('/')[-1].split('.')[0]
+        filepath = file_data['filename']
+        filename = filepath.split('/')[-1]
+        if filename.split('.')[-1] != 'java':
+            patched.add(filename)
+            continue
+        classname = filename.split('.')[0]
 
         replaced_testfile = is_testfile(classname)
         
