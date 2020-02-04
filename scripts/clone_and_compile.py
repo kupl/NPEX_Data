@@ -18,9 +18,9 @@ repo_dict = {}
 
 def get_compile_command():
     if os.path.isfile('pom.xml'):
-        return 'cpulimit --limit=100 -- mvn clean install -DskipTests'
-    elif os.path.isfile('maven.xml'):
-        return 'cpulimit --limit=100 -- maven clean install -DskipTests'
+        return 'mvn clean install -DskipTests'
+    # elif os.path.isfile('maven.xml'):
+    #     return 'cpulimit --limit=100 -- maven clean install -DskipTests'
     else:
         return None
 
@@ -28,8 +28,8 @@ def get_test_command(testClass, project):
     if os.path.isfile('pom.xml'):
         return 'mvn clean test -Dtest=%s -DfailIfNoTests=false' % testClass if project == 'src' \
         else 'mvn clean test -Dtest=%s --pl %s -amd -DfailIfNoTests=false' % (testClass, project) 
-    elif os.path.isfile('maven.xml'):
-        return 'maven clean test -Dtest=%s -DfailIfNoTests=false' % testClass
+    # elif os.path.isfile('maven.xml'):
+    #     return 'maven clean test -Dtest=%s -DfailIfNoTests=false' % testClass
     else:
         return None
 
@@ -60,7 +60,7 @@ def unittest(commit, testFilename, non_testing_files):
     testFile = testFilename.split('/')[-1]
     testClass = testFile.split('.')[0]
 
-    test_cmd = get_test_command(testClass, testFilename.split('/')[1])
+    test_cmd = get_test_command(testClass, testFilename.split('/')[0])
     if test_cmd is None:
         logger.warning(" - not maven project")
         logger.handlers[0].flush()
@@ -120,17 +120,22 @@ def do_commit(commit):
     commit_id = commit['commit'].split('/')[-1]
     commit_dir = commit_id[:6]
 
+    os.chdir(commit_dir)
+    non_testing_files = find_file_path(patchedfiles)
+    test_files = find_file_path(unittests)
+
     ## 1. checkout commit
     git_checkout_command = "git checkout -f %s" % commit_id
-
-    os.chdir(commit_dir)
-    logger.info("git checkout command for fixed version: %s" % (git_checkout_command))
+    checkout_cmd = 'git checkout %s -- %s' % (commit_id, ' '.join(non_testing_files))
+    
     ret_checkout = EasyProcess(git_checkout_command).call()
+
+    checkout_cmd = 'git checkout %s -- %s' % (commit_id, ' '.join(non_testing_files))
+    logger.info("git checkout command for fixed version: %s" % (checkout_cmd))
+    ret_checkout = EasyProcess(checkout_cmd).call()
 
     ## 2. build repo if unit-test exists
     compile_cmd = get_compile_command()
-    non_testing_files = find_file_path(patchedfiles)
-    test_files = find_file_path(unittests)
     if compile_cmd is None:
         logger.warning("# %s IS NOT MAVEN PROJECT" % commit['bug_id'])
         logger.handlers[0].flush()
@@ -155,8 +160,8 @@ def do_commit(commit):
         logger.handlers[0].flush()
         return False
 
-    logger.info("compile command for buggy version: %s" % (compile_cmd))
-    ret_compile = EasyProcess(compile_cmd).call()
+    logger.info("compile command for fixed version: %s" % (compile_cmd))
+    ret_compile = EasyProcess(compile_cmd).call(timeout=300)
 
     ## 3. Testing
     status = ""
@@ -170,7 +175,7 @@ def do_commit(commit):
         if (ret['fixed'] & (not ret['buggy'])):
             json_for_write.append(ret)
     if len(json_for_write) > 1:
-        with open(ROOT_DIR + '/data/%s_npe.json' % commit['bug_id'], 'a') as jsonfile:
+        with open(ROOT_DIR + '/data/%s_npe.json' % commit['bug_id'], 'w') as jsonfile:
             jsonfile.write(json.dumps(json_for_write, indent=4))
         return True
     return False

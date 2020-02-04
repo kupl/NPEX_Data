@@ -3,9 +3,12 @@ import argparse
 from easyprocess import EasyProcess
 from easyprocess import EasyProcessError
 from multiprocessing import Pool
+from multiprocessing import Manager
 import logging
 import subprocess
 import json
+from functools import partial
+from itertools import repeat
 
 ROOT_DIR = os.getcwd()
     
@@ -20,16 +23,24 @@ def get_test_command(testClass, project):
 
 def find_NPE(bug_id, test_buggy_ret):
     test_buggy = test_buggy_ret.split('\n')
-    test_buggy = test_buggy[test_buggy.index(" T E S T S"):]
+    try:
+        test_buggy = test_buggy[test_buggy.index(" T E S T S"):]
+    except ValueError:
+        test_buggy = test_buggy[test_buggy.index("[INFO] BUILD FAILURE"):]
+        for error_line in test_buggy:
+            if 'cannot find symbol' in error_line:
+                logger.warning(" - CANNOT FIND SYMBOL")
+                logger.handlers[0].flush()
+        return
     result_sentence = ''
     error_sentence_lines = []
     failure_sentence_lines = []
     for i in range(len(test_buggy)):
-        if 'Tests run:' in test_buggy[i]:
+        if 'Tests run:' in test_buggy[i] and result_sentence == '':
             result_sentence = test_buggy[i]
             continue
         if '<<< ERROR!' in test_buggy[i]:
-            error_sentences_lines.append(i)
+            error_sentence_lines.append(i)
             continue
         if '<<< FAILURE!' in test_buggy[i]:
             failure_sentence_lines.append(i)
@@ -38,12 +49,12 @@ def find_NPE(bug_id, test_buggy_ret):
     index_of_failures = result_sentence.find('Failures:') + 10
     index_of_errors = result_sentence.find('Errors:') + 8
 
-    num_failures = int(result_sentence[index_of_failures].split(',')[0])
-    num_errors = int(result_sentence[index_of_errors].split(',')[0])
+    num_failures = int(result_sentence[index_of_failures:].split(',')[0])
+    num_errors = int(result_sentence[index_of_errors:].split(',')[0])
 
-    if num_failures != len(failure_sentence_lines) or num_errors != len(failure_sentence_lines):
-        print(" - parser has something wrong")
-        logger.warning(" - parser has something wrong")
+    if num_failures != len(failure_sentence_lines) or num_errors != len(error_sentence_lines):
+        print(" - parser has something wrong1")
+        logger.warning(" - parser has something wrong1")
         logger.handlers[0].flush()
         return
 
@@ -54,19 +65,19 @@ def find_NPE(bug_id, test_buggy_ret):
             buggy_file_line = test_buggy[error_line+2].split('(')[-1][:-1].split(':')
             if buggy_file_line[0] not in buggy_list:
                 buggy_list[buggy_file_line[0]] = []
-            buggy_list[buggy_file_line[0]].append(buggy_file_line[1])
+            buggy_list[buggy_file_line[0]].append(int(buggy_file_line[1])-1)
             buggy_list[buggy_file_line[0]].sort()
     for failure_line in failure_sentence_lines:
         if ('AssertionError' not in test_buggy[failure_line+1]) or ('Expected:' not in test_buggy[failure_line+2]) or ('but:' not in test_buggy[failure_line+3]):
-            print(" - parser has something wrong")
-            logger.warning(" - parser has something wrong")
+            print(" - parser has something wrong2")
+            logger.warning(" - parser has something wrong2")
             logger.handlers[0].flush()
             return
         if 'NullPointerException' in test_buggy[failure_line+4].split(':')[1][1:]:
             buggy_file_line = test_buggy[failure_line+5].split('(')[-1][:-1].split(':')
             if buggy_file_line[0] not in buggy_list:
                 buggy_list[buggy_file_line[0]] = []
-            buggy_list[buggy_file_line[0]].append(buggy_file_line[1])
+            buggy_list[buggy_file_line[0]].append(int(buggy_file_line[1])-1)
             buggy_list[buggy_file_line[0]].sort()
     
     return buggy_list
@@ -89,41 +100,45 @@ def modify_code(buggy_list, ret):
                     modified = {}
                     for buggy_line in buggy_list[buggy_filename]:
                         result_sentence = []
-                        buggy_sentence = buggy_file_lines[buggy_line-1].split('//')[0].spilt('/*')[0]
+                        buggy_sentence = buggy_file_lines[buggy_line].split('//')[0].split('/*')[0]
                         quote_index_list = [(0,0)]
                         doublequote_index_list = [(0,0)]
                         dot_index_list = [0]
                         done = [False, False, False]
                         while True:
-                            quote_index = buggy_sentence.find("'", quote_index_list[-1][1]+1)
-                            if (not done[0]) and quote_index == -1:
-                                quote_index_list.pop(0)
-                                done[0] = True
-                            elif not done[0]:
-                                second_quote_index = buggy_sentence.find("'", quote_index+1)
-                                if second_quote_index == -1:
-                                    print(" - parsing quote has problem")
-                                    logger.warning(" - parsing quote has problem")
-                                    logger.handlers[0].flush()
-                                quote_index_list.append((quote_index, second_quote_index))
+                            if not done[0]:
+                                quote_index = buggy_sentence.find("'", quote_index_list[-1][1]+1)
+                                if quote_index == -1:
+                                    quote_index_list.pop(0)
+                                    done[0] = True
+                                else:
+                                    second_quote_index = buggy_sentence.find("'", quote_index+1)
+                                    if second_quote_index == -1:
+                                        print(" - parsing quote has problem")
+                                        logger.warning(" - parsing quote has problem")
+                                        logger.handlers[0].flush()
+                                    quote_index_list.append((quote_index, second_quote_index))
                             
-                            doublequote_index = buggy_sentence.find('"', doublequote_index_list[-1][1]+1)
-                            if (not done[1]) and doublequote_index == -1:
-                                doublequote_index_list.pop(0)
-                                done[1] = True
-                            elif not done[1]:
-                                second_doublequote_index = buggy_sentence.find('"', doublequote_index+1)
-                                if second_doublequote_index == -1:
-                                    logger.warning(" - parsing quote has problem")
-                                    logger.handlers[0].flush()
-                                doublequote_index_list.append((doublequote_index, second_doublequote_index))
+                            if not done[1]:
+                                doublequote_index = buggy_sentence.find('"', doublequote_index_list[-1][1]+1)
+                                if doublequote_index == -1:
+                                    doublequote_index_list.pop(0)
+                                    done[1] = True
+                                else:
+                                    second_doublequote_index = buggy_sentence.find('"', doublequote_index+1)
+                                    if second_doublequote_index == -1:
+                                        logger.warning(" - parsing quote has problem")
+                                        logger.handlers[0].flush()
+                                    doublequote_index_list.append((doublequote_index, second_doublequote_index))
                            
-                            dot_index = buggy_sentence.find(".", dot_index_list[-1]+1)
-                            if (not done[2]) and dot_index == -1:
-                                dot_index_list.pop(0)
-                                done[2] = True
-                            elif not done[2]:
-                                dot_index.append(dot_index)
+                            if not done[2]:
+                                dot_index = buggy_sentence.find(".", dot_index_list[-1]+1)
+                                if dot_index == -1:
+                                    dot_index_list.pop(0)
+                                    done[2] = True
+                                else:
+                                    dot_index_list.append(dot_index)
+                            
                             if done == [True, True, True]: break
                         
                         check_quote = 0
@@ -153,17 +168,19 @@ def modify_code(buggy_list, ret):
                         dotop_index_list.insert(0, 0)
                         dotop_index_list.append(len(buggy_sentence))
                         for i in range(1, len(dotop_index_list)):
-                            modified_buggy_sentence.append(buggy_sentence[dotop_index_list[i-1]:dotop_index_list[i]])
+                            modified_buggy_sentence.append(buggy_sentence[dotop_index_list[i-1]:dotop_index_list[i]].rstrip() + '\n')
 
                         modified[buggy_line] = modified_buggy_sentence
                     
                     moved = 0
-                    for modify in iter(modified):
+                    for modify in sorted(modified):
                         buggy_file_lines.pop(modify+moved)
                         for exp in modified[modify]:
-                            buggy_file_lines.insert(modify+moved, exp + '\n')
+                            buggy_file_lines.insert(modify+moved, exp)
                             moved += 1
                         moved -= 1
+                    
+                    print(modified)
                 
                 with open(buggy_filepath, 'w') as buggy_file:
                     buggy_file.writelines(buggy_file_lines)
@@ -184,12 +201,29 @@ def find_exp(NPE_list, ret):
 
 #TODO: How it knows line of NPE in original file
 def find_column(buggy_list, NPE_exp_list, ret):
-    pass
+    buggy_line_column_list = {}
+    for buggy_file in iter(buggy_list):
+        linelist = buggy_list[buggy_file]
+        explist = NPE_exp_list[buggy_file]
+        if len(linelist) != len(explist):
+            logger.warning(" - XX")
+            logger.handlers[0].flush()
+        for buggy_filepath in ret['buggy_files']:
+            if buggy_file in buggy_filepath:
+                buggy_line_column_list[buggy_file] = []
+                with open(buggy_filepath) as buggy:
+                    buggy_file_line = buggy.readlines()
+                    for i in range(len(linelist)):
+                        col = buggy_file_line[linelist[i]].find(explist[i])+1
+                        buggy_line_column_list[buggy_file].append({'line': linelist[i]+1, 'column': -100 if (col == 1) else col})
+    return buggy_line_column_list
 
-def testing(commit_filename):
+
+def testing(commit_filename, output):
     bug_id = commit_filename[:-9]
     commit_sha = bug_id[-7:-1]
 
+    os.chdir(ROOT_DIR)
     with open('data/%s' % commit_filename) as commit_file:
         commit_json = json.loads(commit_file.read())
         commit = commit_json[0]
@@ -223,6 +257,7 @@ def testing(commit_filename):
                 return
             
             buggy_list = find_NPE(bug_id, test_buggy_ret.stdout)
+            print(buggy_list)
             modify_code(buggy_list, ret)
 
             test_modify_ret = EasyProcess(test_cmd).call()
@@ -232,9 +267,13 @@ def testing(commit_filename):
                 return
             NPE_list = find_NPE(bug_id, test_modify_ret.stdout)
             NPE_exp_list = find_exp(NPE_list, ret)
+            print(NPE_exp_list)
 
-            # checkout_ret = EasyProcess(checkout_cmd).call()
-            # find_column(buggy_list, NPE_list, ret)
+            checkout_ret = EasyProcess(checkout_cmd).call()
+            NPE_line_column = find_column(buggy_list, NPE_exp_list, ret)
+            print(NPE_line_column)
+            output[bug_id] = NPE_line_column
+            
             
 if __name__ == '__main__':
     logger = logging.getLogger()
@@ -257,9 +296,9 @@ if __name__ == '__main__':
     npe_commits = output.split('\n')[:-1]
     print(npe_commits)
 
-    for npe_commit in npe_commits:
-        testing(npe_commit)
-    # with Pool(n_cpus) as p:
-    #     p.map(testing, npe_commits)
+    output = Manager().dict()
+    with Pool(n_cpus) as p:
+        p.starmap(testing, zip(npe_commits, repeat(output)))
 
-    # with open(ROOT_DIR + '/data/NPE.json', 'w') as jsonfile:
+    with open(ROOT_DIR + '/data/NPE.json', 'w') as jsonfile:
+        jsonfile.write(json.dumps(output.copy(), sort_keys=True))
