@@ -1,0 +1,49 @@
+[
+    {
+        "repo": "commons-jexl",
+        "commit": "https://github.com/apache/commons-jexl/commit/4e2684b3bf72c6b719bd141fe555553158548a6b",
+        "bug_id": "commons-jexl_4e2684b",
+        "message": "JEXL-62\nAvoid NPE in Interpreter when () omitted from method with no parameters (e.g. var.hashCode)\nIncludes test case.\n\nThanks for patch by Henri Biestro <hbiestro at gmail dot com>.\n\ngit-svn-id: https://svn-us.apache.org/repos/asf/commons/proper/jexl/branches/2.0@799903 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/commons-jexl/commit/e42b28d69475b365fbf11db17a0f362417461051",
+        "patched_files": [
+            "Interpreter.java"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 10,
+                "raw_url": "https://github.com/apache/commons-jexl/raw/4e2684b3bf72c6b719bd141fe555553158548a6b/src/java/org/apache/commons/jexl/Interpreter.java",
+                "contents_url": "https://api.github.com/repos/apache/commons-jexl/contents/src/java/org/apache/commons/jexl/Interpreter.java?ref=4e2684b3bf72c6b719bd141fe555553158548a6b",
+                "filename": "src/java/org/apache/commons/jexl/Interpreter.java",
+                "deletions": 4,
+                "sha": "7d514a690f1701bbd77c152206461d21d39ce2a6",
+                "blob_url": "https://github.com/apache/commons-jexl/blob/4e2684b3bf72c6b719bd141fe555553158548a6b/src/java/org/apache/commons/jexl/Interpreter.java",
+                "patch": "@@ -279,6 +279,7 @@ public Object visit(ASTAssignment node, Object data) {\n         JexlNode propertyNode = null;\n         Object property = null;\n         boolean isVariable = true;\n+        int v = 0;\n         StringBuilder variableName = null;\n         // 1: follow children till penultimate\n         int last = left.jjtGetNumChildren() - 1;\n@@ -293,9 +294,11 @@ public Object visit(ASTAssignment node, Object data) {\n             // if we get null back as a result, check for an ant variable\n             if (isVariable) {\n                 String name = ((ASTIdentifier) objectNode).image;\n-                if (c == 0) {\n+                if (v == 0) {\n                     variableName = new StringBuilder(name);\n-                } else {\n+                    v = 1;\n+                }\n+                for(; v <= c; ++v) {\n                     variableName.append('.');\n                     variableName.append(name);\n                 }\n@@ -958,16 +961,19 @@ public Object visit(ASTReference node, Object data) {\n         StringBuilder variableName = null;\n         Map<String, ?> vars = context.getVars();\n         boolean isVariable = true;\n+        int v = 0;\n         for (int i = 0; i < numChildren; i++) {\n             JexlNode theNode = node.jjtGetChild(i);\n             isVariable &= (theNode instanceof ASTIdentifier);\n             result = theNode.jjtAccept(this, result);\n             // if we get null back a result, check for an ant variable\n             if (result == null && isVariable) {\n                 String name = ((ASTIdentifier) theNode).image;\n-                if (i == 0) {\n+                if (v == 0) {\n                     variableName = new StringBuilder(name);\n-                } else {\n+                    v = 1;\n+                }\n+                for(; v <= i; ++v) {\n                     variableName.append('.');\n                     variableName.append(name);\n                 }",
+                "changes": 14
+            },
+            {
+                "status": "modified",
+                "additions": 31,
+                "raw_url": "https://github.com/apache/commons-jexl/raw/4e2684b3bf72c6b719bd141fe555553158548a6b/src/test/org/apache/commons/jexl/IssuesTest.java",
+                "contents_url": "https://api.github.com/repos/apache/commons-jexl/contents/src/test/org/apache/commons/jexl/IssuesTest.java?ref=4e2684b3bf72c6b719bd141fe555553158548a6b",
+                "filename": "src/test/org/apache/commons/jexl/IssuesTest.java",
+                "deletions": 0,
+                "sha": "25f946ff539a7eda19095610c76d515e57b31ee0",
+                "blob_url": "https://github.com/apache/commons-jexl/blob/4e2684b3bf72c6b719bd141fe555553158548a6b/src/test/org/apache/commons/jexl/IssuesTest.java",
+                "patch": "@@ -183,4 +183,35 @@ public void test11() throws Exception {\n         }\n     }\n \n+    // JEXL-62\n+    public void test62() throws Exception {\n+        JexlContext ctxt;\n+        JexlEngine jexl = new JexlEngine();\n+        jexl.setSilent(true); // to avoid throwing JexlException on null method call\n+        \n+        Script jscript;\n+\n+        ctxt = JexlHelper.createContext();\n+        jscript = jexl.createScript(\"dummy.hashCode()\");\n+        assertEquals(jscript.getText(), null, jscript.execute(ctxt)); // OK\n+\n+        ctxt.getVars().put(\"dummy\", \"abcd\");\n+        assertEquals(jscript.getText(), Integer.valueOf(\"abcd\".hashCode()), jscript.execute(ctxt)); // OK\n+        \n+        jscript = jexl.createScript(\"dummy.hashCode\");\n+        assertEquals(jscript.getText(), null, jscript.execute(ctxt)); // OK\n+\n+        Expression jexpr;\n+\n+        ctxt = JexlHelper.createContext();\n+        jexpr = jexl.createExpression(\"dummy.hashCode()\");\n+        assertEquals(jexpr.getExpression(), null, jexpr.evaluate(ctxt)); // OK\n+\n+        ctxt.getVars().put(\"dummy\", \"abcd\");\n+        assertEquals(jexpr.getExpression(), Integer.valueOf(\"abcd\".hashCode()), jexpr.evaluate(ctxt)); // OK\n+\n+        jexpr = jexl.createExpression(\"dummy.hashCode\");\n+        assertEquals(jexpr.getExpression(), null, jexpr.evaluate(ctxt)); // OK\n+    }\n+\n }\n\\ No newline at end of file",
+                "changes": 31
+            }
+        ],
+        "unit_tests": [
+            "IssuesTest.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "src/test/org/apache/commons/jexl/IssuesTest.java",
+        "buggy_files": [
+            "src/java/org/apache/commons/jexl/Interpreter.java"
+        ],
+        "fixed": true
+    }
+]

@@ -1,0 +1,49 @@
+[
+    {
+        "repo": "ws-wss4j",
+        "commit": "https://github.com/apache/ws-wss4j/commit/f54e63d23bfdd2c8bb06f6ccf2eeadee229ad431",
+        "bug_id": "ws-wss4j_f54e63d",
+        "message": "[WSS-560] - NullPointerException in WSSecEncrypt when encrypted header element has attributes. Thanks to Ross M. Lodge for the patch.",
+        "parent": "https://github.com/apache/ws-wss4j/commit/9c2717c816df9ff0d46581632d5c4a1dc43a3445",
+        "patched_files": [
+            "WSSecEncrypt.java"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 2,
+                "raw_url": "https://github.com/apache/ws-wss4j/raw/f54e63d23bfdd2c8bb06f6ccf2eeadee229ad431/ws-security-dom/src/main/java/org/apache/wss4j/dom/message/WSSecEncrypt.java",
+                "contents_url": "https://api.github.com/repos/apache/ws-wss4j/contents/ws-security-dom/src/main/java/org/apache/wss4j/dom/message/WSSecEncrypt.java?ref=f54e63d23bfdd2c8bb06f6ccf2eeadee229ad431",
+                "filename": "ws-security-dom/src/main/java/org/apache/wss4j/dom/message/WSSecEncrypt.java",
+                "deletions": 2,
+                "sha": "1333eac8c672aae89bea1c4097df9089ed872292",
+                "blob_url": "https://github.com/apache/ws-wss4j/blob/f54e63d23bfdd2c8bb06f6ccf2eeadee229ad431/ws-security-dom/src/main/java/org/apache/wss4j/dom/message/WSSecEncrypt.java",
+                "patch": "@@ -708,8 +708,8 @@ private static void createEncryptedHeaderElement(\n         NamedNodeMap map = elementToEncrypt.getAttributes();\n         for (int i = 0; i < map.getLength(); i++) {\n             Attr attr = (Attr)map.item(i);\n-            if (attr.getNamespaceURI().equals(WSConstants.URI_SOAP11_ENV)\n-                || attr.getNamespaceURI().equals(WSConstants.URI_SOAP12_ENV)) {                         \n+            if (WSConstants.URI_SOAP11_ENV.equals(attr.getNamespaceURI())\n+                || WSConstants.URI_SOAP12_ENV.equals(attr.getNamespaceURI())) {\n                 String soapEnvPrefix = \n                     XMLUtils.setNamespace(\n                         elem, attr.getNamespaceURI(), WSConstants.DEFAULT_SOAP_PREFIX",
+                "changes": 4
+            },
+            {
+                "status": "modified",
+                "additions": 49,
+                "raw_url": "https://github.com/apache/ws-wss4j/raw/f54e63d23bfdd2c8bb06f6ccf2eeadee229ad431/ws-security-dom/src/test/java/org/apache/wss4j/dom/message/EncryptionPartsTest.java",
+                "contents_url": "https://api.github.com/repos/apache/ws-wss4j/contents/ws-security-dom/src/test/java/org/apache/wss4j/dom/message/EncryptionPartsTest.java?ref=f54e63d23bfdd2c8bb06f6ccf2eeadee229ad431",
+                "filename": "ws-security-dom/src/test/java/org/apache/wss4j/dom/message/EncryptionPartsTest.java",
+                "deletions": 0,
+                "sha": "554eb549824d44f020c290f4fa33c588c8aaf6f3",
+                "blob_url": "https://github.com/apache/ws-wss4j/blob/f54e63d23bfdd2c8bb06f6ccf2eeadee229ad431/ws-security-dom/src/test/java/org/apache/wss4j/dom/message/EncryptionPartsTest.java",
+                "patch": "@@ -56,6 +56,7 @@\n             \"       <foo:bar1>baz1</foo:bar1>\" + \n             \"       <foo:foobar>baz</foo:foobar>\" + \n             \"       <foo:bar2>baz2</foo:bar2>\" +\n+            \"       <foo:with-attributes some-attribute=\\\"3\\\">baz</foo:with-attributes>\" +\n             \"   </soapenv:Header>\" +\n             \"   <soapenv:Body>\" +\n             \"      <ns1:testMethod xmlns:ns1=\\\"http://axis/service/security/test6/LogTestService8\\\"></ns1:testMethod>\" +\n@@ -295,6 +296,54 @@ public void testSOAPEncryptedHeader() throws Exception {\n         assertEquals(\"/soapenv:Envelope/soapenv:Header/foo:foobar\", xpath);\n     }\n     \n+    /**\n+     * Test encrypting a custom SOAP header using wsse11:EncryptedHeader\n+     */\n+    @SuppressWarnings(\"unchecked\")\n+    @org.junit.Test\n+    public void testSOAPEncryptedHeaderWithAttributes() throws Exception {\n+        WSSecEncrypt encrypt = new WSSecEncrypt();\n+        encrypt.setUserInfo(\"16c73ab6-b892-458f-abf5-2f875f74882e\", \"security\");\n+        encrypt.setKeyIdentifierType(WSConstants.ISSUER_SERIAL);\n+\n+        Document doc = SOAPUtil.toSOAPPart(SOAPMSG);\n+        WSSecHeader secHeader = new WSSecHeader(doc);\n+        secHeader.insertSecurityHeader();\n+\n+        WSEncryptionPart encP =\n+            new WSEncryptionPart(\n+                \"with-attributes\",\n+                \"urn:foo.bar\",\n+                \"Header\");\n+        encrypt.getParts().add(encP);\n+\n+        Document encryptedDoc = encrypt.build(doc, crypto, secHeader);\n+\n+        String outputString =\n+            XMLUtils.PrettyDocumentToString(encryptedDoc);\n+        if (LOG.isDebugEnabled()) {\n+            LOG.debug(outputString);\n+        }\n+        assertTrue(outputString.contains(\"wsse11:EncryptedHeader\"));\n+        assertFalse(outputString.contains(\"foo:with-attributes\"));\n+\n+        WSHandlerResult results = verify(encryptedDoc);\n+\n+        WSSecurityEngineResult actionResult =\n+            results.getActionResults().get(WSConstants.ENCR).get(0);\n+        assertTrue(actionResult != null);\n+        assertFalse(actionResult.isEmpty());\n+        final java.util.List<WSDataRef> refs =\n+            (java.util.List<WSDataRef>) actionResult.get(WSSecurityEngineResult.TAG_DATA_REF_URIS);\n+\n+        assertEquals(WSConstants.KEYTRANSPORT_RSAOEP,\n+            actionResult.get(WSSecurityEngineResult.TAG_ENCRYPTED_KEY_TRANSPORT_METHOD));\n+\n+        WSDataRef wsDataRef = refs.get(0);\n+        String xpath = wsDataRef.getXpath();\n+        assertEquals(\"/soapenv:Envelope/soapenv:Header/foo:with-attributes\", xpath);\n+    }\n+\n     /**\n      * Test encrypting a custom SOAP header with a bad localname\n      */",
+                "changes": 49
+            }
+        ],
+        "unit_tests": [
+            "EncryptionPartsTest.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "ws-security-dom/src/test/java/org/apache/wss4j/dom/message/EncryptionPartsTest.java",
+        "buggy_files": [
+            "ws-security-dom/src/main/java/org/apache/wss4j/dom/message/WSSecEncrypt.java"
+        ],
+        "fixed": true
+    }
+]

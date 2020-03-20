@@ -1,0 +1,51 @@
+[
+    {
+        "repo": "jackrabbit-oak",
+        "commit": "https://github.com/apache/jackrabbit-oak/commit/5ec570cfbd4cd8ee377c8877558cf91bbe74cf15",
+        "bug_id": "jackrabbit-oak_5ec570c",
+        "message": "OAK-8117 : NPE when adding ACE with restrictions and remapped namespaces\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1855402 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/jackrabbit-oak/commit/47952742585e8d91d95f424e7ae3074f057f3dfe",
+        "patched_files": [
+            "ACL.java"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 6,
+                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/5ec570cfbd4cd8ee377c8877558cf91bbe74cf15/oak-core/src/main/java/org/apache/jackrabbit/oak/security/authorization/accesscontrol/ACL.java",
+                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-core/src/main/java/org/apache/jackrabbit/oak/security/authorization/accesscontrol/ACL.java?ref=5ec570cfbd4cd8ee377c8877558cf91bbe74cf15",
+                "filename": "oak-core/src/main/java/org/apache/jackrabbit/oak/security/authorization/accesscontrol/ACL.java",
+                "deletions": 6,
+                "sha": "060fd71e080f825e9b12f9b8f29671dbcfaff159",
+                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/5ec570cfbd4cd8ee377c8877558cf91bbe74cf15/oak-core/src/main/java/org/apache/jackrabbit/oak/security/authorization/accesscontrol/ACL.java",
+                "patch": "@@ -120,15 +120,15 @@ public boolean addEntry(Principal principal, Privilege[] privileges,\n         } else {\n             rs = new HashSet<>();\n             if (restrictions != null) {\n-                for (String jcrName : restrictions.keySet()) {\n-                    String oakName = getNamePathMapper().getOakName(jcrName);\n-                    rs.add(getRestrictionProvider().createRestriction(getOakPath(), oakName, restrictions.get(oakName)));\n+                for (Map.Entry<String, Value> restrEntry : restrictions.entrySet()) {\n+                    String oakName = getNamePathMapper().getOakName(restrEntry.getKey());\n+                    rs.add(getRestrictionProvider().createRestriction(getOakPath(), oakName, restrEntry.getValue()));\n                 }\n             }\n             if (mvRestrictions != null) {\n-                for (String jcrName : mvRestrictions.keySet()) {\n-                    String oakName = getNamePathMapper().getOakName(jcrName);\n-                    rs.add(getRestrictionProvider().createRestriction(getOakPath(), oakName, mvRestrictions.get(oakName)));\n+                for (Map.Entry<String, Value[]> restrEntry : mvRestrictions.entrySet()) {\n+                    String oakName = getNamePathMapper().getOakName(restrEntry.getKey());\n+                    rs.add(getRestrictionProvider().createRestriction(getOakPath(), oakName, restrEntry.getValue()));\n                 }\n             }\n         }",
+                "changes": 12
+            },
+            {
+                "status": "added",
+                "additions": 99,
+                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/5ec570cfbd4cd8ee377c8877558cf91bbe74cf15/oak-core/src/test/java/org/apache/jackrabbit/oak/security/authorization/accesscontrol/RemappedRestrictionNamesTest.java",
+                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-core/src/test/java/org/apache/jackrabbit/oak/security/authorization/accesscontrol/RemappedRestrictionNamesTest.java?ref=5ec570cfbd4cd8ee377c8877558cf91bbe74cf15",
+                "filename": "oak-core/src/test/java/org/apache/jackrabbit/oak/security/authorization/accesscontrol/RemappedRestrictionNamesTest.java",
+                "deletions": 0,
+                "sha": "68e505e81dba672945be11befbb09beb096afa54",
+                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/5ec570cfbd4cd8ee377c8877558cf91bbe74cf15/oak-core/src/test/java/org/apache/jackrabbit/oak/security/authorization/accesscontrol/RemappedRestrictionNamesTest.java",
+                "patch": "@@ -0,0 +1,99 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one or more\n+ * contributor license agreements.  See the NOTICE file distributed with\n+ * this work for additional information regarding copyright ownership.\n+ * The ASF licenses this file to You under the Apache License, Version 2.0\n+ * (the \"License\"); you may not use this file except in compliance with\n+ * the License.  You may obtain a copy of the License at\n+ *\n+ *      http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing, software\n+ * distributed under the License is distributed on an \"AS IS\" BASIS,\n+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n+ * See the License for the specific language governing permissions and\n+ * limitations under the License.\n+ */\n+package org.apache.jackrabbit.oak.security.authorization.accesscontrol;\n+\n+import com.google.common.collect.ImmutableMap;\n+import com.google.common.collect.Iterables;\n+import org.apache.jackrabbit.oak.namepath.NamePathMapper;\n+import org.apache.jackrabbit.oak.namepath.impl.LocalNameMapper;\n+import org.apache.jackrabbit.oak.namepath.impl.NamePathMapperImpl;\n+import org.apache.jackrabbit.oak.spi.security.authorization.accesscontrol.ACE;\n+import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeConstants;\n+import org.jetbrains.annotations.NotNull;\n+import org.junit.Test;\n+\n+import javax.jcr.PropertyType;\n+import javax.jcr.RepositoryException;\n+import javax.jcr.Value;\n+import javax.jcr.security.Privilege;\n+import java.util.Arrays;\n+import java.util.List;\n+import java.util.Map;\n+\n+import static org.apache.jackrabbit.oak.spi.security.authorization.accesscontrol.AccessControlConstants.REP_GLOB;\n+import static org.apache.jackrabbit.oak.spi.security.authorization.accesscontrol.AccessControlConstants.REP_ITEM_NAMES;\n+import static org.junit.Assert.assertArrayEquals;\n+import static org.junit.Assert.assertEquals;\n+import static org.junit.Assert.assertTrue;\n+\n+public class RemappedRestrictionNamesTest extends AbstractAccessControlTest {\n+\n+    private static final Map<String, String> LOCAL_NAME_MAPPINGS = ImmutableMap.of(\n+            \"a\",\"internal\",\n+            \"b\",\"http://www.jcp.org/jcr/1.0\",\n+            \"c\",\"http://jackrabbit.apache.org/oak/ns/1.0\"\n+    );\n+\n+    private NamePathMapperImpl remapped;\n+\n+    private Privilege[] privs;\n+\n+    @Override\n+    public void before() throws Exception {\n+        super.before();\n+\n+        privs = privilegesFromNames(PrivilegeConstants.JCR_READ);\n+    }\n+\n+    @Override\n+    protected NamePathMapper getNamePathMapper() {\n+        if (remapped == null) {\n+            remapped = new NamePathMapperImpl(new LocalNameMapper(root, LOCAL_NAME_MAPPINGS));\n+        }\n+        return remapped;\n+    }\n+\n+    protected Privilege[] privilegesFromNames(@NotNull String... privilegeNames) throws RepositoryException {\n+        Iterable<String> jcrNames = Iterables.transform(Arrays.asList(privilegeNames), s -> getNamePathMapper().getJcrName(s));\n+        return super.privilegesFromNames(jcrNames);\n+    }\n+\n+    @Test\n+    public void testAddEntryWithSingleValueRestriction() throws Exception {\n+        String jcrGlobName = getNamePathMapper().getJcrName(REP_GLOB);\n+        Map<String, Value> rest = ImmutableMap.of(jcrGlobName, getValueFactory(root).createValue(\"*\"));\n+        assertTrue(acl.addEntry(testPrincipal, privs, false, rest));\n+\n+        List<ACE> entries = acl.getEntries();\n+        assertEquals(1, entries.size());\n+        assertArrayEquals(new String[] {jcrGlobName}, entries.get(0).getRestrictionNames());\n+        assertEquals(rest.get(jcrGlobName), entries.get(0).getRestriction(jcrGlobName));\n+    }\n+\n+    @Test\n+    public void testAddEntryWithMVRestriction() throws Exception {\n+        String jcrItemNames = getNamePathMapper().getJcrName(REP_ITEM_NAMES);\n+        Value[] valArray = new Value[] {getValueFactory(root).createValue(\"myItemName\", PropertyType.NAME)};\n+        Map<String, Value[]> rest = ImmutableMap.of(jcrItemNames, valArray);\n+        assertTrue(acl.addEntry(testPrincipal, privs, false, null, rest));\n+\n+        List<ACE> entries = acl.getEntries();\n+        assertEquals(1, entries.size());\n+        assertArrayEquals(new String[] {jcrItemNames}, entries.get(0).getRestrictionNames());\n+        assertArrayEquals(valArray, entries.get(0).getRestrictions(jcrItemNames));\n+    }\n+}\n\\ No newline at end of file",
+                "changes": 99
+            }
+        ],
+        "unit_tests": [
+            "RemappedRestrictionNamesTest.java",
+            "ACLTest.java",
+            "TestACL.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "oak-core/src/test/java/org/apache/jackrabbit/oak/security/authorization/accesscontrol/RemappedRestrictionNamesTest.java",
+        "buggy_files": [
+            "oak-core/src/main/java/org/apache/jackrabbit/oak/security/authorization/accesscontrol/ACL.java"
+        ],
+        "fixed": true
+    }
+]

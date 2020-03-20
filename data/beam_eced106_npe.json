@@ -1,0 +1,51 @@
+[
+    {
+        "repo": "beam",
+        "commit": "https://github.com/apache/beam/commit/eced106e50ddb257524a7826ab7d27254be89da8",
+        "bug_id": "beam_eced106",
+        "message": "[BEAM-196] provide PipelineOptions in DoFn\n\n- fixes NPE when accessing the PipelineOptions\n- adds a test to verify that the PipelineOptions are available",
+        "parent": "https://github.com/apache/beam/commit/d10ae23c9bc9529d04d02951bfed01bbf2957773",
+        "patched_files": [
+            "FlinkAbstractParDoWrapper.java",
+            "PipelineOptions.java"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 7,
+                "raw_url": "https://github.com/apache/beam/raw/eced106e50ddb257524a7826ab7d27254be89da8/runners/flink/runner/src/main/java/org/apache/beam/runners/flink/translation/wrappers/streaming/FlinkAbstractParDoWrapper.java",
+                "contents_url": "https://api.github.com/repos/apache/beam/contents/runners/flink/runner/src/main/java/org/apache/beam/runners/flink/translation/wrappers/streaming/FlinkAbstractParDoWrapper.java?ref=eced106e50ddb257524a7826ab7d27254be89da8",
+                "filename": "runners/flink/runner/src/main/java/org/apache/beam/runners/flink/translation/wrappers/streaming/FlinkAbstractParDoWrapper.java",
+                "deletions": 4,
+                "sha": "a9350116d693261911acd98d55154c47685cf05a",
+                "blob_url": "https://github.com/apache/beam/blob/eced106e50ddb257524a7826ab7d27254be89da8/runners/flink/runner/src/main/java/org/apache/beam/runners/flink/translation/wrappers/streaming/FlinkAbstractParDoWrapper.java",
+                "patch": "@@ -17,6 +17,7 @@\n  */\n package org.apache.beam.runners.flink.translation.wrappers.streaming;\n \n+import org.apache.beam.runners.flink.translation.utils.SerializedPipelineOptions;\n import org.apache.beam.runners.flink.translation.wrappers.SerializableFnAggregatorWrapper;\n import org.apache.beam.sdk.options.PipelineOptions;\n import org.apache.beam.sdk.transforms.Aggregator;\n@@ -37,6 +38,7 @@\n import org.apache.flink.api.common.accumulators.Accumulator;\n import org.apache.flink.api.common.accumulators.AccumulatorHelper;\n import org.apache.flink.api.common.functions.RichFlatMapFunction;\n+import org.apache.flink.configuration.Configuration;\n import org.apache.flink.util.Collector;\n import org.joda.time.Instant;\n import org.joda.time.format.PeriodFormat;\n@@ -52,7 +54,7 @@\n \n   private final DoFn<IN, OUTDF> doFn;\n   private final WindowingStrategy<?, ?> windowingStrategy;\n-  private transient PipelineOptions options;\n+  private final SerializedPipelineOptions serializedPipelineOptions;\n \n   private DoFnProcessContext context;\n \n@@ -62,7 +64,7 @@ public FlinkAbstractParDoWrapper(PipelineOptions options, WindowingStrategy<?, ?\n     Preconditions.checkNotNull(doFn);\n \n     this.doFn = doFn;\n-    this.options = options;\n+    this.serializedPipelineOptions = new SerializedPipelineOptions(options);\n     this.windowingStrategy = windowingStrategy;\n   }\n \n@@ -107,7 +109,8 @@ private void processElement(WindowedValue<IN> value) throws Exception {\n \n     private WindowedValue<IN> element;\n \n-    private DoFnProcessContext(DoFn<IN, OUTDF> function, Collector<WindowedValue<OUTFL>> outCollector) {\n+    private DoFnProcessContext(DoFn<IN, OUTDF> function,\n+          Collector<WindowedValue<OUTFL>> outCollector) {\n       function.super();\n       super.setupDelegateAggregators();\n \n@@ -156,7 +159,7 @@ public PaneInfo pane() {\n \n     @Override\n     public PipelineOptions getPipelineOptions() {\n-      return options;\n+      return serializedPipelineOptions.getPipelineOptions();\n     }\n \n     @Override",
+                "changes": 11
+            },
+            {
+                "status": "modified",
+                "additions": 93,
+                "raw_url": "https://github.com/apache/beam/raw/eced106e50ddb257524a7826ab7d27254be89da8/runners/flink/runner/src/test/java/org/apache/beam/runners/flink/PipelineOptionsTest.java",
+                "contents_url": "https://api.github.com/repos/apache/beam/contents/runners/flink/runner/src/test/java/org/apache/beam/runners/flink/PipelineOptionsTest.java?ref=eced106e50ddb257524a7826ab7d27254be89da8",
+                "filename": "runners/flink/runner/src/test/java/org/apache/beam/runners/flink/PipelineOptionsTest.java",
+                "deletions": 4,
+                "sha": "d571f3168af20e9c3e40ffad278c71fad4339323",
+                "blob_url": "https://github.com/apache/beam/blob/eced106e50ddb257524a7826ab7d27254be89da8/runners/flink/runner/src/test/java/org/apache/beam/runners/flink/PipelineOptionsTest.java",
+                "patch": "@@ -18,14 +18,29 @@\n package org.apache.beam.runners.flink;\n \n import org.apache.beam.runners.flink.translation.utils.SerializedPipelineOptions;\n+import org.apache.beam.runners.flink.translation.wrappers.streaming.FlinkAbstractParDoWrapper;\n import org.apache.beam.sdk.options.Default;\n import org.apache.beam.sdk.options.Description;\n+import org.apache.beam.sdk.options.PipelineOptions;\n import org.apache.beam.sdk.options.PipelineOptionsFactory;\n+import org.apache.beam.sdk.transforms.DoFn;\n+import org.apache.beam.sdk.transforms.windowing.GlobalWindow;\n+import org.apache.beam.sdk.transforms.windowing.PaneInfo;\n+import org.apache.beam.sdk.util.WindowedValue;\n+import org.apache.beam.sdk.util.WindowingInternals;\n+import org.apache.beam.sdk.util.WindowingStrategy;\n+import org.apache.beam.sdk.values.TupleTag;\n+import org.apache.commons.lang.SerializationUtils;\n+import org.apache.flink.util.Collector;\n+import org.joda.time.Instant;\n+import org.junit.Assert;\n import org.junit.BeforeClass;\n import org.junit.Test;\n+import org.mockito.Mockito;\n \n import static org.junit.Assert.assertEquals;\n import static org.junit.Assert.assertNotNull;\n+import static org.junit.Assert.assertTrue;\n \n /**\n  * Tests the serialization and deserialization of PipelineOptions.\n@@ -58,11 +73,85 @@ public void testDeserialization() {\n \n   @Test\n   public void testCaching() {\n-    MyOptions deserializedOptions = serializedOptions.getPipelineOptions().as(MyOptions.class);\n+    PipelineOptions deserializedOptions = serializedOptions.getPipelineOptions().as(PipelineOptions.class);\n     assertNotNull(deserializedOptions);\n-    assertEquals(deserializedOptions, serializedOptions.getPipelineOptions());\n-    assertEquals(deserializedOptions, serializedOptions.getPipelineOptions());\n-    assertEquals(deserializedOptions, serializedOptions.getPipelineOptions());\n+    assertTrue(deserializedOptions == serializedOptions.getPipelineOptions());\n+    assertTrue(deserializedOptions == serializedOptions.getPipelineOptions());\n+    assertTrue(deserializedOptions == serializedOptions.getPipelineOptions());\n+  }\n+\n+  @Test(expected = Exception.class)\n+  public void testNonNull() {\n+    new SerializedPipelineOptions(null);\n+  }\n+\n+  @Test(expected = Exception.class)\n+  public void ParDoBaseClassPipelineOptionsNullTest() {\n+    new TestParDoWrapper(null, WindowingStrategy.globalDefault(), new TestDoFn());\n+  }\n+\n+  /**\n+   * Tests that PipelineOptions are present after serialization\n+   */\n+  @Test\n+  public void ParDoBaseClassPipelineOptionsSerializationTest() throws Exception {\n+    TestParDoWrapper wrapper =\n+        new TestParDoWrapper(options, WindowingStrategy.globalDefault(), new TestDoFn());\n+\n+    final byte[] serialized = SerializationUtils.serialize(wrapper);\n+    TestParDoWrapper deserialize = (TestParDoWrapper) SerializationUtils.deserialize(serialized);\n+\n+    // execute once to access options\n+    deserialize.flatMap(\n+        WindowedValue.of(\n+            new Object(),\n+            Instant.now(),\n+            GlobalWindow.INSTANCE,\n+            PaneInfo.NO_FIRING),\n+        Mockito.mock(Collector.class));\n+\n   }\n \n+\n+  private static class TestDoFn extends DoFn<Object, Object> {\n+\n+    @Override\n+    public void processElement(ProcessContext c) throws Exception {\n+      Assert.assertNotNull(c.getPipelineOptions());\n+      Assert.assertEquals(\n+          options.getTestOption(),\n+          c.getPipelineOptions().as(MyOptions.class).getTestOption());\n+    }\n+  }\n+\n+  private static class TestParDoWrapper extends FlinkAbstractParDoWrapper {\n+    public TestParDoWrapper(PipelineOptions options, WindowingStrategy windowingStrategy, DoFn doFn) {\n+      super(options, windowingStrategy, doFn);\n+    }\n+\n+\n+    @Override\n+    public WindowingInternals windowingInternalsHelper(\n+        WindowedValue inElement,\n+        Collector outCollector) {\n+      return null;\n+    }\n+\n+    @Override\n+    public void sideOutputWithTimestampHelper(\n+        WindowedValue inElement,\n+        Object output,\n+        Instant timestamp,\n+        Collector outCollector,\n+        TupleTag tag) {}\n+\n+    @Override\n+    public void outputWithTimestampHelper(\n+        WindowedValue inElement,\n+        Object output,\n+        Instant timestamp,\n+        Collector outCollector) {}\n+  }\n+\n+\n }",
+                "changes": 97
+            }
+        ],
+        "unit_tests": [
+            "PipelineOptionsTest.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "sdks/java/core/src/test/java/org/apache/beam/sdk/options/PipelineOptionsTest.java",
+        "buggy_files": [
+            "runners/flink/runner/src/main/java/org/apache/beam/runners/flink/translation/wrappers/streaming/FlinkAbstractParDoWrapper.java",
+            "sdks/java/core/src/main/java/org/apache/beam/sdk/options/PipelineOptions.java"
+        ],
+        "fixed": true
+    }
+]

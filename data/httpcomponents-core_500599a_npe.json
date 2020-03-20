@@ -1,0 +1,64 @@
+[
+    {
+        "repo": "httpcomponents-core",
+        "commit": "https://github.com/apache/httpcomponents-core/commit/500599af40e521774071c7ee6360ff58c57c010a",
+        "bug_id": "httpcomponents-core_500599a",
+        "message": "HTTPCORE-373: out of sequence HTTP response causes NPE in HttpAsyncRequestExecutor\n\ngit-svn-id: https://svn.apache.org/repos/asf/httpcomponents/httpcore/trunk@1567105 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/httpcomponents-core/commit/b36d2e5e9c94f2da365f81957bf9c2e4f23d4ea3",
+        "patched_files": [
+            "HttpAsyncRequestExecutor.java",
+            "RELEASE_NOTES.txt"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 4,
+                "raw_url": "https://github.com/apache/httpcomponents-core/raw/500599af40e521774071c7ee6360ff58c57c010a/RELEASE_NOTES.txt",
+                "contents_url": "https://api.github.com/repos/apache/httpcomponents-core/contents/RELEASE_NOTES.txt?ref=500599af40e521774071c7ee6360ff58c57c010a",
+                "filename": "RELEASE_NOTES.txt",
+                "deletions": 1,
+                "sha": "037076e43838cfd5a57adcf4e8c6624343c71cf2",
+                "blob_url": "https://github.com/apache/httpcomponents-core/blob/500599af40e521774071c7ee6360ff58c57c010a/RELEASE_NOTES.txt",
+                "patch": "@@ -1,6 +1,9 @@\n Changes for release 4.4-alpha1\n -------------------\n \n+* [HTTPCORE-373] Out of sequence HTTP response causes NPE in HttpAsyncRequestExecutor.\n+  Contributed by Oleg Kalnichevski <olegk at apache.org>\n+\n * [HTTPCORE-372] Blocking and non-blocking chunk decoders to throw an I/O exception if data stream\n   is terminated without a closing chunk.\n   Contributed by Dmitry Potapov <potapov.d at gmail.com>\n@@ -13,7 +16,7 @@ Changes for release 4.4-alpha1\n \n * [HTTPCORE-370] Race condition if connection request succeeds and times out at the same time.\n   Contributed by Oleg Kalnichevski <olegk at apache.org>\n-    \n+\n * [HTTPCORE-357] Avoid DNS lookups in SSLIOSession.\n   Contributed by Oleg Kalnichevski <olegk at apache.org>\n ",
+                "changes": 5
+            },
+            {
+                "status": "modified",
+                "additions": 4,
+                "raw_url": "https://github.com/apache/httpcomponents-core/raw/500599af40e521774071c7ee6360ff58c57c010a/httpcore-nio/src/main/java/org/apache/http/nio/protocol/HttpAsyncRequestExecutor.java",
+                "contents_url": "https://api.github.com/repos/apache/httpcomponents-core/contents/httpcore-nio/src/main/java/org/apache/http/nio/protocol/HttpAsyncRequestExecutor.java?ref=500599af40e521774071c7ee6360ff58c57c010a",
+                "filename": "httpcore-nio/src/main/java/org/apache/http/nio/protocol/HttpAsyncRequestExecutor.java",
+                "deletions": 1,
+                "sha": "c6070bd744ff1e3182e22651356b9abf3b40a82e",
+                "blob_url": "https://github.com/apache/httpcomponents-core/blob/500599af40e521774071c7ee6360ff58c57c010a/httpcore-nio/src/main/java/org/apache/http/nio/protocol/HttpAsyncRequestExecutor.java",
+                "patch": "@@ -191,9 +191,12 @@ public void outputReady(\n     public void responseReceived(\n             final NHttpClientConnection conn) throws HttpException, IOException {\n         final State state = ensureNotNull(getState(conn));\n+        final HttpRequest request = state.getRequest();\n+        if (request == null) {\n+            throw new HttpException(\"Out of sequence response\");\n+        }\n         final HttpAsyncClientExchangeHandler handler = ensureNotNull(getHandler(conn));\n         final HttpResponse response = conn.getHttpResponse();\n-        final HttpRequest request = state.getRequest();\n \n         final int statusCode = response.getStatusLine().getStatusCode();\n         if (statusCode < HttpStatus.SC_OK) {",
+                "changes": 5
+            },
+            {
+                "status": "added",
+                "additions": 107,
+                "raw_url": "https://github.com/apache/httpcomponents-core/raw/500599af40e521774071c7ee6360ff58c57c010a/httpcore-nio/src/test/java/org/apache/http/nio/integration/TestClientOutOfSequenceResponse.java",
+                "contents_url": "https://api.github.com/repos/apache/httpcomponents-core/contents/httpcore-nio/src/test/java/org/apache/http/nio/integration/TestClientOutOfSequenceResponse.java?ref=500599af40e521774071c7ee6360ff58c57c010a",
+                "filename": "httpcore-nio/src/test/java/org/apache/http/nio/integration/TestClientOutOfSequenceResponse.java",
+                "deletions": 0,
+                "sha": "52edb5304e8f39523c551b158592130baa386379",
+                "blob_url": "https://github.com/apache/httpcomponents-core/blob/500599af40e521774071c7ee6360ff58c57c010a/httpcore-nio/src/test/java/org/apache/http/nio/integration/TestClientOutOfSequenceResponse.java",
+                "patch": "@@ -0,0 +1,107 @@\n+/*\n+ * ====================================================================\n+ * Licensed to the Apache Software Foundation (ASF) under one\n+ * or more contributor license agreements.  See the NOTICE file\n+ * distributed with this work for additional information\n+ * regarding copyright ownership.  The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance\n+ * with the License.  You may obtain a copy of the License at\n+ *\n+ *   http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing,\n+ * software distributed under the License is distributed on an\n+ * \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+ * KIND, either express or implied.  See the License for the\n+ * specific language governing permissions and limitations\n+ * under the License.\n+ * ====================================================================\n+ *\n+ * This software consists of voluntary contributions made by many\n+ * individuals on behalf of the Apache Software Foundation.  For more\n+ * information on the Apache Software Foundation, please see\n+ * <http://www.apache.org/>.\n+ *\n+ */\n+\n+package org.apache.http.nio.integration;\n+\n+import java.net.ServerSocket;\n+import java.net.Socket;\n+import java.util.concurrent.ExecutionException;\n+import java.util.concurrent.Future;\n+\n+import org.apache.http.Consts;\n+import org.apache.http.HttpException;\n+import org.apache.http.HttpHost;\n+import org.apache.http.HttpRequest;\n+import org.apache.http.HttpResponse;\n+import org.apache.http.HttpVersion;\n+import org.apache.http.config.ConnectionConfig;\n+import org.apache.http.impl.nio.pool.BasicNIOConnFactory;\n+import org.apache.http.message.BasicHttpRequest;\n+import org.apache.http.nio.testserver.HttpClientNio;\n+import org.junit.After;\n+import org.junit.Assert;\n+import org.junit.Before;\n+import org.junit.Test;\n+\n+/**\n+ * Tests for handling out of sequence responses.\n+ */\n+public class TestClientOutOfSequenceResponse {\n+\n+    private ServerSocket server;\n+    private HttpClientNio client;\n+\n+    @Before\n+    public void setup() throws Exception {\n+        server = new ServerSocket(0, 1);\n+        client = new HttpClientNio(new BasicNIOConnFactory(ConnectionConfig.DEFAULT));\n+    }\n+\n+    @After\n+    public void cleanup() throws Exception {\n+        if (client != null) {\n+            client.shutdown();\n+        }\n+        if (server != null) {\n+            server.close();\n+        }\n+    }\n+\n+    @Test\n+    public void testOutOfSequenceResponse() throws Exception {\n+        client.setMaxPerRoute(1);\n+        client.setMaxTotal(1);\n+\n+        client.start();\n+        final HttpHost target = new HttpHost(\"localhost\", server.getLocalPort());\n+        final HttpRequest get1 = new BasicHttpRequest(\"GET\", \"/\", HttpVersion.HTTP_1_1);\n+        final Future<HttpResponse> future1 = client.execute(target, get1);\n+        final HttpRequest get2 = new BasicHttpRequest(\"GET\", \"/\", HttpVersion.HTTP_1_1);\n+        final Future<HttpResponse> future2 = client.execute(target, get2);\n+\n+        final Socket socket = server.accept();\n+        Thread.sleep(100);\n+        for (int i = 0; i < 3; ++i) {\n+            socket.getOutputStream().write((\n+                    \"HTTP/1.1 200 OK\\r\\n\" +\n+                    \"Content-Length: 0\\r\\n\" +\n+                    \"Connection: keep-alive\\r\\n\\r\\n\").getBytes(Consts.UTF_8));\n+            socket.getOutputStream().flush();\n+        }\n+\n+        final HttpResponse response1 = future1.get();\n+        Assert.assertEquals(200, response1.getStatusLine().getStatusCode());\n+\n+        try {\n+            final HttpResponse response2 = future2.get();\n+            Assert.assertEquals(200, response2.getStatusLine().getStatusCode());\n+        } catch (ExecutionException ex) {\n+            Assert.assertTrue(ex.getCause() instanceof HttpException);\n+        }\n+    }\n+\n+}",
+                "changes": 107
+            }
+        ],
+        "unit_tests": [
+            "TestClientOutOfSequenceResponse.java",
+            "TestHttpAsyncRequestExecutor.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "httpcore-nio/src/test/java/org/apache/http/nio/integration/TestClientOutOfSequenceResponse.java",
+        "buggy_files": [
+            "httpcore-nio/src/main/java/org/apache/http/nio/protocol/HttpAsyncRequestExecutor.java",
+            "RELEASE_NOTES.txt"
+        ],
+        "fixed": true
+    }
+]

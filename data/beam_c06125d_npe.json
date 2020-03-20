@@ -1,0 +1,51 @@
+[
+    {
+        "repo": "beam",
+        "commit": "https://github.com/apache/beam/commit/c06125d29229309b8e2d2070d7fa140c9a2e14f5",
+        "bug_id": "beam_c06125d",
+        "message": "Fix NullPointerException thrown by getOnly when a value is not present for a given tag.\n\n[]\n-------------\nCreated by MOE: http://code.google.com/p/moe-java\nMOE_MIGRATED_REVID=85888387",
+        "parent": "https://github.com/apache/beam/commit/f42c13c8b917f1228f78ec16b63dcc14b7e83bac",
+        "patched_files": [
+            "CoGbkResult.java",
+            "CoGroupByKey.java"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 2,
+                "raw_url": "https://github.com/apache/beam/raw/c06125d29229309b8e2d2070d7fa140c9a2e14f5/sdk/src/main/java/com/google/cloud/dataflow/sdk/transforms/join/CoGbkResult.java",
+                "contents_url": "https://api.github.com/repos/apache/beam/contents/sdk/src/main/java/com/google/cloud/dataflow/sdk/transforms/join/CoGbkResult.java?ref=c06125d29229309b8e2d2070d7fa140c9a2e14f5",
+                "filename": "sdk/src/main/java/com/google/cloud/dataflow/sdk/transforms/join/CoGbkResult.java",
+                "deletions": 1,
+                "sha": "56fc3fc84bc0a0e53db320da1d07a97d247e5af0",
+                "blob_url": "https://github.com/apache/beam/blob/c06125d29229309b8e2d2070d7fa140c9a2e14f5/sdk/src/main/java/com/google/cloud/dataflow/sdk/transforms/join/CoGbkResult.java",
+                "patch": "@@ -225,6 +225,7 @@ public CoGbkResult decode(\n       return new CoGbkResult(schema, map);\n     }\n \n+    @Override\n     public boolean equals(Object other) {\n       if (!super.equals(other)) {\n         return false;\n@@ -317,7 +318,7 @@ private CoGbkResult(\n           + \" is not in the schema\");\n     }\n     List<RawUnionValue> unions = valueMap.get(index);\n-    if (unions.isEmpty()) {\n+    if (unions == null || unions.isEmpty()) {\n       if (useDefault) {\n         return defaultValue;\n       } else {",
+                "changes": 3
+            },
+            {
+                "status": "modified",
+                "additions": 94,
+                "raw_url": "https://github.com/apache/beam/raw/c06125d29229309b8e2d2070d7fa140c9a2e14f5/sdk/src/test/java/com/google/cloud/dataflow/sdk/transforms/join/CoGroupByKeyTest.java",
+                "contents_url": "https://api.github.com/repos/apache/beam/contents/sdk/src/test/java/com/google/cloud/dataflow/sdk/transforms/join/CoGroupByKeyTest.java?ref=c06125d29229309b8e2d2070d7fa140c9a2e14f5",
+                "filename": "sdk/src/test/java/com/google/cloud/dataflow/sdk/transforms/join/CoGroupByKeyTest.java",
+                "deletions": 0,
+                "sha": "13a74b419fda1ffadd9942b16774fbf23aef10fd",
+                "blob_url": "https://github.com/apache/beam/blob/c06125d29229309b8e2d2070d7fa140c9a2e14f5/sdk/src/test/java/com/google/cloud/dataflow/sdk/transforms/join/CoGroupByKeyTest.java",
+                "patch": "@@ -17,8 +17,10 @@\n package com.google.cloud.dataflow.sdk.transforms.join;\n \n import static org.hamcrest.collection.IsIterableContainingInAnyOrder.containsInAnyOrder;\n+import static org.hamcrest.core.IsEqual.equalTo;\n import static org.junit.Assert.assertNull;\n import static org.junit.Assert.assertThat;\n+import static org.junit.Assert.fail;\n \n import com.google.cloud.dataflow.sdk.Pipeline;\n import com.google.cloud.dataflow.sdk.coders.BigEndianIntegerCoder;\n@@ -75,6 +77,98 @@ public void processElement(ProcessContext c) {\n             }));\n   }\n \n+  /**\n+   * Returns a PCollection<KV<Integer, CoGbkResult>> containing the result\n+   * of a CoGbk over 2 PCollection<KV<Integer, String>>, where each PCollection\n+   * has no duplicate keys and the key sets of each PCollection are\n+   * intersecting but neither is a subset of the other.\n+   */\n+  private PCollection<KV<Integer, CoGbkResult>> buildGetOnlyGbk(\n+      Pipeline p,\n+      TupleTag<String> tag1,\n+      TupleTag<String> tag2) {\n+    List<KV<Integer, String>> list1 =\n+        Arrays.asList(\n+            KV.of(1, \"collection1-1\"),\n+            KV.of(2, \"collection1-2\"));\n+    List<KV<Integer, String>> list2 =\n+        Arrays.asList(\n+            KV.of(2, \"collection2-2\"),\n+            KV.of(3, \"collection2-3\"));\n+    PCollection<KV<Integer, String>> collection1 = createInput(p, list1);\n+    PCollection<KV<Integer, String>> collection2 = createInput(p, list2);\n+    PCollection<KV<Integer, CoGbkResult>> coGbkResults =\n+        KeyedPCollectionTuple.of(tag1, collection1)\n+            .and(tag2, collection2)\n+            .apply(CoGroupByKey.<Integer>create());\n+    return coGbkResults;\n+  }\n+\n+  @Test\n+  public void testCoGroupByKeyGetOnly() {\n+    TupleTag<String> tag1 = new TupleTag<>();\n+    TupleTag<String> tag2 = new TupleTag<>();\n+\n+    DirectPipeline p = DirectPipeline.createForTest();\n+\n+    PCollection<KV<Integer, CoGbkResult>> coGbkResults =\n+        buildGetOnlyGbk(p, tag1, tag2);\n+\n+    EvaluationResults results = p.run();\n+\n+    List<KV<Integer, CoGbkResult>> finalResult =\n+        results.getPCollection(coGbkResults);\n+\n+    HashMap<Integer, Matcher<String>> collection1Matchers =\n+        new HashMap<Integer, Matcher<String>>() {\n+      {\n+        put(1, equalTo(\"collection1-1\"));\n+        put(2, equalTo(\"collection1-2\"));\n+      }\n+    };\n+\n+    HashMap<Integer, Matcher<String>> collection2Matchers =\n+        new HashMap<Integer, Matcher<String>>() {\n+      {\n+        put(2, equalTo(\"collection2-2\"));\n+        put(3, equalTo(\"collection2-3\"));\n+      }\n+    };\n+\n+    for (KV<Integer, CoGbkResult> result : finalResult) {\n+      int key = result.getKey();\n+      CoGbkResult row = result.getValue();\n+      checkGetOnlyForKey(key, collection1Matchers, row, tag1, \"default\");\n+      checkGetOnlyForKey(key, collection2Matchers, row, tag2, \"default\");\n+    }\n+  }\n+\n+  /**\n+   * Check that a singleton value for a key in a CoGbkResult matches the\n+   * expected value in a map.  If no value exists for the key, check that\n+   * a default value is given (if supplied) and that an\n+   * {@link IllegalArgumentException} is thrown if no default is supplied.\n+   */\n+  private <K, V> void checkGetOnlyForKey(\n+      K key,\n+      HashMap<K, Matcher<V>> matchers,\n+      CoGbkResult row,\n+      TupleTag<V> tag,\n+      V defaultValue) {\n+    if (matchers.containsKey(key)) {\n+      assertThat(row.getOnly(tag), matchers.get(key));\n+    } else {\n+      assertThat(row.getOnly(tag, defaultValue), equalTo(defaultValue));\n+      try {\n+        row.getOnly(tag);\n+        fail();\n+      } catch (IllegalArgumentException e) {\n+        // if no value exists, an IllegalArgumentException should be thrown\n+      }\n+\n+    }\n+  }\n+\n   /**\n    * Returns a PCollection<KV<Integer, CoGbkResult>> containing the\n    * results of the CoGbk over 3 PCollection<KV<Integer, String>>, each of",
+                "changes": 94
+            }
+        ],
+        "unit_tests": [
+            "CoGroupByKeyTest.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "sdk/src/test/java/com/google/cloud/dataflow/sdk/transforms/join/CoGroupByKeyTest.java",
+        "buggy_files": [
+            "sdk/src/main/java/com/google/cloud/dataflow/sdk/transforms/join/CoGbkResult.java",
+            "sdk/src/main/java/com/google/cloud/dataflow/sdk/transforms/join/CoGroupByKey.java"
+        ],
+        "fixed": true
+    }
+]

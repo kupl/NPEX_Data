@@ -1,0 +1,65 @@
+[
+    {
+        "repo": "calcite",
+        "commit": "https://github.com/apache/calcite/commit/2ac44153c4a521694c4dc975dd37b097184fc998",
+        "bug_id": "calcite_2ac4415",
+        "message": "[CALCITE-3420] NullPointerException throws for implicit type coercion of nested SET operations\n\nWe should update the nested SET operator node type when implicit type\ncoercion happens.\n\nThis bug fires when the non-first nested SET node triggers the\nimplicit type coercion.",
+        "parent": "https://github.com/apache/calcite/commit/3cbbafa941128dc5097c2a26711f5751f764e12d",
+        "patched_files": [
+            "AbstractTypeCoercion.java",
+            "TypeCoercionImpl.java",
+            "TypeCoercion.java"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 4,
+                "raw_url": "https://github.com/apache/calcite/raw/2ac44153c4a521694c4dc975dd37b097184fc998/core/src/main/java/org/apache/calcite/sql/validate/implicit/AbstractTypeCoercion.java",
+                "contents_url": "https://api.github.com/repos/apache/calcite/contents/core/src/main/java/org/apache/calcite/sql/validate/implicit/AbstractTypeCoercion.java?ref=2ac44153c4a521694c4dc975dd37b097184fc998",
+                "filename": "core/src/main/java/org/apache/calcite/sql/validate/implicit/AbstractTypeCoercion.java",
+                "deletions": 3,
+                "sha": "e963c581eaf2d309d1a8498c2c520ed1d348435e",
+                "blob_url": "https://github.com/apache/calcite/blob/2ac44153c4a521694c4dc975dd37b097184fc998/core/src/main/java/org/apache/calcite/sql/validate/implicit/AbstractTypeCoercion.java",
+                "patch": "@@ -297,22 +297,23 @@ protected void updateInferredType(SqlNode node, RelDataType type) {\n    * @param scope       validator scope\n    * @param query       node to inferred type\n    * @param columnIndex column index to update\n-   * @param targetType1 desired column type\n+   * @param desiredType desired column type\n    */\n   protected void updateInferredColumnType(\n       SqlValidatorScope scope,\n       SqlNode query,\n       int columnIndex,\n-      RelDataType targetType1) {\n+      RelDataType desiredType) {\n     final RelDataType rowType = validator.deriveType(scope, query);\n     assert rowType.isStruct();\n+    assert columnIndex < rowType.getFieldList().size();\n \n     final List<Map.Entry<String, RelDataType>> fieldList = new ArrayList<>();\n     for (int i = 0; i < rowType.getFieldCount(); i++) {\n       final RelDataTypeField field = rowType.getFieldList().get(i);\n       final String name = field.getName();\n       final RelDataType type = field.getType();\n-      final RelDataType targetType = i == columnIndex ? targetType1 : type;\n+      final RelDataType targetType = i == columnIndex ? desiredType : type;\n       fieldList.add(Pair.of(name, targetType));\n     }\n     updateInferredType(query, factory.createStructType(fieldList));",
+                "changes": 7
+            },
+            {
+                "status": "modified",
+                "additions": 9,
+                "raw_url": "https://github.com/apache/calcite/raw/2ac44153c4a521694c4dc975dd37b097184fc998/core/src/main/java/org/apache/calcite/sql/validate/implicit/TypeCoercionImpl.java",
+                "contents_url": "https://api.github.com/repos/apache/calcite/contents/core/src/main/java/org/apache/calcite/sql/validate/implicit/TypeCoercionImpl.java?ref=2ac44153c4a521694c4dc975dd37b097184fc998",
+                "filename": "core/src/main/java/org/apache/calcite/sql/validate/implicit/TypeCoercionImpl.java",
+                "deletions": 2,
+                "sha": "b5b438d144d049507d91f47a6711b5c738a9d7e8",
+                "blob_url": "https://github.com/apache/calcite/blob/2ac44153c4a521694c4dc975dd37b097184fc998/core/src/main/java/org/apache/calcite/sql/validate/implicit/TypeCoercionImpl.java",
+                "patch": "@@ -106,8 +106,15 @@ public boolean rowTypeCoercion(\n     case INTERSECT:\n     case EXCEPT:\n       // Set operations are binary for now.\n-      return rowTypeCoercion(scope, ((SqlCall) query).operand(0), columnIndex, targetType)\n-          && rowTypeCoercion(scope, ((SqlCall) query).operand(1), columnIndex, targetType);\n+      final SqlCall operand0 = ((SqlCall) query).operand(0);\n+      final SqlCall operand1 = ((SqlCall) query).operand(1);\n+      final boolean coerced = rowTypeCoercion(scope, operand0, columnIndex, targetType)\n+          && rowTypeCoercion(scope, operand1, columnIndex, targetType);\n+      // Update the nested SET operator node type.\n+      if (coerced) {\n+        updateInferredColumnType(scope, query, columnIndex, targetType);\n+      }\n+      return coerced;\n     default:\n       return false;\n     }",
+                "changes": 11
+            },
+            {
+                "status": "modified",
+                "additions": 11,
+                "raw_url": "https://github.com/apache/calcite/raw/2ac44153c4a521694c4dc975dd37b097184fc998/core/src/test/java/org/apache/calcite/test/TypeCoercionTest.java",
+                "contents_url": "https://api.github.com/repos/apache/calcite/contents/core/src/test/java/org/apache/calcite/test/TypeCoercionTest.java?ref=2ac44153c4a521694c4dc975dd37b097184fc998",
+                "filename": "core/src/test/java/org/apache/calcite/test/TypeCoercionTest.java",
+                "deletions": 0,
+                "sha": "25d29baa3d0cecd80a1f0336f84ad29197e40f40",
+                "blob_url": "https://github.com/apache/calcite/blob/2ac44153c4a521694c4dc975dd37b097184fc998/core/src/test/java/org/apache/calcite/test/TypeCoercionTest.java",
+                "patch": "@@ -473,6 +473,17 @@ assert equals(result1, expected)\n             + \" DECIMAL(19, 0) NOT NULL T1_DECIMAL,\"\n             + \" FLOAT NOT NULL T1_SMALLINT,\"\n             + \" DOUBLE NOT NULL T1_DOUBLE) NOT NULL\");\n+    // (int) union (int) union (varchar(20))\n+    sql(\"select t1_int from t1 \"\n+        + \"union select t2_int from t2 \"\n+        + \"union select t1_varchar20 from t1\")\n+        .columnType(\"VARCHAR NOT NULL\");\n+\n+    // (varchar(20)) union (int) union (int)\n+    sql(\"select t1_varchar20 from t1 \"\n+        + \"union select t2_int from t2 \"\n+        + \"union select t1_int from t1\")\n+        .columnType(\"VARCHAR NOT NULL\");\n \n     // intersect\n     sql(\"select t1_int, t1_decimal, t1_smallint, t1_double from t1 \"",
+                "changes": 11
+            }
+        ],
+        "unit_tests": [
+            "TypeCoercionTest.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "core/src/test/java/org/apache/calcite/test/TypeCoercionTest.java",
+        "buggy_files": [
+            "core/src/main/java/org/apache/calcite/sql/validate/implicit/AbstractTypeCoercion.java",
+            "core/src/main/java/org/apache/calcite/sql/validate/implicit/TypeCoercionImpl.java",
+            "core/src/main/java/org/apache/calcite/sql/validate/implicit/TypeCoercion.java"
+        ],
+        "fixed": true
+    }
+]

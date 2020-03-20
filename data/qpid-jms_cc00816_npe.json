@@ -1,0 +1,90 @@
+[
+    {
+        "repo": "qpid-jms",
+        "commit": "https://github.com/apache/qpid-jms/commit/cc00816c4d4cfca2bcc4f3ac71b86a0e1d53a36d",
+        "bug_id": "qpid-jms_cc00816",
+        "message": "QPIDJMS-307: avoid NPE during declare rejection, ensure the AMQP session is closed before JMS createSession throws, correct exception message.",
+        "parent": "https://github.com/apache/qpid-jms/commit/53d96e8a5162257894aaaf3951b4ce1d77e641ed",
+        "patched_files": [
+            "AmqpTransactionCoordinator.java",
+            "JmsSession.java"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 13,
+                "raw_url": "https://github.com/apache/qpid-jms/raw/cc00816c4d4cfca2bcc4f3ac71b86a0e1d53a36d/qpid-jms-client/src/main/java/org/apache/qpid/jms/JmsSession.java",
+                "contents_url": "https://api.github.com/repos/apache/qpid-jms/contents/qpid-jms-client/src/main/java/org/apache/qpid/jms/JmsSession.java?ref=cc00816c4d4cfca2bcc4f3ac71b86a0e1d53a36d",
+                "filename": "qpid-jms-client/src/main/java/org/apache/qpid/jms/JmsSession.java",
+                "deletions": 2,
+                "sha": "a821c187487ae9cddfd56f85c23c1212e68c00d4",
+                "blob_url": "https://github.com/apache/qpid-jms/blob/cc00816c4d4cfca2bcc4f3ac71b86a0e1d53a36d/qpid-jms-client/src/main/java/org/apache/qpid/jms/JmsSession.java",
+                "patch": "@@ -142,8 +142,19 @@ protected JmsSession(JmsConnection connection, JmsSessionId sessionId, int ackno\n \n         connection.createResource(sessionInfo);\n \n-        // We always keep an open TX so start now.\n-        getTransactionContext().begin();\n+        // We always keep an open TX if transacted so start now.\n+        try {\n+            getTransactionContext().begin();\n+        } catch (Exception e) {\n+            // failed, close the AMQP session before we throw\n+            try {\n+                connection.destroyResource(sessionInfo);\n+            } catch (Exception ex) {\n+                // Ignore, throw original error\n+            }\n+\n+            throw e;\n+        }\n \n         // Start the completion executor now as it's needed throughout the\n         // lifetime of the Session.",
+                "changes": 15
+            },
+            {
+                "status": "modified",
+                "additions": 2,
+                "raw_url": "https://github.com/apache/qpid-jms/raw/cc00816c4d4cfca2bcc4f3ac71b86a0e1d53a36d/qpid-jms-client/src/main/java/org/apache/qpid/jms/provider/amqp/AmqpTransactionCoordinator.java",
+                "contents_url": "https://api.github.com/repos/apache/qpid-jms/contents/qpid-jms-client/src/main/java/org/apache/qpid/jms/provider/amqp/AmqpTransactionCoordinator.java?ref=cc00816c4d4cfca2bcc4f3ac71b86a0e1d53a36d",
+                "filename": "qpid-jms-client/src/main/java/org/apache/qpid/jms/provider/amqp/AmqpTransactionCoordinator.java",
+                "deletions": 2,
+                "sha": "caf6921ee10e7aeaac76cc72ce3ea525175897d4",
+                "blob_url": "https://github.com/apache/qpid-jms/blob/cc00816c4d4cfca2bcc4f3ac71b86a0e1d53a36d/qpid-jms-client/src/main/java/org/apache/qpid/jms/provider/amqp/AmqpTransactionCoordinator.java",
+                "patch": "@@ -90,7 +90,7 @@ public void processDeliveryUpdates(AmqpProvider provider, Delivery delivery) thr\n                     Exception cause = AmqpSupport.convertToException(\n                         getParent().getProvider(), getEndpoint(), rejected.getError());\n                     JMSException failureCause = null;\n-                    if (txId.getProviderContext().equals(COMMIT_MARKER)) {\n+                    if (COMMIT_MARKER.equals(txId.getProviderContext())){\n                         failureCause = new TransactionRolledBackException(cause.getMessage());\n                     } else {\n                         failureCause = new JMSException(cause.getMessage());\n@@ -133,7 +133,7 @@ public void declare(JmsTransactionId txId, AsyncResult request) throws Exception\n         Declare declare = new Declare();\n         message.setBody(new AmqpValue(declare));\n \n-        ScheduledFuture<?> timeout = scheduleTimeoutIfNeeded(\"Timed out waiting for discharge of TX.\", request);\n+        ScheduledFuture<?> timeout = scheduleTimeoutIfNeeded(\"Timed out waiting for declare of TX.\", request);\n         OperationContext context = new OperationContext(txId, request, timeout);\n \n         Delivery delivery = getEndpoint().delivery(tagGenerator.getNextTag());",
+                "changes": 4
+            },
+            {
+                "status": "modified",
+                "additions": 2,
+                "raw_url": "https://github.com/apache/qpid-jms/raw/cc00816c4d4cfca2bcc4f3ac71b86a0e1d53a36d/qpid-jms-client/src/test/java/org/apache/qpid/jms/integration/ConnectionIntegrationTest.java",
+                "contents_url": "https://api.github.com/repos/apache/qpid-jms/contents/qpid-jms-client/src/test/java/org/apache/qpid/jms/integration/ConnectionIntegrationTest.java?ref=cc00816c4d4cfca2bcc4f3ac71b86a0e1d53a36d",
+                "filename": "qpid-jms-client/src/test/java/org/apache/qpid/jms/integration/ConnectionIntegrationTest.java",
+                "deletions": 0,
+                "sha": "3e12fd9851dcfa035b8968eebc31daebe71d7b79",
+                "blob_url": "https://github.com/apache/qpid-jms/blob/cc00816c4d4cfca2bcc4f3ac71b86a0e1d53a36d/qpid-jms-client/src/test/java/org/apache/qpid/jms/integration/ConnectionIntegrationTest.java",
+                "patch": "@@ -258,6 +258,8 @@ public void testCreateTransactedSessionFailsWhenNoDetachResponseSent() throws Ex\n             txCoordinatorMatcher.withCapabilities(arrayContaining(TxnCapability.LOCAL_TXN));\n             testPeer.expectSenderAttach(notNullValue(), txCoordinatorMatcher, true, true, false, 0, null, null);\n             testPeer.expectDetach(true, false, false);\n+            // Expect the AMQP session to be closed due to the JMS session creation failure.\n+            testPeer.expectEnd();\n \n             try {\n                 connection.createSession(true, Session.SESSION_TRANSACTED);",
+                "changes": 2
+            },
+            {
+                "status": "modified",
+                "additions": 63,
+                "raw_url": "https://github.com/apache/qpid-jms/raw/cc00816c4d4cfca2bcc4f3ac71b86a0e1d53a36d/qpid-jms-client/src/test/java/org/apache/qpid/jms/integration/TransactionsIntegrationTest.java",
+                "contents_url": "https://api.github.com/repos/apache/qpid-jms/contents/qpid-jms-client/src/test/java/org/apache/qpid/jms/integration/TransactionsIntegrationTest.java?ref=cc00816c4d4cfca2bcc4f3ac71b86a0e1d53a36d",
+                "filename": "qpid-jms-client/src/test/java/org/apache/qpid/jms/integration/TransactionsIntegrationTest.java",
+                "deletions": 0,
+                "sha": "d026b2cdca071374906a51ac3904dc4c1aaf8869",
+                "blob_url": "https://github.com/apache/qpid-jms/blob/cc00816c4d4cfca2bcc4f3ac71b86a0e1d53a36d/qpid-jms-client/src/test/java/org/apache/qpid/jms/integration/TransactionsIntegrationTest.java",
+                "patch": "@@ -52,6 +52,7 @@\n import org.apache.qpid.jms.policy.JmsDefaultPrefetchPolicy;\n import org.apache.qpid.jms.test.QpidJmsTestCase;\n import org.apache.qpid.jms.test.testpeer.TestAmqpPeer;\n+import org.apache.qpid.jms.test.testpeer.basictypes.AmqpError;\n import org.apache.qpid.jms.test.testpeer.describedtypes.Accepted;\n import org.apache.qpid.jms.test.testpeer.describedtypes.Declare;\n import org.apache.qpid.jms.test.testpeer.describedtypes.Declared;\n@@ -1251,6 +1252,8 @@ public void testSessionCreateFailsOnDeclareTimeout() throws Exception {\n             testPeer.expectBegin();\n             testPeer.expectCoordinatorAttach();\n             testPeer.expectDeclareButDoNotRespond();\n+            // Expect the AMQP session to be closed due to the JMS session creation failure.\n+            testPeer.expectEnd();\n \n             try {\n                 connection.createSession(true, Session.SESSION_TRANSACTED);\n@@ -1268,6 +1271,66 @@ public void testSessionCreateFailsOnDeclareTimeout() throws Exception {\n         }\n     }\n \n+    @Test(timeout=20000)\n+    public void testSessionCreateFailsOnDeclareRejection() throws Exception {\n+        try (TestAmqpPeer testPeer = new TestAmqpPeer();) {\n+            Connection connection = testFixture.establishConnecton(testPeer);\n+            connection.start();\n+\n+            testPeer.expectBegin();\n+            testPeer.expectCoordinatorAttach();\n+\n+            // First expect an unsettled 'declare' transfer to the txn coordinator, and\n+            // reply with a Rejected disposition state to indicate failure.\n+            testPeer.expectDeclareAndReject();\n+            // Expect the AMQP session to be closed due to the JMS session creation failure.\n+            testPeer.expectEnd();\n+\n+            try {\n+                connection.createSession(true, Session.SESSION_TRANSACTED);\n+                fail(\"should have thrown\");\n+            } catch (JMSException jmse) {\n+                // Expected\n+            }\n+\n+            testPeer.expectClose();\n+            connection.close();\n+\n+            testPeer.waitForAllHandlersToComplete(1000);\n+        }\n+    }\n+\n+    @Test(timeout=20000)\n+    public void testSessionCreateFailsOnCoordinatorLinkRefusal() throws Exception {\n+        try (TestAmqpPeer testPeer = new TestAmqpPeer();) {\n+            Connection connection = testFixture.establishConnecton(testPeer);\n+            connection.start();\n+\n+            testPeer.expectBegin();\n+\n+            // Expect coordinator link, refuse it, expect detach reply\n+            String errorMessage = \"CoordinatorLinkRefusal-breadcrumb\";\n+            testPeer.expectCoordinatorAttach(true, false, AmqpError.NOT_IMPLEMENTED, errorMessage);\n+            testPeer.expectDetach(true, false, false);\n+\n+            // Expect the AMQP session to be closed due to the JMS session creation failure.\n+            testPeer.expectEnd();\n+\n+            try {\n+                connection.createSession(true, Session.SESSION_TRANSACTED);\n+                fail(\"should have thrown\");\n+            } catch (JMSException jmse) {\n+                assertNotNull(jmse.getMessage());\n+                assertTrue(\"Expected exception message to contain breadcrumb\", jmse.getMessage().contains(errorMessage));\n+            }\n+\n+            testPeer.expectClose();\n+            connection.close();\n+\n+            testPeer.waitForAllHandlersToComplete(1000);\n+        }\n+    }\n+\n     @Test(timeout=20000)\n     public void testTransactionRolledBackOnSessionCloseTimesOut() throws Exception {\n         try (TestAmqpPeer testPeer = new TestAmqpPeer();) {",
+                "changes": 63
+            },
+            {
+                "status": "modified",
+                "additions": 9,
+                "raw_url": "https://github.com/apache/qpid-jms/raw/cc00816c4d4cfca2bcc4f3ac71b86a0e1d53a36d/qpid-jms-client/src/test/java/org/apache/qpid/jms/test/testpeer/TestAmqpPeer.java",
+                "contents_url": "https://api.github.com/repos/apache/qpid-jms/contents/qpid-jms-client/src/test/java/org/apache/qpid/jms/test/testpeer/TestAmqpPeer.java?ref=cc00816c4d4cfca2bcc4f3ac71b86a0e1d53a36d",
+                "filename": "qpid-jms-client/src/test/java/org/apache/qpid/jms/test/testpeer/TestAmqpPeer.java",
+                "deletions": 0,
+                "sha": "2e2c9af3541b058f0303d7a289674b06795aeef6",
+                "blob_url": "https://github.com/apache/qpid-jms/blob/cc00816c4d4cfca2bcc4f3ac71b86a0e1d53a36d/qpid-jms-client/src/test/java/org/apache/qpid/jms/test/testpeer/TestAmqpPeer.java",
+                "patch": "@@ -78,6 +78,7 @@\n import org.apache.qpid.jms.test.testpeer.describedtypes.FlowFrame;\n import org.apache.qpid.jms.test.testpeer.describedtypes.FrameDescriptorMapping;\n import org.apache.qpid.jms.test.testpeer.describedtypes.OpenFrame;\n+import org.apache.qpid.jms.test.testpeer.describedtypes.Rejected;\n import org.apache.qpid.jms.test.testpeer.describedtypes.Released;\n import org.apache.qpid.jms.test.testpeer.describedtypes.SaslChallengeFrame;\n import org.apache.qpid.jms.test.testpeer.describedtypes.SaslMechanismsFrame;\n@@ -2082,6 +2083,14 @@ public void expectDeclareButDoNotRespond()\n         expectTransfer(declareMatcher, nullValue(), false, false, null, false);\n     }\n \n+    public void expectDeclareAndReject()\n+    {\n+        TransferPayloadCompositeMatcher declareMatcher = new TransferPayloadCompositeMatcher();\n+        declareMatcher.setMessageContentMatcher(new EncodedAmqpValueMatcher(new Declare()));\n+\n+        expectTransfer(declareMatcher, nullValue(), false, new Rejected(), true);\n+    }\n+\n     public void expectDischarge(Binary txnId, boolean dischargeState) {\n         expectDischarge(txnId, dischargeState, new Accepted());\n     }",
+                "changes": 9
+            }
+        ],
+        "unit_tests": [
+            "ConnectionIntegrationTest.java",
+            "TestAmqpPeer.java",
+            "TransactionsIntegrationTest.java",
+            "JmsSessionTest.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "qpid-jms-client/src/test/java/org/apache/qpid/jms/integration/ConnectionIntegrationTest.java",
+        "buggy_files": [
+            "qpid-jms-client/src/main/java/org/apache/qpid/jms/provider/amqp/AmqpTransactionCoordinator.java",
+            "qpid-jms-client/src/main/java/org/apache/qpid/jms/JmsSession.java"
+        ],
+        "fixed": true
+    }
+]

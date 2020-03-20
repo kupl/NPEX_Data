@@ -202,12 +202,11 @@
         "parent": "https://github.com/apache/openwebbeans/commit/711860eb9f22abd3113fc9767b4392be057b97e7",
         "patched_files": [
             "GenericsUtil.java",
-            "BeanManagerImpl.java"
+            "testng-dev.xml"
         ],
         "repo": "openwebbeans",
         "unit_tests": [
-            "GenericsUtilTest.java",
-            "testng-dev.java"
+            "GenericsUtilTest.java"
         ]
     },
     "openwebbeans_82d296b": {
@@ -306,65 +305,13 @@
         "message": "avoid NPE in InstanceImpl\n\ngit-svn-id: https://svn.apache.org/repos/asf/openwebbeans/trunk@1631174 13f79535-47bb-0310-9956-ffa450edef68",
         "parent": "https://github.com/apache/openwebbeans/commit/472e160a8d0b5594493ee3686d859d8bc7046249",
         "patched_files": [
-            "OwbCDIProvider.java",
+            "InstanceImpl.java",
             "OwbCDI.java",
-            "InstanceImpl.java"
+            "OwbCDIProvider.java"
         ],
         "repo": "openwebbeans",
         "unit_tests": [
             "OwbCDIProviderTest.java"
-        ]
-    },
-    "openwebbeans_8cf7757": {
-        "bug_id": "openwebbeans_8cf7757",
-        "commit": "https://github.com/apache/openwebbeans/commit/8cf77573f002e37f98cb4eff247cd826c3665b9d",
-        "file": [
-            {
-                "additions": 0,
-                "blob_url": "https://github.com/apache/openwebbeans/blob/8cf77573f002e37f98cb4eff247cd826c3665b9d/webbeans-impl/src/main/java/org/apache/webbeans/event/EventMetadataImpl.java",
-                "changes": 5,
-                "contents_url": "https://api.github.com/repos/apache/openwebbeans/contents/webbeans-impl/src/main/java/org/apache/webbeans/event/EventMetadataImpl.java?ref=8cf77573f002e37f98cb4eff247cd826c3665b9d",
-                "deletions": 5,
-                "filename": "webbeans-impl/src/main/java/org/apache/webbeans/event/EventMetadataImpl.java",
-                "patch": "@@ -34,7 +34,6 @@\n import org.apache.webbeans.annotation.AnyLiteral;\n import org.apache.webbeans.config.WebBeansContext;\n import org.apache.webbeans.util.ArrayUtil;\n-import org.apache.webbeans.util.GenericsUtil;\n \n public class EventMetadataImpl implements EventMetadata, Serializable\n {\n@@ -47,10 +46,6 @@\n     \n     public EventMetadataImpl(Type type, InjectionPoint injectionPoint, Annotation[] qualifiers, WebBeansContext context)\n     {\n-        if (GenericsUtil.containsTypeVariable(type))\n-        {\n-            throw new IllegalArgumentException(\"event type may not contain type variable: \" + type);\n-        }\n         context.getAnnotationManager().checkQualifierConditions(qualifiers);\n         this.type = type;\n         this.injectionPoint = injectionPoint;",
-                "raw_url": "https://github.com/apache/openwebbeans/raw/8cf77573f002e37f98cb4eff247cd826c3665b9d/webbeans-impl/src/main/java/org/apache/webbeans/event/EventMetadataImpl.java",
-                "sha": "71ec255fa3de89227458d4f3d421ac02c5c47f27",
-                "status": "modified"
-            },
-            {
-                "additions": 5,
-                "blob_url": "https://github.com/apache/openwebbeans/blob/8cf77573f002e37f98cb4eff247cd826c3665b9d/webbeans-impl/src/main/java/org/apache/webbeans/inject/instance/InstanceImpl.java",
-                "changes": 18,
-                "contents_url": "https://api.github.com/repos/apache/openwebbeans/contents/webbeans-impl/src/main/java/org/apache/webbeans/inject/instance/InstanceImpl.java?ref=8cf77573f002e37f98cb4eff247cd826c3665b9d",
-                "deletions": 13,
-                "filename": "webbeans-impl/src/main/java/org/apache/webbeans/inject/instance/InstanceImpl.java",
-                "patch": "@@ -25,14 +25,13 @@\n import java.lang.annotation.Annotation;\n import java.lang.reflect.Type;\n import java.util.ArrayList;\n-import java.util.HashMap;\n import java.util.HashSet;\n+import java.util.IdentityHashMap;\n import java.util.Iterator;\n import java.util.List;\n import java.util.Map;\n import java.util.Set;\n \n-import javax.enterprise.context.Dependent;\n import javax.enterprise.context.spi.AlterableContext;\n import javax.enterprise.context.spi.Context;\n import javax.enterprise.context.spi.CreationalContext;\n@@ -124,16 +123,8 @@ public T get()\n             InjectionExceptionUtil.throwUnsatisfiedResolutionException(ClassUtil.getClazz(injectionClazz), injectionPoint, anns);\n         }\n \n-        // since Instance<T> is Dependent, we we gonna use the parent CreationalContext by default\n-        CreationalContextImpl<?> creationalContext = beanManager.createCreationalContext(parentCreationalContext.getContextual());\n+        CreationalContextImpl<?> creationalContext = beanManager.createCreationalContext(bean);\n \n-        boolean isDependentBean = WebBeansUtil.isDependent(bean);\n-\n-        if (!isDependentBean)\n-        {\n-            // but for all NormalScoped beans we will need to create a fresh CreationalContext\n-            creationalContext = beanManager.createCreationalContext(bean);\n-        }\n         if (!(creationalContext instanceof CreationalContextImpl))\n         {\n             creationalContext = webBeansContext.getCreationalContextFactory().wrappedCreationalContext(creationalContext, bean);\n@@ -145,10 +136,10 @@ public T get()\n             final T reference = (T) beanManager.getReference(bean, injectionClazz, creationalContext);\n             if (creationalContexts == null)\n             {\n-                creationalContexts = new HashMap<Object, CreationalContextImpl<?>>();\n+                creationalContexts = new IdentityHashMap<Object, CreationalContextImpl<?>>();\n             }\n             creationalContexts.put(reference, creationalContext);\n-            if (Dependent.class == bean.getScope())\n+            if (WebBeansUtil.isDependent(bean))\n             {\n                 parentCreationalContext.addDependent(bean, reference);\n             }\n@@ -348,6 +339,7 @@ private void readObject(java.io.ObjectInputStream in) throws IOException, ClassN\n         injectionClazz = (Type)inputStream.readObject();\n         qualifierAnnotations = (Set<Annotation>)inputStream.readObject();\n         injectionPoint = (InjectionPoint) inputStream.readObject();\n+        parentCreationalContext = webBeansContext.getBeanManagerImpl().createCreationalContext(null); // TODO: check what we can do\n     }\n     \n     public String toString()",
-                "raw_url": "https://github.com/apache/openwebbeans/raw/8cf77573f002e37f98cb4eff247cd826c3665b9d/webbeans-impl/src/main/java/org/apache/webbeans/inject/instance/InstanceImpl.java",
-                "sha": "030c6afe56c50936db680a70c7164992802e5c53",
-                "status": "modified"
-            },
-            {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/openwebbeans/blob/8cf77573f002e37f98cb4eff247cd826c3665b9d/webbeans-tck/testng-dev.xml",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/openwebbeans/contents/webbeans-tck/testng-dev.xml?ref=8cf77573f002e37f98cb4eff247cd826c3665b9d",
-                "deletions": 1,
-                "filename": "webbeans-tck/testng-dev.xml",
-                "patch": "@@ -19,7 +19,7 @@\n   <test name=\"JSR-346 TCK\">\n     <classes>\n       <class\n-          name=\"org.jboss.cdi.tck.tests.lookup.dynamic.destroy.dependent.DestroyingDependentInstanceTest\" />\n+          name=\"org.jboss.cdi.tck.tests.lookup.dynamic.builtin.BuiltinInstanceTest\" />\n     </classes>\n     <groups>\n       <run>",
-                "raw_url": "https://github.com/apache/openwebbeans/raw/8cf77573f002e37f98cb4eff247cd826c3665b9d/webbeans-tck/testng-dev.xml",
-                "sha": "9c52b726d6a60cd38c432c38b2c1c08fc81b0495",
-                "status": "modified"
-            }
-        ],
-        "message": "avoid NPE in Instance + removing constraint on Event types since it was too restrictive\n\ngit-svn-id: https://svn.apache.org/repos/asf/openwebbeans/trunk@1606580 13f79535-47bb-0310-9956-ffa450edef68",
-        "parent": "https://github.com/apache/openwebbeans/commit/c19d2cd3d366d347ea9fa289e2894b73de979dbb",
-        "patched_files": [
-            "EventMetadataImpl.java",
-            "InstanceImpl.java"
-        ],
-        "repo": "openwebbeans",
-        "unit_tests": [
-            "testng-dev.java"
         ]
     }
 }

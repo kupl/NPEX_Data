@@ -1,0 +1,51 @@
+[
+    {
+        "repo": "jackrabbit-oak",
+        "commit": "https://github.com/apache/jackrabbit-oak/commit/c8000c14cfaaecc183bfee8773552ef0837a52ef",
+        "bug_id": "jackrabbit-oak_c8000c1",
+        "message": "OAK-1173 : NPE if TreePermissionImpl if tree does not have a primary type\n\n\ngit-svn-id: https://svn.apache.org/repos/asf/jackrabbit/oak/trunk@1541452 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/jackrabbit-oak/commit/c9c85507704868cbb37287b26b4ebada1d938e34",
+        "patched_files": [
+            "CompiledPermissionImpl.java",
+            "VersionStorage.java"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 4,
+                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/c8000c14cfaaecc183bfee8773552ef0837a52ef/oak-core/src/main/java/org/apache/jackrabbit/oak/security/authorization/permission/CompiledPermissionImpl.java",
+                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-core/src/main/java/org/apache/jackrabbit/oak/security/authorization/permission/CompiledPermissionImpl.java?ref=c8000c14cfaaecc183bfee8773552ef0837a52ef",
+                "filename": "oak-core/src/main/java/org/apache/jackrabbit/oak/security/authorization/permission/CompiledPermissionImpl.java",
+                "deletions": 1,
+                "sha": "c9d0fa0f2ba2827102371d98523457657859ce5c",
+                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/c8000c14cfaaecc183bfee8773552ef0837a52ef/oak-core/src/main/java/org/apache/jackrabbit/oak/security/authorization/permission/CompiledPermissionImpl.java",
+                "patch": "@@ -157,7 +157,10 @@ public TreePermission getTreePermission(@Nonnull ImmutableTree tree, @Nonnull Tr\n                 // TODO: OAK-753 decide on where to filter out hidden items.\n                 return TreePermission.ALL;\n             case TreeTypeProvider.TYPE_VERSION:\n-                String ntName = checkNotNull(TreeUtil.getPrimaryTypeName(tree));\n+                String ntName = TreeUtil.getPrimaryTypeName(tree);\n+                if (ntName == null) {\n+                    return TreePermission.EMPTY;\n+                }\n                 if (VersionConstants.VERSION_STORE_NT_NAMES.contains(ntName) || VersionConstants.NT_ACTIVITY.equals(ntName)) {\n                     return new TreePermissionImpl(tree, TreeTypeProvider.TYPE_VERSION, parentPermission);\n                 } else {",
+                "changes": 5
+            },
+            {
+                "status": "added",
+                "additions": 148,
+                "raw_url": "https://github.com/apache/jackrabbit-oak/raw/c8000c14cfaaecc183bfee8773552ef0837a52ef/oak-core/src/test/java/org/apache/jackrabbit/oak/security/authorization/evaluation/VersionStorageTest.java",
+                "contents_url": "https://api.github.com/repos/apache/jackrabbit-oak/contents/oak-core/src/test/java/org/apache/jackrabbit/oak/security/authorization/evaluation/VersionStorageTest.java?ref=c8000c14cfaaecc183bfee8773552ef0837a52ef",
+                "filename": "oak-core/src/test/java/org/apache/jackrabbit/oak/security/authorization/evaluation/VersionStorageTest.java",
+                "deletions": 0,
+                "sha": "b5916a1bc15f1593df3e6126dedae3ff9178f6db",
+                "blob_url": "https://github.com/apache/jackrabbit-oak/blob/c8000c14cfaaecc183bfee8773552ef0837a52ef/oak-core/src/test/java/org/apache/jackrabbit/oak/security/authorization/evaluation/VersionStorageTest.java",
+                "patch": "@@ -0,0 +1,148 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one or more\n+ * contributor license agreements.  See the NOTICE file distributed with\n+ * this work for additional information regarding copyright ownership.\n+ * The ASF licenses this file to You under the Apache License, Version 2.0\n+ * (the \"License\"); you may not use this file except in compliance with\n+ * the License.  You may obtain a copy of the License at\n+ *\n+ *      http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing, software\n+ * distributed under the License is distributed on an \"AS IS\" BASIS,\n+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n+ * See the License for the specific language governing permissions and\n+ * limitations under the License.\n+ */\n+package org.apache.jackrabbit.oak.security.authorization.evaluation;\n+\n+import javax.annotation.Nonnull;\n+import javax.jcr.security.AccessControlEntry;\n+import javax.jcr.security.AccessControlManager;\n+\n+import org.apache.jackrabbit.JcrConstants;\n+import org.apache.jackrabbit.api.security.JackrabbitAccessControlList;\n+import org.apache.jackrabbit.commons.jackrabbit.authorization.AccessControlUtils;\n+import org.apache.jackrabbit.oak.Oak;\n+import org.apache.jackrabbit.oak.api.Root;\n+import org.apache.jackrabbit.oak.api.Tree;\n+import org.apache.jackrabbit.oak.plugins.nodetype.ReadOnlyNodeTypeManager;\n+import org.apache.jackrabbit.oak.plugins.version.ReadOnlyVersionManager;\n+import org.apache.jackrabbit.oak.plugins.version.VersionConstants;\n+import org.apache.jackrabbit.oak.plugins.version.VersionEditorProvider;\n+import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeConstants;\n+import org.apache.jackrabbit.oak.util.TreeUtil;\n+import org.junit.Test;\n+\n+import static org.apache.jackrabbit.oak.plugins.nodetype.NodeTypeConstants.NODE_TYPES_PATH;\n+import static org.junit.Assert.assertFalse;\n+import static org.junit.Assert.assertNotNull;\n+import static org.junit.Assert.assertTrue;\n+\n+/**\n+ * Tests related to permission evaluation within the version storage.\n+ */\n+public class VersionStorageTest extends AbstractOakCoreTest {\n+\n+    private String vhPath;\n+\n+    @Override\n+    public void before() throws Exception {\n+        super.before();\n+\n+        // make sure the version storage has been setup\n+        Tree a = root.getTree(\"/a\");\n+        TreeUtil.addMixin(a, JcrConstants.MIX_VERSIONABLE, root.getTree(NODE_TYPES_PATH), adminSession.getAuthInfo().getUserID());\n+        root.commit();\n+\n+        Tree vs = root.getTree(VersionConstants.VERSION_STORE_PATH);\n+        assertTrue(vs.exists());\n+        String vhUUID = TreeUtil.getString(a, VersionConstants.JCR_VERSIONHISTORY);\n+        assertNotNull(vhUUID);\n+\n+        String versionableUuid = TreeUtil.getString(a, JcrConstants.JCR_UUID);\n+        vhPath = getVersionHistoryPath(versionableUuid, vs);\n+    }\n+\n+    private String getVersionHistoryPath(String vUUID, final Tree vs) {\n+        ReadOnlyVersionManager vMgr = new ReadOnlyVersionManager() {\n+            @Nonnull\n+            @Override\n+            protected Tree getVersionStorage() {\n+                return vs;\n+            }\n+\n+            @Nonnull\n+            @Override\n+            protected Root getWorkspaceRoot() {\n+                return root;\n+            }\n+\n+            @Nonnull\n+            @Override\n+            protected ReadOnlyNodeTypeManager getNodeTypeManager() {\n+                throw new UnsupportedOperationException();\n+            }\n+        };\n+        return VersionConstants.VERSION_STORE_PATH + '/' + vMgr.getVersionHistoryPath(vUUID);\n+    }\n+\n+    @Override\n+    public void after() throws Exception {\n+        AccessControlManager acMgr = getAccessControlManager(root);\n+        JackrabbitAccessControlList acl = AccessControlUtils.getAccessControlList(acMgr, \"/\");\n+        for (AccessControlEntry ace : acl.getAccessControlEntries()) {\n+            if (testPrincipal.equals(ace.getPrincipal())) {\n+                acl.removeAccessControlEntry(ace);\n+            }\n+        }\n+        acMgr.setPolicy(\"/\", acl);\n+        root.commit();\n+    }\n+\n+    @Override\n+    protected Oak withEditors(Oak oak) {\n+        return oak.with(new VersionEditorProvider());\n+    }\n+\n+    @Test\n+    public void testGetVersionStorage() throws Exception {\n+        Tree vs = getTestRoot().getTree(VersionConstants.VERSION_STORE_PATH);\n+        assertFalse(vs.exists());\n+    }\n+\n+    @Test\n+    public void testGetVersionStorage2() throws Exception {\n+        setupPermission(\"/\", testPrincipal, true, PrivilegeConstants.JCR_READ);\n+\n+        Tree vs = getTestRoot().getTree(VersionConstants.VERSION_STORE_PATH);\n+        assertTrue(vs.exists());\n+    }\n+\n+    @Test\n+    public void testGetVersionHistory() throws Exception {\n+        Tree vs = getTestRoot().getTree(vhPath);\n+        assertFalse(vs.exists());\n+    }\n+\n+    @Test\n+    public void testGetVersionHistory2() throws Exception {\n+        setupPermission(\"/\", testPrincipal, true, PrivilegeConstants.JCR_READ);\n+\n+        Tree vs = getTestRoot().getTree(vhPath);\n+        assertTrue(vs.exists());\n+    }\n+\n+    @Test\n+    public void testGetChildrenCountOnVersionStorage() throws Exception {\n+        Tree vs = getTestRoot().getTree(VersionConstants.VERSION_STORE_PATH);\n+        vs.getChildrenCount(Long.MAX_VALUE);\n+    }\n+\n+    @Test\n+    public void testGetChildrenCountOnVersionStorage2() throws Exception {\n+        setupPermission(\"/\", testPrincipal, true, PrivilegeConstants.JCR_READ);\n+        Tree vs = getTestRoot().getTree(VersionConstants.VERSION_STORE_PATH);\n+        vs.getChildrenCount(Long.MAX_VALUE);\n+    }\n+}\n\\ No newline at end of file",
+                "changes": 148
+            }
+        ],
+        "unit_tests": [
+            "VersionStorageTest.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "oak-core/src/test/java/org/apache/jackrabbit/oak/security/authorization/evaluation/VersionStorageTest.java",
+        "buggy_files": [
+            "oak-core/src/main/java/org/apache/jackrabbit/oak/security/authorization/permission/CompiledPermissionImpl.java",
+            "oak-jcr/src/main/java/org/apache/jackrabbit/oak/jcr/version/VersionStorage.java"
+        ],
+        "fixed": true
+    }
+]

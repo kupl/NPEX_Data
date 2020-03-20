@@ -1,0 +1,164 @@
+[
+    {
+        "repo": "hbase",
+        "commit": "https://github.com/apache/hbase/commit/6b2437de2ccc19fa383442f81b9096c81b2c8bb5",
+        "bug_id": "hbase_6b2437d",
+        "message": "HBASE-10739 RS web UI NPE if master shuts down sooner\n\ngit-svn-id: https://svn.apache.org/repos/asf/hbase/trunk@1577415 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/hbase/commit/1160171e645da5e18391523f76d2c673ba98a97f",
+        "patched_files": [
+            "HMaster.java",
+            "MasterAddressTracker.java",
+            "BackupMasterStatusTmpl.jamon",
+            "SplitLogManager.java",
+            "MasterStatusServlet.java",
+            "HRegionServer.java",
+            "RSStatusTmpl.jamon",
+            "RSStatusServlet.java"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/hbase/raw/6b2437de2ccc19fa383442f81b9096c81b2c8bb5/hbase-server/src/main/jamon/org/apache/hadoop/hbase/tmpl/master/BackupMasterStatusTmpl.jamon",
+                "contents_url": "https://api.github.com/repos/apache/hbase/contents/hbase-server/src/main/jamon/org/apache/hadoop/hbase/tmpl/master/BackupMasterStatusTmpl.jamon?ref=6b2437de2ccc19fa383442f81b9096c81b2c8bb5",
+                "filename": "hbase-server/src/main/jamon/org/apache/hadoop/hbase/tmpl/master/BackupMasterStatusTmpl.jamon",
+                "deletions": 1,
+                "sha": "e6c86136ceaeaf1723d40d6ee57ce3513f2a6293",
+                "blob_url": "https://github.com/apache/hbase/blob/6b2437de2ccc19fa383442f81b9096c81b2c8bb5/hbase-server/src/main/jamon/org/apache/hadoop/hbase/tmpl/master/BackupMasterStatusTmpl.jamon",
+                "patch": "@@ -32,7 +32,7 @@ if (master.isActiveMaster()) {\n   ClusterStatus status = master.getClusterStatus();\n   masters = status.getBackupMasters();\n } else{\n-  ServerName sn = master.getMasterAddressManager().getMasterAddress();\n+  ServerName sn = master.getMasterAddressTracker().getMasterAddress();\n   assert sn != null : \"Failed to retreive master's ServerName!\";\n   masters = Collections.singletonList(sn);\n }",
+                "changes": 2
+            },
+            {
+                "status": "modified",
+                "additions": 7,
+                "raw_url": "https://github.com/apache/hbase/raw/6b2437de2ccc19fa383442f81b9096c81b2c8bb5/hbase-server/src/main/jamon/org/apache/hadoop/hbase/tmpl/regionserver/RSStatusTmpl.jamon",
+                "contents_url": "https://api.github.com/repos/apache/hbase/contents/hbase-server/src/main/jamon/org/apache/hadoop/hbase/tmpl/regionserver/RSStatusTmpl.jamon?ref=6b2437de2ccc19fa383442f81b9096c81b2c8bb5",
+                "filename": "hbase-server/src/main/jamon/org/apache/hadoop/hbase/tmpl/regionserver/RSStatusTmpl.jamon",
+                "deletions": 3,
+                "sha": "1efb0b011e5b9e0f3e683211428cae6e60affb15",
+                "blob_url": "https://github.com/apache/hbase/blob/6b2437de2ccc19fa383442f81b9096c81b2c8bb5/hbase-server/src/main/jamon/org/apache/hadoop/hbase/tmpl/regionserver/RSStatusTmpl.jamon",
+                "patch": "@@ -24,13 +24,12 @@ String format = \"html\";\n <%import>\n java.util.*;\n org.apache.hadoop.hbase.regionserver.HRegionServer;\n-org.apache.hadoop.hbase.util.Bytes;\n org.apache.hadoop.hbase.HRegionInfo;\n org.apache.hadoop.hbase.ServerName;\n org.apache.hadoop.hbase.HBaseConfiguration;\n org.apache.hadoop.hbase.protobuf.ProtobufUtil;\n org.apache.hadoop.hbase.protobuf.generated.AdminProtos.ServerInfo;\n-org.apache.hadoop.hbase.protobuf.generated.ClusterStatusProtos.RegionLoad;\n+org.apache.hadoop.hbase.zookeeper.MasterAddressTracker;\n </%import>\n <%if format.equals(\"json\") %>\n   <& ../common/TaskMonitorTmpl; filter = filter; format = \"json\" &>\n@@ -41,6 +40,9 @@ org.apache.hadoop.hbase.protobuf.generated.ClusterStatusProtos.RegionLoad;\n   ServerName serverName = ProtobufUtil.toServerName(serverInfo.getServerName());\n   List<HRegionInfo> onlineRegions = ProtobufUtil.getOnlineRegions(regionServer);\n   int masterInfoPort = regionServer.getConfiguration().getInt(\"hbase.master.info.port\", 16010);\n+  MasterAddressTracker masterAddressTracker = regionServer.getMasterAddressTracker();\n+  ServerName masterServerName = masterAddressTracker == null ? null\n+    : masterAddressTracker.getMasterAddress();\n </%java>\n <!--[if IE]>\n <!DOCTYPE html>\n@@ -146,9 +148,11 @@ org.apache.hadoop.hbase.protobuf.generated.ClusterStatusProtos.RegionLoad;\n             <td>\n                 <%if (masterInfoPort < 0) %>\n                 No hbase.master.info.port found\n+                <%elseif masterServerName == null %>\n+                No master found\n                 <%else>\n                 <%java>\n-                String host = regionServer.getMasterAddressManager().getMasterAddress().getHostname() + \":\" + masterInfoPort;\n+                String host = masterServerName.getHostname() + \":\" + masterInfoPort;\n                 String url = \"//\" + host + \"/\";\n                 </%java>\n                 <a href=\"<% url %>\"><% host %></a>",
+                "changes": 10
+            },
+            {
+                "status": "modified",
+                "additions": 6,
+                "raw_url": "https://github.com/apache/hbase/raw/6b2437de2ccc19fa383442f81b9096c81b2c8bb5/hbase-server/src/main/java/org/apache/hadoop/hbase/master/HMaster.java",
+                "contents_url": "https://api.github.com/repos/apache/hbase/contents/hbase-server/src/main/java/org/apache/hadoop/hbase/master/HMaster.java?ref=6b2437de2ccc19fa383442f81b9096c81b2c8bb5",
+                "filename": "hbase-server/src/main/java/org/apache/hadoop/hbase/master/HMaster.java",
+                "deletions": 6,
+                "sha": "a3f873f4d638622e0da7c9f5be781cac1cebc14b",
+                "blob_url": "https://github.com/apache/hbase/blob/6b2437de2ccc19fa383442f81b9096c81b2c8bb5/hbase-server/src/main/java/org/apache/hadoop/hbase/master/HMaster.java",
+                "patch": "@@ -294,8 +294,8 @@\n   private DrainingServerTracker drainingServerTracker;\n   // Tracker for load balancer state\n   private LoadBalancerTracker loadBalancerTracker;\n-  // master address manager and watcher\n-  private MasterAddressTracker masterAddressManager;\n+  // master address tracker\n+  private MasterAddressTracker masterAddressTracker;\n \n   // RPC server for the HMaster\n   private final RpcServerInterface rpcServer;\n@@ -586,8 +586,8 @@ public void run() {\n     startupStatus.setDescription(\"Master startup\");\n     masterStartTime = System.currentTimeMillis();\n     try {\n-      this.masterAddressManager = new MasterAddressTracker(getZooKeeperWatcher(), this);\n-      this.masterAddressManager.start();\n+      this.masterAddressTracker = new MasterAddressTracker(getZooKeeperWatcher(), this);\n+      this.masterAddressTracker.start();\n \n       // Put up info server.\n       int port = this.conf.getInt(\"hbase.master.info.port\", HConstants.DEFAULT_MASTER_INFOPORT);\n@@ -1164,8 +1164,8 @@ public ActiveMasterManager getActiveMasterManager() {\n     return this.activeMasterManager;\n   }\n \n-  public MasterAddressTracker getMasterAddressManager() {\n-    return this.masterAddressManager;\n+  public MasterAddressTracker getMasterAddressTracker() {\n+    return this.masterAddressTracker;\n   }\n \n   /*",
+                "changes": 12
+            },
+            {
+                "status": "modified",
+                "additions": 9,
+                "raw_url": "https://github.com/apache/hbase/raw/6b2437de2ccc19fa383442f81b9096c81b2c8bb5/hbase-server/src/main/java/org/apache/hadoop/hbase/regionserver/HRegionServer.java",
+                "contents_url": "https://api.github.com/repos/apache/hbase/contents/hbase-server/src/main/java/org/apache/hadoop/hbase/regionserver/HRegionServer.java?ref=6b2437de2ccc19fa383442f81b9096c81b2c8bb5",
+                "filename": "hbase-server/src/main/java/org/apache/hadoop/hbase/regionserver/HRegionServer.java",
+                "deletions": 9,
+                "sha": "73bf86ba5bcb7b8527eaab70437dfbfec1b291bb",
+                "blob_url": "https://github.com/apache/hbase/blob/6b2437de2ccc19fa383442f81b9096c81b2c8bb5/hbase-server/src/main/java/org/apache/hadoop/hbase/regionserver/HRegionServer.java",
+                "patch": "@@ -429,8 +429,8 @@\n   // zookeeper connection and watcher\n   private ZooKeeperWatcher zooKeeper;\n \n-  // master address manager and watcher\n-  private MasterAddressTracker masterAddressManager;\n+  // master address tracker\n+  private MasterAddressTracker masterAddressTracker;\n \n   // Cluster Status Tracker\n   private ClusterStatusTracker clusterStatusTracker;\n@@ -723,12 +723,12 @@ private void initializeZooKeeper() throws IOException, InterruptedException {\n     this.zooKeeper = new ZooKeeperWatcher(conf, REGIONSERVER + \":\" +\n       this.isa.getPort(), this);\n \n-    // Create the master address manager, register with zk, and start it.  Then\n+    // Create the master address tracker, register with zk, and start it.  Then\n     // block until a master is available.  No point in starting up if no master\n     // running.\n-    this.masterAddressManager = new MasterAddressTracker(this.zooKeeper, this);\n-    this.masterAddressManager.start();\n-    blockAndCheckIfStopped(this.masterAddressManager);\n+    this.masterAddressTracker = new MasterAddressTracker(this.zooKeeper, this);\n+    this.masterAddressTracker.start();\n+    blockAndCheckIfStopped(this.masterAddressTracker);\n \n     // Wait on cluster being up.  Master will set this flag up in zookeeper\n     // when ready.\n@@ -1588,8 +1588,8 @@ public MetricsRegionServer getMetrics() {\n   /**\n    * @return Master address tracker instance.\n    */\n-  public MasterAddressTracker getMasterAddressManager() {\n-    return this.masterAddressManager;\n+  public MasterAddressTracker getMasterAddressTracker() {\n+    return this.masterAddressTracker;\n   }\n \n   /*\n@@ -1960,7 +1960,7 @@ ReplicationSinkService getReplicationSinkService() {\n     boolean interrupted = false;\n     try {\n       while (keepLooping() && master == null) {\n-        sn = this.masterAddressManager.getMasterAddress(refresh);\n+        sn = this.masterAddressTracker.getMasterAddress(refresh);\n         if (sn == null) {\n           if (!keepLooping()) {\n             // give up with no connection.",
+                "changes": 18
+            },
+            {
+                "status": "modified",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/hbase/raw/6b2437de2ccc19fa383442f81b9096c81b2c8bb5/hbase-server/src/main/java/org/apache/hadoop/hbase/regionserver/RSStatusServlet.java",
+                "contents_url": "https://api.github.com/repos/apache/hbase/contents/hbase-server/src/main/java/org/apache/hadoop/hbase/regionserver/RSStatusServlet.java?ref=6b2437de2ccc19fa383442f81b9096c81b2c8bb5",
+                "filename": "hbase-server/src/main/java/org/apache/hadoop/hbase/regionserver/RSStatusServlet.java",
+                "deletions": 2,
+                "sha": "64ae85983385b3cc62c81e37e4dded1e53743cb7",
+                "blob_url": "https://github.com/apache/hbase/blob/6b2437de2ccc19fa383442f81b9096c81b2c8bb5/hbase-server/src/main/java/org/apache/hadoop/hbase/regionserver/RSStatusServlet.java",
+                "patch": "@@ -53,7 +53,6 @@ protected void doGet(HttpServletRequest req, HttpServletResponse resp)\n       tmpl.setFormat(req.getParameter(\"format\"));\n     if (req.getParameter(\"filter\") != null)\n       tmpl.setFilter(req.getParameter(\"filter\"));\n-    if (hrs != null) tmpl.render(resp.getWriter(), hrs);\n+    tmpl.render(resp.getWriter(), hrs);\n   }\n-\n }",
+                "changes": 3
+            },
+            {
+                "status": "modified",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/hbase/raw/6b2437de2ccc19fa383442f81b9096c81b2c8bb5/hbase-server/src/test/java/org/apache/hadoop/hbase/TestZooKeeper.java",
+                "contents_url": "https://api.github.com/repos/apache/hbase/contents/hbase-server/src/test/java/org/apache/hadoop/hbase/TestZooKeeper.java?ref=6b2437de2ccc19fa383442f81b9096c81b2c8bb5",
+                "filename": "hbase-server/src/test/java/org/apache/hadoop/hbase/TestZooKeeper.java",
+                "deletions": 1,
+                "sha": "e2b4f0cea8aac97326ba802866d42492680c6dc6",
+                "blob_url": "https://github.com/apache/hbase/blob/6b2437de2ccc19fa383442f81b9096c81b2c8bb5/hbase-server/src/test/java/org/apache/hadoop/hbase/TestZooKeeper.java",
+                "patch": "@@ -388,7 +388,7 @@ public void testCreateSilentIsReallySilent() throws InterruptedException,\n     // Assumes the  root of the ZooKeeper space is writable as it creates a node\n     // wherever the cluster home is defined.\n     ZooKeeperWatcher zk2 = new ZooKeeperWatcher(TEST_UTIL.getConfiguration(),\n-      \"testMasterAddressManagerFromZK\", null);\n+      \"testCreateSilentIsReallySilent\", null);\n \n     // Save the previous ACL\n     Stat s =  null;",
+                "changes": 2
+            },
+            {
+                "status": "modified",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/hbase/raw/6b2437de2ccc19fa383442f81b9096c81b2c8bb5/hbase-server/src/test/java/org/apache/hadoop/hbase/master/TestMasterStatusServlet.java",
+                "contents_url": "https://api.github.com/repos/apache/hbase/contents/hbase-server/src/test/java/org/apache/hadoop/hbase/master/TestMasterStatusServlet.java?ref=6b2437de2ccc19fa383442f81b9096c81b2c8bb5",
+                "filename": "hbase-server/src/test/java/org/apache/hadoop/hbase/master/TestMasterStatusServlet.java",
+                "deletions": 1,
+                "sha": "b351d944c0ec21e30eebfbbfad17dc8be699c597",
+                "blob_url": "https://github.com/apache/hbase/blob/6b2437de2ccc19fa383442f81b9096c81b2c8bb5/hbase-server/src/test/java/org/apache/hadoop/hbase/master/TestMasterStatusServlet.java",
+                "patch": "@@ -98,7 +98,7 @@ public void setupBasicMocks() {\n \n     // Fake MasterAddressTracker\n     MasterAddressTracker tracker = Mockito.mock(MasterAddressTracker.class);\n-    Mockito.doReturn(tracker).when(master).getMasterAddressManager();\n+    Mockito.doReturn(tracker).when(master).getMasterAddressTracker();\n     Mockito.doReturn(FAKE_HOST).when(tracker).getMasterAddress();\n \n     // Mock admin",
+                "changes": 2
+            },
+            {
+                "status": "modified",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/hbase/raw/6b2437de2ccc19fa383442f81b9096c81b2c8bb5/hbase-server/src/test/java/org/apache/hadoop/hbase/master/TestSplitLogManager.java",
+                "contents_url": "https://api.github.com/repos/apache/hbase/contents/hbase-server/src/test/java/org/apache/hadoop/hbase/master/TestSplitLogManager.java?ref=6b2437de2ccc19fa383442f81b9096c81b2c8bb5",
+                "filename": "hbase-server/src/test/java/org/apache/hadoop/hbase/master/TestSplitLogManager.java",
+                "deletions": 1,
+                "sha": "82b8673742a4c34f7e35d9bf6523cdd92d91b524",
+                "blob_url": "https://github.com/apache/hbase/blob/6b2437de2ccc19fa383442f81b9096c81b2c8bb5/hbase-server/src/test/java/org/apache/hadoop/hbase/master/TestSplitLogManager.java",
+                "patch": "@@ -58,7 +58,7 @@\n import org.apache.hadoop.hbase.Waiter;\n import org.apache.hadoop.hbase.master.SplitLogManager.Task;\n import org.apache.hadoop.hbase.master.SplitLogManager.TaskBatch;\n-import org.apache.hadoop.hbase.regionserver.TestMasterAddressManager.NodeCreationListener;\n+import org.apache.hadoop.hbase.regionserver.TestMasterAddressTracker.NodeCreationListener;\n import org.apache.hadoop.hbase.zookeeper.ZKSplitLog;\n import org.apache.hadoop.hbase.zookeeper.ZKUtil;\n import org.apache.hadoop.hbase.zookeeper.ZooKeeperWatcher;",
+                "changes": 2
+            },
+            {
+                "status": "renamed",
+                "additions": 10,
+                "raw_url": "https://github.com/apache/hbase/raw/6b2437de2ccc19fa383442f81b9096c81b2c8bb5/hbase-server/src/test/java/org/apache/hadoop/hbase/regionserver/TestMasterAddressTracker.java",
+                "contents_url": "https://api.github.com/repos/apache/hbase/contents/hbase-server/src/test/java/org/apache/hadoop/hbase/regionserver/TestMasterAddressTracker.java?ref=6b2437de2ccc19fa383442f81b9096c81b2c8bb5",
+                "filename": "hbase-server/src/test/java/org/apache/hadoop/hbase/regionserver/TestMasterAddressTracker.java",
+                "previous_filename": "hbase-server/src/test/java/org/apache/hadoop/hbase/regionserver/TestMasterAddressManager.java",
+                "deletions": 10,
+                "sha": "cb5b556820c33d4a75a654c74c49ddf04874f763",
+                "blob_url": "https://github.com/apache/hbase/blob/6b2437de2ccc19fa383442f81b9096c81b2c8bb5/hbase-server/src/test/java/org/apache/hadoop/hbase/regionserver/TestMasterAddressTracker.java",
+                "patch": "@@ -36,8 +36,8 @@\n import org.junit.experimental.categories.Category;\n \n @Category(MediumTests.class)\n-public class TestMasterAddressManager {\n-  private static final Log LOG = LogFactory.getLog(TestMasterAddressManager.class);\n+public class TestMasterAddressTracker {\n+  private static final Log LOG = LogFactory.getLog(TestMasterAddressTracker.class);\n \n   private final static HBaseTestingUtility TEST_UTIL = new HBaseTestingUtility();\n \n@@ -56,17 +56,17 @@ public static void tearDownAfterClass() throws Exception {\n    * @throws Exception\n    */\n   @Test\n-  public void testMasterAddressManagerFromZK() throws Exception {\n+  public void testMasterAddressTrackerFromZK() throws Exception {\n \n     ZooKeeperWatcher zk = new ZooKeeperWatcher(TEST_UTIL.getConfiguration(),\n-        \"testMasterAddressManagerFromZK\", null);\n+        \"testMasterAddressTrackerFromZK\", null);\n     ZKUtil.createAndFailSilent(zk, zk.baseZNode);\n \n     // Should not have a master yet\n-    MasterAddressTracker addressManager = new MasterAddressTracker(zk, null);\n-    addressManager.start();\n-    assertFalse(addressManager.hasMaster());\n-    zk.registerListener(addressManager);\n+    MasterAddressTracker addressTracker = new MasterAddressTracker(zk, null);\n+    addressTracker.start();\n+    assertFalse(addressTracker.hasMaster());\n+    zk.registerListener(addressTracker);\n \n     // Use a listener to capture when the node is actually created\n     NodeCreationListener listener = new NodeCreationListener(zk, zk.getMasterAddressZNode());\n@@ -83,8 +83,8 @@ public void testMasterAddressManagerFromZK() throws Exception {\n     LOG.info(\"Waiting for master address manager to be notified\");\n     listener.waitForCreation();\n     LOG.info(\"Master node created\");\n-    assertTrue(addressManager.hasMaster());\n-    ServerName pulledAddress = addressManager.getMasterAddress();\n+    assertTrue(addressTracker.hasMaster());\n+    ServerName pulledAddress = addressTracker.getMasterAddress();\n     assertTrue(pulledAddress.equals(sn));\n \n   }",
+                "changes": 20
+            },
+            {
+                "status": "modified",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/hbase/raw/6b2437de2ccc19fa383442f81b9096c81b2c8bb5/hbase-server/src/test/java/org/apache/hadoop/hbase/regionserver/TestRSStatusServlet.java",
+                "contents_url": "https://api.github.com/repos/apache/hbase/contents/hbase-server/src/test/java/org/apache/hadoop/hbase/regionserver/TestRSStatusServlet.java?ref=6b2437de2ccc19fa383442f81b9096c81b2c8bb5",
+                "filename": "hbase-server/src/test/java/org/apache/hadoop/hbase/regionserver/TestRSStatusServlet.java",
+                "deletions": 1,
+                "sha": "15e55bbbfb3735efd5197b15ee18fdd17e510014",
+                "blob_url": "https://github.com/apache/hbase/blob/6b2437de2ccc19fa383442f81b9096c81b2c8bb5/hbase-server/src/test/java/org/apache/hadoop/hbase/regionserver/TestRSStatusServlet.java",
+                "patch": "@@ -78,7 +78,7 @@ public void setupBasicMocks() throws IOException, ServiceException {\n     // Fake MasterAddressTracker\n     MasterAddressTracker mat = Mockito.mock(MasterAddressTracker.class);\n     Mockito.doReturn(fakeMasterAddress).when(mat).getMasterAddress();\n-    Mockito.doReturn(mat).when(rs).getMasterAddressManager();\n+    Mockito.doReturn(mat).when(rs).getMasterAddressTracker();\n \n     MetricsRegionServer rms = Mockito.mock(MetricsRegionServer.class);\n     Mockito.doReturn(new MetricsRegionServerWrapperStub()).when(rms).getRegionServerWrapper();",
+                "changes": 2
+            }
+        ],
+        "unit_tests": [
+            "TestMasterAddressTracker.java",
+            "TestRSStatusServlet.java",
+            "TestMasterStatusServlet.java",
+            "TestZooKeeper.java",
+            "TestSplitLogManager.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "hbase-server/src/test/java/org/apache/hadoop/hbase/regionserver/TestMasterAddressTracker.java",
+        "buggy_files": [
+            "hbase-server/src/main/java/org/apache/hadoop/hbase/master/HMaster.java",
+            "hbase-client/src/main/java/org/apache/hadoop/hbase/zookeeper/MasterAddressTracker.java",
+            "hbase-server/src/main/jamon/org/apache/hadoop/hbase/tmpl/master/BackupMasterStatusTmpl.jamon",
+            "hbase-server/src/main/java/org/apache/hadoop/hbase/master/SplitLogManager.java",
+            "hbase-server/src/main/java/org/apache/hadoop/hbase/master/MasterStatusServlet.java",
+            "hbase-server/src/main/java/org/apache/hadoop/hbase/regionserver/HRegionServer.java",
+            "hbase-server/src/main/jamon/org/apache/hadoop/hbase/tmpl/regionserver/RSStatusTmpl.jamon",
+            "hbase-server/src/main/java/org/apache/hadoop/hbase/regionserver/RSStatusServlet.java"
+        ],
+        "fixed": true
+    }
+]

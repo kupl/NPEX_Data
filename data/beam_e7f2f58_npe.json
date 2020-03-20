@@ -1,0 +1,49 @@
+[
+    {
+        "repo": "beam",
+        "commit": "https://github.com/apache/beam/commit/e7f2f582afd48bf5e2aacb3a36471377cb927018",
+        "bug_id": "beam_e7f2f58",
+        "message": "Fix NullPointerException in AfterWatermark display data\n\nWindow transforms register display data for the associated trigger\nfunction by calling its .toString() method. The AfterWatermark\ntrigger .toString() method was not properly handling cases where\nthere is no late firings registered.",
+        "parent": "https://github.com/apache/beam/commit/a1bb9020727b8d51eddc96dbd1a503b532b372e5",
+        "patched_files": [
+            "AfterWatermark.java"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 9,
+                "raw_url": "https://github.com/apache/beam/raw/e7f2f582afd48bf5e2aacb3a36471377cb927018/sdks/java/core/src/main/java/org/apache/beam/sdk/transforms/windowing/AfterWatermark.java",
+                "contents_url": "https://api.github.com/repos/apache/beam/contents/sdks/java/core/src/main/java/org/apache/beam/sdk/transforms/windowing/AfterWatermark.java?ref=e7f2f582afd48bf5e2aacb3a36471377cb927018",
+                "filename": "sdks/java/core/src/main/java/org/apache/beam/sdk/transforms/windowing/AfterWatermark.java",
+                "deletions": 5,
+                "sha": "019a68dd7dfbe5d5dd5272051b1ea333028a6c25",
+                "blob_url": "https://github.com/apache/beam/blob/e7f2f582afd48bf5e2aacb3a36471377cb927018/sdks/java/core/src/main/java/org/apache/beam/sdk/transforms/windowing/AfterWatermark.java",
+                "patch": "@@ -31,6 +31,8 @@\n import java.util.List;\n import java.util.Objects;\n \n+import javax.annotation.Nullable;\n+\n /**\n  * <p>{@code AfterWatermark} triggers fire based on progress of the system watermark. This time is a\n  * lower-bound, sometimes heuristically established, on event times that have been fully processed\n@@ -106,6 +108,7 @@ public static FromEndOfWindow pastEndOfWindow() {\n     private static final int LATE_INDEX = 1;\n \n     private final OnceTrigger earlyTrigger;\n+    @Nullable\n     private final OnceTrigger lateTrigger;\n \n     @SuppressWarnings(\"unchecked\")\n@@ -226,18 +229,19 @@ public void onFire(Trigger.TriggerContext context) throws Exception {\n     public String toString() {\n       StringBuilder builder = new StringBuilder(TO_STRING);\n \n-      Trigger earlyTrigger = subTriggers.get(EARLY_INDEX);\n       if (!(earlyTrigger instanceof Never.NeverTrigger)) {\n         builder\n             .append(\".withEarlyFirings(\")\n             .append(earlyTrigger)\n             .append(\")\");\n       }\n \n-      builder\n-          .append(\".withLateFirings(\")\n-          .append(subTriggers.get(LATE_INDEX))\n-          .append(\")\");\n+      if (lateTrigger != null && !(lateTrigger instanceof Never.NeverTrigger)) {\n+        builder\n+            .append(\".withLateFirings(\")\n+            .append(lateTrigger)\n+            .append(\")\");\n+      }\n \n       return builder.toString();\n     }",
+                "changes": 14
+            },
+            {
+                "status": "modified",
+                "additions": 19,
+                "raw_url": "https://github.com/apache/beam/raw/e7f2f582afd48bf5e2aacb3a36471377cb927018/sdks/java/core/src/test/java/org/apache/beam/sdk/transforms/windowing/AfterWatermarkTest.java",
+                "contents_url": "https://api.github.com/repos/apache/beam/contents/sdks/java/core/src/test/java/org/apache/beam/sdk/transforms/windowing/AfterWatermarkTest.java?ref=e7f2f582afd48bf5e2aacb3a36471377cb927018",
+                "filename": "sdks/java/core/src/test/java/org/apache/beam/sdk/transforms/windowing/AfterWatermarkTest.java",
+                "deletions": 0,
+                "sha": "d692cbf7c78a216d224c0f5935e304bf0af7cf06",
+                "blob_url": "https://github.com/apache/beam/blob/e7f2f582afd48bf5e2aacb3a36471377cb927018/sdks/java/core/src/test/java/org/apache/beam/sdk/transforms/windowing/AfterWatermarkTest.java",
+                "patch": "@@ -344,6 +344,15 @@ public void testFromEndOfWindowToString() {\n     assertEquals(\"AfterWatermark.pastEndOfWindow()\", trigger.toString());\n   }\n \n+  @Test\n+  public void testEarlyFiringsToString() {\n+    Trigger trigger = AfterWatermark.pastEndOfWindow()\n+        .withEarlyFirings(StubTrigger.named(\"t1\"))\n+        .buildTrigger();\n+\n+    assertEquals(\"AfterWatermark.pastEndOfWindow().withEarlyFirings(t1)\", trigger.toString());\n+  }\n+\n   @Test\n   public void testLateFiringsToString() {\n     Trigger trigger = AfterWatermark.pastEndOfWindow()\n@@ -363,4 +372,14 @@ public void testEarlyAndLateFiringsToString() {\n     assertEquals(\"AfterWatermark.pastEndOfWindow().withEarlyFirings(t1).withLateFirings(t2)\",\n         trigger.toString());\n   }\n+\n+  @Test\n+  public void testToStringExcludesNeverTrigger() {\n+    Trigger trigger = AfterWatermark.pastEndOfWindow()\n+        .withEarlyFirings(Never.ever())\n+        .withLateFirings(Never.ever())\n+        .buildTrigger();\n+\n+    assertEquals(\"AfterWatermark.pastEndOfWindow()\", trigger.toString());\n+  }\n }",
+                "changes": 19
+            }
+        ],
+        "unit_tests": [
+            "AfterWatermarkTest.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "sdks/java/core/src/test/java/org/apache/beam/sdk/transforms/windowing/AfterWatermarkTest.java",
+        "buggy_files": [
+            "sdks/java/core/src/main/java/org/apache/beam/sdk/transforms/windowing/AfterWatermark.java"
+        ],
+        "fixed": true
+    }
+]

@@ -1,0 +1,91 @@
+[
+    {
+        "repo": "crunch",
+        "commit": "https://github.com/apache/crunch/commit/7061fa75d318f93dd66506ee51ea1643a444bdba",
+        "bug_id": "crunch_7061fa7",
+        "message": "fix NPE on InputCollection getSize()",
+        "parent": "https://github.com/apache/crunch/commit/4b6a08f511c1ce6a3075881072c3eb491b93591c",
+        "patched_files": [
+            "InputCollection.java",
+            "FileSourceImpl.java",
+            "SourceTargetHelper.java",
+            "CompositePathIterable.java"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 2,
+                "raw_url": "https://github.com/apache/crunch/raw/7061fa75d318f93dd66506ee51ea1643a444bdba/src/main/java/com/cloudera/crunch/impl/mr/collect/InputCollection.java",
+                "contents_url": "https://api.github.com/repos/apache/crunch/contents/src/main/java/com/cloudera/crunch/impl/mr/collect/InputCollection.java?ref=7061fa75d318f93dd66506ee51ea1643a444bdba",
+                "filename": "src/main/java/com/cloudera/crunch/impl/mr/collect/InputCollection.java",
+                "deletions": 2,
+                "sha": "a0328b4709d0d03eaa1a43625961cc5985705efe",
+                "blob_url": "https://github.com/apache/crunch/blob/7061fa75d318f93dd66506ee51ea1643a444bdba/src/main/java/com/cloudera/crunch/impl/mr/collect/InputCollection.java",
+                "patch": "@@ -46,8 +46,8 @@ public InputCollection(Source<S> source, MRPipeline pipeline) {\n   @Override\n   protected long getSizeInternal() {\n     long sz = source.getSize(pipeline.getConfiguration());\n-    if (sz == 0) {\n-      throw new IllegalStateException(\"Input source \" + source + \" is empty\");\n+    if (sz < 0) {\n+      throw new IllegalStateException(\"Input source \" + source + \" does not exist!\");\n     }\n     return sz;\n   }",
+                "changes": 4
+            },
+            {
+                "status": "modified",
+                "additions": 20,
+                "raw_url": "https://github.com/apache/crunch/raw/7061fa75d318f93dd66506ee51ea1643a444bdba/src/main/java/com/cloudera/crunch/io/CompositePathIterable.java",
+                "contents_url": "https://api.github.com/repos/apache/crunch/contents/src/main/java/com/cloudera/crunch/io/CompositePathIterable.java?ref=7061fa75d318f93dd66506ee51ea1643a444bdba",
+                "filename": "src/main/java/com/cloudera/crunch/io/CompositePathIterable.java",
+                "deletions": 2,
+                "sha": "e88fc39eea24d0c24ff45014caa2356b3789091b",
+                "blob_url": "https://github.com/apache/crunch/blob/7061fa75d318f93dd66506ee51ea1643a444bdba/src/main/java/com/cloudera/crunch/io/CompositePathIterable.java",
+                "patch": "@@ -17,6 +17,7 @@\n import java.io.FileNotFoundException;\n import java.io.IOException;\n import java.util.Iterator;\n+import java.util.NoSuchElementException;\n \n import org.apache.hadoop.fs.FileStatus;\n import org.apache.hadoop.fs.FileSystem;\n@@ -31,6 +32,18 @@\n   private final FileSystem fs;\n   private final FileReaderFactory<T> readerFactory;\n \n+  private final UnmodifiableIterator<T> emptyIterator = new UnmodifiableIterator<T>() {\n+\t  @Override\n+\t  public boolean hasNext() {\n+\t\t  return false;\t  \n+\t  }\n+\n+\t  @Override\n+\t  public T next() {\n+\t\tthrow new NoSuchElementException();\n+\t  }\n+  };\n+\n   private static final PathFilter FILTER = new PathFilter() {\n \t@Override\n \tpublic boolean accept(Path path) {\n@@ -45,7 +58,7 @@ public boolean accept(Path path) {\n \t} catch (FileNotFoundException e) {\n \t  stati = null;\n \t}\n-\tif (stati == null || stati.length == 0) {\n+\tif (stati == null /*|| stati.length == 0*/) {\n \t  throw new IOException(\"No files found to materialize at: \" + path);\n \t}\n \treturn new CompositePathIterable<S>(stati, fs, readerFactory);\n@@ -56,9 +69,14 @@ private CompositePathIterable(FileStatus[] stati, FileSystem fs, FileReaderFacto\n \tthis.fs = fs;\n \tthis.readerFactory = readerFactory;\n   }\n-  \n+    \n   @Override\n   public Iterator<T> iterator() {\n+\t\n+\tif (stati.length == 0) {\n+      return emptyIterator;\n+\t}\n+\t\n \treturn new UnmodifiableIterator<T>() {\n \t  private int index = 0;\n \t  private Iterator<T> iter = readerFactory.read(fs, stati[index++].getPath());",
+                "changes": 22
+            },
+            {
+                "status": "modified",
+                "additions": 3,
+                "raw_url": "https://github.com/apache/crunch/raw/7061fa75d318f93dd66506ee51ea1643a444bdba/src/main/java/com/cloudera/crunch/io/SourceTargetHelper.java",
+                "contents_url": "https://api.github.com/repos/apache/crunch/contents/src/main/java/com/cloudera/crunch/io/SourceTargetHelper.java?ref=7061fa75d318f93dd66506ee51ea1643a444bdba",
+                "filename": "src/main/java/com/cloudera/crunch/io/SourceTargetHelper.java",
+                "deletions": 0,
+                "sha": "9ba200350e892e18de16634d476d80823ccdcaa0",
+                "blob_url": "https://github.com/apache/crunch/blob/7061fa75d318f93dd66506ee51ea1643a444bdba/src/main/java/com/cloudera/crunch/io/SourceTargetHelper.java",
+                "patch": "@@ -32,6 +32,9 @@ public static long getPathSize(Configuration conf, Path path) throws IOException\n   }\n   \n   public static long getPathSize(FileSystem fs, Path path) throws IOException {\n+\tif (!fs.exists(path)) {\n+       return -1L;\n+    }\n     FileStatus[] stati = null;\n     try {\n       stati = fs.listStatus(path);",
+                "changes": 3
+            },
+            {
+                "status": "modified",
+                "additions": 2,
+                "raw_url": "https://github.com/apache/crunch/raw/7061fa75d318f93dd66506ee51ea1643a444bdba/src/main/java/com/cloudera/crunch/io/impl/FileSourceImpl.java",
+                "contents_url": "https://api.github.com/repos/apache/crunch/contents/src/main/java/com/cloudera/crunch/io/impl/FileSourceImpl.java?ref=7061fa75d318f93dd66506ee51ea1643a444bdba",
+                "filename": "src/main/java/com/cloudera/crunch/io/impl/FileSourceImpl.java",
+                "deletions": 1,
+                "sha": "5d9936ec5073fb6b44a75ac93e82b6b1995a4f3d",
+                "blob_url": "https://github.com/apache/crunch/blob/7061fa75d318f93dd66506ee51ea1643a444bdba/src/main/java/com/cloudera/crunch/io/impl/FileSourceImpl.java",
+                "patch": "@@ -72,8 +72,9 @@ public long getSize(Configuration configuration) {\n \t  return SourceTargetHelper.getPathSize(configuration, path);\n \t} catch (IOException e) {\n \t  LOG.warn(String.format(\"Exception thrown looking up size of: %s\", path), e);\n+\t  throw new IllegalStateException(\"Failed to get the file size of:\"+ path, e);\n \t}\n-\treturn 1L;\n+\t//return 1L;\n   }\n \n ",
+                "changes": 3
+            },
+            {
+                "status": "modified",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/crunch/raw/7061fa75d318f93dd66506ee51ea1643a444bdba/src/test/java/com/cloudera/crunch/io/SourceTargetHelperTest.java",
+                "contents_url": "https://api.github.com/repos/apache/crunch/contents/src/test/java/com/cloudera/crunch/io/SourceTargetHelperTest.java?ref=7061fa75d318f93dd66506ee51ea1643a444bdba",
+                "filename": "src/test/java/com/cloudera/crunch/io/SourceTargetHelperTest.java",
+                "deletions": 1,
+                "sha": "dad8a25ed65bb922edf7c2e73cbef53eb504c6ef",
+                "blob_url": "https://github.com/apache/crunch/blob/7061fa75d318f93dd66506ee51ea1643a444bdba/src/test/java/com/cloudera/crunch/io/SourceTargetHelperTest.java",
+                "patch": "@@ -16,6 +16,6 @@ public void testGetNonexistentPathSize() throws Exception {\n \tPath tmpPath = new Path(tmp.getAbsolutePath());\n \ttmp.delete();\n \tFileSystem fs = FileSystem.getLocal(new Configuration());\n-\tassertEquals(0L, SourceTargetHelper.getPathSize(fs, tmpPath));\n+\tassertEquals(-1L, SourceTargetHelper.getPathSize(fs, tmpPath));\n   }\n }",
+                "changes": 2
+            }
+        ],
+        "unit_tests": [
+            "SourceTargetHelperTest.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "src/test/java/com/cloudera/crunch/io/SourceTargetHelperTest.java",
+        "buggy_files": [
+            "src/main/java/com/cloudera/crunch/impl/mr/collect/InputCollection.java",
+            "src/main/java/com/cloudera/crunch/io/impl/FileSourceImpl.java",
+            "src/main/java/com/cloudera/crunch/io/SourceTargetHelper.java",
+            "src/main/java/com/cloudera/crunch/io/CompositePathIterable.java"
+        ],
+        "fixed": true
+    }
+]

@@ -89,17 +89,17 @@
         "message": "GEODE-6818: Fix PutAllClientServerDistributedTest (#4363)\n\nOverhaul test and fix sources of flakiness (wait/notify and sleeps).\r\n\r\n* Rename PutAllCSDUnitTest\r\n* Replace object wait/notify with CountDownLatch(es)\r\n* Replace sleeps with Awaitility\r\n* Inline super-class and lots of methods\r\n* Remove unused or unnecessary code\r\n* Update deprecated API usage\r\n* Update to AssertJ and Awaitility\r\n* Improve tearDown to prevent NullPointerException\r\n* Add javadocs to testBug51725\r\n* Add await for client2 in testBug51725",
         "parent": "https://github.com/apache/geode/commit/6426bf18b86bc33c2e36a7ba827d506ffcde4c00",
         "patched_files": [
+            "InternalCacheEvent.java",
             "InternalEntryEvent.java",
-            "EntryEventImpl.java",
-            "InternalRegion.java",
             "LocalRegion.java",
-            "InternalCacheEvent.java"
+            "EntryEventImpl.java",
+            "InternalRegion.java"
         ],
         "repo": "geode",
         "unit_tests": [
-            "PutAllCSDUnitTest.java",
             "LocalRegionTest.java",
             "PutAllClientServerDistributedTest.java",
+            "PutAllCSDUnitTest.java",
             "EntryEventImplTest.java"
         ]
     },
@@ -285,17 +285,56 @@
         "message": "GEODE-4362: view preparation throws uncaught RuntimeException\n\nThe problem was happening when a new member joined with a coordinator that\nsuddenly shuts down before other members have been told to install the\nnew membership view.  They've received a \"prepare for view change\" message\ncontaining the new view but have not been told to commit that change.\n\nAnother member then becomes coordinator and sees that there was a new member\nin the prepared view.  It picks this up and adds it to the new view it\nsends out.\n\nThe problem was that the public encryption keys of the members weren't\nbeing transferred from the old view to the new view and when looking for\npublic keys we were fishing them out of GMSEncrypt instead of getting\nthem from the membership view.  This caused an NPE to be thrown when trying\nto fish out the public key of the new member - GMSEncrypt didn't know about\nthis new member because the view containing it was never installed - it\nwas only prepared.\n\nThe fix is to transfer the public keys from the old view to the new one and\nto look for public keys in the view instead of GMSEncrypt.\n\nThis closes #1520",
         "parent": "https://github.com/apache/geode/commit/4ad633773b1fffe9ce5a71ea95fc5410d54d90fc",
         "patched_files": [
-            "GMSJoinLeave.java",
-            "InternalDistributedMember.java",
-            "GMSLocator.java",
             "GMSEncrypt.java",
-            "GMSJoinLeaveTestHelper.java"
+            "InternalDistributedMember.java",
+            "GMSJoinLeaveTestHelper.java",
+            "GMSLocator.java",
+            "GMSJoinLeave.java"
         ],
         "repo": "geode",
         "unit_tests": [
-            "LocatorDUnitTest.java",
             "GMSJoinLeaveJUnitTest.java",
+            "LocatorDUnitTest.java",
             "GMSEncryptJUnitTest.java"
+        ]
+    },
+    "geode_0b23275": {
+        "bug_id": "geode_0b23275",
+        "commit": "https://github.com/apache/geode/commit/0b232758ed708b90e4ccc787d438676e5ac7f58c",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/geode/blob/0b232758ed708b90e4ccc787d438676e5ac7f58c/geode-core/src/integrationTest/java/org/apache/geode/distributed/internal/membership/gms/locator/GMSLocatorRecoveryIntegrationTest.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-core/src/integrationTest/java/org/apache/geode/distributed/internal/membership/gms/locator/GMSLocatorRecoveryIntegrationTest.java?ref=0b232758ed708b90e4ccc787d438676e5ac7f58c",
+                "deletions": 1,
+                "filename": "geode-core/src/integrationTest/java/org/apache/geode/distributed/internal/membership/gms/locator/GMSLocatorRecoveryIntegrationTest.java",
+                "patch": "@@ -234,7 +234,7 @@ private void populateStateFile(File file, int fileStamp, int ordinal, Object obj\n       oos.writeInt(fileStamp);\n       oos.writeInt(ordinal);\n       oos.flush();\n-      DataOutput dataOutput = new DataOutputStream(fileStream);\n+      DataOutput dataOutput = new DataOutputStream(oos);\n       DataSerializer.writeObject(object, dataOutput);\n       fileStream.flush();\n     }",
+                "raw_url": "https://github.com/apache/geode/raw/0b232758ed708b90e4ccc787d438676e5ac7f58c/geode-core/src/integrationTest/java/org/apache/geode/distributed/internal/membership/gms/locator/GMSLocatorRecoveryIntegrationTest.java",
+                "sha": "b04cbd964c390c5979e01244ebf716aa1f5f4ecb",
+                "status": "modified"
+            },
+            {
+                "additions": 14,
+                "blob_url": "https://github.com/apache/geode/blob/0b232758ed708b90e4ccc787d438676e5ac7f58c/geode-core/src/main/java/org/apache/geode/distributed/internal/membership/gms/locator/GMSLocator.java",
+                "changes": 21,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-core/src/main/java/org/apache/geode/distributed/internal/membership/gms/locator/GMSLocator.java?ref=0b232758ed708b90e4ccc787d438676e5ac7f58c",
+                "deletions": 7,
+                "filename": "geode-core/src/main/java/org/apache/geode/distributed/internal/membership/gms/locator/GMSLocator.java",
+                "patch": "@@ -365,7 +365,7 @@ private void saveView(GMSMembershipView<ID> view) {\n       oos.writeInt(LOCATOR_FILE_STAMP);\n       oos.writeInt(Version.getCurrentVersion().ordinal());\n       oos.flush();\n-      DataOutputStream dataOutputStream = new DataOutputStream(fileStream);\n+      DataOutputStream dataOutputStream = new DataOutputStream(oos);\n       objectSerializer.writeObject(view, dataOutputStream);\n     } catch (Exception e) {\n       logger.warn(\n@@ -442,7 +442,8 @@ boolean recoverFromFile(File file) {\n       return false;\n     }\n \n-    logger.info(\"Peer locator recovering from {}\", file.getAbsolutePath());\n+    logger.info(\"Peer locator recovering from {} with size {}\",\n+        file.getAbsolutePath(), file.length());\n     try (FileInputStream fileInputStream = new FileInputStream(file);\n         ObjectInputStream ois = new ObjectInputStream(fileInputStream)) {\n       int stamp = ois.readInt();\n@@ -452,15 +453,21 @@ boolean recoverFromFile(File file) {\n \n       int version = ois.readInt();\n       int currentVersion = Version.getCurrentVersion().ordinal();\n-      DataInputStream input = new DataInputStream(fileInputStream);\n-      if (version != currentVersion) {\n+      DataInputStream input;\n+      if (version == currentVersion) {\n+        input = new DataInputStream(ois);\n+      } else if (version > currentVersion) {\n+        return false;\n+      } else {\n         Version geodeVersion = Version.fromOrdinalNoThrow((short) version, false);\n         logger.info(\"Peer locator found that persistent view was written with version {}\",\n             geodeVersion);\n-        if (version > currentVersion) {\n-          return false;\n+        if (Version.GEODE_1_11_0.equals(geodeVersion)) {\n+          // v1.11 did not create the file with an ObjectOutputStream, so don't use one here\n+          input = new VersionedDataInputStream(fileInputStream, geodeVersion);\n+        } else {\n+          input = new VersionedDataInputStream(ois, geodeVersion);\n         }\n-        input = new VersionedDataInputStream(ois, geodeVersion);\n       }\n \n       // TBD - services isn't available when we recover from disk so this will throw an NPE",
+                "raw_url": "https://github.com/apache/geode/raw/0b232758ed708b90e4ccc787d438676e5ac7f58c/geode-core/src/main/java/org/apache/geode/distributed/internal/membership/gms/locator/GMSLocator.java",
+                "sha": "f295362d3c8c0fe6097a93df5e06499d8b686abf",
+                "status": "modified"
+            }
+        ],
+        "message": "GEODE-7649 upgrade tests fail when v1.11 is added to geode-old-versions (#4564)\n\n* GEODE-7649 upgrade tests fail when v1.11 is added to geode-old-versions\r\n\r\nGeode v1.11 inadvertently changed the form of its saved membership view\r\nby using a FileOutputStream to write it to disk instead of using\r\nan ObjectOutputStream.  The latter writes additional information during\r\nserialization.\r\n\r\nNote: there is already a test for this change that will start running\r\nwhen v1.12 is created and v1.11 is added as a geode-old-version in\r\nsettings.gradle.\r\n\r\n* corrected serialization in integration test\r\n\r\n* flipping equals() check to avoid possible NPE",
+        "parent": "https://github.com/apache/geode/commit/65260ef6cec059f6da5b1877941e4a86bf8c0179",
+        "patched_files": [
+            "GMSLocator.java"
+        ],
+        "repo": "geode",
+        "unit_tests": [
+            "GMSLocatorRecoveryIntegrationTest.java"
         ]
     },
     "geode_0ccf9fa": {
@@ -354,9 +393,9 @@
         "message": "GEODE-3299: throw CacheClosedException in FunctionContext.getCache() (#975)\n\n* GEODE-3299: throw CacheClosedException when FunctionContext.getCache() == null\r\n\r\nGfsh functions handle CacheClosedException, whereas\r\nNullPointerExceptions that resulted from returning null are not.\r\n\r\n* GEODE-3299: Updates to ShowMissingDiskStoresFunction\r\n\r\nAdjusted test in ShowMissingDiskStoresDUniotTest to expect the exception instead of empty\r\nresults. Also removed redundant fail() assertions from the tests.",
         "parent": "https://github.com/apache/geode/commit/8ff23e06430721f82e2fe3ce36da7b8238c18633",
         "patched_files": [
+            "ShowMissingDiskStoresFunction.java",
             "GetRegionDescriptionFunction.java",
-            "FunctionContextImpl.java",
-            "ShowMissingDiskStoresFunction.java"
+            "FunctionContextImpl.java"
         ],
         "repo": "geode",
         "unit_tests": [
@@ -477,8 +516,8 @@
         ],
         "repo": "geode",
         "unit_tests": [
-            "BucketRegionTest.java",
-            "TXDetectReadConflictJUnitTest.java"
+            "TXDetectReadConflictJUnitTest.java",
+            "BucketRegionTest.java"
         ]
     },
     "geode_1dfbffa": {
@@ -577,8 +616,8 @@
         "message": "GEODE-7036: Fix for NPE caused by ex-coordinator joining quorum",
         "parent": "https://github.com/apache/geode/commit/e5c9c420f462149fd062847904e3435fbe99afb4",
         "patched_files": [
-            "ClusterStartupRule.java",
-            "InternalLocator.java"
+            "InternalLocator.java",
+            "ClusterStartupRule.java"
         ],
         "repo": "geode",
         "unit_tests": [
@@ -769,9 +808,9 @@
         "parent": "https://github.com/apache/geode/commit/935743586a874dce4b4b780aefe0c653d42f8902",
         "patched_files": [
             "MBeanJMXAdapter.java",
-            "MBeanProxyInvocationHandler.java",
-            "FederatingManager.java",
             "MemberStarterRule.java",
+            "FederatingManager.java",
+            "MBeanProxyInvocationHandler.java",
             "MBeanProxyFactory.java"
         ],
         "repo": "geode",
@@ -898,17 +937,17 @@
         "message": "GEODE-4094: ClientHealthMonitor may cause an NPE in a ServerConnection (#1326)\n\n* GEODE-4094: ClientHealthMonitor may cause an NPE in a ServerConnection\r\n\r\n- minor refactoring of AcceptorImpl and Handshake to improve testability\r\n- added a unit test to demonstrate race condition\r\n- refactored connection map into a new object to prevent race",
         "parent": "https://github.com/apache/geode/commit/e63152ac0c2bb33a53897a26cb851ce16cda26ba",
         "patched_files": [
-            "HandShake.java",
             "AcceptorImpl.java",
             "ServerHandShakeProcessor.java",
-            "ServerConnection.java",
+            "ClientHealthMonitor.java",
+            "HandShake.java",
             "ServerConnectionCollection.java",
-            "ClientHealthMonitor.java"
+            "ServerConnection.java"
         ],
         "repo": "geode",
         "unit_tests": [
-            "HandShakeTest.java",
-            "ServerConnectionTest.java"
+            "ServerConnectionTest.java",
+            "HandShakeTest.java"
         ]
     },
     "geode_306fda0": {
@@ -1051,20 +1090,20 @@
         "message": "GEODE-1675: Fix ClassCastException in ClientServer expiry\n\n* Also fix for NPE if session manager somehow is null in a session\n* Added tests for client/server session management\n* Refactored existing tests so they can share tests with client/server set up",
         "parent": "https://github.com/apache/geode/commit/e25ba5c0879a4b8ae85116b268a82406857f7cf8",
         "patched_files": [
-            "AbstractCache.java",
-            "DeltaSession8.java",
             "DeltaSession.java",
+            "PeerToPeerCache.java",
+            "DeltaSession8.java",
+            "AbstractCache.java",
             "ClientServerCache.java",
             "DeltaSessionInterface.java",
-            "PeerToPeerCache.java",
             "SessionExpirationCacheListener.java"
         ],
         "repo": "geode",
         "unit_tests": [
-            "Tomcat8SessionsDUnitTest.java",
             "Tomcat8SessionsJUnitTest.java",
-            "TestSessionsTomcat8Base.java",
-            "Tomcat8SessionsClientServerDUnitTest.java"
+            "Tomcat8SessionsClientServerDUnitTest.java",
+            "Tomcat8SessionsDUnitTest.java",
+            "TestSessionsTomcat8Base.java"
         ]
     },
     "geode_364ddef": {
@@ -1175,12 +1214,432 @@
         "message": "GEODE-2676: fix NPE with ShowMetricsCommand.",
         "parent": "https://github.com/apache/geode/commit/445b304670894a73cbe66a485539d8732d29a7c8",
         "patched_files": [
-            "RegionMBeanBridge.java",
-            "CommandResultAssert.java"
+            "CommandResultAssert.java",
+            "RegionMBeanBridge.java"
         ],
         "repo": "geode",
         "unit_tests": [
             "ShowMetricsCommandIntegrationTest.java"
+        ]
+    },
+    "geode_40d6b47": {
+        "bug_id": "geode_40d6b47",
+        "commit": "https://github.com/apache/geode/commit/40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+        "file": [
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-core/src/distributedTest/java/org/apache/geode/cache30/DistributedAckRegionCCEDUnitTest.java",
+                "changes": 5,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-core/src/distributedTest/java/org/apache/geode/cache30/DistributedAckRegionCCEDUnitTest.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 3,
+                "filename": "geode-core/src/distributedTest/java/org/apache/geode/cache30/DistributedAckRegionCCEDUnitTest.java",
+                "patch": "@@ -40,7 +40,6 @@\n import org.apache.geode.distributed.internal.ClusterDistributionManager;\n import org.apache.geode.distributed.internal.DistributionAdvisor;\n import org.apache.geode.distributed.internal.membership.InternalDistributedMember;\n-import org.apache.geode.distributed.internal.membership.api.MemberData;\n import org.apache.geode.internal.cache.DistributedCacheOperation;\n import org.apache.geode.internal.cache.DistributedRegion;\n import org.apache.geode.internal.cache.EntryEventImpl;\n@@ -218,8 +217,8 @@ public void vMotionDuringGII(Set recipientSet, LocalRegion region) {\n       VersionTag<InternalDistributedMember> tag =\n           (VersionTag<InternalDistributedMember>) versionStamp.asVersionTag();\n       // create a fake member ID that will be < mine and lose a concurrency check\n-      MemberData nm =\n-          CCRegion.getDistributionManager().getDistributionManagerId().getMemberData();\n+      InternalDistributedMember nm =\n+          CCRegion.getDistributionManager().getDistributionManagerId();\n       InternalDistributedMember mbr = null;\n \n       mbr = new InternalDistributedMember(nm.getInetAddress().getCanonicalHostName(),",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-core/src/distributedTest/java/org/apache/geode/cache30/DistributedAckRegionCCEDUnitTest.java",
+                "sha": "bd606c9363b49973512f6f8a81c443ce4a324f92",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-core/src/distributedTest/java/org/apache/geode/distributed/DistributedMemberDUnitTest.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-core/src/distributedTest/java/org/apache/geode/distributed/DistributedMemberDUnitTest.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 1,
+                "filename": "geode-core/src/distributedTest/java/org/apache/geode/distributed/DistributedMemberDUnitTest.java",
+                "patch": "@@ -263,7 +263,7 @@ private InternalDistributedMember connectAndSetUpPartialID() throws Exception {\n     assertTrue(system == basicGetSystem()); // senders will use basicGetSystem()\n     InternalDistributedMember internalDistributedMember = system.getDistributedMember();\n \n-    internalDistributedMember.getMemberData().setName(null);\n+    internalDistributedMember.setName(null);\n     HeapDataOutputStream outputStream = new HeapDataOutputStream(100);\n     internalDistributedMember.writeEssentialData(outputStream);\n     DataInputStream dataInputStream =",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-core/src/distributedTest/java/org/apache/geode/distributed/DistributedMemberDUnitTest.java",
+                "sha": "07074bad950ac85a6afe74e1ba97fdeaecb3306f",
+                "status": "modified"
+            },
+            {
+                "additions": 7,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-core/src/integrationTest/java/org/apache/geode/cache/client/ClientCacheFactoryJUnitTest.java",
+                "changes": 14,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-core/src/integrationTest/java/org/apache/geode/cache/client/ClientCacheFactoryJUnitTest.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 7,
+                "filename": "geode-core/src/integrationTest/java/org/apache/geode/cache/client/ClientCacheFactoryJUnitTest.java",
+                "patch": "@@ -362,10 +362,10 @@ public void testOldClientIDDeserialization() throws Exception {\n     assertThat(newMemberID.getVersionObject()).isEqualTo(Version.GFE_82);\n     assertThat(newID.getClientVersion()).isEqualTo(Version.GFE_82);\n \n-    assertThat(newMemberID.getMemberData().getUuidLeastSignificantBits()).isEqualTo(0);\n-    assertThat(newMemberID.getMemberData().getUuidMostSignificantBits()).isEqualTo(0);\n+    assertThat(newMemberID.getUuidLeastSignificantBits()).isEqualTo(0);\n+    assertThat(newMemberID.getUuidMostSignificantBits()).isEqualTo(0);\n \n-    gmsID.getMemberData().setUUID(new UUID(1234L, 5678L));\n+    gmsID.setUUID(new UUID(1234L, 5678L));\n     memberID.setVersionObjectForTest(Version.CURRENT);\n     clientID = ClientProxyMembershipID.getClientId(memberID);\n     out = new HeapDataOutputStream(Version.CURRENT);\n@@ -378,10 +378,10 @@ public void testOldClientIDDeserialization() throws Exception {\n     assertThat(newMemberID.getVersionObject()).isEqualTo(Version.CURRENT);\n     assertThat(newID.getClientVersion()).isEqualTo(Version.CURRENT);\n \n-    assertThat(newMemberID.getMemberData().getUuidLeastSignificantBits())\n-        .isEqualTo(gmsID.getMemberData().getUuidLeastSignificantBits());\n-    assertThat(newMemberID.getMemberData().getUuidMostSignificantBits())\n-        .isEqualTo(gmsID.getMemberData().getUuidMostSignificantBits());\n+    assertThat(newMemberID.getUuidLeastSignificantBits())\n+        .isEqualTo(gmsID.getUuidLeastSignificantBits());\n+    assertThat(newMemberID.getUuidMostSignificantBits())\n+        .isEqualTo(gmsID.getUuidMostSignificantBits());\n   }\n \n   @Test",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-core/src/integrationTest/java/org/apache/geode/cache/client/ClientCacheFactoryJUnitTest.java",
+                "sha": "90744734ff1fa38f6cad325635ee87b154ad05ef",
+                "status": "modified"
+            },
+            {
+                "additions": 8,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-core/src/integrationTest/java/org/apache/geode/distributed/internal/membership/gms/MembershipOnlyTest.java",
+                "changes": 16,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-core/src/integrationTest/java/org/apache/geode/distributed/internal/membership/gms/MembershipOnlyTest.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 8,
+                "filename": "geode-core/src/integrationTest/java/org/apache/geode/distributed/internal/membership/gms/MembershipOnlyTest.java",
+                "patch": "@@ -32,7 +32,6 @@\n import org.apache.geode.distributed.internal.membership.api.LifecycleListener;\n import org.apache.geode.distributed.internal.membership.api.MemberIdentifier;\n import org.apache.geode.distributed.internal.membership.api.MemberIdentifierFactoryImpl;\n-import org.apache.geode.distributed.internal.membership.api.MemberIdentifierImpl;\n import org.apache.geode.distributed.internal.membership.api.MemberStartupException;\n import org.apache.geode.distributed.internal.membership.api.Membership;\n import org.apache.geode.distributed.internal.membership.api.MembershipBuilder;\n@@ -91,19 +90,19 @@ public void locatorStarts() {\n \n   @Test\n   public void memberCanConnectToSelfHostedLocator() throws MemberStartupException {\n-    Membership<MemberIdentifierImpl> membership = startMember(\"member\", membershipLocator);\n+    Membership<MemberIdentifier> membership = startMember(\"member\", membershipLocator);\n     assertThat(membership.getView().getMembers()).hasSize(1);\n   }\n \n   @Test\n   public void twoMembersCanConnect() throws MemberStartupException {\n-    Membership<MemberIdentifierImpl> member1 = startMember(\"member1\", membershipLocator);\n-    Membership<MemberIdentifierImpl> member2 = startMember(\"member2\", null);\n+    Membership<MemberIdentifier> member1 = startMember(\"member1\", membershipLocator);\n+    Membership<MemberIdentifier> member2 = startMember(\"member2\", null);\n     await().untilAsserted(() -> assertThat(member1.getView().getMembers()).hasSize(2));\n     await().untilAsserted(() -> assertThat(member2.getView().getMembers()).hasSize(2));\n   }\n \n-  private Membership<MemberIdentifierImpl> startMember(String name,\n+  private Membership<MemberIdentifier> startMember(String name,\n       final MembershipLocator embeddedLocator)\n       throws MemberStartupException {\n     MembershipConfig config = new MembershipConfig() {\n@@ -131,10 +130,11 @@ public String getName() {\n     TcpClient locatorClient = new TcpClient(socketCreator, dsfidSerializer.getObjectSerializer(),\n         dsfidSerializer.getObjectDeserializer());\n \n-    LifecycleListener<MemberIdentifierImpl> lifeCycleListener = mock(LifecycleListener.class);\n+    LifecycleListener<MemberIdentifier> lifeCycleListener = mock(LifecycleListener.class);\n \n-    final Membership<MemberIdentifierImpl> membership =\n-        MembershipBuilder.<MemberIdentifierImpl>newMembershipBuilder(\n+\n+    final Membership<MemberIdentifier> membership =\n+        MembershipBuilder.<MemberIdentifier>newMembershipBuilder(\n             socketCreator,\n             locatorClient,\n             dsfidSerializer,",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-core/src/integrationTest/java/org/apache/geode/distributed/internal/membership/gms/MembershipOnlyTest.java",
+                "sha": "e6634849600992be9fde1110fb74dcd9506b7263",
+                "status": "modified"
+            },
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-core/src/integrationTest/java/org/apache/geode/distributed/internal/membership/gms/fd/GMSHealthMonitorJUnitTest.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-core/src/integrationTest/java/org/apache/geode/distributed/internal/membership/gms/fd/GMSHealthMonitorJUnitTest.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 3,
+                "filename": "geode-core/src/integrationTest/java/org/apache/geode/distributed/internal/membership/gms/fd/GMSHealthMonitorJUnitTest.java",
+                "patch": "@@ -852,9 +852,9 @@ public void executeTestClientSocketHandler(MemberIdentifier gmsMember,\n \n     MemberIdentifier testMember =\n         createGMSMember(Version.CURRENT_ORDINAL, viewId,\n-            gmsMember.getMemberData().getUuidMostSignificantBits(),\n-            gmsMember.getMemberData().getUuidLeastSignificantBits());\n-    testMember.getMemberData().setUdpPort(9000);\n+            gmsMember.getUuidMostSignificantBits(),\n+            gmsMember.getUuidLeastSignificantBits());\n+    testMember.setUdpPort(9000);\n \n     // We set to our expected test viewId in the IDM as well as resetting the gms member\n     gmsMember.setVmViewId(viewId);",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-core/src/integrationTest/java/org/apache/geode/distributed/internal/membership/gms/fd/GMSHealthMonitorJUnitTest.java",
+                "sha": "a146f1a37d7377ff842260aef73a0e78107755c1",
+                "status": "modified"
+            },
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-core/src/integrationTest/java/org/apache/geode/distributed/internal/membership/gms/membership/GMSJoinLeaveJUnitTest.java",
+                "changes": 6,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-core/src/integrationTest/java/org/apache/geode/distributed/internal/membership/gms/membership/GMSJoinLeaveJUnitTest.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 3,
+                "filename": "geode-core/src/integrationTest/java/org/apache/geode/distributed/internal/membership/gms/membership/GMSJoinLeaveJUnitTest.java",
+                "patch": "@@ -632,7 +632,7 @@ public void testRemoveRequestCausesForcedDisconnectInRogue() throws Exception {\n             .setMembershipPort(gmsJoinLeaveMemberId.getMembershipPort())\n             .build());\n     previousMemberId.setVmViewId(0);\n-    previousMemberId.getMemberData().setUUID(gmsJoinLeaveMemberId.getMemberData().getUUID());\n+    previousMemberId.setUUID(gmsJoinLeaveMemberId.getUUID());\n     GMSMembershipView view = new GMSMembershipView(mockMembers[0], 1,\n         createMemberList(mockMembers[0], previousMemberId, mockMembers[1]));\n     InstallViewMessage viewMessage = new InstallViewMessage(view, 0, false);\n@@ -867,7 +867,7 @@ public void testNetworkPartitionDetected() throws Exception {\n     mbrs.add(mockMembers[2]);\n     mbrs.add(gmsJoinLeaveMemberId);\n \n-    mockMembers[1].getMemberData().setMemberWeight((byte) 20);\n+    mockMembers[1].setMemberWeight((byte) 20);\n \n     GMSMembershipView newView =\n         new GMSMembershipView(mockMembers[0], gmsJoinLeave.getView().getViewId() + 1, mbrs);\n@@ -917,7 +917,7 @@ public void testQuorumLossNotificationWithNetworkPartitionDetectionDisabled() th\n     mbrs.add(mockMembers[2]);\n     mbrs.add(gmsJoinLeaveMemberId);\n \n-    mockMembers[1].getMemberData().setMemberWeight((byte) 20);\n+    mockMembers[1].setMemberWeight((byte) 20);\n \n     GMSMembershipView newView =\n         new GMSMembershipView(mockMembers[0], gmsJoinLeave.getView().getViewId() + 1, mbrs,",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-core/src/integrationTest/java/org/apache/geode/distributed/internal/membership/gms/membership/GMSJoinLeaveJUnitTest.java",
+                "sha": "5dbd7ccc1727101f4dbac7b51e9678b3c81ccbd6",
+                "status": "modified"
+            },
+            {
+                "additions": 19,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-core/src/integrationTest/java/org/apache/geode/distributed/internal/membership/gms/messenger/JGroupsMessengerJUnitTest.java",
+                "changes": 25,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-core/src/integrationTest/java/org/apache/geode/distributed/internal/membership/gms/messenger/JGroupsMessengerJUnitTest.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 6,
+                "filename": "geode-core/src/integrationTest/java/org/apache/geode/distributed/internal/membership/gms/messenger/JGroupsMessengerJUnitTest.java",
+                "patch": "@@ -49,6 +49,7 @@\n import java.io.IOException;\n import java.util.ArrayList;\n import java.util.Collections;\n+import java.util.Comparator;\n import java.util.HashMap;\n import java.util.List;\n import java.util.Map;\n@@ -75,9 +76,10 @@\n import org.apache.geode.distributed.internal.DistributionStats;\n import org.apache.geode.distributed.internal.membership.InternalDistributedMember;\n import org.apache.geode.distributed.internal.membership.adapter.ServiceConfig;\n+import org.apache.geode.distributed.internal.membership.api.MemberData;\n import org.apache.geode.distributed.internal.membership.api.MemberDisconnectedException;\n import org.apache.geode.distributed.internal.membership.api.MemberIdentifier;\n-import org.apache.geode.distributed.internal.membership.api.MemberIdentifierFactoryImpl;\n+import org.apache.geode.distributed.internal.membership.api.MemberIdentifierFactory;\n import org.apache.geode.distributed.internal.membership.api.MembershipClosedException;\n import org.apache.geode.distributed.internal.membership.api.MembershipConfig;\n import org.apache.geode.distributed.internal.membership.api.Message;\n@@ -186,7 +188,18 @@ private void initMocks(boolean enableMcast, Properties addProp) throws Exception\n \n     // if I do this earlier then test this return messenger as null\n     when(services.getMessenger()).thenReturn(messenger);\n-    when(services.getMemberFactory()).thenReturn(new MemberIdentifierFactoryImpl());\n+    when(services.getMemberFactory())\n+        .thenReturn(new MemberIdentifierFactory<InternalDistributedMember>() {\n+          @Override\n+          public InternalDistributedMember create(MemberData memberInfo) {\n+            return new InternalDistributedMember(memberInfo);\n+          }\n+\n+          @Override\n+          public Comparator<InternalDistributedMember> getComparator() {\n+            return InternalDistributedMember::compareTo;\n+          }\n+        });\n \n     String jgroupsConfig = messenger.jgStackConfig;\n     int startIdx = jgroupsConfig.indexOf(\"<org\");\n@@ -276,7 +289,7 @@ public void testMemberWeightIsSerialized() throws Exception {\n     BufferDataOutputStream out =\n         new BufferDataOutputStream(500, Version.getCurrentVersion());\n     MemberIdentifier mbr = createAddress(8888);\n-    mbr.getMemberData().setMemberWeight((byte) 40);\n+    mbr.setMemberWeight((byte) 40);\n     mbr.toData(out, mock(SerializationContext.class));\n     DataInputStream in = new DataInputStream(new ByteArrayInputStream(out.toByteArray()));\n     mbr = new InternalDistributedMember();\n@@ -553,7 +566,7 @@ public void doTestBigMessageIsFragmented(boolean mcastEnabled, boolean broadcast\n     int seqno = 1;\n     for (org.jgroups.Message m : messages) {\n       if (jgroupsWillUseMulticast) {\n-        m.setSrc(messenger.localAddress.getMemberData().getUUID());\n+        m.setSrc(messenger.localAddress.getUUID());\n       } else {\n         m.setSrc(fakeMember);\n         UNICAST3.Header oldHeader = (UNICAST3.Header) m.getHeader(unicastHeaderId);\n@@ -1137,9 +1150,9 @@ public void testEncryptedJoinResponse() throws Exception {\n \n   private MemberIdentifier createAddress(int port) {\n     MemberIdentifier gms = new InternalDistributedMember(\"localhost\", port);\n-    gms.getMemberData().setUUID(UUID.randomUUID());\n+    gms.setUUID(UUID.randomUUID());\n     gms.setVmKind(MemberIdentifier.NORMAL_DM_TYPE);\n-    gms.getMemberData().setVersionOrdinal(Version.getCurrentVersion().ordinal());\n+    gms.setVersionObjectForTest(Version.getCurrentVersion());\n     return gms;\n   }\n ",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-core/src/integrationTest/java/org/apache/geode/distributed/internal/membership/gms/messenger/JGroupsMessengerJUnitTest.java",
+                "sha": "25c86a2aeeec694498fdb4c7b867e4a3f017c26d",
+                "status": "modified"
+            },
+            {
+                "additions": 7,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-core/src/integrationTest/resources/org/apache/geode/codeAnalysis/sanctionedDataSerializables.txt",
+                "changes": 12,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-core/src/integrationTest/resources/org/apache/geode/codeAnalysis/sanctionedDataSerializables.txt?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 5,
+                "filename": "geode-core/src/integrationTest/resources/org/apache/geode/codeAnalysis/sanctionedDataSerializables.txt",
+                "patch": "@@ -274,11 +274,13 @@ org/apache/geode/distributed/internal/locks/NonGrantorDestroyedProcessor$NonGran\n fromData,17\n toData,17\n \n-org/apache/geode/distributed/internal/membership/InternalDistributedMember,4\n-fromDataPre_GFE_7_1_0_0,7\n-fromDataPre_GFE_9_0_0_0,7\n-toDataPre_GFE_7_1_0_0,7\n-toDataPre_GFE_9_0_0_0,7\n+org/apache/geode/distributed/internal/membership/InternalDistributedMember,6\n+fromData,12\n+fromDataPre_GFE_7_1_0_0,12\n+fromDataPre_GFE_9_0_0_0,12\n+toData,12\n+toDataPre_GFE_7_1_0_0,12\n+toDataPre_GFE_9_0_0_0,12\n \n org/apache/geode/distributed/internal/membership/adapter/LocalViewMessage,2\n fromData,8",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-core/src/integrationTest/resources/org/apache/geode/codeAnalysis/sanctionedDataSerializables.txt",
+                "sha": "5e2e57ccfa4c3ff4dbf4ded85d95e54500c7a785",
+                "status": "modified"
+            },
+            {
+                "additions": 356,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-core/src/main/java/org/apache/geode/distributed/internal/membership/InternalDistributedMember.java",
+                "changes": 398,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-core/src/main/java/org/apache/geode/distributed/internal/membership/InternalDistributedMember.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 42,
+                "filename": "geode-core/src/main/java/org/apache/geode/distributed/internal/membership/InternalDistributedMember.java",
+                "patch": "@@ -18,13 +18,20 @@\n import java.io.DataOutput;\n import java.io.Externalizable;\n import java.io.IOException;\n+import java.io.ObjectInput;\n+import java.io.ObjectOutput;\n import java.net.InetAddress;\n import java.net.UnknownHostException;\n import java.util.Collections;\n+import java.util.List;\n import java.util.Set;\n+import java.util.function.Function;\n import java.util.stream.Collectors;\n \n+import org.jgroups.util.UUID;\n+\n import org.apache.geode.InternalGemFireError;\n+import org.apache.geode.annotations.Immutable;\n import org.apache.geode.annotations.VisibleForTesting;\n import org.apache.geode.annotations.internal.MutableForTesting;\n import org.apache.geode.cache.client.ServerConnectivityException;\n@@ -35,30 +42,41 @@\n import org.apache.geode.distributed.internal.ServerLocation;\n import org.apache.geode.distributed.internal.membership.api.MemberData;\n import org.apache.geode.distributed.internal.membership.api.MemberDataBuilder;\n-import org.apache.geode.distributed.internal.membership.api.MemberIdentifierImpl;\n+import org.apache.geode.distributed.internal.membership.api.MemberIdentifier;\n+import org.apache.geode.distributed.internal.membership.api.MemberIdentifierFactoryImpl;\n import org.apache.geode.internal.cache.versions.VersionSource;\n import org.apache.geode.internal.inet.LocalHostUtil;\n import org.apache.geode.internal.net.SocketCreator;\n+import org.apache.geode.internal.serialization.DataSerializableFixedID;\n import org.apache.geode.internal.serialization.DeserializationContext;\n import org.apache.geode.internal.serialization.SerializationContext;\n+import org.apache.geode.internal.serialization.Version;\n import org.apache.geode.logging.internal.OSProcess;\n \n /**\n  * This is the fundamental representation of a member of a GemFire distributed system.\n  */\n-public class InternalDistributedMember extends MemberIdentifierImpl\n-    implements DistributedMember, Externalizable, ProfileId, VersionSource<DistributedMember> {\n+public class InternalDistributedMember\n+    implements DistributedMember, Externalizable, ProfileId, VersionSource<DistributedMember>,\n+    MemberIdentifier, DataSerializableFixedID {\n   private static final long serialVersionUID = -2785249969777296507L;\n \n+  @Immutable\n+  public static final MemberIdentifierFactoryImpl MEMBER_IDENTIFIER_FACTORY =\n+      new MemberIdentifierFactoryImpl();\n+\n   /** Retrieves an InetAddress given the provided hostname */\n   @MutableForTesting\n   protected static HostnameResolver hostnameResolver =\n       (location) -> InetAddress.getByName(location.getHostName());\n+  private final MemberIdentifier memberIdentifier;\n \n   /** lock object used when getting/setting roles/rolesSet fields */\n \n   // Used only by deserialization\n-  public InternalDistributedMember() {}\n+  public InternalDistributedMember() {\n+    memberIdentifier = MEMBER_IDENTIFIER_FACTORY.create(null);\n+  }\n \n   /**\n    * Construct a InternalDistributedMember\n@@ -76,11 +94,12 @@ public InternalDistributedMember() {}\n   public InternalDistributedMember(InetAddress i, int membershipPort, boolean splitBrainEnabled,\n       boolean canBeCoordinator) {\n \n-    super(MemberDataBuilder.newBuilder(i, getHostName(i))\n-        .setMembershipPort(membershipPort)\n-        .setNetworkPartitionDetectionEnabled(splitBrainEnabled)\n-        .setPreferredForCoordinator(canBeCoordinator)\n-        .build(), null);\n+    memberIdentifier =\n+        MEMBER_IDENTIFIER_FACTORY.create(MemberDataBuilder.newBuilder(i, getHostName(i))\n+            .setMembershipPort(membershipPort)\n+            .setNetworkPartitionDetectionEnabled(splitBrainEnabled)\n+            .setPreferredForCoordinator(canBeCoordinator)\n+            .build());\n   }\n \n   private static String getHostName(InetAddress i) {\n@@ -92,11 +111,11 @@ private static String getHostName(InetAddress i) {\n    *\n    */\n   public InternalDistributedMember(MemberData m) {\n-    super(m, null);\n+    memberIdentifier = MEMBER_IDENTIFIER_FACTORY.create(m);\n \n-    if (getMemberData().getHostName() == null || getMemberData().isPartial()) {\n+    if (getHostName() == null || isPartial()) {\n       String hostName = getHostName(m.getInetAddress());\n-      getMemberData().setHostName(hostName);\n+      memberIdentifier.setHostName(hostName);\n     }\n   }\n \n@@ -128,11 +147,13 @@ public InternalDistributedMember(String i, int p) {\n    */\n \n   public InternalDistributedMember(ServerLocation location) {\n-    super(MemberDataBuilder.newBuilder(getInetAddress(location), location.getHostName())\n-        .setMembershipPort(location.getPort())\n-        .setNetworkPartitionDetectionEnabled(false)\n-        .setPreferredForCoordinator(true)\n-        .build(), null);\n+    memberIdentifier =\n+        MEMBER_IDENTIFIER_FACTORY.create(\n+            MemberDataBuilder.newBuilder(getInetAddress(location), location.getHostName())\n+                .setMembershipPort(location.getPort())\n+                .setNetworkPartitionDetectionEnabled(false)\n+                .setPreferredForCoordinator(true)\n+                .build());\n   }\n \n   private static InetAddress getInetAddress(ServerLocation location) {\n@@ -167,14 +188,15 @@ private static InetAddress getInetAddress(ServerLocation location) {\n    */\n   public InternalDistributedMember(String host, int p, String n, String u, int vmKind,\n       String[] groups, DurableClientAttributes attr) throws UnknownHostException {\n-    super(createMemberData(host, p, n, vmKind, groups, attr), u);\n+    memberIdentifier =\n+        MEMBER_IDENTIFIER_FACTORY.create(createMemberData(host, p, n, vmKind, groups, attr, u));\n \n     defaultToCurrentHost();\n   }\n \n   private static MemberData createMemberData(String host, int p, String n, int vmKind,\n       String[] groups,\n-      DurableClientAttributes attr) {\n+      DurableClientAttributes attr, String u) {\n     InetAddress addr = LocalHostUtil.toInetAddress(host);\n     MemberDataBuilder builder = MemberDataBuilder.newBuilder(addr, host)\n         .setName(n)\n@@ -183,6 +205,7 @@ private static MemberData createMemberData(String host, int p, String n, int vmK\n         .setPreferredForCoordinator(false)\n         .setNetworkPartitionDetectionEnabled(true)\n         .setVmKind(vmKind)\n+        .setUniqueTag(u)\n         .setGroups(groups);\n     if (attr != null) {\n       builder.setDurableId(attr.getId())\n@@ -203,9 +226,9 @@ private static MemberData createMemberData(String host, int p, String n, int vmK\n    * @param p the membership listening port\n    */\n   public InternalDistributedMember(InetAddress i, int p) {\n-    super(MemberDataBuilder.newBuilder(i, \"localhost\")\n+    memberIdentifier = MEMBER_IDENTIFIER_FACTORY.create(MemberDataBuilder.newBuilder(i, \"localhost\")\n         .setMembershipPort(p)\n-        .build(), null);\n+        .build());\n     defaultToCurrentHost();\n   }\n \n@@ -222,8 +245,9 @@ public InternalDistributedMember(InetAddress i, int p) {\n    *        false to create a temporary id for the OTHER side of a connection)\n    */\n   public InternalDistributedMember(InetAddress addr, int p, boolean isCurrentHost) {\n-    super(MemberDataBuilder.newBuilder(addr, \"localhost\")\n-        .setMembershipPort(p).build(), null);\n+    memberIdentifier =\n+        MEMBER_IDENTIFIER_FACTORY.create(MemberDataBuilder.newBuilder(addr, \"localhost\")\n+            .setMembershipPort(p).build());\n     if (isCurrentHost) {\n       defaultToCurrentHost();\n     }\n@@ -245,50 +269,59 @@ public static void setHostnameResolver(final HostnameResolver hostnameResolver)\n   /**\n    * Returns this client member's durable attributes or null if no durable attributes were created.\n    */\n+  @Override\n   public DurableClientAttributes getDurableClientAttributes() {\n     assert !this.isPartial();\n-    String durableId = getMemberData().getDurableId();\n+    String durableId = memberIdentifier.getDurableId();\n     if (durableId == null || durableId.isEmpty()) {\n       return new DurableClientAttributes(\"\", 300);\n     }\n-    return new DurableClientAttributes(durableId, getMemberData().getDurableTimeout());\n+    return new DurableClientAttributes(durableId, memberIdentifier.getDurableTimeout());\n   }\n \n   /**\n    * Returns an unmodifiable Set of this member's Roles.\n    */\n+  @Override\n   public Set<Role> getRoles() {\n \n-    if (getMemberData().getGroups() == null) {\n+    if (getGroups() == null) {\n       return Collections.emptySet();\n     }\n     return getGroups().stream().map(InternalRole::getRole).collect(Collectors.toSet());\n   }\n \n+  @Override\n   public int compareTo(DistributedMember o) {\n     return compareTo(o, false, true);\n   }\n \n-  public int compareTo(DistributedMember o, boolean compareMemberData, boolean compareViewIds) {\n+  private int compareTo(DistributedMember o, boolean compareMemberData, boolean compareViewIds) {\n     if (this == o) {\n       return 0;\n     }\n     // obligatory type check\n     if (!(o instanceof InternalDistributedMember))\n       throw new ClassCastException(\n           \"InternalDistributedMember.compareTo(): comparison between different classes\");\n-    MemberIdentifierImpl other = (MemberIdentifierImpl) o;\n+    InternalDistributedMember other = (InternalDistributedMember) o;\n \n-    return compareTo(other, compareMemberData, compareViewIds);\n+    return compareTo(other.memberIdentifier, compareMemberData, compareViewIds);\n   }\n \n-  protected void defaultToCurrentHost() {\n-    getMemberData().setProcessId(OSProcess.getId());\n+  @Override\n+  public int compareTo(\n+      MemberIdentifier memberIdentifier, boolean compareMemberData, boolean compareViewIds) {\n+    return this.memberIdentifier.compareTo(memberIdentifier, compareMemberData, compareViewIds);\n+  }\n+\n+  private void defaultToCurrentHost() {\n+    memberIdentifier.setProcessId(OSProcess.getId());\n     try {\n       if (SocketCreator.resolve_dns) {\n-        getMemberData().setHostName(SocketCreator.getHostName(LocalHostUtil.getLocalHost()));\n+        setHostName(SocketCreator.getHostName(LocalHostUtil.getLocalHost()));\n       } else {\n-        getMemberData().setHostName(LocalHostUtil.getLocalHost().getHostAddress());\n+        setHostName(LocalHostUtil.getLocalHost().getHostAddress());\n       }\n     } catch (UnknownHostException ee) {\n       throw new InternalGemFireError(ee);\n@@ -301,27 +334,308 @@ public int getDSFID() {\n   }\n \n   @Override\n-  public void toDataPre_GFE_9_0_0_0(DataOutput out, SerializationContext context)\n-      throws IOException {\n-    super.toDataPre_GFE_9_0_0_0(out, context);\n+  public void setDurableTimeout(int newValue) {\n+    memberIdentifier.setDurableTimeout(newValue);\n+  }\n+\n+  @Override\n+  public void setDurableId(String id) {\n+    memberIdentifier.setDurableId(id);\n+  }\n+\n+  @Override\n+  public void setMemberData(MemberData m) {\n+    memberIdentifier.setMemberData(m);\n+  }\n+\n+  @Override\n+  public InetAddress getInetAddress() {\n+    return memberIdentifier.getInetAddress();\n+  }\n+\n+  @Override\n+  public int getMembershipPort() {\n+    return memberIdentifier.getMembershipPort();\n+  }\n+\n+  @Override\n+  public short getVersionOrdinal() {\n+    return memberIdentifier.getVersionOrdinal();\n+  }\n+\n+  @Override\n+  public int getDirectChannelPort() {\n+    return memberIdentifier.getDirectChannelPort();\n+  }\n+\n+  @Override\n+  public int getVmKind() {\n+    return memberIdentifier.getVmKind();\n+  }\n+\n+  @Override\n+  public int getMemberWeight() {\n+    return memberIdentifier.getMemberWeight();\n+  }\n+\n+  @Override\n+  public int getVmViewId() {\n+    return memberIdentifier.getVmViewId();\n+  }\n+\n+  @Override\n+  public boolean preferredForCoordinator() {\n+    return memberIdentifier.preferredForCoordinator();\n+  }\n+\n+  @Override\n+  public List<String> getGroups() {\n+    return memberIdentifier.getGroups();\n   }\n \n   @Override\n-  public void toDataPre_GFE_7_1_0_0(DataOutput out, SerializationContext context)\n+  public void setVmViewId(int p) {\n+    memberIdentifier.setVmViewId(p);\n+  }\n+\n+  @Override\n+  public void setPreferredForCoordinator(boolean preferred) {\n+    memberIdentifier.setPreferredForCoordinator(preferred);\n+  }\n+\n+  @Override\n+  public void setDirectChannelPort(int dcPort) {\n+    memberIdentifier.setDirectChannelPort(dcPort);\n+  }\n+\n+  @Override\n+  public void setVmKind(int dmType) {\n+    memberIdentifier.setVmKind(dmType);\n+  }\n+\n+  @Override\n+  public String getName() {\n+    return memberIdentifier.getName();\n+  }\n+\n+  @Override\n+  public boolean isPartial() {\n+    return memberIdentifier.isPartial();\n+  }\n+\n+  @Override\n+  public boolean equals(Object o) {\n+    if (this == o) {\n+      return true;\n+    }\n+    if (o == null || getClass() != o.getClass()) {\n+      return false;\n+    }\n+    InternalDistributedMember that = (InternalDistributedMember) o;\n+    return memberIdentifier.equals(that.memberIdentifier);\n+  }\n+\n+  @Override\n+  public int hashCode() {\n+    return memberIdentifier.hashCode();\n+  }\n+\n+  @Override\n+  public String toString() {\n+    return memberIdentifier.toString();\n+  }\n+\n+  public void addFixedToString(StringBuilder sb, boolean useIpAddress) {\n+    memberIdentifier.addFixedToString(sb, useIpAddress);\n+  }\n+\n+  @Override\n+  public void writeExternal(ObjectOutput out) throws IOException {\n+    memberIdentifier.writeExternal(out);\n+  }\n+\n+  @Override\n+  public void readExternal(ObjectInput in) throws IOException, ClassNotFoundException {\n+    memberIdentifier.readExternal(in);\n+  }\n+\n+  @Override\n+  public void toData(DataOutput out,\n+      SerializationContext context)\n+      throws IOException {\n+    memberIdentifier.toData(out, context);\n+  }\n+\n+  public void toDataPre_GFE_9_0_0_0(DataOutput out,\n+      SerializationContext context)\n+      throws IOException {\n+    memberIdentifier.toDataPre_GFE_9_0_0_0(out, context);\n+  }\n+\n+  public void toDataPre_GFE_7_1_0_0(DataOutput out,\n+      SerializationContext context)\n       throws IOException {\n-    super.toDataPre_GFE_7_1_0_0(out, context);\n+    memberIdentifier.toDataPre_GFE_7_1_0_0(out, context);\n+  }\n+\n+  @Override\n+  public void fromData(DataInput in,\n+      DeserializationContext context)\n+      throws IOException, ClassNotFoundException {\n+    memberIdentifier.fromData(in, context);\n   }\n \n   @Override\n-  public void fromDataPre_GFE_9_0_0_0(DataInput in, DeserializationContext context)\n+  public void fromDataPre_GFE_9_0_0_0(DataInput in,\n+      DeserializationContext context)\n       throws IOException, ClassNotFoundException {\n-    super.fromDataPre_GFE_9_0_0_0(in, context);\n+    memberIdentifier.fromDataPre_GFE_9_0_0_0(in, context);\n   }\n \n   @Override\n-  public void fromDataPre_GFE_7_1_0_0(DataInput in, DeserializationContext context)\n+  public void fromDataPre_GFE_7_1_0_0(DataInput in,\n+      DeserializationContext context)\n       throws IOException, ClassNotFoundException {\n-    super.fromDataPre_GFE_7_1_0_0(in, context);\n+    memberIdentifier.fromDataPre_GFE_7_1_0_0(in, context);\n+  }\n+\n+  @Override\n+  public void _readEssentialData(DataInput in,\n+      Function<InetAddress, String> hostnameResolver)\n+      throws IOException, ClassNotFoundException {\n+    memberIdentifier._readEssentialData(in, hostnameResolver);\n+  }\n+\n+  @Override\n+  public void writeEssentialData(DataOutput out) throws IOException {\n+    memberIdentifier.writeEssentialData(out);\n+  }\n+\n+  public void setPort(int p) {\n+    memberIdentifier.setPort(p);\n+  }\n+\n+  @Override\n+  public MemberData getMemberData() {\n+    return memberIdentifier.getMemberData();\n+  }\n+\n+  @Override\n+  public String getHostName() {\n+    return memberIdentifier.getHostName();\n+  }\n+\n+  @Override\n+  public String getHost() {\n+    return memberIdentifier.getHost();\n+  }\n+\n+  @Override\n+  public int getProcessId() {\n+    return memberIdentifier.getProcessId();\n+  }\n+\n+  @Override\n+  public String getId() {\n+    return memberIdentifier.getId();\n+  }\n+\n+  @Override\n+  public String getUniqueId() {\n+    return memberIdentifier.getUniqueId();\n+  }\n+\n+  public void setVersionObjectForTest(Version v) {\n+    memberIdentifier.setVersionObjectForTest(v);\n+  }\n+\n+  @Override\n+  public Version getVersionObject() {\n+    return memberIdentifier.getVersionObject();\n+  }\n+\n+  @Override\n+  public Version[] getSerializationVersions() {\n+    return memberIdentifier.getSerializationVersions();\n+  }\n+\n+  @Override\n+  public String getUniqueTag() {\n+    return memberIdentifier.getUniqueTag();\n+  }\n+\n+  public void setUniqueTag(String tag) {\n+    memberIdentifier.setUniqueTag(tag);\n+  }\n+\n+  @Override\n+  public void setIsPartial(boolean value) {\n+    memberIdentifier.setIsPartial(value);\n+  }\n+\n+  @Override\n+  public void setName(String name) {\n+    memberIdentifier.setName(name);\n+  }\n+\n+  @Override\n+  public String getDurableId() {\n+    return memberIdentifier.getDurableId();\n+  }\n+\n+  @Override\n+  public int getDurableTimeout() {\n+    return memberIdentifier.getDurableTimeout();\n+  }\n+\n+  @Override\n+  public void setHostName(String hostName) {\n+    memberIdentifier.setHostName(hostName);\n+  }\n+\n+  @Override\n+  public void setProcessId(int id) {\n+    memberIdentifier.setProcessId(id);\n+  }\n+\n+  @Override\n+  public boolean hasUUID() {\n+    return memberIdentifier.hasUUID();\n+  }\n+\n+  @Override\n+  public long getUuidLeastSignificantBits() {\n+    return memberIdentifier.getUuidLeastSignificantBits();\n+  }\n+\n+  @Override\n+  public long getUuidMostSignificantBits() {\n+    return memberIdentifier.getUuidMostSignificantBits();\n+  }\n+\n+  @Override\n+  public boolean isNetworkPartitionDetectionEnabled() {\n+    return memberIdentifier.isNetworkPartitionDetectionEnabled();\n+  }\n+\n+  @Override\n+  public void setUUID(UUID randomUUID) {\n+    memberIdentifier.setUUID(randomUUID);\n+  }\n+\n+  @Override\n+  public void setMemberWeight(byte b) {\n+    memberIdentifier.setMemberWeight(b);\n+  }\n+\n+  @Override\n+  public void setUdpPort(int i) {\n+    memberIdentifier.setUdpPort(i);\n+  }\n+\n+  @Override\n+  public UUID getUUID() {\n+    return memberIdentifier.getUUID();\n   }\n \n   @FunctionalInterface",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-core/src/main/java/org/apache/geode/distributed/internal/membership/InternalDistributedMember.java",
+                "sha": "151b787a966e909d181d71844f2838b813291297",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-core/src/test/java/org/apache/geode/distributed/internal/DistributionTest.java",
+                "changes": 4,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-core/src/test/java/org/apache/geode/distributed/internal/DistributionTest.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 3,
+                "filename": "geode-core/src/test/java/org/apache/geode/distributed/internal/DistributionTest.java",
+                "patch": "@@ -44,7 +44,6 @@\n import org.apache.geode.distributed.internal.membership.InternalDistributedMember;\n import org.apache.geode.distributed.internal.membership.api.Membership;\n import org.apache.geode.distributed.internal.membership.api.MembershipClosedException;\n-import org.apache.geode.distributed.internal.membership.gms.GMSMemberData;\n import org.apache.geode.distributed.internal.membership.gms.GMSMembership;\n import org.apache.geode.internal.admin.remote.AlertListenerMessage;\n import org.apache.geode.internal.admin.remote.RemoteTransportConfig;\n@@ -85,9 +84,8 @@ public void setUpDirectChannelMock() throws Exception {\n     mockMembers = new InternalDistributedMember[5];\n     for (int i = 0; i < mockMembers.length; i++) {\n       mockMembers[i] = new InternalDistributedMember(\"localhost\", 8888 + i);\n-      GMSMemberData m = (GMSMemberData) mockMembers[i].getMemberData();\n       UUID uuid = new UUID(r.nextLong(), r.nextLong());\n-      m.setUUID(uuid);\n+      mockMembers[i].setUUID(uuid);\n     }\n \n     dc = mock(DirectChannel.class);",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-core/src/test/java/org/apache/geode/distributed/internal/DistributionTest.java",
+                "sha": "56b139197b89c267bc9d054f9793387365e21bc2",
+                "status": "modified"
+            },
+            {
+                "additions": 2,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-core/src/test/java/org/apache/geode/distributed/internal/membership/InternalDistributedMemberTest.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-core/src/test/java/org/apache/geode/distributed/internal/membership/InternalDistributedMemberTest.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 0,
+                "filename": "geode-core/src/test/java/org/apache/geode/distributed/internal/membership/InternalDistributedMemberTest.java",
+                "patch": "@@ -123,8 +123,10 @@ public void equalsReturnsFalseIfUniqueTagsDiffer() throws UnknownHostException {\n     InetAddress host1 = InetAddress.getByAddress(new byte[] {127, 0, 0, 1});\n     MemberData netMember1 = mock(MemberData.class);\n     when(netMember1.getInetAddress()).thenReturn(host1);\n+    when(netMember1.getUniqueTag()).thenReturn(\"tag1\");\n     MemberData netMember2 = mock(MemberData.class);\n     when(netMember2.getInetAddress()).thenReturn(host1);\n+    when(netMember2.getUniqueTag()).thenReturn(\"tag2\");\n     InternalDistributedMember member = new InternalDistributedMember(netMember1);\n     member.setUniqueTag(\"tag1\");\n     InternalDistributedMember other = new InternalDistributedMember(netMember2);",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-core/src/test/java/org/apache/geode/distributed/internal/membership/InternalDistributedMemberTest.java",
+                "sha": "66f03678ed6294ca624f0c870521b466a0aa9fa8",
+                "status": "modified"
+            },
+            {
+                "additions": 5,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-gfsh/src/test/java/org/apache/geode/management/internal/cli/commands/ExportLogsCommandTest.java",
+                "changes": 10,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-gfsh/src/test/java/org/apache/geode/management/internal/cli/commands/ExportLogsCommandTest.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 5,
+                "filename": "geode-gfsh/src/test/java/org/apache/geode/management/internal/cli/commands/ExportLogsCommandTest.java",
+                "patch": "@@ -173,8 +173,8 @@ public void testTotalEstimateSizeExceedsLocatorAvailableDisk() throws Exception\n \n     InternalDistributedMember member1 = new InternalDistributedMember(\"member1\", 12345);\n     InternalDistributedMember member2 = new InternalDistributedMember(\"member2\", 98765);\n-    member1.getMemberData().setName(\"member1\");\n-    member2.getMemberData().setName(\"member2\");\n+    member1.setName(\"member1\");\n+    member2.setName(\"member2\");\n     Set<DistributedMember> testMembers = new HashSet<>();\n     testMembers.add(member1);\n     testMembers.add(member2);\n@@ -216,8 +216,8 @@ public void testTotalEstimateSizeExceedsUserSpecifiedValue() throws Exception {\n \n     InternalDistributedMember member1 = new InternalDistributedMember(\"member1\", 12345);\n     InternalDistributedMember member2 = new InternalDistributedMember(\"member2\", 98765);\n-    member1.getMemberData().setName(\"member1\");\n-    member2.getMemberData().setName(\"member2\");\n+    member1.setName(\"member1\");\n+    member2.setName(\"member2\");\n     Set<DistributedMember> testMembers = new HashSet<>();\n     testMembers.add(member1);\n     testMembers.add(member2);\n@@ -258,7 +258,7 @@ public void estimateLogSizeExceedsServerDisk() throws Exception {\n     boolean statsOnly = false;\n \n     InternalDistributedMember member1 = new InternalDistributedMember(\"member1\", 12345);\n-    member1.getMemberData().setName(\"member1\");\n+    member1.setName(\"member1\");\n     Set<DistributedMember> testMembers = new HashSet<>();\n     testMembers.add(member1);\n ",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-gfsh/src/test/java/org/apache/geode/management/internal/cli/commands/ExportLogsCommandTest.java",
+                "sha": "f1bd0d33361133678e936e48fbc8f2ee7bb1c56e",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/integrationTest/java/org/apache/geode/distributed/internal/membership/GMSMembershipViewJUnitTest.java",
+                "changes": 3,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-membership/src/integrationTest/java/org/apache/geode/distributed/internal/membership/GMSMembershipViewJUnitTest.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 2,
+                "filename": "geode-membership/src/integrationTest/java/org/apache/geode/distributed/internal/membership/GMSMembershipViewJUnitTest.java",
+                "patch": "@@ -61,8 +61,7 @@ public void initMembers() throws Exception {\n \n     // member joining in this view\n     members.get(numMembers - 1).setVmViewId(2);\n-    members.get(numMembers - 1).getMemberData()\n-        .setVmKind(MemberIdentifier.NORMAL_DM_TYPE);\n+    members.get(numMembers - 1).setVmKind(MemberIdentifier.NORMAL_DM_TYPE);\n   }\n \n   private void setFailureDetectionPorts(GMSMembershipView view) {",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/integrationTest/java/org/apache/geode/distributed/internal/membership/GMSMembershipViewJUnitTest.java",
+                "sha": "c0378b502498005da61c458705b93a94a9e788f2",
+                "status": "modified"
+            },
+            {
+                "additions": 5,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/integrationTest/java/org/apache/geode/distributed/internal/membership/api/MemberIdentifierFactoryImplTest.java",
+                "changes": 10,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-membership/src/integrationTest/java/org/apache/geode/distributed/internal/membership/api/MemberIdentifierFactoryImplTest.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 5,
+                "filename": "geode-membership/src/integrationTest/java/org/apache/geode/distributed/internal/membership/api/MemberIdentifierFactoryImplTest.java",
+                "patch": "@@ -93,7 +93,7 @@ public void testSetDurableId() {\n     MemberData memberData = MemberDataBuilder.newBuilderForLocalHost(\"hostname\")\n         .setDurableId(\"myId\").build();\n     MemberIdentifier data = factory.create(memberData);\n-    assertThat(data.getMemberData().getDurableId()).isEqualTo(\"myId\");\n+    assertThat(data.getDurableId()).isEqualTo(\"myId\");\n   }\n \n   @Test\n@@ -108,21 +108,21 @@ public void testSetVersionOrdinal() {\n   public void membersAreEqual() {\n     MemberData memberData = MemberDataBuilder.newBuilderForLocalHost(\"hostname\")\n         .setMembershipPort(1).build();\n-    MemberIdentifierImpl member1 = factory.create(memberData);\n+    MemberIdentifier member1 = factory.create(memberData);\n     memberData = MemberDataBuilder.newBuilderForLocalHost(\"hostname\")\n         .setMembershipPort(1).build();\n-    MemberIdentifierImpl member2 = factory.create(memberData);\n+    MemberIdentifier member2 = factory.create(memberData);\n     assertThat(factory.getComparator().compare(member1, member2)).isZero();\n   }\n \n   @Test\n   public void membersAreNotEqual() {\n     MemberData memberData = MemberDataBuilder.newBuilderForLocalHost(\"hostname\")\n         .setMembershipPort(1).build();\n-    MemberIdentifierImpl member1 = factory.create(memberData);\n+    MemberIdentifier member1 = factory.create(memberData);\n     memberData = MemberDataBuilder.newBuilderForLocalHost(\"hostname\")\n         .setMembershipPort(2).build();\n-    MemberIdentifierImpl member2 = factory.create(memberData);\n+    MemberIdentifier member2 = factory.create(memberData);\n     assertThat(factory.getComparator().compare(member1, member2)).isLessThan(0);\n     assertThat(factory.getComparator().compare(member2, member1)).isGreaterThan(0);\n   }",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/integrationTest/java/org/apache/geode/distributed/internal/membership/api/MemberIdentifierFactoryImplTest.java",
+                "sha": "72e7b7f77d057ef3a286726890cef631ea95445b",
+                "status": "modified"
+            },
+            {
+                "additions": 6,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/integrationTest/java/org/apache/geode/distributed/internal/membership/api/MembershipAPIArchUnitTest.java",
+                "changes": 9,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-membership/src/integrationTest/java/org/apache/geode/distributed/internal/membership/api/MembershipAPIArchUnitTest.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 3,
+                "filename": "geode-membership/src/integrationTest/java/org/apache/geode/distributed/internal/membership/api/MembershipAPIArchUnitTest.java",
+                "patch": "@@ -28,6 +28,7 @@\n import org.junit.runner.RunWith;\n \n import org.apache.geode.distributed.internal.membership.gms.MemberDataBuilderImpl;\n+import org.apache.geode.distributed.internal.membership.gms.MemberIdentifierImpl;\n import org.apache.geode.distributed.internal.membership.gms.MembershipBuilderImpl;\n import org.apache.geode.distributed.internal.membership.gms.MembershipLocatorBuilderImpl;\n import org.apache.geode.internal.inet.LocalHostUtil;\n@@ -49,9 +50,11 @@\n               // Serialization is a dependency of membership\n               .or(resideInAPackage(\"org.apache.geode.internal.serialization..\"))\n               .or(resideInAPackage(\"org.apache.geode.distributed.internal.tcpserver..\"))\n-              // allowed\n+              // allowed implementation class accesses\n               .or(type(MembershipBuilderImpl.class))\n               .or(type(MembershipLocatorBuilderImpl.class))\n-              .or(type(MemberDataBuilderImpl.class)\n-                  .or(type(LocalHostUtil.class))));\n+              .or(type(MemberDataBuilderImpl.class))\n+              .or(type(MemberIdentifierImpl.class))\n+\n+              .or(type(LocalHostUtil.class)));\n }",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/integrationTest/java/org/apache/geode/distributed/internal/membership/api/MembershipAPIArchUnitTest.java",
+                "sha": "f48064120a23f83a2d7f0cda1918e039d961769c",
+                "status": "modified"
+            },
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/integrationTest/java/org/apache/geode/distributed/internal/membership/gms/GMSMembershipJUnitTest.java",
+                "changes": 8,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-membership/src/integrationTest/java/org/apache/geode/distributed/internal/membership/gms/GMSMembershipJUnitTest.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 5,
+                "filename": "geode-membership/src/integrationTest/java/org/apache/geode/distributed/internal/membership/gms/GMSMembershipJUnitTest.java",
+                "patch": "@@ -118,9 +118,8 @@ public long getAckSevereAlertThreshold() {\n \n     authenticator = mock(Authenticator.class);\n     myMemberId = createMemberID(8887);\n-    GMSMemberData m = (GMSMemberData) myMemberId.getMemberData();\n     UUID uuid = new UUID(12345, 12345);\n-    m.setUUID(uuid);\n+    myMemberId.setUUID(uuid);\n \n     messenger = mock(Messenger.class);\n     when(messenger.getMemberID()).thenReturn(myMemberId);\n@@ -148,9 +147,8 @@ public long getAckSevereAlertThreshold() {\n     mockMembers = new MemberIdentifier[5];\n     for (int i = 0; i < mockMembers.length; i++) {\n       mockMembers[i] = createMemberID(8888 + i);\n-      m = (GMSMemberData) mockMembers[i].getMemberData();\n       uuid = new UUID(r.nextLong(), r.nextLong());\n-      m.setUUID(uuid);\n+      mockMembers[i].setUUID(uuid);\n     }\n     members = new ArrayList<>(Arrays.asList(mockMembers));\n \n@@ -316,7 +314,7 @@ public void testAddressesWithoutUUIDs() throws Exception {\n     // each destination w/o a UUID should have been replaced with the corresponding\n     // ID from the membership view\n     for (int i = 0; i < destinations.length; i++) {\n-      assertTrue(((GMSMemberData) destinations[i].getMemberData()).hasUUID());\n+      assertTrue(destinations[i].hasUUID());\n     }\n   }\n ",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/integrationTest/java/org/apache/geode/distributed/internal/membership/gms/GMSMembershipJUnitTest.java",
+                "sha": "7c06265dde387e21658480c45eb2d9f3976c0449",
+                "status": "modified"
+            },
+            {
+                "additions": 9,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/api/MemberData.java",
+                "changes": 9,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/api/MemberData.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 0,
+                "filename": "geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/api/MemberData.java",
+                "patch": "@@ -22,6 +22,7 @@\n \n import org.apache.geode.internal.serialization.DeserializationContext;\n import org.apache.geode.internal.serialization.SerializationContext;\n+import org.apache.geode.internal.serialization.Version;\n \n /**\n  * MemberIdentifiers are created with a MemberData component. Use MemberDataBuilder to create\n@@ -44,6 +45,10 @@\n \n   short getVersionOrdinal();\n \n+  Version getVersion();\n+\n+  String getUniqueTag();\n+\n   void setVersionOrdinal(short versionOrdinal);\n \n   void setUUID(UUID u);\n@@ -133,4 +138,8 @@ void readEssentialData(java.io.DataInput in,\n   int compareAdditionalData(MemberData his);\n \n   int getVmPid();\n+\n+  void setIsPartial(boolean value);\n+\n+  void setUniqueTag(String tag);\n }",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/api/MemberData.java",
+                "sha": "6483fb52fadca63a631061efef8e962e1838e83c",
+                "status": "modified"
+            },
+            {
+                "additions": 5,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/api/MemberDataBuilder.java",
+                "changes": 5,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/api/MemberDataBuilder.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 0,
+                "filename": "geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/api/MemberDataBuilder.java",
+                "patch": "@@ -91,5 +91,10 @@ static void parseCsv(List<String> groups, String csv) {\n \n   MemberDataBuilder setUuidLeastSignificantBits(long uuidLeastSignificantBits);\n \n+  MemberDataBuilder setIsPartial(boolean isPartial);\n+\n+  MemberDataBuilder setUniqueTag(String uniqueTag);\n+\n   MemberData build();\n+\n }",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/api/MemberDataBuilder.java",
+                "sha": "e8426a77176bc3d3ba1e54ecb834b8c5f277077e",
+                "status": "modified"
+            },
+            {
+                "additions": 84,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/api/MemberIdentifier.java",
+                "changes": 84,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/api/MemberIdentifier.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 0,
+                "filename": "geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/api/MemberIdentifier.java",
+                "patch": "@@ -14,10 +14,20 @@\n  */\n package org.apache.geode.distributed.internal.membership.api;\n \n+import java.io.DataInput;\n+import java.io.DataOutput;\n+import java.io.IOException;\n+import java.io.ObjectInput;\n+import java.io.ObjectOutput;\n import java.net.InetAddress;\n import java.util.List;\n+import java.util.function.Function;\n+\n+import org.jgroups.util.UUID;\n \n import org.apache.geode.internal.serialization.DataSerializableFixedID;\n+import org.apache.geode.internal.serialization.DeserializationContext;\n+import org.apache.geode.internal.serialization.SerializationContext;\n import org.apache.geode.internal.serialization.Version;\n \n /**\n@@ -140,4 +150,78 @@\n    * @return true if this is a partial ID\n    */\n   boolean isPartial();\n+\n+  void setDurableId(String id);\n+\n+  void setDurableTimeout(int newValue);\n+\n+  int getDirectChannelPort();\n+\n+  String getName();\n+\n+  void addFixedToString(StringBuilder sb, boolean useIpAddress);\n+\n+  void writeExternal(ObjectOutput out) throws IOException;\n+\n+  void readExternal(ObjectInput in) throws IOException, ClassNotFoundException;\n+\n+  void toDataPre_GFE_9_0_0_0(DataOutput out, SerializationContext context) throws IOException;\n+\n+  void toDataPre_GFE_7_1_0_0(DataOutput out, SerializationContext context) throws IOException;\n+\n+  void fromDataPre_GFE_9_0_0_0(DataInput in, DeserializationContext context)\n+      throws IOException, ClassNotFoundException;\n+\n+  void fromDataPre_GFE_7_1_0_0(DataInput in, DeserializationContext context)\n+      throws IOException, ClassNotFoundException;\n+\n+  void _readEssentialData(DataInput in, Function<InetAddress, String> hostnameResolver)\n+      throws IOException, ClassNotFoundException;\n+\n+  void writeEssentialData(DataOutput out) throws IOException;\n+\n+  void setPort(int p);\n+\n+  String getHost();\n+\n+  int getProcessId();\n+\n+  String getId();\n+\n+  String getUniqueId();\n+\n+  void setVersionObjectForTest(Version v);\n+\n+  void setUniqueTag(String tag);\n+\n+  int compareTo(MemberIdentifier memberIdentifier, boolean compareMemberData,\n+      boolean compareViewIds);\n+\n+  String getUniqueTag();\n+\n+  void setName(String name);\n+\n+  String getDurableId();\n+\n+  int getDurableTimeout();\n+\n+  void setHostName(String hostName);\n+\n+  void setProcessId(int id);\n+\n+  boolean hasUUID();\n+\n+  long getUuidLeastSignificantBits();\n+\n+  long getUuidMostSignificantBits();\n+\n+  boolean isNetworkPartitionDetectionEnabled();\n+\n+  void setUUID(UUID randomUUID);\n+\n+  void setMemberWeight(byte b);\n+\n+  void setUdpPort(int i);\n+\n+  UUID getUUID();\n }",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/api/MemberIdentifier.java",
+                "sha": "7f16c6572cb54f343d618d2edb57b74591a52b6e",
+                "status": "modified"
+            },
+            {
+                "additions": 15,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/api/MemberIdentifierFactoryImpl.java",
+                "changes": 20,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/api/MemberIdentifierFactoryImpl.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 5,
+                "filename": "geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/api/MemberIdentifierFactoryImpl.java",
+                "patch": "@@ -16,16 +16,26 @@\n \n import java.util.Comparator;\n \n+import org.apache.geode.distributed.internal.membership.gms.MemberIdentifierImpl;\n+import org.apache.geode.distributed.internal.tcpserver.TcpClient;\n+import org.apache.geode.distributed.internal.tcpserver.TcpSocketCreator;\n+import org.apache.geode.internal.serialization.DSFIDSerializer;\n+\n+/**\n+ * The default {@link MemberIdentifierFactory} which produces {@link MemberIdentifier} objects. For\n+ * use in\n+ * {@link MembershipBuilder#newMembershipBuilder(TcpSocketCreator, TcpClient, DSFIDSerializer, MemberIdentifierFactory)}\n+ */\n public class MemberIdentifierFactoryImpl\n-    implements MemberIdentifierFactory<MemberIdentifierImpl> {\n+    implements MemberIdentifierFactory<MemberIdentifier> {\n \n   @Override\n-  public MemberIdentifierImpl create(MemberData memberInfo) {\n-    return new MemberIdentifierImpl(memberInfo, null);\n+  public MemberIdentifier create(MemberData memberInfo) {\n+    return new MemberIdentifierImpl(memberInfo);\n   }\n \n   @Override\n-  public Comparator<MemberIdentifierImpl> getComparator() {\n-    return MemberIdentifierImpl::compare;\n+  public Comparator<MemberIdentifier> getComparator() {\n+    return (identifier, other) -> identifier.compareTo(other, false, true);\n   }\n }",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/api/MemberIdentifierFactoryImpl.java",
+                "sha": "93f323257d0e93f4290310535a0171da645a4dbf",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/api/MembershipView.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/api/MembershipView.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 1,
+                "filename": "geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/api/MembershipView.java",
+                "patch": "@@ -181,7 +181,7 @@ public synchronized ID getCanonicalID(ID id) {\n \n   public ID getCoordinator() {\n     for (ID addr : members) {\n-      if (addr.getMemberData().isPreferredForCoordinator()) {\n+      if (addr.preferredForCoordinator()) {\n         return addr;\n       }\n     }",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/api/MembershipView.java",
+                "sha": "22a769114ecbd90885ea8c161ba3e7a48a115a82",
+                "status": "modified"
+            },
+            {
+                "additions": 66,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/GMSMemberData.java",
+                "changes": 83,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/GMSMemberData.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 17,
+                "filename": "geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/GMSMemberData.java",
+                "patch": "@@ -27,6 +27,7 @@\n import org.apache.geode.internal.serialization.DeserializationContext;\n import org.apache.geode.internal.serialization.SerializationContext;\n import org.apache.geode.internal.serialization.StaticSerialization;\n+import org.apache.geode.internal.serialization.UnsupportedSerializationVersionException;\n import org.apache.geode.internal.serialization.Version;\n \n /**\n@@ -47,6 +48,15 @@\n   /** The DM type for stand-alone members (usually clients) */\n   public static final int LONER_DM_TYPE = 13;\n \n+  /** serialization bit flag */\n+  public static final int NPD_ENABLED_BIT = 0x1;\n+  /** serialization bit flag */\n+  public static final int COORD_ENABLED_BIT = 0x2;\n+  /** partial ID bit flag */\n+  public static final int PARTIAL_ID_BIT = 0x4;\n+  /** product version bit flag */\n+  public static final int VERSION_BIT = 0x8;\n+\n   private String hostName;\n \n   private int udpPort = 0;\n@@ -60,12 +70,22 @@\n   private int directPort;\n   private String name;\n   private String[] groups;\n-  private short versionOrdinal = Version.getCurrentVersion().ordinal();\n   private long uuidLSBs;\n   private long uuidMSBs;\n   private String durableId;\n   private int durableTimeout;\n+  /**\n+   * Unique tag (such as randomly generated bytes) to help enforce uniqueness. Note: this should be\n+   * displayable.\n+   */\n+  private String uniqueTag = null;\n+  private transient Version versionObj = Version.CURRENT;\n \n+  /**\n+   * whether this is a partial member ID (without roles, durable attributes). We use partial IDs in\n+   * EventID objects to reduce their size. It would be better to use canonical IDs but there is\n+   * currently no central mechanism that would allow that for both server and client identifiers\n+   */\n   private boolean isPartial; // transient state - created with readEssentialData\n \n   public boolean isPartial() {\n@@ -93,7 +113,7 @@ public GMSMemberData(InetAddress i, String hostName, int membershipPort, int pro\n       String durableId, int durableTimeout,\n       boolean networkPartitionDetectionEnabled, boolean preferredForCoordinator,\n       short version,\n-      long msbs, long lsbs, byte memberWeight) {\n+      long msbs, long lsbs, byte memberWeight, boolean isPartial, String uniqueTag) {\n     this.inetAddr = i;\n     this.hostName = hostName;\n     this.udpPort = membershipPort;\n@@ -107,17 +127,27 @@ public GMSMemberData(InetAddress i, String hostName, int membershipPort, int pro\n     this.durableTimeout = durableTimeout;\n     this.networkPartitionDetectionEnabled = networkPartitionDetectionEnabled;\n     this.preferredForCoordinator = preferredForCoordinator;\n-    this.versionOrdinal = version;\n+    setVersionObject(version);\n     this.uuidMSBs = msbs;\n     this.uuidLSBs = lsbs;\n     this.memberWeight = memberWeight;\n+    this.isPartial = isPartial;\n+    this.uniqueTag = uniqueTag;\n+  }\n+\n+  private void setVersionObject(short versionOrdinal) {\n+    try {\n+      this.versionObj = Version.fromOrdinal(versionOrdinal);\n+    } catch (UnsupportedSerializationVersionException e) {\n+      this.versionObj = Version.CURRENT;\n+    }\n   }\n \n   public GMSMemberData(InetAddress i, int p, short version, long msbs, long lsbs, int viewId) {\n     this.inetAddr = i;\n     this.hostName = i.getHostName();\n     this.udpPort = p;\n-    this.versionOrdinal = version;\n+    setVersionObject(version);\n     this.uuidMSBs = msbs;\n     this.uuidLSBs = lsbs;\n     this.vmViewId = viewId;\n@@ -146,9 +176,11 @@ public GMSMemberData(GMSMemberData other) {\n     this.durableId = other.durableId;\n     this.durableTimeout = other.durableTimeout;\n     this.groups = other.groups;\n-    this.versionOrdinal = other.versionOrdinal;\n+    this.versionObj = other.versionObj;\n     this.uuidLSBs = other.uuidLSBs;\n     this.uuidMSBs = other.uuidMSBs;\n+    this.isPartial = other.isPartial;\n+    this.uniqueTag = other.uniqueTag;\n   }\n \n \n@@ -188,12 +220,22 @@ public InetAddress getInetAddress() {\n   @Override\n \n   public short getVersionOrdinal() {\n-    return this.versionOrdinal;\n+    return this.versionObj.ordinal();\n+  }\n+\n+  @Override\n+  public Version getVersion() {\n+    return versionObj;\n+  }\n+\n+  @Override\n+  public String getUniqueTag() {\n+    return uniqueTag;\n   }\n \n   @Override\n   public void setVersionOrdinal(short versionOrdinal) {\n-    this.versionOrdinal = versionOrdinal;\n+    setVersionObject(versionOrdinal);\n   }\n \n   @Override\n@@ -362,8 +404,8 @@ public String toString() {\n     sb.append(\";addr=\").append(inetAddr).append(\";port=\").append(udpPort)\n         .append(\";kind=\").append(vmKind).append(\";processId=\").append(processId)\n         .append(\";viewId=\").append(vmViewId);\n-    if (versionOrdinal != Version.CURRENT_ORDINAL) {\n-      sb.append(\";version=\").append(versionOrdinal);\n+    if (getVersionOrdinal() != Version.CURRENT_ORDINAL) {\n+      sb.append(\";version=\").append(getVersionOrdinal());\n     }\n     sb.append(\"]\");\n     return sb.toString();\n@@ -464,7 +506,7 @@ public void setVmKind(int vmKind) {\n \n   @Override\n   public void setVersion(Version v) {\n-    this.versionOrdinal = v.ordinal();\n+    this.versionObj = v;\n   }\n \n   @Override\n@@ -503,20 +545,17 @@ public boolean hasUUID() {\n     return !(this.uuidLSBs == 0 && this.uuidMSBs == 0);\n   }\n \n-  static final int NPD_ENABLED_BIT = 0x01;\n-  static final int PREFERRED_FOR_COORD_BIT = 0x02;\n-  static final int VERSION_BIT = 0x8;\n \n   @Override\n   public void writeEssentialData(DataOutput out,\n       SerializationContext context) throws IOException {\n-    Version.writeOrdinal(out, this.versionOrdinal, true);\n+    Version.writeOrdinal(out, getVersionOrdinal(), true);\n \n     int flags = 0;\n     if (networkPartitionDetectionEnabled)\n       flags |= NPD_ENABLED_BIT;\n     if (preferredForCoordinator)\n-      flags |= PREFERRED_FOR_COORD_BIT;\n+      flags |= COORD_ENABLED_BIT;\n     out.writeShort(flags);\n \n     StaticSerialization.writeInetAddress(inetAddr, out);\n@@ -542,11 +581,11 @@ public void setHostName(String hostName) {\n   @Override\n   public void readEssentialData(DataInput in,\n       DeserializationContext context) throws IOException, ClassNotFoundException {\n-    this.versionOrdinal = Version.readOrdinal(in);\n+    setVersionObject(Version.readOrdinal(in));\n \n     int flags = in.readShort();\n     this.networkPartitionDetectionEnabled = (flags & NPD_ENABLED_BIT) != 0;\n-    this.preferredForCoordinator = (flags & PREFERRED_FOR_COORD_BIT) != 0;\n+    this.preferredForCoordinator = (flags & COORD_ENABLED_BIT) != 0;\n \n     this.inetAddr = StaticSerialization.readInetAddress(in);\n     if (this.inetAddr != null) {\n@@ -597,4 +636,14 @@ public void setDurableTimeout(int newValue) {\n   public void setDurableId(String id) {\n     durableId = id;\n   }\n+\n+  @Override\n+  public void setIsPartial(boolean value) {\n+    isPartial = value;\n+  }\n+\n+  @Override\n+  public void setUniqueTag(String tag) {\n+    uniqueTag = tag;\n+  }\n }",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/GMSMemberData.java",
+                "sha": "851791eef77fc8de2bdf73a3d87d98cb3b160112",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/GMSMembership.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/GMSMembership.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 1,
+                "filename": "geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/GMSMembership.java",
+                "patch": "@@ -1441,7 +1441,7 @@ void checkAddressesForUUIDs(ID[] addresses) {\n     for (int i = 0; i < addresses.length; i++) {\n       ID id = addresses[i];\n       if (id != null) {\n-        if (!id.getMemberData().hasUUID()) {\n+        if (!id.hasUUID()) {\n           id.setMemberData(view.getCanonicalID(id).getMemberData());\n         }\n       }",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/GMSMembership.java",
+                "sha": "ea7635e043434570d4a1f1097c0407d711d8d6dd",
+                "status": "modified"
+            },
+            {
+                "additions": 14,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/MemberDataBuilderImpl.java",
+                "changes": 15,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/MemberDataBuilderImpl.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 1,
+                "filename": "geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/MemberDataBuilderImpl.java",
+                "patch": "@@ -48,6 +48,8 @@\n   private short versionOrdinal = Version.CURRENT_ORDINAL;\n   private long uuidMostSignificantBits = 0;\n   private long uuidLeastSignificantBits = 0;\n+  private boolean isPartial;\n+  private String uniqueTag;\n \n   public void setMemberWeight(byte memberWeight) {\n     this.memberWeight = memberWeight;\n@@ -154,12 +156,23 @@ public MemberDataBuilderImpl setUuidLeastSignificantBits(long uuidLeastSignifica\n     return this;\n   }\n \n+  public MemberDataBuilderImpl setIsPartial(boolean partial) {\n+    this.isPartial = partial;\n+    return this;\n+  }\n+\n+  @Override\n+  public MemberDataBuilder setUniqueTag(String uniqueTag) {\n+    this.uniqueTag = uniqueTag;\n+    return this;\n+  }\n+\n   public MemberData build() {\n     return new GMSMemberData(inetAddress, hostName,\n         membershipPort, vmPid, (byte) vmKind, directChannelPort,\n         vmViewId, name, groups, durableId, durableTimeout,\n         networkPartitionDetectionEnabled, preferredForCoordinator, versionOrdinal,\n-        uuidMostSignificantBits, uuidLeastSignificantBits, memberWeight);\n+        uuidMostSignificantBits, uuidLeastSignificantBits, memberWeight, isPartial, uniqueTag);\n   }\n \n }",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/MemberDataBuilderImpl.java",
+                "sha": "b0eca8f666d44c3de057236167493f5f1f6324fa",
+                "status": "modified"
+            },
+            {
+                "additions": 136,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/MemberIdentifierImpl.java",
+                "changes": 209,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/MemberIdentifierImpl.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 73,
+                "filename": "geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/MemberIdentifierImpl.java",
+                "patch": "@@ -12,7 +12,12 @@\n  * or implied. See the License for the specific language governing permissions and limitations under\n  * the License.\n  */\n-package org.apache.geode.distributed.internal.membership.api;\n+package org.apache.geode.distributed.internal.membership.gms;\n+\n+import static org.apache.geode.distributed.internal.membership.gms.GMSMemberData.COORD_ENABLED_BIT;\n+import static org.apache.geode.distributed.internal.membership.gms.GMSMemberData.NPD_ENABLED_BIT;\n+import static org.apache.geode.distributed.internal.membership.gms.GMSMemberData.PARTIAL_ID_BIT;\n+import static org.apache.geode.distributed.internal.membership.gms.GMSMemberData.VERSION_BIT;\n \n import java.io.DataInput;\n import java.io.DataOutput;\n@@ -29,60 +34,35 @@\n import java.util.function.Function;\n \n import org.apache.commons.validator.routines.InetAddressValidator;\n+import org.jgroups.util.UUID;\n \n import org.apache.geode.annotations.Immutable;\n import org.apache.geode.annotations.VisibleForTesting;\n+import org.apache.geode.distributed.internal.membership.api.MemberData;\n+import org.apache.geode.distributed.internal.membership.api.MemberDataBuilder;\n+import org.apache.geode.distributed.internal.membership.api.MemberIdentifier;\n import org.apache.geode.internal.serialization.DataSerializableFixedID;\n import org.apache.geode.internal.serialization.DeserializationContext;\n import org.apache.geode.internal.serialization.SerializationContext;\n import org.apache.geode.internal.serialization.StaticSerialization;\n-import org.apache.geode.internal.serialization.UnsupportedSerializationVersionException;\n import org.apache.geode.internal.serialization.Version;\n \n /**\n  * An implementation of {@link MemberIdentifier}\n  */\n public class MemberIdentifierImpl implements MemberIdentifier, DataSerializableFixedID {\n-  /** serialization bit flag */\n-  private static final int NPD_ENABLED_BIT = 0x1;\n-  /** serialization bit flag */\n-  private static final int COORD_ENABLED_BIT = 0x2;\n-  /** partial ID bit flag */\n-  private static final int PARTIAL_ID_BIT = 0x4;\n-  /** product version bit flag */\n-  private static final int VERSION_BIT = 0x8;\n   /** The versions in which this message was modified */\n   @Immutable\n   private static final Version[] dsfidVersions = new Version[] {\n       Version.GFE_71, Version.GFE_90};\n   private MemberData memberData; // the underlying member object\n-  /**\n-   * whether this is a partial member ID (without roles, durable attributes). We use partial IDs in\n-   * EventID objects to reduce their size. It would be better to use canonical IDs but there is\n-   * currently no central mechanism that would allow that for both server and client identifiers\n-   */\n-  private boolean isPartial;\n-  /**\n-   * Unique tag (such as randomly generated bytes) to help enforce uniqueness. Note: this should be\n-   * displayable.\n-   */\n-  private String uniqueTag = null;\n-  private transient Version versionObj = Version.CURRENT;\n+\n \n   public MemberIdentifierImpl() {}\n \n   public MemberIdentifierImpl(\n-      MemberData memberData, String uniqueTag) {\n+      MemberData memberData) {\n     this.memberData = memberData;\n-    this.isPartial = memberData.isPartial();\n-    this.uniqueTag = uniqueTag;\n-\n-    short version = memberData.getVersionOrdinal();\n-    try {\n-      this.versionObj = Version.fromOrdinal(version);\n-    } catch (UnsupportedSerializationVersionException e) {\n-      this.versionObj = Version.CURRENT;\n-    }\n   }\n \n   public int getVmPid() {\n@@ -128,14 +108,14 @@ public int getMembershipPort() {\n \n   @Override\n   public short getVersionOrdinal() {\n-    return versionObj == null ? memberData.getVersionOrdinal() : versionObj.ordinal();\n+    return memberData.getVersionOrdinal();\n   }\n \n   /**\n    * Returns the port on which the direct channel runs\n    */\n   public int getDirectChannelPort() {\n-    assert !this.isPartial;\n+    assert !this.isPartial();\n     return memberData.getDirectChannelPort();\n   }\n \n@@ -168,7 +148,9 @@ public boolean preferredForCoordinator() {\n \n   @Override\n   public List<String> getGroups() {\n-    return Collections.unmodifiableList(Arrays.asList(memberData.getGroups()));\n+    String[] groups = memberData.getGroups();\n+    return groups == null ? Collections.emptyList()\n+        : Collections.unmodifiableList(Arrays.asList(groups));\n   }\n \n   @Override\n@@ -195,7 +177,7 @@ public void setVmKind(int dmType) {\n     cachedToString = null;\n   }\n \n-  protected void setGroups(String[] newGroups) {\n+  public void setGroups(String[] newGroups) {\n     this.memberData.setGroups(newGroups);\n     cachedToString = null;\n   }\n@@ -212,11 +194,49 @@ public String getName() {\n     return result;\n   }\n \n-  public int compare(MemberIdentifierImpl other) {\n+  @Override\n+  public void setName(String name) {\n+    memberData.setName(name);\n+  }\n+\n+  @Override\n+  public String getUniqueTag() {\n+    return memberData.getUniqueTag();\n+  }\n+\n+  @Override\n+  public String getDurableId() {\n+    return memberData.getDurableId();\n+  }\n+\n+  @Override\n+  public int getDurableTimeout() {\n+    return memberData.getDurableTimeout();\n+  }\n+\n+  @Override\n+  public void setHostName(String hostName) {\n+    memberData.setHostName(hostName);\n+\n+  }\n+\n+  @Override\n+  public void setProcessId(int id) {\n+    memberData.setProcessId(id);\n+\n+  }\n+\n+  @Override\n+  public boolean hasUUID() {\n+    return memberData.hasUUID();\n+  }\n+\n+  public int compare(MemberIdentifier other) {\n     return this.compareTo(other, false, true);\n   }\n \n-  protected int compareTo(MemberIdentifierImpl other, boolean compareMemberData,\n+  @Override\n+  public int compareTo(MemberIdentifier other, boolean compareMemberData,\n       boolean compareViewIds) {\n     int myPort = getMembershipPort();\n     int otherPort = other.getMembershipPort();\n@@ -254,7 +274,7 @@ protected int compareTo(MemberIdentifierImpl other, boolean compareMemberData,\n \n     String myName = getName();\n     String otherName = other.getName();\n-    if (!(other.isPartial || this.isPartial)) {\n+    if (!(other.isPartial() || this.isPartial())) {\n       if (myName == null && otherName == null) {\n         // do nothing\n       } else if (myName == null) {\n@@ -269,7 +289,7 @@ protected int compareTo(MemberIdentifierImpl other, boolean compareMemberData,\n       }\n     }\n \n-    if (this.uniqueTag == null && other.uniqueTag == null) {\n+    if (this.getUniqueTag() == null && other.getUniqueTag() == null) {\n       if (compareViewIds) {\n         // not loners, so look at P2P view ID\n         int thisViewId = getVmViewId();\n@@ -282,19 +302,19 @@ protected int compareTo(MemberIdentifierImpl other, boolean compareMemberData,\n           } // else they're the same, so continue\n         }\n       }\n-    } else if (this.uniqueTag == null) {\n+    } else if (this.getUniqueTag() == null) {\n       return -1;\n-    } else if (other.uniqueTag == null) {\n+    } else if (other.getUniqueTag() == null) {\n       return 1;\n     } else {\n-      int i = this.uniqueTag.compareTo(other.uniqueTag);\n+      int i = this.getUniqueTag().compareTo(other.getUniqueTag());\n       if (i != 0) {\n         return i;\n       }\n     }\n \n-    if (compareMemberData && this.memberData != null && other.memberData != null) {\n-      return this.memberData.compareAdditionalData(other.memberData);\n+    if (compareMemberData && this.memberData != null && other.getMemberData() != null) {\n+      return this.memberData.compareAdditionalData(other.getMemberData());\n     } else {\n       return 0;\n     }\n@@ -307,7 +327,7 @@ protected int compareTo(MemberIdentifierImpl other, boolean compareMemberData,\n    * @return true if this is a partial ID\n    */\n   public boolean isPartial() {\n-    return isPartial;\n+    return memberData.isPartial();\n   }\n \n   @Override\n@@ -341,7 +361,7 @@ public boolean equals(Object obj) {\n       }\n     }\n \n-    if (this.uniqueTag == null && other.uniqueTag == null) {\n+    if (this.getUniqueTag() == null && other.getUniqueTag() == null) {\n       // not loners, so look at P2P view ID\n       int thisViewId = getVmViewId();\n       int otherViewId = other.getVmViewId();\n@@ -350,7 +370,7 @@ public boolean equals(Object obj) {\n           return false;\n         } // else they're the same, so continue\n       }\n-    } else if (!Objects.equals(this.uniqueTag, other.uniqueTag)) {\n+    } else if (!Objects.equals(this.getUniqueTag(), other.getUniqueTag())) {\n       return false;\n     }\n \n@@ -478,8 +498,8 @@ public void addFixedToString(StringBuilder sb, boolean useIpAddress) {\n     if (vmKind == MemberIdentifier.LONER_DM_TYPE) {\n       // add some more info that was added in 4.2.1 for loner bridge clients\n       // impact on non-bridge loners is ok\n-      if (this.uniqueTag != null && this.uniqueTag.length() != 0) {\n-        sb.append(\":\").append(this.uniqueTag);\n+      if (this.getUniqueTag() != null && this.getUniqueTag().length() != 0) {\n+        sb.append(\":\").append(this.getUniqueTag());\n       }\n       String name = getName();\n       if (name.length() != 0) {\n@@ -491,13 +511,11 @@ public void addFixedToString(StringBuilder sb, boolean useIpAddress) {\n   private short readVersion(int flags, DataInput in) throws IOException {\n     if ((flags & VERSION_BIT) != 0) {\n       short version = Version.readOrdinal(in);\n-      this.versionObj = Version.fromOrdinalNoThrow(version, false);\n       return version;\n     } else {\n       // prior to 7.1 member IDs did not serialize their version information\n       Version v = StaticSerialization.getVersionForDataStreamOrNull(in);\n       if (v != null) {\n-        this.versionObj = v;\n         return v.ordinal();\n       }\n       return Version.CURRENT_ORDINAL;\n@@ -526,7 +544,7 @@ public void writeExternal(ObjectOutput out) throws IOException {\n       flags |= NPD_ENABLED_BIT;\n     if (memberData.isPreferredForCoordinator())\n       flags |= COORD_ENABLED_BIT;\n-    if (this.isPartial)\n+    if (this.isPartial())\n       flags |= PARTIAL_ID_BIT;\n     // always write product version but enable reading from older versions\n     // that do not have it\n@@ -540,7 +558,7 @@ public void writeExternal(ObjectOutput out) throws IOException {\n     StaticSerialization.writeStringArray(memberData.getGroups(), out);\n \n     StaticSerialization.writeString(memberData.getName(), out);\n-    StaticSerialization.writeString(this.uniqueTag, out);\n+    StaticSerialization.writeString(memberData.getUniqueTag(), out);\n     String durableId = memberData.getDurableId();\n     StaticSerialization.writeString(durableId == null ? \"\" : durableId, out);\n     StaticSerialization.writeInteger(\n@@ -567,7 +585,7 @@ public void readExternal(ObjectInput in) throws IOException, ClassNotFoundExcept\n     int flags = in.readUnsignedByte();\n     boolean sbEnabled = (flags & NPD_ENABLED_BIT) != 0;\n     boolean elCoord = (flags & COORD_ENABLED_BIT) != 0;\n-    this.isPartial = (flags & PARTIAL_ID_BIT) != 0;\n+    boolean isPartial = (flags & PARTIAL_ID_BIT) != 0;\n \n     int dcPort = in.readInt();\n     int vmPid = in.readInt();\n@@ -576,7 +594,7 @@ public void readExternal(ObjectInput in) throws IOException, ClassNotFoundExcept\n     String[] groups = StaticSerialization.readStringArray(in);\n \n     String name = StaticSerialization.readString(in);\n-    this.uniqueTag = StaticSerialization.readString(in);\n+    String uniqueTag = StaticSerialization.readString(in);\n     String durableId = StaticSerialization.readString(in);\n     int durableTimeout = in.readInt();\n \n@@ -595,6 +613,8 @@ public void readExternal(ObjectInput in) throws IOException, ClassNotFoundExcept\n         .setGroups(groups)\n         .setDurableId(durableId)\n         .setDurableTimeout(durableTimeout)\n+        .setIsPartial(isPartial)\n+        .setUniqueTag(uniqueTag)\n         .build();\n     if (version >= Version.GFE_90.ordinal()) {\n       try {\n@@ -616,7 +636,7 @@ public void toData(DataOutput out,\n       SerializationContext context) throws IOException {\n     toDataPre_GFE_9_0_0_0(out, context);\n     if (memberData.getVersionOrdinal() >= Version.GFE_90.ordinal()) {\n-      getMemberData().writeAdditionalData(out);\n+      memberData.writeAdditionalData(out);\n     }\n   }\n \n@@ -636,7 +656,7 @@ public void toDataPre_GFE_9_0_0_0(DataOutput out, SerializationContext context)\n       flags |= NPD_ENABLED_BIT;\n     if (memberData.isPreferredForCoordinator())\n       flags |= COORD_ENABLED_BIT;\n-    if (this.isPartial)\n+    if (this.isPartial())\n       flags |= PARTIAL_ID_BIT;\n     // always write product version but enable reading from older versions\n     // that do not have it\n@@ -652,7 +672,7 @@ public void toDataPre_GFE_9_0_0_0(DataOutput out, SerializationContext context)\n \n     StaticSerialization.writeString(memberData.getName(), out);\n     if (vmKind == MemberIdentifier.LONER_DM_TYPE) {\n-      StaticSerialization.writeString(this.uniqueTag, out);\n+      StaticSerialization.writeString(memberData.getUniqueTag(), out);\n     } else { // added in 6.5 for unique identifiers in P2P\n       StaticSerialization.writeString(String.valueOf(memberData.getVmViewId()), out);\n     }\n@@ -689,7 +709,7 @@ public void toDataPre_GFE_7_1_0_0(DataOutput out, SerializationContext context)\n       flags |= NPD_ENABLED_BIT;\n     if (memberData.isPreferredForCoordinator())\n       flags |= COORD_ENABLED_BIT;\n-    if (this.isPartial)\n+    if (this.isPartial())\n       flags |= PARTIAL_ID_BIT;\n     out.writeByte((byte) (flags & 0xff));\n \n@@ -701,7 +721,7 @@ public void toDataPre_GFE_7_1_0_0(DataOutput out, SerializationContext context)\n     StaticSerialization.writeString(memberData.getName(), out);\n     int vmKind = memberData.getVmKind();\n     if (vmKind == MemberIdentifier.LONER_DM_TYPE) {\n-      StaticSerialization.writeString(this.uniqueTag, out);\n+      StaticSerialization.writeString(memberData.getUniqueTag(), out);\n     } else { // added in 6.5 for unique identifiers in P2P\n       StaticSerialization.writeString(String.valueOf(memberData.getVmViewId()), out);\n     }\n@@ -718,7 +738,7 @@ public void fromData(DataInput in,\n     fromDataPre_GFE_9_0_0_0(in, context);\n     // just in case this is just a non-versioned read\n     // from a file we ought to check the version\n-    if (getMemberData().getVersionOrdinal() >= Version.GFE_90.ordinal()) {\n+    if (memberData.getVersionOrdinal() >= Version.GFE_90.ordinal()) {\n       try {\n         memberData.readAdditionalData(in);\n       } catch (EOFException e) {\n@@ -737,7 +757,7 @@ public void fromDataPre_GFE_9_0_0_0(DataInput in, DeserializationContext context\n     int flags = in.readUnsignedByte();\n     boolean sbEnabled = (flags & NPD_ENABLED_BIT) != 0;\n     boolean elCoord = (flags & COORD_ENABLED_BIT) != 0;\n-    this.isPartial = (flags & PARTIAL_ID_BIT) != 0;\n+    boolean isPartial = (flags & PARTIAL_ID_BIT) != 0;\n \n     int dcPort = in.readInt();\n     int vmPid = in.readInt();\n@@ -746,8 +766,9 @@ public void fromDataPre_GFE_9_0_0_0(DataInput in, DeserializationContext context\n     int vmViewId = -1;\n \n     String name = StaticSerialization.readString(in);\n+    String uniqueTag = null;\n     if (vmKind == MemberIdentifier.LONER_DM_TYPE) {\n-      this.uniqueTag = StaticSerialization.readString(in);\n+      uniqueTag = StaticSerialization.readString(in);\n     } else {\n       String str = StaticSerialization.readString(in);\n       if (str != null) { // backward compatibility from earlier than 6.5\n@@ -773,6 +794,8 @@ public void fromDataPre_GFE_9_0_0_0(DataInput in, DeserializationContext context\n         .setGroups(groups)\n         .setDurableId(durableId)\n         .setDurableTimeout(durableTimeout)\n+        .setIsPartial(isPartial)\n+        .setUniqueTag(uniqueTag)\n         .build();\n \n     assert memberData.getVmKind() > 0;\n@@ -789,7 +812,7 @@ public void fromDataPre_GFE_7_1_0_0(DataInput in, DeserializationContext context\n     int flags = in.readUnsignedByte();\n     boolean sbEnabled = (flags & NPD_ENABLED_BIT) != 0;\n     boolean elCoord = (flags & COORD_ENABLED_BIT) != 0;\n-    this.isPartial = (flags & PARTIAL_ID_BIT) != 0;\n+    boolean isPartial = (flags & PARTIAL_ID_BIT) != 0;\n \n     int dcPort = in.readInt();\n     int vmPid = in.readInt();\n@@ -798,8 +821,9 @@ public void fromDataPre_GFE_7_1_0_0(DataInput in, DeserializationContext context\n     int vmViewId = -1;\n \n     String name = StaticSerialization.readString(in);\n+    String uniqueTag = null;\n     if (vmKind == MemberIdentifier.LONER_DM_TYPE) {\n-      this.uniqueTag = StaticSerialization.readString(in);\n+      uniqueTag = StaticSerialization.readString(in);\n     } else {\n       String str = StaticSerialization.readString(in);\n       if (str != null) { // backward compatibility from earlier than 6.5\n@@ -825,6 +849,8 @@ public void fromDataPre_GFE_7_1_0_0(DataInput in, DeserializationContext context\n         .setGroups(groups)\n         .setDurableId(durableId)\n         .setDurableTimeout(durableTimeout)\n+        .setIsPartial(isPartial)\n+        .setUniqueTag(uniqueTag)\n         .build();\n \n     assert memberData.getVmKind() > 0;\n@@ -833,7 +859,6 @@ public void fromDataPre_GFE_7_1_0_0(DataInput in, DeserializationContext context\n \n   public void _readEssentialData(DataInput in, Function<InetAddress, String> hostnameResolver)\n       throws IOException, ClassNotFoundException {\n-    this.isPartial = true;\n     InetAddress inetAddr = StaticSerialization.readInetAddress(in);\n     int port = in.readInt();\n \n@@ -846,8 +871,9 @@ public void _readEssentialData(DataInput in, Function<InetAddress, String> hostn\n     int vmKind = in.readUnsignedByte();\n     int vmViewId = -1;\n \n+    String uniqueTag = null;\n     if (vmKind == MemberIdentifier.LONER_DM_TYPE) {\n-      this.uniqueTag = StaticSerialization.readString(in);\n+      uniqueTag = StaticSerialization.readString(in);\n     } else {\n       String str = StaticSerialization.readString(in);\n       if (str != null) { // backward compatibility from earlier than 6.5\n@@ -865,6 +891,8 @@ public void _readEssentialData(DataInput in, Function<InetAddress, String> hostn\n         .setVersionOrdinal(StaticSerialization.getVersionForDataStream(in).ordinal())\n         .setVmKind(vmKind)\n         .setVmViewId(vmViewId)\n+        .setIsPartial(true)\n+        .setUniqueTag(uniqueTag)\n         .build();\n \n     if (StaticSerialization.getVersionForDataStream(in).compareTo(Version.GFE_90) == 0) {\n@@ -890,7 +918,7 @@ public void writeEssentialData(DataOutput out) throws IOException {\n     out.writeByte(vmKind);\n \n     if (vmKind == MemberIdentifier.LONER_DM_TYPE) {\n-      StaticSerialization.writeString(this.uniqueTag, out);\n+      StaticSerialization.writeString(memberData.getUniqueTag(), out);\n     } else { // added in 6.5 for unique identifiers in P2P\n       StaticSerialization.writeString(String.valueOf(memberData.getVmViewId()), out);\n     }\n@@ -952,12 +980,11 @@ public String getUniqueId() {\n   }\n \n   public void setVersionObjectForTest(Version v) {\n-    this.versionObj = v;\n     memberData.setVersion(v);\n   }\n \n   public Version getVersionObject() {\n-    return this.versionObj;\n+    return memberData.getVersion();\n   }\n \n   @Override\n@@ -967,12 +994,48 @@ public Version getVersionObject() {\n \n   @VisibleForTesting\n   public void setUniqueTag(String tag) {\n-    uniqueTag = tag;\n+    memberData.setUniqueTag(tag);\n   }\n \n   @Override\n   public void setIsPartial(boolean value) {\n-    isPartial = value;\n+    memberData.setIsPartial(value);\n+  }\n+\n+  @Override\n+  public long getUuidLeastSignificantBits() {\n+    return memberData.getUuidLeastSignificantBits();\n+  }\n+\n+  @Override\n+  public long getUuidMostSignificantBits() {\n+    return memberData.getUuidMostSignificantBits();\n+  }\n+\n+  @Override\n+  public boolean isNetworkPartitionDetectionEnabled() {\n+    return memberData.isNetworkPartitionDetectionEnabled();\n+  }\n+\n+  @Override\n+  public void setUUID(UUID uuid) {\n+    memberData.setUUID(uuid);\n+\n+  }\n+\n+  @Override\n+  public void setMemberWeight(byte b) {\n+    memberData.setMemberWeight(b);\n   }\n \n+  @Override\n+  public void setUdpPort(int port) {\n+    memberData.setUdpPort(port);\n+\n+  }\n+\n+  @Override\n+  public UUID getUUID() {\n+    return memberData.getUUID();\n+  }\n }",
+                "previous_filename": "geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/api/MemberIdentifierImpl.java",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/MemberIdentifierImpl.java",
+                "sha": "2268b5a522be8bfc31b5d505d7d1ac27ea2ca4d1",
+                "status": "renamed"
+            },
+            {
+                "additions": 0,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/Services.java",
+                "changes": 1,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/Services.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 1,
+                "filename": "geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/Services.java",
+                "patch": "@@ -41,7 +41,6 @@\n import org.apache.geode.distributed.internal.membership.api.MemberDisconnectedException;\n import org.apache.geode.distributed.internal.membership.api.MemberIdentifier;\n import org.apache.geode.distributed.internal.membership.api.MemberIdentifierFactory;\n-import org.apache.geode.distributed.internal.membership.api.MemberIdentifierImpl;\n import org.apache.geode.distributed.internal.membership.api.MemberStartupException;\n import org.apache.geode.distributed.internal.membership.api.MembershipClosedException;\n import org.apache.geode.distributed.internal.membership.api.MembershipConfig;",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/Services.java",
+                "sha": "4ed15e364cfc683bcddee11bddc43b8be2b11084",
+                "status": "modified"
+            },
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/fd/GMSHealthMonitor.java",
+                "changes": 8,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/fd/GMSHealthMonitor.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 4,
+                "filename": "geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/fd/GMSHealthMonitor.java",
+                "patch": "@@ -350,10 +350,10 @@ public void run() {\n         GMSHealthMonitor.this.stats.incFinalCheckRequestsReceived();\n         GMSHealthMonitor.this.stats.incTcpFinalCheckRequestsReceived();\n         ID gmbr = localAddress;\n-        UUID myUUID = gmbr.getMemberData().getUUID();\n+        UUID myUUID = gmbr.getUUID();\n         // during reconnect or rapid restart we will have a zero viewId but there may still\n         // be an old ID in the membership view that we do not want to respond to\n-        int myVmViewId = gmbr.getMemberData().getVmViewId();\n+        int myVmViewId = gmbr.getVmViewId();\n         if (playingDead) {\n           logger.debug(\"HealthMonitor: simulating sick member in health check\");\n         } else if (uuidLSBs == myUUID.getLeastSignificantBits()\n@@ -647,8 +647,8 @@ boolean doTCPCheckMember(ID suspectMember, Socket clientSocket) {\n   void writeMemberToStream(ID gmbr, DataOutputStream out) throws IOException {\n     out.writeShort(Version.getCurrentVersion().ordinal());\n     out.writeInt(gmbr.getVmViewId());\n-    out.writeLong(gmbr.getMemberData().getUuidLeastSignificantBits());\n-    out.writeLong(gmbr.getMemberData().getUuidMostSignificantBits());\n+    out.writeLong(gmbr.getUuidLeastSignificantBits());\n+    out.writeLong(gmbr.getUuidMostSignificantBits());\n     out.flush();\n   }\n ",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/fd/GMSHealthMonitor.java",
+                "sha": "803f4dedbfc3883a5e17c2b068a6dc1364cdaa7b",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/locator/GMSLocator.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/locator/GMSLocator.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 1,
+                "filename": "geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/locator/GMSLocator.java",
+                "patch": "@@ -322,7 +322,7 @@ public Object processRequest(Object request) {\n           if (mbr != coordinator && (coordinator == null || Objects.compare(mbr, coordinator,\n               services.getMemberFactory().getComparator()) < 0)) {\n             if (!rejections.contains(mbr) && (mbr.preferredForCoordinator()\n-                || !mbr.getMemberData().isNetworkPartitionDetectionEnabled())) {\n+                || !mbr.isNetworkPartitionDetectionEnabled())) {\n               coordinator = mbr;\n             }\n           }",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/locator/GMSLocator.java",
+                "sha": "eb2939bfc359d5f195c64551b55bc4e874762621",
+                "status": "modified"
+            },
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/membership/GMSJoinLeave.java",
+                "changes": 7,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/membership/GMSJoinLeave.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 4,
+                "filename": "geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/membership/GMSJoinLeave.java",
+                "patch": "@@ -1667,7 +1667,7 @@ public void setLocalAddress(ID address) {\n       boolean preferred = false;\n       if (services.getLocator() != null || services.getConfig().getHasLocator()\n           || !services.getConfig().getStartLocator().isEmpty()\n-          || localAddress.getMemberData().getVmKind() == MemberIdentifier.LOCATOR_DM_TYPE) {\n+          || localAddress.getVmKind() == MemberIdentifier.LOCATOR_DM_TYPE) {\n         logger\n             .info(\"This member is hosting a locator will be preferred as a membership coordinator\");\n         preferred = true;\n@@ -2575,9 +2575,8 @@ void prepareAndSendView(GMSMembershipView<ID> newView, List<ID> joinReqs,\n             lastConflictingView = conflictingView;\n             // if I am not a locator and the conflicting view is from a locator I should\n             // let it take control and stop sending membership views\n-            if (localAddress.getMemberData()\n-                .getVmKind() != MemberIdentifier.LOCATOR_DM_TYPE\n-                && conflictingView.getCreator().getMemberData()\n+            if (localAddress.getVmKind() != MemberIdentifier.LOCATOR_DM_TYPE\n+                && conflictingView.getCreator()\n                     .getVmKind() == MemberIdentifier.LOCATOR_DM_TYPE) {\n               logger.info(\"View preparation interrupted - a locator is taking over as \"\n                   + \"membership coordinator in this view: {}\", conflictingView);",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/membership/GMSJoinLeave.java",
+                "sha": "80da0af934a088c129e6c0f203f77f1ce22e6bbe",
+                "status": "modified"
+            },
+            {
+                "additions": 3,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/messenger/JGAddress.java",
+                "changes": 8,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/messenger/JGAddress.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 5,
+                "filename": "geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/messenger/JGAddress.java",
+                "patch": "@@ -27,7 +27,6 @@\n import org.jgroups.stack.IpAddress;\n import org.jgroups.util.UUID;\n \n-import org.apache.geode.distributed.internal.membership.api.MemberData;\n import org.apache.geode.distributed.internal.membership.api.MemberIdentifier;\n import org.apache.geode.util.internal.GeodeGlossary;\n \n@@ -56,10 +55,9 @@ public JGAddress(MemberIdentifier mbr) {\n     super();\n     this.ip_addr = mbr.getInetAddress();\n     this.port = mbr.getMembershipPort();\n-    MemberData memberData = mbr.getMemberData();\n-    this.mostSigBits = memberData.getUuidMostSignificantBits();\n-    this.leastSigBits = memberData.getUuidLeastSignificantBits();\n-    this.vmViewId = memberData.getVmViewId();\n+    this.mostSigBits = mbr.getUuidMostSignificantBits();\n+    this.leastSigBits = mbr.getUuidLeastSignificantBits();\n+    this.vmViewId = mbr.getVmViewId();\n   }\n \n ",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/messenger/JGAddress.java",
+                "sha": "2f75b7a967a9c9de20d4633b6381d6e74e1e72b6",
+                "status": "modified"
+            },
+            {
+                "additions": 4,
+                "blob_url": "https://github.com/apache/geode/blob/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/messenger/JGroupsMessenger.java",
+                "changes": 10,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/messenger/JGroupsMessenger.java?ref=40d6b47ffce96df1e1bc0da88dff661b57939d7e",
+                "deletions": 6,
+                "filename": "geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/messenger/JGroupsMessenger.java",
+                "patch": "@@ -68,7 +68,6 @@\n import org.jgroups.util.UUID;\n \n import org.apache.geode.distributed.internal.membership.api.CacheOperationMessageMarker;\n-import org.apache.geode.distributed.internal.membership.api.MemberData;\n import org.apache.geode.distributed.internal.membership.api.MemberDisconnectedException;\n import org.apache.geode.distributed.internal.membership.api.MemberIdentifier;\n import org.apache.geode.distributed.internal.membership.api.MemberShunnedException;\n@@ -494,10 +493,9 @@ public void handleJGroupsIOException(IOException e, Address dest) {\n       List<ID> members = v.getMembers();\n       ID recipient = null;\n       for (ID gmsMbr : members) {\n-        MemberData memberData = gmsMbr.getMemberData();\n-        if (jgMbr.getUUIDLsbs() == memberData.getUuidLeastSignificantBits()\n-            && jgMbr.getUUIDMsbs() == memberData.getUuidMostSignificantBits()\n-            && jgMbr.getVmViewId() == memberData.getVmViewId()) {\n+        if (jgMbr.getUUIDLsbs() == gmsMbr.getUuidLeastSignificantBits()\n+            && jgMbr.getUUIDMsbs() == gmsMbr.getUuidMostSignificantBits()\n+            && jgMbr.getVmViewId() == gmsMbr.getVmViewId()) {\n           recipient = gmsMbr;\n           break;\n         }\n@@ -559,7 +557,7 @@ private void establishLocalAddress() throws MemberStartupException {\n         config.isNetworkPartitionDetectionEnabled(), isLocator,\n         Version.getCurrentVersion().ordinal(),\n         jgAddress.getUUIDMsbs(), jgAddress.getUUIDLsbs(),\n-        (byte) (services.getConfig().getMemberWeight() & 0xff));\n+        (byte) (services.getConfig().getMemberWeight() & 0xff), false, null);\n     localAddress = services.getMemberFactory().create(gmsMember);\n     logger.info(\"Established local address {}\", localAddress);\n     services.setLocalAddress(localAddress);",
+                "raw_url": "https://github.com/apache/geode/raw/40d6b47ffce96df1e1bc0da88dff661b57939d7e/geode-membership/src/main/java/org/apache/geode/distributed/internal/membership/gms/messenger/JGroupsMessenger.java",
+                "sha": "040c08a57e92ff5cec40f678595fc95c5b7eaabe",
+                "status": "modified"
+            }
+        ],
+        "message": "GEODE-7704: Replacing inheritance of MemberIdentifierImpl with delagation (#4636)\n\n* Deduplicate fields betweeen MemberIdentifierImpl and GMSMemberData\r\n\r\nMoving all state down into GMSMemberData and removing duplicate fields\r\nisPartial and versionObject. GMSMemberData now has all of the state of a\r\nmember.\r\n\r\n* Delegate rather than inherit InternalDistributedMember\r\n\r\nDelegating to MemberIdentifierImpl, rather than inheriting from it.\r\n\r\n* Delegate to MemberIdentifier, rather than MemberIdentifierImpl\r\n\r\nHaving InternalDistributedMember delegate to MemberIdentifier, rather than\r\nMemberIdentifierImpl, so that we are not relying on the concrete class and all\r\nrequired methods are part of the interface. As a result, adding a number of\r\nadditional methods to the MemberIdentifier interface.\r\n\r\n* Removing uses of getMemberData\r\n\r\nRemoving uses of getMemberData and adding methods to MemberIdentifier that\r\ndelegate to memberData.\r\n\r\n* Hiding MemberIdentiferImpl\r\n\r\nUsing MemberIdentifier everywhere insteand of MemberIdentiferImpl. Still need to\r\nmove MemberIdentiferImpl to an internal package.\r\n\r\n* Making PMD happy\r\n\r\nMarking the MemberIdentifierFactory as immutable.\r\n\r\n* Fixing NPE in getGroups\r\n\r\nThe MemberIdentifierImpl.getGroups needs to check for a null array. Places that\r\nused to call getMemberData.getGroups were throwing an NPE.\r\n\r\n* Fixing a test that used MemberIdentifierFactoryImpl\r\n\r\nThis factory is not going to play well with other parts of the test that are\r\ngenerating InternalDistributedMembers.\r\n\r\n* Fixing AnalyzeSerializablesJUnitTest\r\n\r\nInternalDistributedMember now has new serialization methods that delegate to\r\nthe methods that it previously was just inheriting.\r\n\r\n* Fixing a unit test failure due to mocking MemberData\r\n\r\nInternalDistributedMemberTest was mocking the underlying MemberData and\r\nchanging state on the InternalDistributedMember. Now that all state is\r\ndelegated to the MemberData, this test was failing because the mock was not\r\nreflecting the state changes.\r\n\r\nCo-authored-by: Ernie Burghardt <eburghardt@pivotal.io>",
+        "parent": "https://github.com/apache/geode/commit/e1467e55267be8266ab6d84196f924c893c67de9",
+        "patched_files": [
+            "sanctionedDataSerializables.txt",
+            "MemberIdentifierFactoryImpl.java",
+            "MemberData.java",
+            "Distribution.java",
+            "GMSLocator.java",
+            "MemberDataBuilderImpl.java",
+            "ExportLogsCommand.java",
+            "MemberIdentifier.java",
+            "GMSMembership.java",
+            "JGAddress.java",
+            "Services.java",
+            "InternalDistributedMember.java",
+            "MembershipView.java",
+            "JGroupsMessenger.java",
+            "MemberDataBuilder.java",
+            "GMSHealthMonitor.java",
+            "GMSJoinLeave.java",
+            "MemberIdentifierImpl.java",
+            "GMSMemberData.java"
+        ],
+        "repo": "geode",
+        "unit_tests": [
+            "GMSMembershipJUnitTest.java",
+            "DistributionTest.java",
+            "DistributedMemberDUnitTest.java",
+            "MembershipOnlyTest.java",
+            "ExportLogsCommandTest.java",
+            "MemberDataBuilderImplTest.java",
+            "GMSHealthMonitorJUnitTest.java",
+            "JGroupsMessengerJUnitTest.java",
+            "InternalDistributedMemberTest.java",
+            "GMSJoinLeaveJUnitTest.java",
+            "GMSMembershipViewJUnitTest.java",
+            "ClientCacheFactoryJUnitTest.java",
+            "MembershipAPIArchUnitTest.java",
+            "MemberIdentifierFactoryImplTest.java",
+            "DistributedAckRegionCCEDUnitTest.java"
         ]
     },
     "geode_4290946": {
@@ -1274,16 +1733,16 @@
         "message": "GEODE-4273: overhaul DiskRegionJUnitTest (#2449)\n\n* Remove use of base class\r\n* Extract testCompactorClose to DiskRegionCompactorCloseIntegrationTest\r\n* Extract testDiskRegDWAttrbts to DiskRegionAttributesIntegrationTest\r\n* GEODE-3900: Use TemporaryFolder for all disk dirs and files\r\n* Ensure Cache and DS have proper tearDown\r\n* Use Rules, Awaitility, and AssertJ\r\n* Use CountDownLatch instead of verbose synchronization tricks\r\n* Minimize usage of non-User APIs\r\n* Fix usage of deprecated APIs\r\n* Use proper variable names\r\n* Use MAX_OPLOG_SIZE_IN_BYTES instead of literal value\r\n* Protect AtomicReferences with Awaitility to prevent NPEs",
         "parent": "https://github.com/apache/geode/commit/d9bb24d95bd7d310ae0ce693fe1d84774c2f521c",
         "patched_files": [
-            "LocalRegion.java",
             "InternalPersistentRegion.java",
             "AbstractRegion.java",
+            "LocalRegion.java",
             "InternalRegion.java"
         ],
         "repo": "geode",
         "unit_tests": [
+            "DiskRegionCompactorCloseIntegrationTest.java",
             "DiskRegionAttributesIntegrationTest.java",
             "DiskRegionJUnitTest.java",
-            "DiskRegionCompactorCloseIntegrationTest.java",
             "AbstractRegionTest.java"
         ]
     },
@@ -1335,8 +1794,8 @@
         ],
         "repo": "geode",
         "unit_tests": [
-            "PdxQueryDUnitTest.java",
-            "PdxStringQueryJUnitTest.java"
+            "PdxStringQueryJUnitTest.java",
+            "PdxQueryDUnitTest.java"
         ]
     },
     "geode_501bd79": {
@@ -1527,23 +1986,23 @@
         "message": "GEODE-3385: Change GetAllRequest to return list of errors.\n\nAlso:\n* Rename `KeyedErrorResponse` to `KeyedError`.\n* move `ErrorResponse` to `clientProtocol.proto`.\n* Check for null `value` in `ProtobufUtilities.createEntry`.\n  If we find a null, we don't set the value; previously this resulted in\nNPE.\n\nSigned-off-by: Galen O'Sullivan <gosullivan@pivotal.io>",
         "parent": "https://github.com/apache/geode/commit/21c1fb9d88d1fae657d527a13422540f5e8577ce",
         "patched_files": [
+            "Result.java",
+            "basicTypes.proto",
+            "Failure.java",
+            "ProtobufUtilities.java",
+            "GetAllRequestOperationHandler.java",
+            "region_API.proto",
+            "ProtobufResponseUtilities.java",
+            "OperationContext.java",
             "PutAllRequestOperationHandler.java",
             "ProtocolErrorCode.java",
-            "Result.java",
-            "Success.java",
-            "region_API.java",
-            "OperationContext.java",
-            "basicTypes.java",
-            "Failure.java",
-            "ProtobufResponseUtilities.java",
-            "clientProtocol.java",
-            "ProtobufUtilities.java",
-            "GetAllRequestOperationHandler.java"
+            "clientProtocol.proto",
+            "Success.java"
         ],
         "repo": "geode",
         "unit_tests": [
-            "PutAllRequestOperationHandlerJUnitTest.java",
             "GetAllRequestOperationHandlerJUnitTest.java",
+            "PutAllRequestOperationHandlerJUnitTest.java",
             "RoundTripCacheConnectionJUnitTest.java"
         ]
     },
@@ -1591,8 +2050,8 @@
         "message": "GEODE-5000: do not request/apply cluster config when creating client \u2026 (#1739)\n\n* do not request/apply cluster config when creating client cache.\r\n* give client cache a no-op security service to avoid NPE.",
         "parent": "https://github.com/apache/geode/commit/ced3d005e6a81cd72dd147abb885bb2bb88bfd03",
         "patched_files": [
-            "GemFireCacheImpl.java",
-            "ClusterConfigurationLoader.java"
+            "ClusterConfigurationLoader.java",
+            "GemFireCacheImpl.java"
         ],
         "repo": "geode",
         "unit_tests": [
@@ -1728,17 +2187,19 @@
         "message": "GEODE-6759: Prevent Deleting Pool Still in Use and Fix NPE in Function Execution (#3569)\n\n* GEODE-6759: Avoid Deleting Pools Still in Use\r\n\r\n- Fixed minor warnings.\r\n- Added unit and integration tests.\r\n- Replaced the usage of `junit.Assert` by `assertj`.\r\n- PoolManagerImpl now checks whether the pool is being used or not\r\n  before unregistering it.\r\n- InternalFunctionExecutionServiceImpl now throws a meaningful\r\n  exception if the pool can not be found instead of NPE.",
         "parent": "https://github.com/apache/geode/commit/8342938cce4dee733a45529fe95402f46cedc119",
         "patched_files": [
-            "InternalFunctionExecutionService.java",
             "PoolManager.java",
+            "CacheXmlParserJUnitTest.testMultiplePools.cache.xml",
+            "InternalFunctionExecutionService.java",
             "PoolManagerImpl.java",
+            "CacheXmlParserJUnitTest.testRegionWithNonExistingPool.cache.xml",
             "InternalFunctionExecutionServiceImpl.java"
         ],
         "repo": "geode",
         "unit_tests": [
+            "InternalFunctionExecutionServiceTest.java",
+            "CacheXmlParserJUnitTest.java",
             "ClientRegionFactoryJUnitTest.java",
             "PoolManagerIntegrationTest.java",
-            "CacheXmlParserJUnitTest.java",
-            "InternalFunctionExecutionServiceTest.java",
             "PoolManagerTest.java",
             "ClientServerFunctionExecutionDUnitTest.java"
         ]
@@ -1825,8 +2286,8 @@
         "message": "GEODE-2215 NPE in ViewCreator thread setting public keys into a NetView\n\nNetView creates a ConcurrentHashmap to hold the public keys when it's\nconstructed but it had some methods that were replacing it with a\nHashmap.  I made the field final and also added checks to avoid putting\na null key or value into the map.",
         "parent": "https://github.com/apache/geode/commit/f68c41600151b18bd096d7d1e77d6a5fcecce9d5",
         "patched_files": [
-            "NetView.java",
-            "sanctionedDataSerializables.java"
+            "sanctionedDataSerializables.txt",
+            "NetView.java"
         ],
         "repo": "geode",
         "unit_tests": [
@@ -5196,270 +5657,279 @@
         "message": "Merge branch 'develop' of https://git-wip-us.apache.org/repos/asf/geode into develop\n\n* 'develop' of https://git-wip-us.apache.org/repos/asf/geode: (57 commits)\n  GEODE-2551 Fix code issues found by AppChecker\n  Revert \"GEODE-1887: Now Size api goes through ServerProxy when cache is of type client and DataPolicy is Empty.\"\n  GEODE-2538: Don't deserialize values on the server when getting results\n  GEODE-2461: remove json4s-ast_2.10 as explicit dependency\n  GEODE-2547: Interest registration no longer causes a CacheLoader to be invoked\n  GEODE-2526: Enhance log statement to include ResourceTypeName\n  GEODE-880 Remove unused classes\n  GEODE-2460: update dependency versions\n  GEODE-1995: Removed ReliableMessageQueue, ReliableMessageQueueFactory, ReliableMessageQueueFactoryImpl and it's usage in the code from GemfireCacheImpl and DistributedRegion.\n  GEODE-2550 Improve README and BUILDING\n  GEODE-2538: Don't invoke a cache loader when fetching values for a lucene query\n  GEODE-2404: Added support for destroying lucene indexes\n  GEODE-2545: NPE during lucene query execution when cache is closing or region is destroyed\n  GEODE-2515: Disabling BaseLineAndCompareQueryPerfJUnitTest\n  GEODE-2142: Removing JSON licence stuff from NOTICE files\n  GEODE-2142: removing tests so run precheckin\n  GEODE-2142: final compiling build\n  GEODE-2142: cyclical dependency in gradle build\n  GEODE-2142: spotless\n  GEODE-2142: Refactoring of tests to work with new JSONObject class. Changing file export to use Base64 encoding.\n  ...",
         "parent": "https://github.com/apache/geode/commit/c3dbd742cde95a2aa9266990d6c42f4ce359cea2",
         "patched_files": [
-            "HTTPTokener.java",
-            "CDL.java",
-            "InternalLuceneIndex.java",
-            "IndexRepositoryImpl.java",
-            "OpType.java",
-            "CookieList.java",
-            "fontawesome-webfont-eot.java",
-            "JSONWriter.java",
-            "bootstrap.java",
-            "print.java",
-            "XML.java",
-            "SendQueueOperation.java",
-            "releases.java",
-            "markers.java",
-            "favicon.java",
-            "LuceneDestroyIndexFunction.java",
-            "usergrid-site.java",
-            "DiskInitFile.java",
-            "book.java",
-            "DistributedRemoveAllOperation.java",
-            "TombstoneService.java",
-            "FindCoordinatorResponse.java",
-            "geode-site.java",
-            "cache-1.java",
-            "PersistentReplicatedTestBase.java",
-            "FixedPartitioningTestBase.java",
-            "FontAwesome.java",
-            "fontawesome-webfont-woff.java",
-            "jquery.java",
-            "respond.java",
-            "PRTombstoneMessage.java",
-            "book-styles.java",
-            "LuceneIndexCommands.java",
-            "ReliableMessageQueueFactoryImpl.java",
-            "LuceneFunctionSerializable.java",
-            "ReliableMessageQueue.java",
-            "Locator.java",
-            "HTTP.java",
-            "QueryTestUtils.java",
-            "DataSerializableFixedID.java",
-            "AsyncEventQueueImpl.java",
-            "DistributedCacheOperation.java",
-            "bootflat-square.java",
-            "UpdateEntryVersionOperation.java",
-            "LongBuffer.java",
-            "LuceneQueriesAccessorBase.java",
-            "CliUtil.java",
-            "github.java",
-            "ResultBuilder.java",
-            "DestroyOperation.java",
-            "GfJsonObject.java",
-            "AbstractLauncherIntegrationTestCase.java",
-            "DSFIDFactory.java",
-            "GMSMembershipManager.java",
-            "PersistentOplogSet.java",
-            "JSON.java",
-            "LuceneService.java",
-            "LuceneQueryFunction.java",
-            "apache_geode_logo_white.java",
-            "AbstractResultData.java",
-            "default.java",
-            "head.java",
-            "LuceneIndexImpl.java",
-            "DiskRegionTestingBase.java",
-            "LuceneIndexForPartitionedRegion.java",
-            "BaseCommand.java",
-            "Oplog.java",
-            "MapResultCollector.java",
-            "JsonUtil.java",
-            "apache_geode_logo_white_small.java",
-            "sticky.java",
-            "footer.java",
-            "map-markers.java",
-            "LuceneIndexInfo.java",
-            "UpdateOperation.java",
-            "BucketRegion.java",
-            "LuceneQueryImpl.java",
-            "helpers_.java",
-            "JSONStringer.java",
-            "PageEntry.java",
-            "bookbinder.java",
-            "dependency-versions.java",
-            "pandoc.java",
-            "sample-01.java",
-            "Cookie.java",
-            "fontawesome-webfont.java",
-            "geode-subnav.java",
-            "StatArchiveHandler.java",
-            "ParserUtils.java",
-            "LuceneQuery.java",
-            "GemFireCacheImpl.java",
-            "ReliableDistributionData.java",
-            "noframeworkAdapter.java",
-            "expected_jars.java",
-            "LuceneResultStructImpl.java",
-            "LuceneEventListener.java",
-            "Rules.java",
-            "base.java",
-            "LuceneQueryFactory.java",
-            "all.java",
-            "LuceneResultStruct.java",
-            "LocalizedStrings.java",
-            "LuceneQueryFactoryImpl.java",
-            "JSONObject.java",
-            "NOTICE.java",
-            "build.java",
-            "JSONML.java",
-            "WaitUntilFlushedFunction.java",
-            "fontawesome-webfont-ttf.java",
-            "RestoreScript.java",
-            "DistributedRegion.java",
-            "asf_logo.java",
-            "group.java",
-            "TXCommitMessage.java",
-            "ReliableMessageQueueFactory.java",
-            "LuceneIndexDetails.java",
-            "LuceneQueryInfo.java",
-            "bootflat-extensions.java",
-            "snapshot-apigee.java",
-            "LuceneRawIndex.java",
-            "rat.java",
-            "JSONException.java",
-            "nanoc.java",
-            "JSONTokener.java",
-            "ProcessManager.java",
-            "RegionAdvisor.java",
-            "LuceneExceptionObserver.java",
-            "DestroyLuceneIndexMessage.java",
-            "MainWithChildrenRollingFileHandler.java",
-            "FileUtil.java",
-            "BackupManager.java",
-            "LuceneServiceImpl.java",
-            "run.java",
-            "docs.java",
-            "PageResults.java",
+            "context.js",
             "Operation.java",
-            "LuceneTestUtilities.java",
-            "Services.java",
-            "PageableLuceneQueryResultsImpl.java",
-            "XMLTokener.java",
-            "header.java",
-            "index.java",
-            "BUILDING.java",
-            "InvalidateOperation.java",
-            "LuceneIndexFactorySpy.java",
-            "StatArchiveReader.java",
-            "JavaExec.java",
-            "font-awesome.java",
-            "LuceneCliStrings.java",
-            "DistributedPutAllOperation.java",
-            "MergeLogFiles.java",
-            "DistributionAdvisor.java",
-            "waypoint.java",
-            "print-layout-styles.java",
+            "GMSMembershipManager.java",
+            "rat.gradle",
             "BatchDestroyOperation.java",
-            "WANTestBase.java",
-            "LuceneGetPageFunction.java",
-            "fontawesome-webfont-svg.java",
-            "PersistentPartitionedRegionTestBase.java",
-            "jquery-1.java",
-            "GMSLocator.java",
-            ".java",
-            "test.java",
-            "layout-styles.java",
-            "ProcessUtils.java",
+            "DSFIDFactory.java",
+            "RestoreScript.java",
+            "docs.html",
+            "LuceneService.java",
+            "JSON.java",
+            "BackupManager.java",
+            "BUILDING.md",
+            "LuceneExceptionObserver.java",
+            "lucene-1.0.xsd",
+            "XML.java",
+            "JsonUtil.java",
+            "bookbinder.js",
+            "TombstoneService.java",
+            "head.js",
+            "geode-subnav",
+            "WaitUntilFlushedFunction.java",
             "JSONArray.java",
-            "LICENSE.java",
-            "context.java",
-            "print-book-styles.java",
-            "lucene-1.java",
-            "AbstractRegion.java",
-            "bootflat.java",
-            "apache_geode_logo.java",
-            "html5shiv.java",
-            "README.java",
+            "fontawesome-webfont-svg.svg",
+            "AbstractLauncherIntegrationTestCase.java",
+            "LuceneCliStrings.java",
+            "ReliableMessageQueue.java",
+            "InvalidateOperation.java",
+            "LICENSE",
+            "bootstrap.min.js",
+            "ParserUtils.java",
+            "releases.html",
+            "DistributedRemoveAllOperation.java",
+            "ProcessManager.java",
+            "github.png",
+            "XMLTokener.java",
+            "sample-01.json",
+            "LuceneQueryInfo.java",
+            "jquery.icheck.js",
             "package-info.java",
+            "LuceneRawIndex.java",
+            "layout-styles",
+            "StatArchiveHandler.java",
+            "PersistentPartitionedRegionTestBase.java",
+            "Oplog.java",
+            "PageableLuceneQueryResultsImpl.java",
+            "bootflat-extensions.css",
+            "CDL.java",
+            "fontawesome-webfont.woff2",
+            "JSONML.java",
+            "fontawesome-webfont-ttf.ttf",
+            "JSONWriter.java",
+            "PersistentReplicatedTestBase.java",
+            "apache_geode_logo_white_small.png",
+            "index.html",
+            "ReliableDistributionData.java",
+            "snapshot-apigee.rb",
+            "JavaExec.java",
+            "DestroyLuceneIndexMessage.java",
+            "DistributedCacheOperation.java",
+            "LuceneQueriesAccessorBase.java",
+            "map-markers.rb",
+            "UpdateEntryVersionOperation.java",
+            "HTTPTokener.java",
+            "apache_geode_logo_white.png",
+            "CookieList.java",
+            "GMSLocator.java",
+            "PersistentOplogSet.java",
+            "FixedPartitioningTestBase.java",
+            "print-layout-styles",
+            "FileUtil.java",
+            "respond.min.js",
+            "MergeLogFiles.java",
+            "DiskInitFile.java",
+            "LuceneGetPageFunction.java",
+            "Services.java",
+            "sticky.js",
+            "LuceneIndexDetails.java",
+            "group.js",
+            "LongBuffer.java",
+            "build.gradle",
+            "LuceneTestUtilities.java",
+            "JSONTokener.java",
+            "base",
+            "JSONException.java",
+            "LuceneIndexImpl.java",
+            "README.md",
+            "DistributedRegion.java",
+            "DistributedPutAllOperation.java",
+            "LuceneQuery.java",
+            "all.js",
+            "PageEntry.java",
+            "LuceneServiceImpl.java",
+            "fontawesome-webfont-woff.woff",
+            "all.css",
+            "jquery-1.10.1.min.js",
+            "AbstractResultData.java",
+            "fontawesome-webfont.woff",
+            "TXCommitMessage.java",
+            "default.png",
             "DataSerializer.java",
-            "community.java",
-            "DiskStoreImpl.java"
+            "footer.html",
+            "run.sh",
+            "LuceneQueryFactoryImpl.java",
+            "AbstractRegion.java",
+            "StatArchiveReader.java",
+            "geode-site.css",
+            "GfJsonObject.java",
+            "helpers_.rb",
+            "noframeworkAdapter.js",
+            "dependency-versions.properties",
+            "DistributionAdvisor.java",
+            "LuceneResultStructImpl.java",
+            "header.html",
+            "LuceneQueryFactory.java",
+            "NOTICE",
+            "LuceneQueryFunction.java",
+            "RegionAdvisor.java",
+            "DiskRegionTestingBase.java",
+            "InternalLuceneIndex.java",
+            "DiskStoreImpl.java",
+            "default.html",
+            "community.html",
+            "default.rb",
+            "LuceneIndexFactorySpy.java",
+            "favicon.ico",
+            "JSONObject.java",
+            "HTTP.java",
+            "Cookie.java",
+            "LuceneQueryImpl.java",
+            "WANTestBase.java",
+            "LocalizedStrings.java",
+            "QueryTestUtils.java",
+            "bootflat-square.css",
+            ".gitignore",
+            "fontawesome-webfont.svg",
+            "ProcessUtils.java",
+            "LuceneIndexInfo.java",
+            "bootstrap.min.css",
+            "test.gradle",
+            "OpType.java",
+            "IndexRepositoryImpl.java",
+            "waypoint.js",
+            "usergrid-site.js",
+            "pandoc.template",
+            "GemFireCacheImpl.java",
+            "build.sh",
+            "LuceneDestroyIndexFunction.java",
+            "print.css",
+            "BucketRegion.java",
+            "asf_logo.png",
+            "font-awesome.min.css",
+            "LuceneFunctionSerializable.java",
+            "MainWithChildrenRollingFileHandler.java",
+            "book.js",
+            "bootflat.css",
+            "DestroyOperation.java",
+            "MapResultCollector.java",
+            "PRTombstoneMessage.java",
+            "ResultBuilder.java",
+            "book-styles",
+            "BaseCommand.java",
+            "fontawesome-webfont-eot.eot",
+            "PageResults.java",
+            "DataSerializableFixedID.java",
+            "fontawesome-webfont.ttf",
+            "ReliableMessageQueueFactoryImpl.java",
+            "FindCoordinatorResponse.java",
+            "ReliableMessageQueueFactory.java",
+            "LuceneIndexForPartitionedRegion.java",
+            "cache-1.0.xsd",
+            "html5shiv.js",
+            "LuceneEventListener.java",
+            "UpdateOperation.java",
+            "LuceneIndexCommands.java",
+            "SendQueueOperation.java",
+            "Rules",
+            "markers.txt",
+            "FontAwesome.otf",
+            "print-book-styles",
+            "nanoc.yaml",
+            "Locator.java",
+            "AsyncEventQueueImpl.java",
+            "expected_jars.txt",
+            "CliUtil.java",
+            "apache_geode_logo.png",
+            "LuceneResultStruct.java",
+            "fontawesome-webfont.eot",
+            "JSONStringer.java"
         ],
         "repo": "geode",
         "unit_tests": [
-            "TestDataSerializer.java",
-            "PageableLuceneQueryResultsImplJUnitTest.java",
-            "QueueCommandsDUnitTest.java",
-            "BackupDUnitTest.java",
-            "LogWriterLoggerPerformanceTest.java",
-            "ClusterConfigurationServiceEndToEndDUnitTest.java",
-            "LocatorDUnitTest.java",
-            "LuceneQueryFunctionJUnitTest.java",
-            "ClientServerCCEDUnitTest.java",
-            "MainWithChildrenRollingFileHandlerIntegrationTest.java",
-            "Log4J2PerformanceTest.java",
-            "LuceneQueryImplJUnitTest.java",
-            "RebalanceWithRedundancyDUnitTest.java",
-            "FileUtilJUnitTest.java",
-            "ClientCacheFactoryJUnitTest.java",
-            "RollingUpgradeDUnitTest.java",
-            "DiskStoreCommandsDUnitTest.java",
-            "LuceneQueriesIntegrationTest.java",
-            "LuceneQueriesPeerPRPersistentDUnitTest.java",
-            "TestUtil.java",
-            "PdxDeleteFieldDUnitTest.java",
-            "LuceneQueriesPeerPROverflowDUnitTest.java",
-            "JarDeployerDUnitTest.java",
-            "LocatorUDPSecurityDUnitTest.java",
-            "SSLSocketIntegrationTest.java",
-            "SelectStarQueryDUnitTest.java",
-            "CreateAlterDestroyRegionCommandsDUnitTest.java",
-            "PdxAttributesJUnitTest.java",
-            "LuceneIndexDestroyDUnitTest.java",
-            "LuceneServiceImplIntegrationTest.java",
             "PageResultsJUnitTest.java",
-            "QueryIndexUsingXMLDUnitTest.java",
-            "PdxRenameJUnitTest.java",
-            "StatArchiveWithMissingResourceTypeRegressionTest.java",
-            "LuceneDestroyIndexFunctionJUnitTest.java",
-            "BackupJUnitTest.java",
-            "RebalanceDUnitTest.java",
-            "PdxSerializableJUnitTest.java",
-            "IncrementalBackupDUnitTest.java",
-            "MiscellaneousCommandsExportLogsPart3DUnitTest.java",
-            "UserCommandsDUnitTest.java",
-            "JarDeployerIntegrationTest.java",
-            "LuceneQueryFactoryImplJUnitTest.java",
-            "DiskRegionAsyncRecoveryJUnitTest.java",
-            "LuceneIndexCreationDUnitTest.java",
-            "InterestListDUnitTest.java",
-            "PersistentColocatedPartitionedRegionDUnitTest.java",
-            "PageEntryJUnitTest.java",
-            "GemFireCacheImplTest.java",
-            "DataSerializableJUnitTest.java",
-            "MiscellaneousCommandsExportLogsPart4DUnitTest.java",
-            "LuceneIndexCreationOnFixedPRDUnitTest.java",
-            "DiskSpaceLimitIntegrationTest.java",
-            "LuceneQueriesClientDUnitTest.java",
-            "LuceneQueriesPeerPRDUnitTest.java",
-            "LuceneClusterConfigurationDUnitTest.java",
-            "BackupInspectorJUnitTest.java",
-            "LuceneGetPageFunctionJUnitTest.java",
-            "ClearTXLockingDUnitTest.java",
-            "InstallerJUnitTest.java",
-            "LuceneIndexForPartitionedRegionTest.java",
+            "LogWriterLoggerPerformanceTest.java",
             "IndexCreationJUnitTest.java",
-            "DistributionManagerDUnitTest.java",
             "MiscellaneousCommandsExportLogsPart1DUnitTest.java",
-            "BaseLineAndCompareQueryPerfJUnitTest.java",
-            "LuceneDUnitTest.java",
-            "PartitionedRegionStatsJUnitTest.java",
-            "RollingUpgrade2DUnitTest.java",
-            "OplogRVVJUnitTest.java",
-            "MiscellaneousCommandsExportLogsPart2DUnitTest.java",
-            "LuceneEventListenerJUnitTest.java",
-            "PersistentPartitionedRegionJUnitTest.java",
+            "TestDataSerializer.java",
+            "QueueCommandsDUnitTest.java",
             "LuceneQueriesDUnitTest.java",
-            "BundledJarsJUnitTest.java",
-            "PaginationDUnitTest.java",
-            "LuceneQueryFunctionContextJUnitTest.java",
-            "StatArchiveHandlerIntegrationTest.java",
             "LuceneQueriesPeerFixedPRDUnitTest.java",
-            "LuceneIndexCommandsDUnitTest.java",
-            "LuceneIndexCommandsJUnitTest.java",
+            "PageableLuceneQueryResultsImplJUnitTest.java",
+            "UserCommandsDUnitTest.java",
+            "LuceneGetPageFunctionJUnitTest.java",
+            "IncrementalBackupDUnitTest.java",
+            "FileUtilJUnitTest.java",
+            "GemFireCacheImplTest.java",
+            "DiskRegionAsyncRecoveryJUnitTest.java",
+            "PartitionedRegionStatsJUnitTest.java",
+            "BackupInspectorJUnitTest.java",
+            "LuceneDUnitTest.java",
+            "ClientCacheFactoryJUnitTest.java",
+            "InstallerJUnitTest.java",
+            "PdxRenameJUnitTest.java",
+            "DistributionManagerDUnitTest.java",
+            "RollingUpgradeDUnitTest.java",
+            "StatArchiveWithMissingResourceTypeRegressionTest.java",
+            "LuceneQueriesPeerPRPersistentDUnitTest.java",
+            "LuceneQueryFunctionContextJUnitTest.java",
+            "PdxAttributesJUnitTest.java",
+            "JarDeployerDUnitTest.java",
+            "PageEntryJUnitTest.java",
+            "StatArchiveHandlerIntegrationTest.java",
+            "JarDeployerIntegrationTest.java",
+            "QueryIndexUsingXMLDUnitTest.java",
+            "DiskSpaceLimitIntegrationTest.java",
+            "SSLSocketIntegrationTest.java",
+            "LuceneIndexForPartitionedRegionTest.java",
+            "LuceneIndexCreationDUnitTest.java",
+            "BackupDUnitTest.java",
+            "BaseLineAndCompareQueryPerfJUnitTest.java",
+            "LuceneIndexCreationOnFixedPRDUnitTest.java",
+            "BackupJUnitTest.java",
+            "PaginationDUnitTest.java",
+            "LuceneIndexDestroyDUnitTest.java",
+            "LuceneQueryImplJUnitTest.java",
+            "ClearTXLockingDUnitTest.java",
+            "LuceneQueryFunctionJUnitTest.java",
+            "PersistentColocatedPartitionedRegionDUnitTest.java",
+            "PdxRenameDUnitTest.java",
+            "DiskStoreCommandsDUnitTest.java",
+            "MiscellaneousCommandsExportLogsPart3DUnitTest.java",
+            "LocatorUDPSecurityDUnitTest.java",
+            "LuceneQueriesClientDUnitTest.java",
+            "Log4J2PerformanceTest.java",
+            "LuceneDestroyIndexFunctionJUnitTest.java",
             "PdxDeleteFieldJUnitTest.java",
-            "PdxRenameDUnitTest.java"
+            "InterestListDUnitTest.java",
+            "LocatorDUnitTest.java",
+            "ClientServerCCEDUnitTest.java",
+            "CreateAlterDestroyRegionCommandsDUnitTest.java",
+            "TestUtil.java",
+            "RebalanceDUnitTest.java",
+            "RebalanceWithRedundancyDUnitTest.java",
+            "LuceneQueriesIntegrationTest.java",
+            "PdxSerializableJUnitTest.java",
+            "LuceneQueryFactoryImplJUnitTest.java",
+            "SelectStarQueryDUnitTest.java",
+            "LuceneEventListenerJUnitTest.java",
+            "LuceneServiceImplIntegrationTest.java",
+            "PersistentPartitionedRegionJUnitTest.java",
+            "PdxDeleteFieldDUnitTest.java",
+            "LuceneIndexCommandsDUnitTest.java",
+            "MiscellaneousCommandsExportLogsPart4DUnitTest.java",
+            "LuceneQueriesPeerPRDUnitTest.java",
+            "BundledJarsJUnitTest.java",
+            "MiscellaneousCommandsExportLogsPart2DUnitTest.java",
+            "DataSerializableJUnitTest.java",
+            "LuceneClusterConfigurationDUnitTest.java",
+            "LuceneQueriesPeerPROverflowDUnitTest.java",
+            "RollingUpgrade2DUnitTest.java",
+            "LuceneIndexCommandsJUnitTest.java",
+            "OplogRVVJUnitTest.java",
+            "MainWithChildrenRollingFileHandlerIntegrationTest.java",
+            "ClusterConfigurationServiceEndToEndDUnitTest.java"
         ]
     },
     "geode_638b058": {
@@ -5506,8 +5976,8 @@
         "message": "GEODE-2155 Auto-reconnect fails with NPE\n\nI created a test to reproduce the problem by introducing a non-Declarable\ncache listener and then initiating a forced-disconnect.  cache.xml is\ngenerated and when it's used to rebuild the cache a CacheXmlException\nis thrown, reliably reproducing the problem.\n\nThe fix is to simply catch the CacheXmlException in\nInternalDistributedSystem.reconnect() and terminate reconnection attempt",
         "parent": "https://github.com/apache/geode/commit/0182a1bb744d25fe490d142dfed7d9a6f20b2713",
         "patched_files": [
-            "InternalDistributedSystem.java",
-            "GemFireCacheImpl.java"
+            "GemFireCacheImpl.java",
+            "InternalDistributedSystem.java"
         ],
         "repo": "geode",
         "unit_tests": [
@@ -5721,22 +6191,22 @@
         "message": "GEODE-4160: fix gfsh describe jdbc-connection (#1223)\n\n* GEODE-4160: fix gfsh describe jdbc-connection\r\n\r\nIf the connection had no parameters set, then running\r\ngfsh describe jdbc-connection would fail with an NPE.",
         "parent": "https://github.com/apache/geode/commit/21d243d950270bb9f265f3a47c4d2ddd8be15cec",
         "patched_files": [
-            "RegionMappingBuilder.java",
-            "DescribeConnectionCommand.java",
-            "JdbcConnectorServiceXmlGenerator.java",
-            "ElementType.java",
             "ConnectionConfiguration.java",
-            "ConnectionConfigBuilder.java"
+            "ConnectionConfigBuilder.java",
+            "DescribeConnectionCommand.java",
+            "ElementType.java",
+            "JdbcConnectorServiceXmlGenerator.java",
+            "RegionMappingBuilder.java"
         ],
         "repo": "geode",
         "unit_tests": [
-            "RegionMappingBuilderTest.java",
-            "ConnectionConfigBuilderTest.java",
-            "ConnectionConfigurationTest.java",
-            "JdbcConnectorServiceXmlGeneratorIntegrationTest.java",
             "JdbcConnectorServiceXmlGeneratorTest.java",
+            "ElementTypeTest.java",
+            "JdbcConnectorServiceXmlGeneratorIntegrationTest.java",
+            "RegionMappingBuilderTest.java",
             "DescribeConnectionCommandIntegrationTest.java",
-            "ElementTypeTest.java"
+            "ConnectionConfigBuilderTest.java",
+            "ConnectionConfigurationTest.java"
         ]
     },
     "geode_6f4bbbd": {
@@ -5799,9 +6269,9 @@
         ],
         "repo": "geode",
         "unit_tests": [
+            "SerialWANConflationDUnitTest.java",
             "AsyncEventListenerDistributedTest.java",
-            "ParallelGatewaySenderEventProcessorJUnitTest.java",
-            "SerialWANConflationDUnitTest.java"
+            "ParallelGatewaySenderEventProcessorJUnitTest.java"
         ]
     },
     "geode_6ff83bc": {
@@ -5860,13 +6330,13 @@
         "message": "GEODE-100: Nested count(*) query on pr causes NullPointerException\nQuery object in query execution was being used without being set for nested queries.\n\nReviewed by agingade",
         "parent": "https://github.com/apache/geode/commit/9d7949555fce852b10d0b2e023a578aa446ea23a",
         "patched_files": [
-            "PartitionedRegion.java",
-            "CompiledSelect.java"
+            "CompiledSelect.java",
+            "PartitionedRegion.java"
         ],
         "repo": "geode",
         "unit_tests": [
-            "PRQueryDUnitTest.java",
-            "PRQueryJUnitTest.java"
+            "PRQueryJUnitTest.java",
+            "PRQueryDUnitTest.java"
         ]
     },
     "geode_7041507": {
@@ -6318,40 +6788,40 @@
         "message": "GEODE-6369 Cache-creation failure after a successful auto-reconnect causes subsequent NPE\n\nIf an error occurs while rebuilding the cache on auto-reconnect & we can't\ncontinue we should throw an exception to any thread waiting for the\nreconnect to complete.\n\nIf we're unable to contact the cluster configuration service we do not\nterminate auto-reconnect attempts.\n\nNew members are now only allowed to join after view preparation has\ncompleted.  This will reduce the number of \"surprise members\" and also\nensures that any old member IDs have been removed from the view.\n\nWe now only attempt to use findCoordinatorFromView multiple times if the\nview actually changes.  Instead we contact locators again to see if\nthere are new registrants.\n\nfixing the above exposed other problems in auto-reconnect:\n\n* messages were being thrown away by the location service quorum checker\nduring auto-reconnect.  some of these were \"join\" messages that needed\nto be delivered to the new membership service\n\n* registrants weren't being removed from the recovered membership view\nin the locator.  This confused restarting nodes because the recovered\nmembership view has stale info in it that they don't want to use\n\n* locator services restart were hanging due to profile interchange being\ndone under synchronization",
         "parent": "https://github.com/apache/geode/commit/49696f83c70606673758a19cf904b544d1df4346",
         "patched_files": [
-            "Service.java",
-            "MembershipManager.java",
-            "GemFireCacheImpl.java",
-            "DistributedSystem.java",
-            "ServerLocator.java",
-            "GMSHealthMonitor.java",
-            "GMSUtil.java",
-            "Cache.java",
-            "TcpHandler.java",
-            "MembershipInformation.java",
-            "JGroupsMessenger.java",
-            "GMSQuorumChecker.java",
             "GMSMembershipManager.java",
-            "CacheServerLauncher.java",
-            "InternalLocator.java",
-            "GMSJoinLeave.java",
-            "TcpServer.java",
             "InternalDistributedSystem.java",
-            "Connection.java",
-            "Services.java",
+            "GMSLocator.java",
+            "ServerLocator.java",
+            "DistributedSystem.java",
+            "Service.java",
+            "TcpServer.java",
+            "MembershipManager.java",
+            "InternalLocator.java",
             "Manager.java",
-            "GMSLocator.java"
+            "TcpHandler.java",
+            "GMSQuorumChecker.java",
+            "GMSUtil.java",
+            "Services.java",
+            "MembershipInformation.java",
+            "CacheServerLauncher.java",
+            "JGroupsMessenger.java",
+            "Connection.java",
+            "GMSHealthMonitor.java",
+            "GMSJoinLeave.java",
+            "Cache.java",
+            "GemFireCacheImpl.java"
         ],
         "repo": "geode",
         "unit_tests": [
-            "ReconnectDUnitTest.java",
+            "InternalDistributedSystemTest.java",
             "MembershipJUnitTest.java",
-            "ReconnectWithClusterConfigurationDUnitTest.java",
+            "ReconnectDUnitTest.java",
+            "JGroupsMessengerJUnitTest.java",
+            "ClusterCommunicationsDUnitTest.java",
             "GemFireCacheImplTest.java",
             "GMSJoinLeaveJUnitTest.java",
-            "JGroupsMessengerJUnitTest.java",
-            "InternalDistributedSystemTest.java",
-            "ClusterCommunicationsDUnitTest.java",
-            "ConnectionTest.java"
+            "ConnectionTest.java",
+            "ReconnectWithClusterConfigurationDUnitTest.java"
         ]
     },
     "geode_769d9b3": {
@@ -6583,15 +7053,15 @@
         "message": "GEODE-5284: Add testing surrounding MBean persistence during member failure and reconnection. (#2066)\n\n* Add null-check to ConfigurationChangeListener to avoid NPE when a locator joins.\r\n* Add withPort method to MemberStarterRule to specify membership port\r\n* Add testing associated with MemberStarterRule addition\r\n* Ensure cleanup of members in MemberStarterRuleIntegrationTest.\r\n* Improve names and extract helper methods\r\n* use the methods provided by the starter rules to force disconnect and\r\nto reconnect servers and locators. Adds a parameter in InternalLocator\r\nto track the status of the reconnect. Adds export of cache xml for\r\nreconnect so that the server is able to restore its state following\r\ndisconnect.\r\n\r\nCo-Authored-by: Helena Bales <hbales@pivotal.io>\r\nCo-Authored-by: Dale Emery <dale@dhemery.com>\r\nCo-Authored-by: Patrick Rhomberg <prhomberg@pivotal.io>\r\nCo-Authored-By: Jinmei Liao <jinmeiliao@pivotal.io>",
         "parent": "https://github.com/apache/geode/commit/c9be10e3077b4ff1958f44637183799afd00dbab",
         "patched_files": [
-            "MembershipManagerHelper.java",
+            "ServerStarterRule.java",
+            "MemberStarterRule.java",
+            "MBeanServerWrapper.java",
             "ConfigurationChangeListener.java",
             "VMProvider.java",
-            "InternalLocator.java",
-            "ServerStarterRule.java",
+            "MembershipManagerHelper.java",
             "MemberVM.java",
-            "MBeanServerWrapper.java",
             "LocatorStarterRule.java",
-            "MemberStarterRule.java"
+            "InternalLocator.java"
         ],
         "repo": "geode",
         "unit_tests": [
@@ -6767,22 +7237,22 @@
         "message": "GEODE-4160: fix gfsh describe jdbc-connection (#1223)\n\n* GEODE-4160: fix gfsh describe jdbc-connection\r\n\r\nIf the connection had no parameters set, then running\r\ngfsh describe jdbc-connection would fail with an NPE.",
         "parent": "https://github.com/apache/geode/commit/78438f8586610f084c3eec462bc69abe05e1e1b7",
         "patched_files": [
-            "RegionMappingBuilder.java",
-            "DescribeConnectionCommand.java",
-            "JdbcConnectorServiceXmlGenerator.java",
-            "ElementType.java",
             "ConnectionConfiguration.java",
-            "ConnectionConfigBuilder.java"
+            "ConnectionConfigBuilder.java",
+            "DescribeConnectionCommand.java",
+            "ElementType.java",
+            "JdbcConnectorServiceXmlGenerator.java",
+            "RegionMappingBuilder.java"
         ],
         "repo": "geode",
         "unit_tests": [
-            "RegionMappingBuilderTest.java",
-            "ConnectionConfigBuilderTest.java",
-            "ConnectionConfigurationTest.java",
-            "JdbcConnectorServiceXmlGeneratorIntegrationTest.java",
             "JdbcConnectorServiceXmlGeneratorTest.java",
+            "ElementTypeTest.java",
+            "JdbcConnectorServiceXmlGeneratorIntegrationTest.java",
+            "RegionMappingBuilderTest.java",
             "DescribeConnectionCommandIntegrationTest.java",
-            "ElementTypeTest.java"
+            "ConnectionConfigBuilderTest.java",
+            "ConnectionConfigurationTest.java"
         ]
     },
     "geode_9934558": {
@@ -6868,13 +7338,13 @@
         "message": "Merge pull request #2185 from BenjaminPerryRoss/fix-npe-jndi-command-159205020\n\nGEODE-5450: Added protection for NPE in GemFireBasicDataSource with no credentials",
         "parent": "https://github.com/apache/geode/commit/0f765b98b4ea03180e9df6c3415247d377d5eb67",
         "patched_files": [
-            "GemFireBasicDataSource.java",
-            "Driver.java"
+            "Driver.java",
+            "GemFireBasicDataSource.java"
         ],
         "repo": "geode",
         "unit_tests": [
-            "TestDriver.java",
-            "GemFireBasicDataSourceJUnitTest.java"
+            "GemFireBasicDataSourceJUnitTest.java",
+            "TestDriver.java"
         ]
     },
     "geode_9fdcca1": {
@@ -7006,17 +7476,17 @@
         "message": "GEODE-5198 NPE in DataSerializer registration when forming a client/server connection during handshake\n\nIf a holder can't be found do not record supported classes for it.\nAbsense of the holder, which had just been inserted into the\nidsToHolders collection, means that another thread has resolved the\nholder into an actual DataSerializer class and has removed the holder\nand its supported classes.\n\nThis closes #1943",
         "parent": "https://github.com/apache/geode/commit/8ed21ab9e2ffc3d40d5909d1d124930a93282e9c",
         "patched_files": [
-            "InternalDataSerializer.java",
-            "ClientSideHandshakeImpl.java"
+            "ClientSideHandshakeImpl.java",
+            "InternalDataSerializer.java"
         ],
         "repo": "geode",
         "unit_tests": [
-            "DataSerializerHolderJUnitTest.java",
-            "UniversalMembershipListenerAdapterDUnitTest.java",
             "RedisDistDUnitTest.java",
-            "GMSJoinLeaveJUnitTest.java",
             "GemFireDeadlockDetectorDUnitTest.java",
-            "GMSHealthMonitorJUnitTest.java"
+            "UniversalMembershipListenerAdapterDUnitTest.java",
+            "GMSHealthMonitorJUnitTest.java",
+            "GMSJoinLeaveJUnitTest.java",
+            "DataSerializerHolderJUnitTest.java"
         ]
     },
     "geode_a8e1fab": {
@@ -7075,9 +7545,9 @@
         "message": "GEODE-3941: Pulse issues when SecurityManager is enabled (#1007)\n\n- Pulse UI is not updated correctly - missing servers for ex.\r\n- NPE regarding JMXUpdater in pulse.log",
         "parent": "https://github.com/apache/geode/commit/235790c14af58b89c57643c066ff25ca9b7afb14",
         "patched_files": [
-            "LocatorMBeanBridge.java",
-            "spring-security.java",
-            "JMXDataUpdater.java"
+            "JMXDataUpdater.java",
+            "spring-security.xml",
+            "LocatorMBeanBridge.java"
         ],
         "repo": "geode",
         "unit_tests": [
@@ -7500,47 +7970,43 @@
         "message": "GEODE-981: NPE in Message.clear()\n\nThis fixes the NPE and adds a unit test for it.  I also did some cleanup\nof Message, removing unused methods and old commented out code and\nchanging the earlyAck byte to be \"flags\" and not allow external\nmanipulation of the byte's bits.",
         "parent": "https://github.com/apache/geode/commit/75d6a8b68fc07248cfd7450b44aa0678a0cd924e",
         "patched_files": [
-            "PingOp.java",
-            "AbstractOp.java",
-            "RollbackOp.java",
+            "Part.java",
+            "GetPDXEnumByIdOp.java",
             "GetClientPartitionAttributesOp.java",
-            "GetClientPRMetaDataOp.java",
-            "ReadyForEventsOp.java",
-            "Message.java",
-            "TXFailoverOp.java",
-            "ProxyCacheCloseOp.java",
-            "CloseConnectionOp.java",
-            "PrimaryAckOp.java",
-            "GetPDXTypesOp.java",
-            "TXSynchronizationOp.java",
-            "TXManagerImpl.java",
+            "GetFunctionAttributeOp.java",
             "AuthenticateUserOp.java",
-            "RegisterInstantiatorsOp.java",
+            "AbstractOp.java",
             "RegisterDataSerializersOp.java",
-            "GetEventValueOp.java",
             "GetPDXEnumsOp.java",
             "BaseCommand.java",
-            "AddPDXEnumOp.java",
-            "GatewaySenderBatchOp.java",
-            "GetPDXEnumByIdOp.java",
-            "AddPDXTypeOp.java",
-            "CommitOp.java",
-            "GetPDXTypeByIdOp.java",
             "MakePrimaryOp.java",
-            "GetPDXIdForEnumOp.java",
-            "Part.java",
+            "PingOp.java",
+            "RegisterInstantiatorsOp.java",
+            "Message.java",
+            "ProxyCacheCloseOp.java",
+            "GetPDXTypeByIdOp.java",
+            "GatewaySenderBatchOp.java",
+            "PrimaryAckOp.java",
+            "GetClientPRMetaDataOp.java",
+            "TXSynchronizationOp.java",
+            "GetPDXTypesOp.java",
+            "AddPDXEnumOp.java",
+            "TXFailoverOp.java",
+            "CloseConnectionOp.java",
+            "GetPDXIdForTypeOp.java",
+            "ReadyForEventsOp.java",
+            "RollbackOp.java",
+            "CommitOp.java",
             "SizeOp.java",
-            "GetFunctionAttributeOp.java",
-            "GetPDXIdForTypeOp.java"
+            "TXManagerImpl.java",
+            "GetEventValueOp.java",
+            "GetPDXIdForEnumOp.java",
+            "AddPDXTypeOp.java"
         ],
         "repo": "geode",
         "unit_tests": [
-            "PartTest.java",
             "MessageJUnitTest.java",
-            "LocatorDUnitTest.java",
-            "TXFailoverOpTest.java",
-            "AbstractOpTest.java",
-            "TXManagerImplTest.java"
+            "LocatorDUnitTest.java"
         ]
     },
     "geode_b31ff34": {
@@ -7728,10 +8194,10 @@
         "message": "GEODE-6391: Adding the event ID to the messages (#3184)\n\n        * Event id is included in the DestroyPartitionedRegionMessage and InvalidatePartitionedRegionMessage\r\n\t* This is to prevent the NPE\r\n\t* The NPE occurs when server tries to notify the clients after receiving the message\r\n\t* While getting the thread id and sequence id it ends up with an NPE and event id is null.",
         "parent": "https://github.com/apache/geode/commit/67ed50f0410d641adb35eae8093e872b5625c65e",
         "patched_files": [
-            "InvalidatePartitionedRegionMessage.java",
+            "sanctionedDataSerializables.txt",
             "DestroyPartitionedRegionMessage.java",
-            "sanctionedDataSerializables.java",
-            "RegionEventImpl.java"
+            "RegionEventImpl.java",
+            "InvalidatePartitionedRegionMessage.java"
         ],
         "repo": "geode",
         "unit_tests": [
@@ -7899,10 +8365,10 @@
         "message": "GEODE-2811: close OffHeapEvictor when cache is closed\n\nRejected executions are now ignored if shutting down.\nexecute now used instead of submit.\nClose logic on HeapEvictor improved to prevent race conditions and NPEs.",
         "parent": "https://github.com/apache/geode/commit/c98bc8bdbf6a6f1f32031a1aba390a3b14edd6b4",
         "patched_files": [
-            "RegionEvictorTask.java",
+            "HeapEvictor.java",
             "EvictionTestBase.java",
             "GemFireCacheImpl.java",
-            "HeapEvictor.java"
+            "RegionEvictorTask.java"
         ],
         "repo": "geode",
         "unit_tests": [
@@ -8036,8 +8502,8 @@
         ],
         "repo": "geode",
         "unit_tests": [
-            "BucketRegionTest.java",
-            "TXDetectReadConflictJUnitTest.java"
+            "TXDetectReadConflictJUnitTest.java",
+            "BucketRegionTest.java"
         ]
     },
     "geode_c4a5ab2": {
@@ -8162,12 +8628,64 @@
         "message": "Merge pull request #3882 from Nordix/feature/GEODE-7036\n\nGEODE-7036: Fix for NPE caused by ex-coordinator joining quorum",
         "parent": "https://github.com/apache/geode/commit/6c6dc146c2044f916fc772e079a144b5cbef6740",
         "patched_files": [
-            "ClusterStartupRule.java",
-            "InternalLocator.java"
+            "InternalLocator.java",
+            "ClusterStartupRule.java"
         ],
         "repo": "geode",
         "unit_tests": [
             "RestartOfMemberDistributedTest.java"
+        ]
+    },
+    "geode_c9570d7": {
+        "bug_id": "geode_c9570d7",
+        "commit": "https://github.com/apache/geode/commit/c9570d7788307f0125bbd9b4bfb97d52684d183a",
+        "file": [
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/geode/blob/c9570d7788307f0125bbd9b4bfb97d52684d183a/geode-core/src/integrationTest/resources/org/apache/geode/codeAnalysis/sanctionedDataSerializables.txt",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-core/src/integrationTest/resources/org/apache/geode/codeAnalysis/sanctionedDataSerializables.txt?ref=c9570d7788307f0125bbd9b4bfb97d52684d183a",
+                "deletions": 1,
+                "filename": "geode-core/src/integrationTest/resources/org/apache/geode/codeAnalysis/sanctionedDataSerializables.txt",
+                "patch": "@@ -977,7 +977,7 @@ toData,22\n org/apache/geode/internal/cache/EventID,4\n fromData,53\n fromDataPre_GFE_8_0_0_0,33\n-toData,99\n+toData,106\n toDataPre_GFE_8_0_0_0,24\n \n org/apache/geode/internal/cache/EvictionAttributesImpl,2",
+                "raw_url": "https://github.com/apache/geode/raw/c9570d7788307f0125bbd9b4bfb97d52684d183a/geode-core/src/integrationTest/resources/org/apache/geode/codeAnalysis/sanctionedDataSerializables.txt",
+                "sha": "294543d341d23158886863d2dc3e20b802fdd77a",
+                "status": "modified"
+            },
+            {
+                "additions": 1,
+                "blob_url": "https://github.com/apache/geode/blob/c9570d7788307f0125bbd9b4bfb97d52684d183a/geode-core/src/main/java/org/apache/geode/internal/cache/EventID.java",
+                "changes": 2,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-core/src/main/java/org/apache/geode/internal/cache/EventID.java?ref=c9570d7788307f0125bbd9b4bfb97d52684d183a",
+                "deletions": 1,
+                "filename": "geode-core/src/main/java/org/apache/geode/internal/cache/EventID.java",
+                "patch": "@@ -356,7 +356,7 @@ public void toData(DataOutput dop,\n     // using the client's version to ensure it gets the proper on-wire form\n     // of the identifier\n     // See GEODE-3072\n-    if (version.compareTo(Version.GEODE_1_1_0) < 0) {\n+    if (membershipID != null && version.compareTo(Version.GEODE_1_1_0) < 0) {\n       InternalDistributedMember member = getDistributedMember(Version.GFE_90);\n       // reserialize with the client's version so that we write the UUID\n       // bytes",
+                "raw_url": "https://github.com/apache/geode/raw/c9570d7788307f0125bbd9b4bfb97d52684d183a/geode-core/src/main/java/org/apache/geode/internal/cache/EventID.java",
+                "sha": "9a21f8a71acb26f7aca17fac86ac9cf0f1eab5ef",
+                "status": "modified"
+            },
+            {
+                "additions": 54,
+                "blob_url": "https://github.com/apache/geode/blob/c9570d7788307f0125bbd9b4bfb97d52684d183a/geode-core/src/test/java/org/apache/geode/internal/cache/EventIDTest.java",
+                "changes": 54,
+                "contents_url": "https://api.github.com/repos/apache/geode/contents/geode-core/src/test/java/org/apache/geode/internal/cache/EventIDTest.java?ref=c9570d7788307f0125bbd9b4bfb97d52684d183a",
+                "deletions": 0,
+                "filename": "geode-core/src/test/java/org/apache/geode/internal/cache/EventIDTest.java",
+                "patch": "@@ -0,0 +1,54 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one or more contributor license\n+ * agreements. See the NOTICE file distributed with this work for additional information regarding\n+ * copyright ownership. The ASF licenses this file to You under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance with the License. You may obtain a\n+ * copy of the License at\n+ *\n+ * http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing, software distributed under the License\n+ * is distributed on an \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express\n+ * or implied. See the License for the specific language governing permissions and limitations under\n+ * the License.\n+ */\n+package org.apache.geode.internal.cache;\n+\n+import java.io.ByteArrayInputStream;\n+import java.io.IOException;\n+\n+import org.assertj.core.api.Assertions;\n+import org.junit.Test;\n+\n+import org.apache.geode.DataSerializer;\n+import org.apache.geode.internal.HeapDataOutputStream;\n+import org.apache.geode.internal.serialization.Version;\n+import org.apache.geode.internal.serialization.VersionedDataInputStream;\n+\n+public class EventIDTest {\n+\n+  @Test\n+  public void emptyEventIdCanBeSerializedWithCurrentVersion()\n+      throws IOException, ClassNotFoundException {\n+    emptyEventIdCanBeSerialized(Version.CURRENT);\n+\n+  }\n+\n+  @Test\n+  public void emptyEventIdCanBeSerializedToGeode100() throws IOException, ClassNotFoundException {\n+    emptyEventIdCanBeSerialized(Version.GFE_90);\n+  }\n+\n+  private void emptyEventIdCanBeSerialized(Version version)\n+      throws IOException, ClassNotFoundException {\n+    EventID eventID = new EventID();\n+    HeapDataOutputStream out = new HeapDataOutputStream(version);\n+    DataSerializer.writeObject(eventID, out);\n+\n+    EventID result = DataSerializer.readObject(\n+        new VersionedDataInputStream(new ByteArrayInputStream(out.toByteArray()), version));\n+\n+    Assertions.assertThat(result.getMembershipID()).isEqualTo(eventID.getMembershipID());\n+  }\n+\n+}",
+                "raw_url": "https://github.com/apache/geode/raw/c9570d7788307f0125bbd9b4bfb97d52684d183a/geode-core/src/test/java/org/apache/geode/internal/cache/EventIDTest.java",
+                "sha": "5fdc8cab8b0209c218e8099b347014d51f98a1de",
+                "status": "added"
+            }
+        ],
+        "message": "GEODE-7661: Check for null membershipID when serializing EventID (#4574)\n\nWe create an serialize an EventID with a null membershipID. When serializing to\r\na Geode 1.0.0 member, this resulted in an NPE in some version transalation\r\nlogic. Fixing the version translation logic to check for null.",
+        "parent": "https://github.com/apache/geode/commit/0cadfe99d9d3b629b306ab60307fa967b706c999",
+        "patched_files": [
+            "sanctionedDataSerializables.txt",
+            "EventID.java"
+        ],
+        "repo": "geode",
+        "unit_tests": [
+            "EventIDTest.java"
         ]
     },
     "geode_ca12f78": {
@@ -8298,14 +8816,14 @@
         "message": "GEODE-2970: clearing LogWriterAppender when shutting down locator.\n\n* Do not bury the NPE in AlterRuntimeConfigFunction\n* destroy the LogWriterAppender when removing the locator\n* added test",
         "parent": "https://github.com/apache/geode/commit/f9099df50ae061a158a00f1c3a69327bbf583d1a",
         "patched_files": [
-            "AlterRuntimeConfigFunction.java",
             "ConfigCommands.java",
-            "InternalLocator.java",
-            "LocatorServerStartupRule.java",
-            "LocatorLauncher.java",
-            "DistributionLocator.java",
             "MemberVM.java",
-            "Locator.java"
+            "LocatorLauncher.java",
+            "AlterRuntimeConfigFunction.java",
+            "DistributionLocator.java",
+            "InternalLocator.java",
+            "Locator.java",
+            "LocatorServerStartupRule.java"
         ],
         "repo": "geode",
         "unit_tests": [
@@ -8397,8 +8915,8 @@
         "message": "GEODE-5142 new Thread Monitoring Mechanism\n\nFixing an NPE that may occur if a monitored thread disappears during\nexpiry but before we've reported on its state.",
         "parent": "https://github.com/apache/geode/commit/3f2654cc031b2f812b394fda9e806b4b9f1e167b",
         "patched_files": [
-            "PooledExecutorGroup.java",
-            "AbstractExecutor.java"
+            "AbstractExecutor.java",
+            "PooledExecutorGroup.java"
         ],
         "repo": "geode",
         "unit_tests": [
@@ -8466,8 +8984,8 @@
         ],
         "repo": "geode",
         "unit_tests": [
-            "AggregateRegionStatsMonitorTest.java",
-            "MemberLevelDiskMonitorTest.java"
+            "MemberLevelDiskMonitorTest.java",
+            "AggregateRegionStatsMonitorTest.java"
         ]
     },
     "geode_d79b74a": {
@@ -8514,13 +9032,13 @@
         "message": "Added protection for NPE in GemFireBasicDataSource with no credentials\n\nAdded protection against NullPointerExceptions being thrown by\nGemFireBasicDataSource.getConnection() in the event the default username or password\nwere null. Also added tests to confirm this is working as intended.\n\n[GEODE-5450]\n\nCo-authored-by: Benjamin Ross <bross@pivotal.io>\nCo-authored-by: Patrick Johnson <kcirtap1324@gmail.com>",
         "parent": "https://github.com/apache/geode/commit/67d2241be0ffcf1cd16bed48cfb6a74883db5dba",
         "patched_files": [
-            "GemFireBasicDataSource.java",
-            "Driver.java"
+            "Driver.java",
+            "GemFireBasicDataSource.java"
         ],
         "repo": "geode",
         "unit_tests": [
-            "TestDriver.java",
-            "GemFireBasicDataSourceJUnitTest.java"
+            "GemFireBasicDataSourceJUnitTest.java",
+            "TestDriver.java"
         ]
     },
     "geode_da87d64": {
@@ -8603,16 +9121,16 @@
         "message": "GEODE-6779: fix issues with DUnit failures (#3810)\n\n- due to different ways of determining existence of disk stores\r\n- added more protection against NPEs\r\n- Move diskStore presence checking to DiskStoreCommandsUtils\r\n- Move tests to newly created DiskStoreCommandsUtilsTest",
         "parent": "https://github.com/apache/geode/commit/1d3ae3c46c097948c7e04a1f93793d54e351a376",
         "patched_files": [
+            "DiskStoreCommandsUtils.java",
             "CreateRegionCommand.java",
             "CreateDiskStoreCommand.java",
-            "DiskStoreCommandsUtils.java",
             "CompactDiskStoreCommand.java"
         ],
         "repo": "geode",
         "unit_tests": [
-            "GfshCommandJUnitTest.java",
             "CreateRegionCommandTest.java",
             "CreateDiskStoreCommandTest.java",
+            "GfshCommandJUnitTest.java",
             "DiskStoreCommandsUtilsTest.java"
         ]
     },
@@ -8660,8 +9178,8 @@
         "message": "GEODE-6959: Prevent NPE in GMSMembershipManager for null AlertAppender (#3899)\n\nIf a custom log4j2.xml is used without specifying the Geode AlertAppender,\r\nGMSMembershipManager may throw a NullPointerException when invoking\r\nAlertAppender.getInstance().stopSession() during a forceDisconnect. This\r\nchange prevents the NullPointerException allowing forceDisconnect to finish.\r\n\r\nUsers using Spring Boot with Logback are more likely to hit this bug.\r\n\r\nCo-authored-by: Mark Hanson mhanson@pivotal.io",
         "parent": "https://github.com/apache/geode/commit/62317207b2ea3b4b4d7ded96e66250caa01ce76e",
         "patched_files": [
-            "GMSMembershipManager.java",
-            "AlertAppender.java"
+            "AlertAppender.java",
+            "GMSMembershipManager.java"
         ],
         "repo": "geode",
         "unit_tests": [
@@ -8778,8 +9296,8 @@
         "message": "GEODE-3620: check for null argument to prevent NPE\n\nAdded new tests\n\nFixes problem in LocatorServerStartupRule where a faiulure due to\nsuspect strings caused dunit VM cleanup to be skipped.",
         "parent": "https://github.com/apache/geode/commit/8f6b0b9fced9ed06710bf39d56ef72750171f7ff",
         "patched_files": [
-            "MainWithChildrenRollingFileHandler.java",
-            "LocatorServerStartupRule.java"
+            "LocatorServerStartupRule.java",
+            "MainWithChildrenRollingFileHandler.java"
         ],
         "repo": "geode",
         "unit_tests": [
@@ -8977,21 +9495,21 @@
         "message": "GEODE-1675: Fix ClassCastException in ClientServer expiry\n\n* Also fix for NPE if session manager somehow is null in a session\n* Added tests for client/server session management\n* Refactored existing tests so they can share tests with client/server set up\n* EmbeddedTomcat will explictly create a log directory",
         "parent": "https://github.com/apache/geode/commit/9fa589708c03754c85e7d10e353fbe47294673db",
         "patched_files": [
+            "DeltaSession8.java",
             "AbstractCache.java",
             "EmbeddedTomcat8.java",
-            "PeerToPeerCache.java",
-            "DeltaSession8.java",
-            "DeltaSession.java",
-            "DeltaSessionInterface.java",
             "ClientServerCache.java",
-            "SessionExpirationCacheListener.java"
+            "DeltaSessionInterface.java",
+            "SessionExpirationCacheListener.java",
+            "DeltaSession.java",
+            "PeerToPeerCache.java"
         ],
         "repo": "geode",
         "unit_tests": [
-            "Tomcat8SessionsDUnitTest.java",
             "Tomcat8SessionsJUnitTest.java",
-            "TestSessionsTomcat8Base.java",
-            "Tomcat8SessionsClientServerDUnitTest.java"
+            "Tomcat8SessionsClientServerDUnitTest.java",
+            "Tomcat8SessionsDUnitTest.java",
+            "TestSessionsTomcat8Base.java"
         ]
     },
     "geode_f30f936": {
@@ -9062,14 +9580,14 @@
         "message": "GEODE-7167: eliminate NPE when parsing locators property (#4018)",
         "parent": "https://github.com/apache/geode/commit/2104c9bba5cd2b57e41e5c9259d08de31fb8ea3b",
         "patched_files": [
+            "InternalLocator.java",
             "GMSUtil.java",
-            "TcpServer.java",
-            "InternalLocator.java"
+            "TcpServer.java"
         ],
         "repo": "geode",
         "unit_tests": [
-            "MultipleCacheJUnitTest.java",
-            "GMSUtilTest.java"
+            "GMSUtilTest.java",
+            "MultipleCacheJUnitTest.java"
         ]
     },
     "geode_f6dd58f": {
@@ -9170,12 +9688,12 @@
         ],
         "repo": "geode",
         "unit_tests": [
+            "HARegionQueueIntegrationTest.java",
             "HABug36738DUnitTest.java",
             "HARegionDUnitTest.java",
-            "HARegionQueueIntegrationTest.java",
-            "AbstractRegionMapTest.java",
             "HARegionQueueTest.java",
-            "HARegionQueueDUnitTest.java"
+            "HARegionQueueDUnitTest.java",
+            "AbstractRegionMapTest.java"
         ]
     },
     "geode_fcd0340": {

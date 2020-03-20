@@ -1,0 +1,92 @@
+[
+    {
+        "repo": "tinkerpop",
+        "commit": "https://github.com/apache/tinkerpop/commit/276064530617c04706b62ac57ec4e2e660a756a4",
+        "bug_id": "tinkerpop_2760645",
+        "message": "fixed an NPE in AddVertexStartStep. In PathRetractionStrategy, NoOpBarriers are only added to global children as 99% of local children are by()-modulation based and thus, there is no point to fully compute the traversal if only the first next() is going to be used.",
+        "parent": "https://github.com/apache/tinkerpop/commit/2d824cf29f7d914405e262f4111aa2f5a7c272dc",
+        "patched_files": [
+            "PathRetractionStrategy.java",
+            "GroovyAddVertexTest.groovy",
+            "CHANGELOG.asciidoc",
+            "AddVertexStartStep.java"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 2,
+                "raw_url": "https://github.com/apache/tinkerpop/raw/276064530617c04706b62ac57ec4e2e660a756a4/CHANGELOG.asciidoc",
+                "contents_url": "https://api.github.com/repos/apache/tinkerpop/contents/CHANGELOG.asciidoc?ref=276064530617c04706b62ac57ec4e2e660a756a4",
+                "filename": "CHANGELOG.asciidoc",
+                "deletions": 0,
+                "sha": "4411f99b9c74caf34be039d93ad0744c50b676bf",
+                "blob_url": "https://github.com/apache/tinkerpop/blob/276064530617c04706b62ac57ec4e2e660a756a4/CHANGELOG.asciidoc",
+                "patch": "@@ -26,6 +26,8 @@ image::https://raw.githubusercontent.com/apache/tinkerpop/master/docs/static/ima\n TinkerPop 3.2.4 (Release Date: NOT OFFICIALLY RELEASED YET)\n ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n \n+* `PathRetractionStrategy` does not add a `NoOpBarrierStep` to the end of local children as its wasted computation in 99% of traversals.\n+* Fixed a bug in `AddVertexStartStep` where if a side-effect was being used in the parametrization, an NPE occurred.\n * Fixed a bug in `LazyBarrierStrategy` where `profile()` was deactivating it accidentally.\n * Fixed a bug in `RepeatUnrollStrategy` where stateful `DedupGlobalStep` was cloned and thus, maintained two deduplication sets.\n * Added documentation around \"terminal steps\" in Gremlin: `hasNext()`, `next()`, `toList()`, etc.",
+                "changes": 2
+            },
+            {
+                "status": "modified",
+                "additions": 5,
+                "raw_url": "https://github.com/apache/tinkerpop/raw/276064530617c04706b62ac57ec4e2e660a756a4/gremlin-core/src/main/java/org/apache/tinkerpop/gremlin/process/traversal/step/map/AddVertexStartStep.java",
+                "contents_url": "https://api.github.com/repos/apache/tinkerpop/contents/gremlin-core/src/main/java/org/apache/tinkerpop/gremlin/process/traversal/step/map/AddVertexStartStep.java?ref=276064530617c04706b62ac57ec4e2e660a756a4",
+                "filename": "gremlin-core/src/main/java/org/apache/tinkerpop/gremlin/process/traversal/step/map/AddVertexStartStep.java",
+                "deletions": 3,
+                "sha": "58c3ef32b4aa3ab9a6417aff6b59e0786f1e5189",
+                "blob_url": "https://github.com/apache/tinkerpop/blob/276064530617c04706b62ac57ec4e2e660a756a4/gremlin-core/src/main/java/org/apache/tinkerpop/gremlin/process/traversal/step/map/AddVertexStartStep.java",
+                "patch": "@@ -19,8 +19,10 @@\n package org.apache.tinkerpop.gremlin.process.traversal.step.map;\n \n import org.apache.tinkerpop.gremlin.process.traversal.Parameterizing;\n+import org.apache.tinkerpop.gremlin.process.traversal.Step;\n import org.apache.tinkerpop.gremlin.process.traversal.Traversal;\n import org.apache.tinkerpop.gremlin.process.traversal.Traverser;\n+import org.apache.tinkerpop.gremlin.process.traversal.TraverserGenerator;\n import org.apache.tinkerpop.gremlin.process.traversal.step.Mutating;\n import org.apache.tinkerpop.gremlin.process.traversal.step.TraversalParent;\n import org.apache.tinkerpop.gremlin.process.traversal.step.util.AbstractStep;\n@@ -29,7 +31,6 @@\n import org.apache.tinkerpop.gremlin.process.traversal.step.util.event.Event;\n import org.apache.tinkerpop.gremlin.process.traversal.step.util.event.ListCallbackRegistry;\n import org.apache.tinkerpop.gremlin.process.traversal.traverser.TraverserRequirement;\n-import org.apache.tinkerpop.gremlin.process.traversal.traverser.util.EmptyTraverser;\n import org.apache.tinkerpop.gremlin.process.traversal.util.FastNoSuchElementException;\n import org.apache.tinkerpop.gremlin.structure.T;\n import org.apache.tinkerpop.gremlin.structure.Vertex;\n@@ -75,12 +76,13 @@ public void addPropertyMutations(final Object... keyValues) {\n     protected Traverser.Admin<Vertex> processNextStart() {\n         if (this.first) {\n             this.first = false;\n-            final Vertex vertex = this.getTraversal().getGraph().get().addVertex(this.parameters.getKeyValues(EmptyTraverser.instance()));\n+            final TraverserGenerator generator = this.getTraversal().getTraverserGenerator();\n+            final Vertex vertex = this.getTraversal().getGraph().get().addVertex(this.parameters.getKeyValues(generator.generate(false, (Step) this, 1L)));\n             if (this.callbackRegistry != null) {\n                 final Event.VertexAddedEvent vae = new Event.VertexAddedEvent(DetachedFactory.detach(vertex, true));\n                 this.callbackRegistry.getCallbacks().forEach(c -> c.accept(vae));\n             }\n-            return this.getTraversal().getTraverserGenerator().generate(vertex, this, 1l);\n+            return generator.generate(vertex, this, 1L);\n         } else\n             throw FastNoSuchElementException.instance();\n     }",
+                "changes": 8
+            },
+            {
+                "status": "modified",
+                "additions": 2,
+                "raw_url": "https://github.com/apache/tinkerpop/raw/276064530617c04706b62ac57ec4e2e660a756a4/gremlin-core/src/main/java/org/apache/tinkerpop/gremlin/process/traversal/strategy/optimization/PathRetractionStrategy.java",
+                "contents_url": "https://api.github.com/repos/apache/tinkerpop/contents/gremlin-core/src/main/java/org/apache/tinkerpop/gremlin/process/traversal/strategy/optimization/PathRetractionStrategy.java?ref=276064530617c04706b62ac57ec4e2e660a756a4",
+                "filename": "gremlin-core/src/main/java/org/apache/tinkerpop/gremlin/process/traversal/strategy/optimization/PathRetractionStrategy.java",
+                "deletions": 1,
+                "sha": "1d09748f42ddf0cda8e71f21417011a1241907fb",
+                "blob_url": "https://github.com/apache/tinkerpop/blob/276064530617c04706b62ac57ec4e2e660a756a4/gremlin-core/src/main/java/org/apache/tinkerpop/gremlin/process/traversal/strategy/optimization/PathRetractionStrategy.java",
+                "patch": "@@ -109,7 +109,8 @@ public void apply(final Traversal.Admin<?, ?> traversal) {\n                         !(currentStep instanceof MatchStep) &&\n                         !(currentStep instanceof Barrier) &&\n                         !(currentStep.getNextStep() instanceof Barrier) &&\n-                        !(currentStep.getTraversal().getParent() instanceof MatchStep))\n+                        !(currentStep.getTraversal().getParent() instanceof MatchStep) &&\n+                        TraversalHelper.isGlobalChild(currentStep.getTraversal()))\n                     TraversalHelper.insertAfterStep(new NoOpBarrierStep<>(traversal, this.standardBarrierSize), currentStep, traversal);\n             }\n         }",
+                "changes": 3
+            },
+            {
+                "status": "modified",
+                "additions": 10,
+                "raw_url": "https://github.com/apache/tinkerpop/raw/276064530617c04706b62ac57ec4e2e660a756a4/gremlin-groovy-test/src/main/groovy/org/apache/tinkerpop/gremlin/process/traversal/step/map/GroovyAddVertexTest.groovy",
+                "contents_url": "https://api.github.com/repos/apache/tinkerpop/contents/gremlin-groovy-test/src/main/groovy/org/apache/tinkerpop/gremlin/process/traversal/step/map/GroovyAddVertexTest.groovy?ref=276064530617c04706b62ac57ec4e2e660a756a4",
+                "filename": "gremlin-groovy-test/src/main/groovy/org/apache/tinkerpop/gremlin/process/traversal/step/map/GroovyAddVertexTest.groovy",
+                "deletions": 0,
+                "sha": "00312faf4e9dea5678b81d6ac6ffa43f103c3d2f",
+                "blob_url": "https://github.com/apache/tinkerpop/blob/276064530617c04706b62ac57ec4e2e660a756a4/gremlin-groovy-test/src/main/groovy/org/apache/tinkerpop/gremlin/process/traversal/step/map/GroovyAddVertexTest.groovy",
+                "patch": "@@ -76,6 +76,16 @@ public abstract class GroovyAddVertexTest {\n             new ScriptTraversal<>(g, \"gremlin-groovy\", \"g.V.addV('animal').property('name', values('name')).property('name', 'an animal').property(values('name'), label())\")\n         }\n \n+        @Override\n+        public Traversal<Vertex, Map<String, List<String>>> get_g_withSideEffectXa_testX_V_hasLabelXsoftwareX_propertyXtemp_selectXaXX_valueMapXname_tempX() {\n+            new ScriptTraversal<>(g, \"gremlin-groovy\", \"g.withSideEffect('a', 'test').V.hasLabel('software').property('temp', select('a')).valueMap('name', 'temp')\")\n+        }\n+\n+        @Override\n+        public Traversal<Vertex, String> get_g_withSideEffectXa_markoX_addV_propertyXname_selectXaXX_name() {\n+            new ScriptTraversal<>(g, \"gremlin-groovy\", \"g.withSideEffect('a', 'marko').addV().property('name', select('a')).name\")\n+        }\n+\n         ///////// DEPRECATED BELOW\n \n         @Override",
+                "changes": 10
+            },
+            {
+                "status": "modified",
+                "additions": 51,
+                "raw_url": "https://github.com/apache/tinkerpop/raw/276064530617c04706b62ac57ec4e2e660a756a4/gremlin-test/src/main/java/org/apache/tinkerpop/gremlin/process/traversal/step/map/AddVertexTest.java",
+                "contents_url": "https://api.github.com/repos/apache/tinkerpop/contents/gremlin-test/src/main/java/org/apache/tinkerpop/gremlin/process/traversal/step/map/AddVertexTest.java?ref=276064530617c04706b62ac57ec4e2e660a756a4",
+                "filename": "gremlin-test/src/main/java/org/apache/tinkerpop/gremlin/process/traversal/step/map/AddVertexTest.java",
+                "deletions": 2,
+                "sha": "f43c6125ebcdcd4e302687a5fad305d098131e8f",
+                "blob_url": "https://github.com/apache/tinkerpop/blob/276064530617c04706b62ac57ec4e2e660a756a4/gremlin-test/src/main/java/org/apache/tinkerpop/gremlin/process/traversal/step/map/AddVertexTest.java",
+                "patch": "@@ -32,11 +32,17 @@\n import org.junit.Test;\n import org.junit.runner.RunWith;\n \n+import java.util.Collections;\n import java.util.List;\n+import java.util.Map;\n \n import static org.apache.tinkerpop.gremlin.LoadGraphWith.GraphData.MODERN;\n+import static org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__.select;\n import static org.hamcrest.Matchers.containsInAnyOrder;\n-import static org.junit.Assert.*;\n+import static org.junit.Assert.assertEquals;\n+import static org.junit.Assert.assertFalse;\n+import static org.junit.Assert.assertThat;\n+import static org.junit.Assert.assertTrue;\n \n /**\n  * @author Marko A. Rodriguez (http://markorodriguez.com)\n@@ -62,6 +68,10 @@\n \n     public abstract Traversal<Vertex, Vertex> get_g_V_addVXanimalX_propertyXname_valuesXnameXX_propertyXname_an_animalX_propertyXvaluesXnameX_labelX();\n \n+    public abstract Traversal<Vertex, Map<String, List<String>>> get_g_withSideEffectXa_testX_V_hasLabelXsoftwareX_propertyXtemp_selectXaXX_valueMapXname_tempX();\n+\n+    public abstract Traversal<Vertex, String> get_g_withSideEffectXa_markoX_addV_propertyXname_selectXaXX_name();\n+\n     // 3.0.0 DEPRECATIONS\n     @Deprecated\n     public abstract Traversal<Vertex, Vertex> get_g_V_addVXlabel_animal_age_0X();\n@@ -275,12 +285,41 @@ public void g_addVXlabel_person_name_stephenX() {\n         assertEquals(7, IteratorUtils.count(g.V()));\n     }\n \n+    @Test\n+    @LoadGraphWith(MODERN)\n+    @FeatureRequirement(featureClass = Graph.Features.VertexFeatures.class, feature = Graph.Features.VertexFeatures.FEATURE_ADD_PROPERTY)\n+    public void g_withSideEffectXa_testX_V_hasLabelXsoftwareX_propertyXtemp_selectXaXX_valueMapXname_tempX() {\n+        final Traversal<Vertex, Map<String, List<String>>> traversal = get_g_withSideEffectXa_testX_V_hasLabelXsoftwareX_propertyXtemp_selectXaXX_valueMapXname_tempX();\n+        printTraversalForm(traversal);\n+        int counter = 0;\n+        while (traversal.hasNext()) {\n+            counter++;\n+            final Map<String, List<String>> valueMap = traversal.next();\n+            assertEquals(2, valueMap.size());\n+            assertEquals(Collections.singletonList(\"test\"), valueMap.get(\"temp\"));\n+            assertTrue(valueMap.get(\"name\").equals(Collections.singletonList(\"ripple\")) || valueMap.get(\"name\").equals(Collections.singletonList(\"lop\")));\n+        }\n+        assertEquals(2, counter);\n+        assertFalse(traversal.hasNext());\n+    }\n+\n+    @Test\n+    @LoadGraphWith(MODERN)\n+    @FeatureRequirement(featureClass = Graph.Features.VertexFeatures.class, feature = Graph.Features.VertexFeatures.FEATURE_ADD_VERTICES)\n+    @FeatureRequirement(featureClass = Graph.Features.VertexFeatures.class, feature = Graph.Features.VertexFeatures.FEATURE_ADD_PROPERTY)\n+    public void g_withSideEffectXa_markoX_addV_propertyXname_selectXaXX_name() {\n+        final Traversal<Vertex, String> traversal = get_g_withSideEffectXa_markoX_addV_propertyXname_selectXaXX_name();\n+        printTraversalForm(traversal);\n+        assertEquals(\"marko\", traversal.next());\n+        assertFalse(traversal.hasNext());\n+    }\n+\n \n     public static class Traversals extends AddVertexTest {\n \n         @Override\n         public Traversal<Vertex, Vertex> get_g_VX1X_addVXanimalX_propertyXage_selectXaX_byXageXX_propertyXname_puppyX(final Object v1Id) {\n-            return g.V(v1Id).as(\"a\").addV(\"animal\").property(\"age\", __.select(\"a\").by(\"age\")).property(\"name\", \"puppy\");\n+            return g.V(v1Id).as(\"a\").addV(\"animal\").property(\"age\", select(\"a\").by(\"age\")).property(\"name\", \"puppy\");\n         }\n \n         @Override\n@@ -332,5 +371,15 @@ public void g_addVXlabel_person_name_stephenX() {\n         public Traversal<Vertex, Vertex> get_g_addVXlabel_person_name_stephenX() {\n             return g.addV(T.label, \"person\", \"name\", \"stephen\");\n         }\n+\n+        @Override\n+        public Traversal<Vertex, Map<String, List<String>>> get_g_withSideEffectXa_testX_V_hasLabelXsoftwareX_propertyXtemp_selectXaXX_valueMapXname_tempX() {\n+            return g.withSideEffect(\"a\", \"test\").V().hasLabel(\"software\").property(\"temp\", select(\"a\")).valueMap(\"name\", \"temp\");\n+        }\n+\n+        @Override\n+        public Traversal<Vertex, String> get_g_withSideEffectXa_markoX_addV_propertyXname_selectXaXX_name() {\n+            return g.withSideEffect(\"a\", \"marko\").addV().property(\"name\", select(\"a\")).values(\"name\");\n+        }\n     }\n }\n\\ No newline at end of file",
+                "changes": 53
+            }
+        ],
+        "unit_tests": [
+            "PathRetractionStrategyTest.java",
+            "AddVertexTest.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "gremlin-core/src/test/java/org/apache/tinkerpop/gremlin/process/traversal/strategy/optimization/PathRetractionStrategyTest.java",
+        "buggy_files": [
+            "gremlin-core/src/main/java/org/apache/tinkerpop/gremlin/process/traversal/strategy/optimization/PathRetractionStrategy.java",
+            "gremlin-groovy-test/src/main/groovy/org/apache/tinkerpop/gremlin/process/traversal/step/map/GroovyAddVertexTest.groovy",
+            "CHANGELOG.asciidoc",
+            "gremlin-core/src/main/java/org/apache/tinkerpop/gremlin/process/traversal/step/map/AddVertexStartStep.java"
+        ],
+        "fixed": true
+    }
+]

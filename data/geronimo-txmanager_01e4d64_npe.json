@@ -1,0 +1,51 @@
+[
+    {
+        "repo": "geronimo-txmanager",
+        "commit": "https://github.com/apache/geronimo-txmanager/commit/01e4d641665eadc84828157899ea1e86c08383f9",
+        "bug_id": "geronimo-txmanager_01e4d64",
+        "message": "[GERONIMO-6541] NPE during XAResource recovery with invalid Xids\n\ngit-svn-id: https://svn.apache.org/repos/asf/geronimo/components/txmanager/trunk@1673231 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/geronimo-txmanager/commit/87593cd3899e9aad8ac01afce68580d7ab01ba3c",
+        "patched_files": [
+            "Recovery.java",
+            "RecoveryImpl.java"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 19,
+                "raw_url": "https://github.com/apache/geronimo-txmanager/raw/01e4d641665eadc84828157899ea1e86c08383f9/geronimo-transaction/src/main/java/org/apache/geronimo/transaction/manager/RecoveryImpl.java",
+                "contents_url": "https://api.github.com/repos/apache/geronimo-txmanager/contents/geronimo-transaction/src/main/java/org/apache/geronimo/transaction/manager/RecoveryImpl.java?ref=01e4d641665eadc84828157899ea1e86c08383f9",
+                "filename": "geronimo-transaction/src/main/java/org/apache/geronimo/transaction/manager/RecoveryImpl.java",
+                "deletions": 8,
+                "sha": "caa691dae886b36f9415a5f468666a5a1a740b7f",
+                "blob_url": "https://github.com/apache/geronimo-txmanager/blob/01e4d641665eadc84828157899ea1e86c08383f9/geronimo-transaction/src/main/java/org/apache/geronimo/transaction/manager/RecoveryImpl.java",
+                "patch": "@@ -99,7 +99,11 @@ public synchronized void recoverResourceManager(NamedXAResource xaResource) thro\n         Xid[] prepared = xaResource.recover(XAResource.TMSTARTRSCAN + XAResource.TMENDRSCAN);\n         for (int i = 0; prepared != null && i < prepared.length; i++) {\n             Xid xid = prepared[i];\n-            log.trace(\"considering recovered xid from\\n name: \" + xaResource.getName() + \"\\n \" + toString(xid));\n+            if (xid.getGlobalTransactionId() == null || xid.getBranchQualifier() == null) {\n+                log.warn(\"Ignoring bad xid from\\n name: \" + xaResource.getName() + \"\\n \" + toString(xid));\n+                continue;\n+            }\n+            log.trace(\"Considering recovered xid from\\n name: \" + xaResource.getName() + \"\\n \" + toString(xid));\n             ByteArrayWrapper globalIdWrapper = new ByteArrayWrapper(xid.getGlobalTransactionId());\n             XidBranchesPair xidNamesPair = ourXids.get(globalIdWrapper);\n             \n@@ -226,17 +230,24 @@ private static String toString(Xid xid) {\n         StringBuilder s = new StringBuilder();\n         s.append(\"[Xid:class=\").append(xid.getClass().getSimpleName()).append(\":globalId=\");\n         byte[] globalId = xid.getGlobalTransactionId();\n-        for (int i = 0; i < globalId.length; i++) {\n-            s.append(Integer.toHexString(globalId[i]));\n+        if (globalId == null) {\n+            s.append(\"null\");\n+        } else {\n+            for (int i = 0; i < globalId.length; i++) {\n+                s.append(Integer.toHexString(globalId[i]));\n+            }\n+            s.append(\",length=\").append(globalId.length);\n         }\n-        s.append(\",length=\").append(globalId.length);\n         s.append(\",branchId=\");\n         byte[] branchId = xid.getBranchQualifier();\n-        for (int i = 0; i < branchId.length; i++) {\n-            s.append(Integer.toHexString(branchId[i]));\n+        if (branchId == null) {\n+            s.append(\"null\");\n+        } else {\n+            for (int i = 0; i < branchId.length; i++) {\n+                s.append(Integer.toHexString(branchId[i]));\n+            }\n+            s.append(\",length=\").append(branchId.length);\n         }\n-        s.append(\",length=\");\n-        s.append(branchId.length);\n         s.append(\"]\");\n         return s.toString();\n     }",
+                "changes": 27
+            },
+            {
+                "status": "modified",
+                "additions": 61,
+                "raw_url": "https://github.com/apache/geronimo-txmanager/raw/01e4d641665eadc84828157899ea1e86c08383f9/geronimo-transaction/src/test/java/org/apache/geronimo/transaction/manager/RecoveryTest.java",
+                "contents_url": "https://api.github.com/repos/apache/geronimo-txmanager/contents/geronimo-transaction/src/test/java/org/apache/geronimo/transaction/manager/RecoveryTest.java?ref=01e4d641665eadc84828157899ea1e86c08383f9",
+                "filename": "geronimo-transaction/src/test/java/org/apache/geronimo/transaction/manager/RecoveryTest.java",
+                "deletions": 0,
+                "sha": "bc8ec2fbcae7df41c5cbd1a125dedbe147c6bef6",
+                "blob_url": "https://github.com/apache/geronimo-txmanager/blob/01e4d641665eadc84828157899ea1e86c08383f9/geronimo-transaction/src/test/java/org/apache/geronimo/transaction/manager/RecoveryTest.java",
+                "patch": "@@ -99,6 +99,67 @@ public void test2ResOnlineAfterRecoveryStart() throws Exception {\n \n     }\n \n+    public void testInvalidXid() throws Exception {\n+        final Xid[] xids = new Xid[] { new Xid() {\n+            @Override\n+            public int getFormatId() {\n+                return 0;\n+            }\n+            @Override\n+            public byte[] getGlobalTransactionId() {\n+                return null;\n+            }\n+            @Override\n+            public byte[] getBranchQualifier() {\n+                return new byte[0];\n+            }\n+        } };\n+        final NamedXAResource xares = new NamedXAResource() {\n+            @Override\n+            public String getName() {\n+                return RM1;\n+            }\n+            @Override\n+            public void commit(Xid xid, boolean b) throws XAException {\n+            }\n+            @Override\n+            public void end(Xid xid, int i) throws XAException {\n+            }\n+            @Override\n+            public void forget(Xid xid) throws XAException {\n+            }\n+            @Override\n+            public int getTransactionTimeout() throws XAException {\n+                return 0;\n+            }\n+            @Override\n+            public boolean isSameRM(XAResource xaResource) throws XAException {\n+                return false;\n+            }\n+            @Override\n+            public int prepare(Xid xid) throws XAException {\n+                return 0;\n+            }\n+            @Override\n+            public Xid[] recover(int i) throws XAException {\n+                return xids;\n+            }\n+            @Override\n+            public void rollback(Xid xid) throws XAException {\n+            }\n+            @Override\n+            public boolean setTransactionTimeout(int i) throws XAException {\n+                return false;\n+            }\n+            @Override\n+            public void start(Xid xid, int i) throws XAException {\n+            }\n+        };\n+        prepareForReplay();\n+        Recovery recovery = txManager.recovery;\n+        recovery.recoverResourceManager(xares);\n+    }\n+\n     private void addBranch(MockTransactionInfo[] txInfos, MockXAResource xaRes) throws XAException {\n         for (int i = 0; i < txInfos.length; i++) {\n             MockTransactionInfo txInfo = txInfos[i];",
+                "changes": 61
+            }
+        ],
+        "unit_tests": [
+            "RecoveryTest.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "geronimo-transaction/src/test/java/org/apache/geronimo/transaction/manager/RecoveryTest.java",
+        "buggy_files": [
+            "geronimo-transaction/src/main/java/org/apache/geronimo/transaction/manager/Recovery.java",
+            "geronimo-transaction/src/main/java/org/apache/geronimo/transaction/manager/RecoveryImpl.java"
+        ],
+        "fixed": true
+    }
+]

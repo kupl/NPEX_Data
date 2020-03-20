@@ -1,0 +1,49 @@
+[
+    {
+        "repo": "phoenix",
+        "commit": "https://github.com/apache/phoenix/commit/5d1fd559b27ea04d677b5a77fb26ab1d685053ee",
+        "bug_id": "phoenix_5d1fd55",
+        "message": "PHOENIX-30 NPE on PTable.getColumn(String) if column with same name used in the PK and non PK (JamesTaylor)",
+        "parent": "https://github.com/apache/phoenix/commit/a977a7529f5c5bce9b38610cc6b0c534ee3a88d0",
+        "patched_files": [
+            "PTableImpl.java"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 4,
+                "raw_url": "https://github.com/apache/phoenix/raw/5d1fd559b27ea04d677b5a77fb26ab1d685053ee/phoenix-core/src/main/java/org/apache/phoenix/schema/PTableImpl.java",
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/schema/PTableImpl.java?ref=5d1fd559b27ea04d677b5a77fb26ab1d685053ee",
+                "filename": "phoenix-core/src/main/java/org/apache/phoenix/schema/PTableImpl.java",
+                "deletions": 2,
+                "sha": "f2a3e7685e12f099b01de3954756c7ce0b98610e",
+                "blob_url": "https://github.com/apache/phoenix/blob/5d1fd559b27ea04d677b5a77fb26ab1d685053ee/phoenix-core/src/main/java/org/apache/phoenix/schema/PTableImpl.java",
+                "patch": "@@ -468,8 +468,10 @@ public PColumn getColumn(String name) throws ColumnNotFoundException, AmbiguousC\n         }\n         if (size > 1) {\n             for (PColumn column : columns) {\n-                if (QueryConstants.DEFAULT_COLUMN_FAMILY.equals(column.getFamilyName().getString())) {\n-                    // Allow ambiguity with default column, since a user would not know how to prefix it.\n+                if (column.getFamilyName() == null || QueryConstants.DEFAULT_COLUMN_FAMILY.equals(column.getFamilyName().getString())) {\n+                    // Allow ambiguity with PK column or column in the default column family,\n+                    // since a PK column cannot be prefixed and a user would not know how to\n+                    // prefix a column in the default column family.\n                     return column;\n                 }\n             }",
+                "changes": 6
+            },
+            {
+                "status": "modified",
+                "additions": 16,
+                "raw_url": "https://github.com/apache/phoenix/raw/5d1fd559b27ea04d677b5a77fb26ab1d685053ee/phoenix-core/src/test/java/org/apache/phoenix/compile/QueryCompileTest.java",
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/test/java/org/apache/phoenix/compile/QueryCompileTest.java?ref=5d1fd559b27ea04d677b5a77fb26ab1d685053ee",
+                "filename": "phoenix-core/src/test/java/org/apache/phoenix/compile/QueryCompileTest.java",
+                "deletions": 1,
+                "sha": "e9c34e0005c09ffd59e2d0aa514ad6a13a9b448f",
+                "blob_url": "https://github.com/apache/phoenix/blob/5d1fd559b27ea04d677b5a77fb26ab1d685053ee/phoenix-core/src/test/java/org/apache/phoenix/compile/QueryCompileTest.java",
+                "patch": "@@ -23,10 +23,10 @@\n import static org.apache.phoenix.util.TestUtil.assertDegenerate;\n import static org.junit.Assert.assertArrayEquals;\n import static org.junit.Assert.assertEquals;\n+import static org.junit.Assert.assertFalse;\n import static org.junit.Assert.assertNotNull;\n import static org.junit.Assert.assertNull;\n import static org.junit.Assert.assertTrue;\n-import static org.junit.Assert.assertFalse;\n import static org.junit.Assert.fail;\n \n import java.sql.Connection;\n@@ -45,12 +45,14 @@\n import org.apache.phoenix.expression.aggregator.CountAggregator;\n import org.apache.phoenix.expression.aggregator.ServerAggregators;\n import org.apache.phoenix.expression.function.TimeUnit;\n+import org.apache.phoenix.jdbc.PhoenixConnection;\n import org.apache.phoenix.jdbc.PhoenixPreparedStatement;\n import org.apache.phoenix.query.BaseConnectionlessQueryTest;\n import org.apache.phoenix.query.QueryConstants;\n import org.apache.phoenix.schema.AmbiguousColumnException;\n import org.apache.phoenix.schema.ColumnAlreadyExistsException;\n import org.apache.phoenix.schema.ColumnNotFoundException;\n+import org.apache.phoenix.schema.PColumn;\n import org.apache.phoenix.util.ByteUtil;\n import org.apache.phoenix.util.PhoenixRuntime;\n import org.apache.phoenix.util.SchemaUtil;\n@@ -138,6 +140,19 @@ public void testFamilyNameInPK() throws Exception {\n         }\n     }\n \n+    @Test\n+    public void testSameColumnNameInPKAndNonPK() throws Exception {\n+        Connection conn = DriverManager.getConnection(getUrl());\n+        try {\n+            String query = \"CREATE TABLE t1 (k integer not null primary key, a.k decimal, b.k decimal)\";\n+            conn.createStatement().execute(query);\n+            PColumn c = conn.unwrap(PhoenixConnection.class).getPMetaData().getTable(\"T1\").getColumn(\"K\");\n+            assertTrue(SchemaUtil.isPKColumn(c));\n+        } finally {\n+            conn.close();\n+        }\n+    }\n+\n     @Test\n     public void testVarBinaryInMultipartPK() throws Exception {\n         Connection conn = DriverManager.getConnection(getUrl());",
+                "changes": 17
+            }
+        ],
+        "unit_tests": [
+            "QueryCompileTest.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "phoenix-core/src/test/java/org/apache/phoenix/compile/QueryCompileTest.java",
+        "buggy_files": [
+            "phoenix-core/src/main/java/org/apache/phoenix/schema/PTableImpl.java"
+        ],
+        "fixed": true
+    }
+]

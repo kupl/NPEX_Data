@@ -43,13 +43,13 @@
         "message": "MINOR: Fix metric collection NPE during shutdown\n\nCollecting socket server metrics during shutdown may throw NullPointerException\n\nAuthor: Xavier L\u00e9aut\u00e9 <xavier@confluent.io>\n\nReviewers: Ismael Juma <ismael@juma.me.uk>\n\nCloses #2221 from xvrl/fix-metrics-npe-on-shutdown",
         "parent": "https://github.com/apache/kafka/commit/1949a76bc4189534b853e21c476bb11172fa3fc9",
         "patched_files": [
+            "SocketServerTest.scala",
             "Metrics.java",
-            "SocketServer.java"
+            "SocketServer.scala"
         ],
         "repo": "kafka",
         "unit_tests": [
-            "MetricsTest.java",
-            "SocketServerTest.java"
+            "MetricsTest.java"
         ]
     },
     "kafka_00a58f8": {
@@ -240,107 +240,16 @@
         "message": "KAFKA-6015; Fix NPE in RecordAccumulator after ProducerId reset\n\nIt is possible for batches with sequence numbers to be in the `deque` while at the same time the in flight batches in the `TransactionManager` are removed due to a producerId reset.\n\nIn this case, when the batches in the `deque` are drained, we will get a `NullPointerException` in the background thread due to this line:\n\n```java\nif (first.hasSequence() && first.baseSequence() != transactionManager.nextBatchBySequence(first.topicPartition).baseSequence())\n```\n\nParticularly, `transactionManager.nextBatchBySequence` will return null, because there no inflight batches being tracked.\n\nIn this patch, we simply allow the batches in the `deque` to be drained if there are no in flight batches being tracked in the TransactionManager. If they succeed, well and good. If the responses come back with an error, the batces will be ultimately failed in the producer with an `OutOfOrderSequenceException` when the response comes back.\n\nAuthor: Apurva Mehta <apurva@confluent.io>\n\nReviewers: Jason Gustafson <jason@confluent.io>\n\nCloses #4022 from apurvam/KAFKA-6015-npe-in-record-accumulator",
         "parent": "https://github.com/apache/kafka/commit/10cd98cc894b88c5d1e24fc54c66361ad9914df2",
         "patched_files": [
-            "TransactionManager.java",
             "Sender.java",
             "RecordAccumulator.java",
-            "ProducerStateManager.java"
+            "ProducerStateManager.scala",
+            "TransactionManager.java"
         ],
         "repo": "kafka",
         "unit_tests": [
-            "SenderTest.java",
             "TransactionManagerTest.java",
+            "SenderTest.java",
             "RecordAccumulatorTest.java"
-        ]
-    },
-    "kafka_12a3cca": {
-        "bug_id": "kafka_12a3cca",
-        "commit": "https://github.com/apache/kafka/commit/12a3ccafa1cbc333539b98d83d7d6d572700f05b",
-        "file": [
-            {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/kafka/blob/12a3ccafa1cbc333539b98d83d7d6d572700f05b/core/src/main/scala/kafka/consumer/ZookeeperConsumerConnector.scala",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/main/scala/kafka/consumer/ZookeeperConsumerConnector.scala?ref=12a3ccafa1cbc333539b98d83d7d6d572700f05b",
-                "deletions": 1,
-                "filename": "core/src/main/scala/kafka/consumer/ZookeeperConsumerConnector.scala",
-                "patch": "@@ -120,7 +120,7 @@ private[kafka] class ZookeeperConsumerConnector(val config: ConsumerConfig,\n   connectZk()\n   createFetcher()\n   if (config.autoCommit) {\n-    scheduler.startUp\n+    scheduler.startup\n     info(\"starting auto committer every \" + config.autoCommitIntervalMs + \" ms\")\n     scheduler.scheduleWithRate(autoCommit, \"Kafka-consumer-autocommit-\", config.autoCommitIntervalMs,\n       config.autoCommitIntervalMs, false)",
-                "raw_url": "https://github.com/apache/kafka/raw/12a3ccafa1cbc333539b98d83d7d6d572700f05b/core/src/main/scala/kafka/consumer/ZookeeperConsumerConnector.scala",
-                "sha": "6d38fc5011382db7234b501d87367173d04b16bf",
-                "status": "modified"
-            },
-            {
-                "additions": 25,
-                "blob_url": "https://github.com/apache/kafka/blob/12a3ccafa1cbc333539b98d83d7d6d572700f05b/core/src/main/scala/kafka/server/KafkaController.scala",
-                "changes": 46,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/main/scala/kafka/server/KafkaController.scala?ref=12a3ccafa1cbc333539b98d83d7d6d572700f05b",
-                "deletions": 21,
-                "filename": "core/src/main/scala/kafka/server/KafkaController.scala",
-                "patch": "@@ -38,14 +38,14 @@ class RequestSendThread(val controllerId: Int,\n         extends Thread(\"requestSendThread-\" + toBrokerId) with Logging {\n   this.logIdent = \"Controller %d, request send thread to broker %d, \".format(controllerId, toBrokerId)\n   val isRunning: AtomicBoolean = new AtomicBoolean(true)\n-  private val shutDownLatch = new CountDownLatch(1)\n+  private val shutdownLatch = new CountDownLatch(1)\n   private val lock = new Object()\n \n-  def shutDown(): Unit = {\n+  def shutdown(): Unit = {\n     info(\"shutting down\")\n     isRunning.set(false)\n     interrupt()\n-    shutDownLatch.await()\n+    shutdownLatch.await()\n     info(\"shutted down completed\")\n   }\n \n@@ -84,7 +84,7 @@ class RequestSendThread(val controllerId: Int,\n       case e: InterruptedException => warn(\"intterrupted. Shutting down\")\n       case e1 => error(\"Error due to \", e1)\n     }\n-    shutDownLatch.countDown()\n+    shutdownLatch.countDown()\n   }\n }\n \n@@ -107,7 +107,7 @@ class ControllerChannelManager(allBrokers: Set[Broker], config : KafkaConfig) ex\n     messageQueues.put(broker.id, new LinkedBlockingQueue[(RequestOrResponse, (RequestOrResponse) => Unit)](config.controllerMessageQueueSize))\n   }\n \n-  def startUp() = {\n+  def startup() = {\n     for((brokerId, broker) <- brokers){\n       val thread = new RequestSendThread(config.brokerId, brokerId, messageQueues(brokerId), messageChannels(brokerId))\n       thread.setDaemon(false)\n@@ -116,7 +116,7 @@ class ControllerChannelManager(allBrokers: Set[Broker], config : KafkaConfig) ex\n     }\n   }\n \n-  def shutDown() = {\n+  def shutdown() = {\n     lock synchronized {\n       for((brokerId, broker) <- brokers){\n         removeBroker(brokerId)\n@@ -152,7 +152,7 @@ class ControllerChannelManager(allBrokers: Set[Broker], config : KafkaConfig) ex\n         messageChannels(brokerId).disconnect()\n         messageChannels.remove(brokerId)\n         messageQueues.remove(brokerId)\n-        messageThreads(brokerId).shutDown()\n+        messageThreads(brokerId).shutdown()\n         messageThreads.remove(brokerId)\n       }catch {\n         case e => error(\"Error while removing broker by the controller\", e)\n@@ -163,7 +163,8 @@ class ControllerChannelManager(allBrokers: Set[Broker], config : KafkaConfig) ex\n \n class KafkaController(config : KafkaConfig, zkClient: ZkClient) extends Logging {\n   this.logIdent = \"Controller \" + config.brokerId + \", \"\n-  info(\"startup\");\n+  info(\"startup\")\n+  private var isRunning = true\n   private val controllerLock = new Object\n   private var controllerChannelManager: ControllerChannelManager = null\n   private var allBrokers : Set[Broker] = null\n@@ -189,7 +190,7 @@ class KafkaController(config : KafkaConfig, zkClient: ZkClient) extends Logging\n       info(\"allPartitionReplicaAssignment: %s\".format(allPartitionReplicaAssignment))\n       allLeaders = new mutable.HashMap[(String, Int), Int]\n       controllerChannelManager = new ControllerChannelManager(allBrokers, config)\n-      controllerChannelManager.startUp()\n+      controllerChannelManager.startup()\n       return true\n     } catch {\n       case e: ZkNodeExistsException =>\n@@ -201,6 +202,10 @@ class KafkaController(config : KafkaConfig, zkClient: ZkClient) extends Logging\n   }\n \n   private def controllerRegisterOrFailover(){\n+    if(!isRunning){\n+      info(\"controller has already been shut down, don't need to compete for lead controller any more\")\n+      return\n+    }\n     info(\"try to become controller\")\n     if(tryToBecomeController() == true){\n       info(\"won the controller competition and work on leader and isr recovery\")\n@@ -209,12 +214,7 @@ class KafkaController(config : KafkaConfig, zkClient: ZkClient) extends Logging\n       onBrokerChange()\n \n       // If there are some partition with leader not initialized, init the leader for them\n-      val partitionReplicaAssignment = allPartitionReplicaAssignment.clone()\n-      for((topicPartition, replicas) <- partitionReplicaAssignment){\n-        if (allLeaders.contains(topicPartition)){\n-          partitionReplicaAssignment.remove(topicPartition)\n-        }\n-      }\n+      val partitionReplicaAssignment = allPartitionReplicaAssignment.filter(m => !allLeaders.contains(m._1))\n       debug(\"work on init leaders: %s, current cache for all leader is: %s\".format(partitionReplicaAssignment.toString(), allLeaders))\n       initLeaders(partitionReplicaAssignment)\n     }\n@@ -228,18 +228,20 @@ class KafkaController(config : KafkaConfig, zkClient: ZkClient) extends Logging\n     controllerLock synchronized {\n       registerSessionExpirationListener()\n       registerControllerExistListener()\n+      isRunning = true\n       controllerRegisterOrFailover()\n     }\n   }\n \n-  def shutDown() = {\n+  def shutdown() = {\n     controllerLock synchronized {\n       if(controllerChannelManager != null){\n         info(\"shut down\")\n-        controllerChannelManager.shutDown()\n+        controllerChannelManager.shutdown()\n         controllerChannelManager = null\n         info(\"shutted down completely\")\n       }\n+      isRunning = false\n     }\n   }\n \n@@ -280,11 +282,13 @@ class KafkaController(config : KafkaConfig, zkClient: ZkClient) extends Logging\n     @throws(classOf[Exception])\n     def handleNewSession() {\n       controllerLock synchronized {\n-        info(\"session expires, clean up the state\")\n-        controllerChannelManager.shutDown()\n-        controllerChannelManager = null\n-        controllerRegisterOrFailover()\n+        if(controllerChannelManager != null){\n+          info(\"session expires, clean up the state\")\n+          controllerChannelManager.shutdown()\n+          controllerChannelManager = null\n+        }\n       }\n+      controllerRegisterOrFailover()\n     }\n   }\n ",
-                "raw_url": "https://github.com/apache/kafka/raw/12a3ccafa1cbc333539b98d83d7d6d572700f05b/core/src/main/scala/kafka/server/KafkaController.scala",
-                "sha": "68f5dd2ee1ea0e29e59349660d4e8b20fa40a05d",
-                "status": "modified"
-            },
-            {
-                "additions": 2,
-                "blob_url": "https://github.com/apache/kafka/blob/12a3ccafa1cbc333539b98d83d7d6d572700f05b/core/src/main/scala/kafka/server/KafkaServer.scala",
-                "changes": 4,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/main/scala/kafka/server/KafkaServer.scala?ref=12a3ccafa1cbc333539b98d83d7d6d572700f05b",
-                "deletions": 2,
-                "filename": "core/src/main/scala/kafka/server/KafkaServer.scala",
-                "patch": "@@ -65,7 +65,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime) extends Logg\n     }\n \n     /* start scheduler */\n-    kafkaScheduler.startUp\n+    kafkaScheduler.startup\n \n     /* start log manager */\n     logManager = new LogManager(config,\n@@ -132,7 +132,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime) extends Logg\n         logManager.shutdown()\n \n       if(kafkaController != null)\n-        kafkaController.shutDown()\n+        kafkaController.shutdown()\n \n       val cleanShutDownFile = new File(new File(config.logDir), CleanShutdownFile)\n       debug(\"creating clean shutdown file \" + cleanShutDownFile.getAbsolutePath())",
-                "raw_url": "https://github.com/apache/kafka/raw/12a3ccafa1cbc333539b98d83d7d6d572700f05b/core/src/main/scala/kafka/server/KafkaServer.scala",
-                "sha": "3038399270f26f779edf7556ef81ae010794393d",
-                "status": "modified"
-            },
-            {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/kafka/blob/12a3ccafa1cbc333539b98d83d7d6d572700f05b/core/src/main/scala/kafka/utils/KafkaScheduler.scala",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/main/scala/kafka/utils/KafkaScheduler.scala?ref=12a3ccafa1cbc333539b98d83d7d6d572700f05b",
-                "deletions": 1,
-                "filename": "core/src/main/scala/kafka/utils/KafkaScheduler.scala",
-                "patch": "@@ -34,7 +34,7 @@ class KafkaScheduler(val numThreads: Int) extends Logging {\n     }\n   private val threadNamesAndIds = new HashMap[String, AtomicInteger]()\n \n-  def startUp = {\n+  def startup = {\n     executor = new ScheduledThreadPoolExecutor(numThreads)\n     executor.setContinueExistingPeriodicTasksAfterShutdownPolicy(false)\n     executor.setExecuteExistingDelayedTasksAfterShutdownPolicy(false)",
-                "raw_url": "https://github.com/apache/kafka/raw/12a3ccafa1cbc333539b98d83d7d6d572700f05b/core/src/main/scala/kafka/utils/KafkaScheduler.scala",
-                "sha": "4a70e8173eab05ab7242907a60c300b11385e71a",
-                "status": "modified"
-            },
-            {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/kafka/blob/12a3ccafa1cbc333539b98d83d7d6d572700f05b/core/src/test/scala/unit/kafka/log/LogManagerTest.scala",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/test/scala/unit/kafka/log/LogManagerTest.scala?ref=12a3ccafa1cbc333539b98d83d7d6d572700f05b",
-                "deletions": 1,
-                "filename": "core/src/test/scala/unit/kafka/log/LogManagerTest.scala",
-                "patch": "@@ -46,7 +46,7 @@ class LogManagerTest extends JUnit3Suite with ZooKeeperTestHarness {\n                    override val logFileSize = 1024\n                    override val flushInterval = 100\n                  }\n-    scheduler.startUp\n+    scheduler.startup\n     logManager = new LogManager(config, scheduler, time, veryLargeLogFlushInterval, maxLogAge, false)\n     logManager.startup\n     logDir = logManager.logDir",
-                "raw_url": "https://github.com/apache/kafka/raw/12a3ccafa1cbc333539b98d83d7d6d572700f05b/core/src/test/scala/unit/kafka/log/LogManagerTest.scala",
-                "sha": "1fd176b028422e0c29f6f8b1615e8d495b13a58f",
-                "status": "modified"
-            },
-            {
-                "additions": 2,
-                "blob_url": "https://github.com/apache/kafka/blob/12a3ccafa1cbc333539b98d83d7d6d572700f05b/core/src/test/scala/unit/kafka/server/HighwatermarkPersistenceTest.scala",
-                "changes": 4,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/test/scala/unit/kafka/server/HighwatermarkPersistenceTest.scala?ref=12a3ccafa1cbc333539b98d83d7d6d572700f05b",
-                "deletions": 2,
-                "filename": "core/src/test/scala/unit/kafka/server/HighwatermarkPersistenceTest.scala",
-                "patch": "@@ -37,7 +37,7 @@ class HighwatermarkPersistenceTest extends JUnit3Suite {\n     EasyMock.replay(zkClient)\n     // create kafka scheduler\n     val scheduler = new KafkaScheduler(2)\n-    scheduler.startUp\n+    scheduler.startup\n     // create replica manager\n     val replicaManager = new ReplicaManager(configs.head, new MockTime(), zkClient, scheduler, null)\n     replicaManager.startup()\n@@ -80,7 +80,7 @@ class HighwatermarkPersistenceTest extends JUnit3Suite {\n     EasyMock.replay(zkClient)\n     // create kafka scheduler\n     val scheduler = new KafkaScheduler(2)\n-    scheduler.startUp\n+    scheduler.startup\n     // create replica manager\n     val replicaManager = new ReplicaManager(configs.head, new MockTime(), zkClient, scheduler, null)\n     replicaManager.startup()",
-                "raw_url": "https://github.com/apache/kafka/raw/12a3ccafa1cbc333539b98d83d7d6d572700f05b/core/src/test/scala/unit/kafka/server/HighwatermarkPersistenceTest.scala",
-                "sha": "2b9f86a11e435e9d8a664b1cba87a2d11f91449d",
-                "status": "modified"
-            }
-        ],
-        "message": "KafkaController NPE in SessionExpireListener; patched by Yang Ye; reviewed by Jun Rao, Neha Narkhede; KAFKA-464\n\ngit-svn-id: https://svn.apache.org/repos/asf/incubator/kafka/branches/0.8@1374467 13f79535-47bb-0310-9956-ffa450edef68",
-        "parent": "https://github.com/apache/kafka/commit/60735b7ad6ef15f25ae9e432c2fc566bec535e31",
-        "patched_files": [
-            "ZookeeperConsumerConnector.java",
-            "KafkaController.java",
-            "KafkaScheduler.java",
-            "KafkaServer.java"
-        ],
-        "repo": "kafka",
-        "unit_tests": [
-            "LogManagerTest.java",
-            "HighwatermarkPersistenceTest.java"
         ]
     },
     "kafka_14314e3": {
@@ -387,15 +296,15 @@
         "message": "[HOT FIX] in-memory store behavior should match rocksDB (#6657)\n\nWhile working on consolidating the various store unit tests I uncovered some minor \"bugs\" in the in-memory stores (inconsistencies with the behavior as established by the RocksDB stores).\r\n\r\nopen iterators should be properly closed in the case the store is closed\r\nfetch/findSessions should always throw NPE if key is null\r\nwindow end time should be truncated at Long.MAX_VALUE rather than throw exception\r\n(Verified in-memory stores pass all applicable rocksDB tests now, unified unit tests coming in another PR)\r\n\r\nReviewers: Guozhang Wang <wangguoz@gmail.com>, Bill Bejeck <bbejeck@gmail.com>",
         "parent": "https://github.com/apache/kafka/commit/a1b1e088b98763818e933dce335b580d02916640",
         "patched_files": [
+            "WindowKeySchema.java",
             "InMemoryWindowStore.java",
-            "InMemorySessionStore.java",
-            "WindowKeySchema.java"
+            "InMemorySessionStore.java"
         ],
         "repo": "kafka",
         "unit_tests": [
-            "WindowKeySchemaTest.java",
+            "InMemoryWindowStoreTest.java",
             "InMemorySessionStoreTest.java",
-            "InMemoryWindowStoreTest.java"
+            "WindowKeySchemaTest.java"
         ]
     },
     "kafka_1659ca1": {
@@ -466,53 +375,14 @@
         "message": "KAFKA-4901; Make ProduceRequest thread-safe\n\nIf request logging is enabled, `ProduceRequest` can be accessed\nand mutated concurrently from a network thread (which calls\n`toString`) and a request handler thread (which calls\n`clearPartitionRecords()`).\n\nThat can lead to a `ConcurrentModificationException` when iterating\nthe `partitionRecords` map.\n\nThe underlying thread-safety issue has existed since the server\nstarted using the Java implementation of ProduceRequest in 0.10.0.\nHowever, we were incorrectly not clearing the underlying struct until\n0.10.2, so `toString` itself was thread-safe until that change. In 0.10.2,\n`toString` is no longer thread-safe and we could potentially see a\n`NullPointerException` given the right set of interleavings between\n`toString` and `clearPartitionRecords` although we haven't seen that\nhappen yet.\n\nIn trunk, we changed the requests to have a `toStruct` method\ninstead of creating a struct in the constructor and `toString` was\nno longer printing the contents of the `Struct`. This accidentally\nfixed the race condition, but it meant that request logging was less\nuseful.\n\nA couple of days ago, `AbstractRequest.toString` was changed to\nprint the contents of the request by calling `toStruct().toString()`\nand reintroduced the race condition. The impact is more visible\nbecause we iterate over a `HashMap`, which proactively\nchecks for concurrent modification (unlike arrays).\n\nWe will need a separate PR for 0.10.2.\n\nAuthor: Ismael Juma <ismael@juma.me.uk>\n\nReviewers: Jiangjie Qin <becket.qin@gmail.com>, Onur Karaman <okaraman@linkedin.com>, Jun Rao <junrao@gmail.com>\n\nCloses #2689 from ijuma/produce-request-thread-safety",
         "parent": "https://github.com/apache/kafka/commit/be11272818a06eea157ab7f6eee8905855f1cede",
         "patched_files": [
-            "AbstractRequest.java",
             "ProduceRequest.java",
-            "KafkaApis.java",
-            "RequestChannel.java"
+            "RequestChannel.scala",
+            "KafkaApis.scala",
+            "AbstractRequest.java"
         ],
         "repo": "kafka",
         "unit_tests": [
             "RequestResponseTest.java"
-        ]
-    },
-    "kafka_1c4b943": {
-        "bug_id": "kafka_1c4b943",
-        "commit": "https://github.com/apache/kafka/commit/1c4b943f2d9cc90101026519769f142c07bc1785",
-        "file": [
-            {
-                "additions": 11,
-                "blob_url": "https://github.com/apache/kafka/blob/1c4b943f2d9cc90101026519769f142c07bc1785/core/src/main/scala/kafka/log/Log.scala",
-                "changes": 20,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/main/scala/kafka/log/Log.scala?ref=1c4b943f2d9cc90101026519769f142c07bc1785",
-                "deletions": 9,
-                "filename": "core/src/main/scala/kafka/log/Log.scala",
-                "patch": "@@ -563,21 +563,23 @@ class Log(val dir: File,\n    * @return The number of segments deleted\n    */\n   def deleteOldSegments(predicate: LogSegment => Boolean): Int = {\n-    // find any segments that match the user-supplied predicate UNLESS it is the final segment\n-    // and it is empty (since we would just end up re-creating it\n-    val lastSegment = activeSegment\n-    val deletable = logSegments.takeWhile(s => predicate(s) && (s.baseOffset != lastSegment.baseOffset || s.size > 0))\n-    val numToDelete = deletable.size\n-    if(numToDelete > 0) {\n-      lock synchronized {\n+    lock synchronized {\n+      //find any segments that match the user-supplied predicate UNLESS it is the final segment\n+      //and it is empty (since we would just end up re-creating it)\n+      val lastEntry = segments.lastEntry\n+      val deletable =\n+        if (lastEntry == null) Seq.empty\n+        else logSegments.takeWhile(s => predicate(s) && (s.baseOffset != lastEntry.getValue.baseOffset || s.size > 0))\n+      val numToDelete = deletable.size\n+      if (numToDelete > 0) {\n         // we must always have at least one segment, so if we are going to delete all the segments, create a new one first\n-        if(segments.size == numToDelete)\n+        if (segments.size == numToDelete)\n           roll()\n         // remove the segments for lookups\n         deletable.foreach(deleteSegment(_))\n       }\n+      numToDelete\n     }\n-    numToDelete\n   }\n \n   /**",
-                "raw_url": "https://github.com/apache/kafka/raw/1c4b943f2d9cc90101026519769f142c07bc1785/core/src/main/scala/kafka/log/Log.scala",
-                "sha": "a7549dc134a7913861e6f1ec6428b1d386e072db",
-                "status": "modified"
-            },
-            {
-                "additions": 28,
-                "blob_url": "https://github.com/apache/kafka/blob/1c4b943f2d9cc90101026519769f142c07bc1785/core/src/test/scala/unit/kafka/log/LogTest.scala",
-                "changes": 28,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/test/scala/unit/kafka/log/LogTest.scala?ref=1c4b943f2d9cc90101026519769f142c07bc1785",
-                "deletions": 0,
-                "filename": "core/src/test/scala/unit/kafka/log/LogTest.scala",
-                "patch": "@@ -930,4 +930,32 @@ class LogTest extends JUnitSuite {\n   def topicPartitionName(topic: String, partition: String): String =\n     File.separator + topic + \"-\" + partition\n \n+  @Test\n+  def testDeleteOldSegmentsMethod() {\n+    val set = TestUtils.singleMessageSet(\"test\".getBytes)\n+    val logProps = new Properties()\n+    logProps.put(LogConfig.SegmentBytesProp, set.sizeInBytes * 5: java.lang.Integer)\n+    logProps.put(LogConfig.SegmentIndexBytesProp, 1000: java.lang.Integer)\n+    val config = LogConfig(logProps)\n+    val log = new Log(logDir,\n+      config,\n+      recoveryPoint = 0L,\n+      time.scheduler,\n+      time)\n+\n+    // append some messages to create some segments\n+    for (i <- 0 until 100)\n+      log.append(set)\n+\n+    log.deleteOldSegments(_ => true)\n+    assertEquals(\"The deleted segments should be gone.\", 1, log.numberOfSegments)\n+\n+    // append some messages to create some segments\n+    for (i <- 0 until 100)\n+      log.append(set)\n+\n+    log.delete()\n+    assertEquals(\"The number of segments should be 0\", 0, log.numberOfSegments)\n+    assertEquals(\"The number of deleted segments shoud be zero.\", 0, log.deleteOldSegments(_ => true))\n+  }\n }",
-                "raw_url": "https://github.com/apache/kafka/raw/1c4b943f2d9cc90101026519769f142c07bc1785/core/src/test/scala/unit/kafka/log/LogTest.scala",
-                "sha": "f48f6b1e85fa593ac25133726c2be53fcd535ed2",
-                "status": "modified"
-            }
-        ],
-        "message": "KAFKA-3584; Fix synchronization issue between deleteOldSegments() and delete() methods\n\nThis PR is to fix synchronization issue between deleteOldSegments() and delete() method calls. log.deleteOldSegments() call throws NullPointerException after log.delete() method call.\n\ncc ijuma junrao\n\nAuthor: Manikumar reddy O <manikumar.reddy@gmail.com>\n\nReviewers: Jun Rao <junrao@gmail.com>, Ismael Juma <ismael@juma.me.uk>\n\nCloses #1367 from omkreddy/KAFKA-3584",
-        "parent": "https://github.com/apache/kafka/commit/fb421dbcfe36c4a0d9df7a742c18c11515f095c5",
-        "patched_files": [
-            "Log.java"
-        ],
-        "repo": "kafka",
-        "unit_tests": [
-            "LogTest.java"
         ]
     },
     "kafka_1d19ac9": {
@@ -599,14 +469,14 @@
         "parent": "https://github.com/apache/kafka/commit/62253539d87e1ccb353673ed96adc98fb2d854ae",
         "patched_files": [
             "ProcessorStateManager.java",
-            "MockConsumer.java",
-            "StreamPartitionAssignor.java"
+            "StreamPartitionAssignor.java",
+            "MockConsumer.java"
         ],
         "repo": "kafka",
         "unit_tests": [
-            "MockConsumerTest.java",
+            "ProcessorStateManagerTest.java",
             "StreamPartitionAssignorTest.java",
-            "ProcessorStateManagerTest.java"
+            "MockConsumerTest.java"
         ]
     },
     "kafka_1f692bd": {
@@ -719,52 +589,13 @@
         "parent": "https://github.com/apache/kafka/commit/1aea0834d346f0afa16f946c47e51fefac37612b",
         "patched_files": [
             "Metrics.java",
-            "Sensor.java",
-            "suppressions.java"
+            "suppressions.xml",
+            "Sensor.java"
         ],
         "repo": "kafka",
         "unit_tests": [
             "MetricsTest.java",
             "SensorTest.java"
-        ]
-    },
-    "kafka_218e6a5": {
-        "bug_id": "kafka_218e6a5",
-        "commit": "https://github.com/apache/kafka/commit/218e6a53c1385be897d9f8a3a39baa38b68d7992",
-        "file": [
-            {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/kafka/blob/218e6a53c1385be897d9f8a3a39baa38b68d7992/core/src/main/scala/kafka/server/KafkaApis.scala",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/main/scala/kafka/server/KafkaApis.scala?ref=218e6a53c1385be897d9f8a3a39baa38b68d7992",
-                "deletions": 1,
-                "filename": "core/src/main/scala/kafka/server/KafkaApis.scala",
-                "patch": "@@ -476,7 +476,7 @@ class KafkaApis(val requestChannel: RequestChannel,\n     val responseInfo = offsetCommitRequest.requestInfo.map( t => {\n       val topicDirs = new ZKGroupTopicDirs(offsetCommitRequest.groupId, t._1.topic)\n       try {\n-        if(t._2.metadata.length > config.offsetMetadataMaxSize) {\n+        if(t._2.metadata != null && t._2.metadata.length > config.offsetMetadataMaxSize) {\n           (t._1, ErrorMapping.OffsetMetadataTooLargeCode)\n         } else {\n           ZkUtils.updatePersistentPath(zkClient, topicDirs.consumerOffsetDir + \"/\" +",
-                "raw_url": "https://github.com/apache/kafka/raw/218e6a53c1385be897d9f8a3a39baa38b68d7992/core/src/main/scala/kafka/server/KafkaApis.scala",
-                "sha": "c059981887f0675cb7a10519142bfa3e08c1462a",
-                "status": "modified"
-            },
-            {
-                "additions": 10,
-                "blob_url": "https://github.com/apache/kafka/blob/218e6a53c1385be897d9f8a3a39baa38b68d7992/core/src/test/scala/unit/kafka/server/OffsetCommitTest.scala",
-                "changes": 10,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/test/scala/unit/kafka/server/OffsetCommitTest.scala?ref=218e6a53c1385be897d9f8a3a39baa38b68d7992",
-                "deletions": 0,
-                "filename": "core/src/test/scala/unit/kafka/server/OffsetCommitTest.scala",
-                "patch": "@@ -171,4 +171,14 @@ class OffsetCommitTest extends JUnit3Suite with ZooKeeperTestHarness {\n \n   }\n \n+  @Test\n+  def testNullMetadata() {\n+    val topicAndPartition = TopicAndPartition(\"null-metadata\", 0)\n+    val commitRequest = OffsetCommitRequest(\"test-group\", Map(topicAndPartition -> OffsetMetadataAndError(\n+      offset=42L,\n+      metadata=null\n+    )))\n+    val commitResponse = simpleConsumer.commitOffsets(commitRequest)\n+    assertEquals(ErrorMapping.NoError, commitResponse.requestInfo.get(topicAndPartition).get)\n+  }\n }",
-                "raw_url": "https://github.com/apache/kafka/raw/218e6a53c1385be897d9f8a3a39baa38b68d7992/core/src/test/scala/unit/kafka/server/OffsetCommitTest.scala",
-                "sha": "6989c95e611b937fdb401c37be98c6c0e6a0ccfb",
-                "status": "modified"
-            }
-        ],
-        "message": "KAFKA-771 NPE in handleOffsetCommitRequest; reviewed by Neha Narkhede",
-        "parent": "https://github.com/apache/kafka/commit/e7edb5e1e933f5535378d546bcf4d8b178d2e69c",
-        "patched_files": [
-            "KafkaApis.java"
-        ],
-        "repo": "kafka",
-        "unit_tests": [
-            "OffsetCommitTest.java"
         ]
     },
     "kafka_22f1724": {
@@ -799,8 +630,8 @@
         "message": "KAFKA-7434: Fix NPE in DeadLetterQueueReporter\n\n*More detailed description of your change,\nif necessary. The PR title and PR message become\nthe squashed commit message, so use a separate\ncomment to ping reviewers.*\n\n*Summary of testing strategy (including rationale)\nfor the feature or bug fix. Unit and/or integration\ntests are expected for any behaviour change and\nsystem tests should be considered for larger changes.*\n\nAuthor: Micha\u0142 Borowiecki <mbor81@gmail.com>\n\nReviewers: Arjun Satish <arjun@confluent.io>, Ewen Cheslack-Postava <ewen@confluent.io>\n\nCloses #5700 from mihbor/KAFKA-7434",
         "parent": "https://github.com/apache/kafka/commit/cb21bca400359e6b7e61555578b7539f27d9d2ff",
         "patched_files": [
-            "DeadLetterQueueReporter.java",
-            "ErrorReporter.java"
+            "ErrorReporter.java",
+            "DeadLetterQueueReporter.java"
         ],
         "repo": "kafka",
         "unit_tests": [
@@ -844,71 +675,6 @@
         "repo": "kafka",
         "unit_tests": [
             "WorkerConfigTransformerTest.java"
-        ]
-    },
-    "kafka_2d19ad4": {
-        "bug_id": "kafka_2d19ad4",
-        "commit": "https://github.com/apache/kafka/commit/2d19ad4bb07b4f10f2a314e86bbf4171cdcd7765",
-        "file": [
-            {
-                "additions": 7,
-                "blob_url": "https://github.com/apache/kafka/blob/2d19ad4bb07b4f10f2a314e86bbf4171cdcd7765/core/src/main/scala/kafka/log/Log.scala",
-                "changes": 12,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/main/scala/kafka/log/Log.scala?ref=2d19ad4bb07b4f10f2a314e86bbf4171cdcd7765",
-                "deletions": 5,
-                "filename": "core/src/main/scala/kafka/log/Log.scala",
-                "patch": "@@ -605,19 +605,21 @@ class Log(@volatile var dir: File,\n           s\"for partition $topicAndPartition is ${config.messageFormatVersion} which is earlier than the minimum \" +\n           s\"required version $KAFKA_0_10_0_IV0\")\n \n+    // Cache to avoid race conditions. `toBuffer` is faster than most alternatives and provides\n+    // constant time access while being safe to use with concurrent collections unlike `toArray`.\n+    val segmentsCopy = logSegments.toBuffer\n     // For the earliest and latest, we do not need to return the timestamp.\n-    val segsArray = logSegments.toArray\n     if (targetTimestamp == ListOffsetRequest.EARLIEST_TIMESTAMP)\n-        return Some(TimestampOffset(Message.NoTimestamp, segsArray(0).baseOffset))\n+        return Some(TimestampOffset(Message.NoTimestamp, segmentsCopy.head.baseOffset))\n     else if (targetTimestamp == ListOffsetRequest.LATEST_TIMESTAMP)\n         return Some(TimestampOffset(Message.NoTimestamp, logEndOffset))\n \n     val targetSeg = {\n       // Get all the segments whose largest timestamp is smaller than target timestamp\n-      val earlierSegs = segsArray.takeWhile(_.largestTimestamp < targetTimestamp)\n+      val earlierSegs = segmentsCopy.takeWhile(_.largestTimestamp < targetTimestamp)\n       // We need to search the first segment whose largest timestamp is greater than the target timestamp if there is one.\n-      if (earlierSegs.length < segsArray.length)\n-        Some(segsArray(earlierSegs.length))\n+      if (earlierSegs.length < segmentsCopy.length)\n+        Some(segmentsCopy(earlierSegs.length))\n       else\n         None\n     }",
-                "raw_url": "https://github.com/apache/kafka/raw/2d19ad4bb07b4f10f2a314e86bbf4171cdcd7765/core/src/main/scala/kafka/log/Log.scala",
-                "sha": "6acc8d274a1379b5523b6bb71bb842534743f530",
-                "status": "modified"
-            },
-            {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/kafka/blob/2d19ad4bb07b4f10f2a314e86bbf4171cdcd7765/core/src/main/scala/kafka/log/LogCleanerManager.scala",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/main/scala/kafka/log/LogCleanerManager.scala?ref=2d19ad4bb07b4f10f2a314e86bbf4171cdcd7765",
-                "deletions": 1,
-                "filename": "core/src/main/scala/kafka/log/LogCleanerManager.scala",
-                "patch": "@@ -289,7 +289,7 @@ private[log] object LogCleanerManager extends Logging {\n     }\n \n     // dirty log segments\n-    val dirtyNonActiveSegments = log.logSegments(firstDirtyOffset, log.activeSegment.baseOffset).toArray\n+    val dirtyNonActiveSegments = log.logSegments(firstDirtyOffset, log.activeSegment.baseOffset)\n \n     val compactionLagMs = math.max(log.config.compactionLagMs, 0L)\n ",
-                "raw_url": "https://github.com/apache/kafka/raw/2d19ad4bb07b4f10f2a314e86bbf4171cdcd7765/core/src/main/scala/kafka/log/LogCleanerManager.scala",
-                "sha": "681042ef4987d297712c9e280b369d6201afe6d6",
-                "status": "modified"
-            },
-            {
-                "additions": 13,
-                "blob_url": "https://github.com/apache/kafka/blob/2d19ad4bb07b4f10f2a314e86bbf4171cdcd7765/core/src/main/scala/kafka/server/KafkaApis.scala",
-                "changes": 23,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/main/scala/kafka/server/KafkaApis.scala?ref=2d19ad4bb07b4f10f2a314e86bbf4171cdcd7765",
-                "deletions": 10,
-                "filename": "core/src/main/scala/kafka/server/KafkaApis.scala",
-                "patch": "@@ -717,18 +717,21 @@ class KafkaApis(val requestChannel: RequestChannel,\n   }\n \n   private[server] def fetchOffsetsBefore(log: Log, timestamp: Long, maxNumOffsets: Int): Seq[Long] = {\n-    val segsArray = log.logSegments.toArray\n-    var offsetTimeArray: Array[(Long, Long)] = null\n-    val lastSegmentHasSize = segsArray.last.size > 0\n-    if (lastSegmentHasSize)\n-      offsetTimeArray = new Array[(Long, Long)](segsArray.length + 1)\n-    else\n-      offsetTimeArray = new Array[(Long, Long)](segsArray.length)\n+    // Cache to avoid race conditions. `toBuffer` is faster than most alternatives and provides\n+    // constant time access while being safe to use with concurrent collections unlike `toArray`.\n+    val segments = log.logSegments.toBuffer\n+    val lastSegmentHasSize = segments.last.size > 0\n+\n+    val offsetTimeArray =\n+      if (lastSegmentHasSize)\n+        new Array[(Long, Long)](segments.length + 1)\n+      else\n+        new Array[(Long, Long)](segments.length)\n \n-    for (i <- segsArray.indices)\n-      offsetTimeArray(i) = (segsArray(i).baseOffset, segsArray(i).lastModified)\n+    for (i <- segments.indices)\n+      offsetTimeArray(i) = (segments(i).baseOffset, segments(i).lastModified)\n     if (lastSegmentHasSize)\n-      offsetTimeArray(segsArray.length) = (log.logEndOffset, time.milliseconds)\n+      offsetTimeArray(segments.length) = (log.logEndOffset, time.milliseconds)\n \n     var startIndex = -1\n     timestamp match {",
-                "raw_url": "https://github.com/apache/kafka/raw/2d19ad4bb07b4f10f2a314e86bbf4171cdcd7765/core/src/main/scala/kafka/server/KafkaApis.scala",
-                "sha": "447e4e2b4bb90a2f799f0af501980878b5ce015e",
-                "status": "modified"
-            },
-            {
-                "additions": 19,
-                "blob_url": "https://github.com/apache/kafka/blob/2d19ad4bb07b4f10f2a314e86bbf4171cdcd7765/core/src/test/scala/unit/kafka/server/LogOffsetTest.scala",
-                "changes": 19,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/test/scala/unit/kafka/server/LogOffsetTest.scala?ref=2d19ad4bb07b4f10f2a314e86bbf4171cdcd7765",
-                "deletions": 0,
-                "filename": "core/src/test/scala/unit/kafka/server/LogOffsetTest.scala",
-                "patch": "@@ -214,6 +214,25 @@ class LogOffsetTest extends ZooKeeperTestHarness {\n     server.apis.fetchOffsetsBefore(log, System.currentTimeMillis, 100)\n   }\n \n+  /* We test that `fetchOffsetsBefore` works correctly if `Log.logSegments` content and size are\n+   * different (simulating a race condition) */\n+  @Test\n+  def testFetchOffsetsBeforeWithChangingSegments() {\n+    val log = EasyMock.niceMock(classOf[Log])\n+    val logSegment = EasyMock.niceMock(classOf[LogSegment])\n+    EasyMock.expect(log.logSegments).andStubAnswer {\n+      new IAnswer[Iterable[LogSegment]] {\n+        def answer = new Iterable[LogSegment] {\n+          override def size = 2\n+          def iterator = Seq(logSegment).iterator\n+        }\n+      }\n+    }\n+    EasyMock.replay(logSegment)\n+    EasyMock.replay(log)\n+    server.apis.fetchOffsetsBefore(log, System.currentTimeMillis, 100)\n+  }\n+\n   private def createBrokerConfig(nodeId: Int): Properties = {\n     val props = new Properties\n     props.put(\"broker.id\", nodeId.toString)",
-                "raw_url": "https://github.com/apache/kafka/raw/2d19ad4bb07b4f10f2a314e86bbf4171cdcd7765/core/src/test/scala/unit/kafka/server/LogOffsetTest.scala",
-                "sha": "70445d78a1594f404190b8ee10cc03b7644b67d9",
-                "status": "modified"
-            }
-        ],
-        "message": "KAFKA-4205; KafkaApis: fix NPE caused by conversion to array\n\nNPE was caused by `log.logSegments.toArray` resulting in array containing `null` values. The exact reason still remains somewhat a mystery to me, but it seems that the culprit is `JavaConverters` in combination with concurrent data structure access.\n\nHere's a simple code example to prove that:\n```scala\nimport java.util.concurrent.ConcurrentSkipListMap\n// Same as `JavaConversions`, but allows explicit conversions via `asScala`/`asJava` methods.\nimport scala.collection.JavaConverters._\n\ncase object Value\nval m = new ConcurrentSkipListMap[Int, Value.type]\nnew Thread { override def run() = { while (true) m.put(9000, Value) } }.start()\nnew Thread { override def run() = { while (true) m.remove(9000) } }.start()\nnew Thread { override def run() = { while (true) { println(m.values.asScala.toArray.headOption) } } }.start()\n```\n\nRunning the example will occasionally print `Some(null)` indicating that there's something shady going on during `toArray` conversion.\n\n`null`s magically disappear by making the following change:\n```diff\n- println(m.values.asScala.toArray.headOption)\n+ println(m.values.asScala.toSeq.headOption)\n```\n\nAuthor: Anton Karamanov <ataraxer@yandex-team.ru>\n\nReviewers: Ismael Juma <ismael@juma.me.uk>, Guozhang Wang <wangguoz@gmail.com>\n\nCloses #2204 from ataraxer/KAFKA-4205",
-        "parent": "https://github.com/apache/kafka/commit/e43bbce493192ea5f936867e8cdae163ab850650",
-        "patched_files": [
-            "Log.java",
-            "LogCleanerManager.java",
-            "KafkaApis.java"
-        ],
-        "repo": "kafka",
-        "unit_tests": [
-            "LogOffsetTest.java"
         ]
     },
     "kafka_2fce203": {
@@ -1132,12 +898,12 @@
         "message": "KAFKA-5047: NullPointerException while using GlobalKTable in KafkaStreams\n\nSkip null keys when initializing GlobalKTables. This is inline with what happens during normal processing.\n\nAuthor: Damian Guy <damian.guy@gmail.com>\n\nReviewers: Michael G. Noll, Eno Thereska, Matthias J. Sax, Guozhang Wang\n\nCloses #2834 from dguy/kafka-5047",
         "parent": "https://github.com/apache/kafka/commit/14ab3dcc6c70d5bd4b21d99e0b97332ea332ac07",
         "patched_files": [
-            "KTable.java",
-            "GlobalStateManagerImpl.java",
             "StateRestorer.java",
-            "StoreChangelogReader.java",
             "MockRestoreCallback.java",
-            "GlobalKTable.java"
+            "GlobalStateManagerImpl.java",
+            "GlobalKTable.java",
+            "StoreChangelogReader.java",
+            "KTable.java"
         ],
         "repo": "kafka",
         "unit_tests": [
@@ -1347,27 +1113,27 @@
         "message": "KAFKA-4163: NPE in StreamsMetadataState during re-balance operations\n\nDuring rebalance operations the Cluster object gets set to Cluster.empty(). This can result in NPEs when doing certain operation on StreamsMetadataState. This should throw a StreamsException if the Cluster is empty as it is not yet (re-)initialized\n\nAuthor: Damian Guy <damian.guy@gmail.com>\n\nReviewers: Eno Thereska, Guozhang Wang\n\nCloses #1845 from dguy/streams-meta-hotfix",
         "parent": "https://github.com/apache/kafka/commit/70afd5f9dd2eddc784a24fa2518992ef3371f0a4",
         "patched_files": [
-            "StateStoreProviderStub.java",
-            "StreamsMetadataState.java",
-            "StreamsMetadata.java",
-            "KafkaStreams.java",
-            "QueryableStoreProvider.java",
-            "ReadOnlyWindowStoreStub.java",
-            "CompositeReadOnlyWindowStore.java",
-            "CompositeReadOnlyKeyValueStore.java",
             "StreamThreadStateStoreProvider.java",
-            "WrappingStoreProvider.java"
+            "KafkaStreams.java",
+            "StateStoreProviderStub.java",
+            "CompositeReadOnlyKeyValueStore.java",
+            "QueryableStoreProvider.java",
+            "CompositeReadOnlyWindowStore.java",
+            "ReadOnlyWindowStoreStub.java",
+            "StreamsMetadata.java",
+            "WrappingStoreProvider.java",
+            "StreamsMetadataState.java"
         ],
         "repo": "kafka",
         "unit_tests": [
+            "CompositeReadOnlyWindowStoreTest.java",
             "WrappingStoreProviderTest.java",
-            "CompositeReadOnlyKeyValueStoreTest.java",
-            "QueryableStoreProviderTest.java",
             "QueryableStateIntegrationTest.java",
+            "QueryableStoreProviderTest.java",
             "StreamsMetadataStateTest.java",
             "StreamThreadStateStoreProviderTest.java",
             "KafkaStreamsTest.java",
-            "CompositeReadOnlyWindowStoreTest.java"
+            "CompositeReadOnlyKeyValueStoreTest.java"
         ]
     },
     "kafka_3e48bdb": {
@@ -1436,45 +1202,6 @@
             "TaskManagerTest.java"
         ]
     },
-    "kafka_490bbc9": {
-        "bug_id": "kafka_490bbc9",
-        "commit": "https://github.com/apache/kafka/commit/490bbc91183d1468a164d80f826317f137026684",
-        "file": [
-            {
-                "additions": 3,
-                "blob_url": "https://github.com/apache/kafka/blob/490bbc91183d1468a164d80f826317f137026684/core/src/main/scala/kafka/coordinator/GroupCoordinator.scala",
-                "changes": 6,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/main/scala/kafka/coordinator/GroupCoordinator.scala?ref=490bbc91183d1468a164d80f826317f137026684",
-                "deletions": 3,
-                "filename": "core/src/main/scala/kafka/coordinator/GroupCoordinator.scala",
-                "patch": "@@ -662,13 +662,13 @@ class GroupCoordinator(val brokerId: Int,\n \n object GroupCoordinator {\n \n-  val EmptyGroup = GroupSummary(NoState, NoProtocolType, NoProtocol, NoMembers)\n-  val DeadGroup = GroupSummary(Dead.toString, NoProtocolType, NoProtocol, NoMembers)\n-  val NoMembers = List[MemberSummary]()\n   val NoState = \"\"\n   val NoProtocolType = \"\"\n   val NoProtocol = \"\"\n   val NoLeader = \"\"\n+  val NoMembers = List[MemberSummary]()\n+  val EmptyGroup = GroupSummary(NoState, NoProtocolType, NoProtocol, NoMembers)\n+  val DeadGroup = GroupSummary(Dead.toString, NoProtocolType, NoProtocol, NoMembers)\n \n   // TODO: we store both group metadata and offset data here despite the topic name being offsets only\n   val GroupMetadataTopicName = \"__consumer_offsets\"",
-                "raw_url": "https://github.com/apache/kafka/raw/490bbc91183d1468a164d80f826317f137026684/core/src/main/scala/kafka/coordinator/GroupCoordinator.scala",
-                "sha": "900830fdf702bb2eb3336c55ac1a33a10c2822f1",
-                "status": "modified"
-            },
-            {
-                "additions": 11,
-                "blob_url": "https://github.com/apache/kafka/blob/490bbc91183d1468a164d80f826317f137026684/core/src/test/scala/integration/kafka/api/AdminClientTest.scala",
-                "changes": 11,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/test/scala/integration/kafka/api/AdminClientTest.scala?ref=490bbc91183d1468a164d80f826317f137026684",
-                "deletions": 0,
-                "filename": "core/src/test/scala/integration/kafka/api/AdminClientTest.scala",
-                "patch": "@@ -111,4 +111,15 @@ class AdminClientTest extends IntegrationTestHarness with Logging {\n       assertEquals(Set(tp, tp2), partitions.toSet)\n   }\n \n+  @Test\n+  def testDescribeConsumerGroupForNonExistentGroup() {\n+    val nonExistentGroup = \"non\" + groupId\n+    try {\n+      client.describeConsumerGroup(nonExistentGroup)\n+      fail(\"Should have failed for non existent group.\")\n+    } catch {\n+      case ex: IllegalArgumentException => // Pass\n+      case _: Throwable => fail(\"Should have failed for non existent group with IllegalArgumentException.\")\n+    }\n+  }\n }",
-                "raw_url": "https://github.com/apache/kafka/raw/490bbc91183d1468a164d80f826317f137026684/core/src/test/scala/integration/kafka/api/AdminClientTest.scala",
-                "sha": "7d529ec8c4fddc5c76687326833ba12fbf11870f",
-                "status": "modified"
-            }
-        ],
-        "message": "KAFKA-2755: Suspicious reference forwarding cause NPE on handleDescribeGroup.\n\n\u2026xistent consumer group\n\nAuthor: Ashish Singh <asingh@cloudera.com>\n\nReviewers: Guozhang Wang\n\nCloses #435 from SinghAsDev/KAFKA-2755",
-        "parent": "https://github.com/apache/kafka/commit/7eee11451e1f0d17efa27775becfb370a9894d56",
-        "patched_files": [
-            "GroupCoordinator.java"
-        ],
-        "repo": "kafka",
-        "unit_tests": [
-            "AdminClientTest.java"
-        ]
-    },
     "kafka_4c295a7": {
         "bug_id": "kafka_4c295a7",
         "commit": "https://github.com/apache/kafka/commit/4c295a78446be6eba24ca4a9b7e506657e55c875",
@@ -1519,13 +1246,13 @@
         "message": "KAFKA-4269: Update topic subscription when regex pattern specified out of topicGroups method\n\n\u2026d out of topicGroups method. The topicGroups method only called from StreamPartitionAssignor when KafkaStreams object  is the leader, needs to be executed for clients.\n\nAuthor: bbejeck <bbejeck@gmail.com>\n\nReviewers: Damian Guy <damian.guy@gmail.com>, Guozhang Wang <wangguoz@gmail.com>\n\nCloses #2005 from bbejeck/KAFKA-4269_multiple_kstream_instances_mult_consumers_npe",
         "parent": "https://github.com/apache/kafka/commit/17cb4fe52f74fcc1b7c43baa4649e0a4aba80fa3",
         "patched_files": [
-            "TopologyBuilder.java",
-            "StreamPartitionAssignor.java"
+            "StreamPartitionAssignor.java",
+            "TopologyBuilder.java"
         ],
         "repo": "kafka",
         "unit_tests": [
-            "StreamPartitionAssignorTest.java",
-            "TopologyBuilderTest.java"
+            "TopologyBuilderTest.java",
+            "StreamPartitionAssignorTest.java"
         ]
     },
     "kafka_4c76b5f": {
@@ -1592,98 +1319,6 @@
         "repo": "kafka",
         "unit_tests": [
             "SelectorTest.java"
-        ]
-    },
-    "kafka_58e5852": {
-        "bug_id": "kafka_58e5852",
-        "commit": "https://github.com/apache/kafka/commit/58e58529b350a3da860b1f51fdfa356dfc42761f",
-        "file": [
-            {
-                "additions": 32,
-                "blob_url": "https://github.com/apache/kafka/blob/58e58529b350a3da860b1f51fdfa356dfc42761f/core/src/main/scala/kafka/consumer/PartitionAssignor.scala",
-                "changes": 62,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/main/scala/kafka/consumer/PartitionAssignor.scala?ref=58e58529b350a3da860b1f51fdfa356dfc42761f",
-                "deletions": 30,
-                "filename": "core/src/main/scala/kafka/consumer/PartitionAssignor.scala",
-                "patch": "@@ -71,39 +71,41 @@ class RoundRobinAssignor() extends PartitionAssignor with Logging {\n   def assign(ctx: AssignmentContext) = {\n     val partitionOwnershipDecision = collection.mutable.Map[TopicAndPartition, ConsumerThreadId]()\n \n-    // check conditions (a) and (b)\n-    val (headTopic, headThreadIdSet) = (ctx.consumersForTopic.head._1, ctx.consumersForTopic.head._2.toSet)\n-    ctx.consumersForTopic.foreach { case (topic, threadIds) =>\n-      val threadIdSet = threadIds.toSet\n-      require(threadIdSet == headThreadIdSet,\n-              \"Round-robin assignment is allowed only if all consumers in the group subscribe to the same topics, \" +\n-              \"AND if the stream counts across topics are identical for a given consumer instance.\\n\" +\n-              \"Topic %s has the following available consumer streams: %s\\n\".format(topic, threadIdSet) +\n-              \"Topic %s has the following available consumer streams: %s\\n\".format(headTopic, headThreadIdSet))\n-    }\n+    if (ctx.consumersForTopic.size > 0) {\n+      // check conditions (a) and (b)\n+      val (headTopic, headThreadIdSet) = (ctx.consumersForTopic.head._1, ctx.consumersForTopic.head._2.toSet)\n+      ctx.consumersForTopic.foreach { case (topic, threadIds) =>\n+        val threadIdSet = threadIds.toSet\n+        require(threadIdSet == headThreadIdSet,\n+          \"Round-robin assignment is allowed only if all consumers in the group subscribe to the same topics, \" +\n+            \"AND if the stream counts across topics are identical for a given consumer instance.\\n\" +\n+            \"Topic %s has the following available consumer streams: %s\\n\".format(topic, threadIdSet) +\n+            \"Topic %s has the following available consumer streams: %s\\n\".format(headTopic, headThreadIdSet))\n+      }\n \n-    val threadAssignor = Utils.circularIterator(headThreadIdSet.toSeq.sorted)\n+      val threadAssignor = Utils.circularIterator(headThreadIdSet.toSeq.sorted)\n+\n+      info(\"Starting round-robin assignment with consumers \" + ctx.consumers)\n+      val allTopicPartitions = ctx.partitionsForTopic.flatMap { case (topic, partitions) =>\n+        info(\"Consumer %s rebalancing the following partitions for topic %s: %s\"\n+          .format(ctx.consumerId, topic, partitions))\n+        partitions.map(partition => {\n+          TopicAndPartition(topic, partition)\n+        })\n+      }.toSeq.sortWith((topicPartition1, topicPartition2) => {\n+        /*\n+         * Randomize the order by taking the hashcode to reduce the likelihood of all partitions of a given topic ending\n+         * up on one consumer (if it has a high enough stream count).\n+         */\n+        topicPartition1.toString.hashCode < topicPartition2.toString.hashCode\n+      })\n \n-    info(\"Starting round-robin assignment with consumers \" + ctx.consumers)\n-    val allTopicPartitions = ctx.partitionsForTopic.flatMap { case(topic, partitions) =>\n-      info(\"Consumer %s rebalancing the following partitions for topic %s: %s\"\n-           .format(ctx.consumerId, topic, partitions))\n-      partitions.map(partition => {\n-        TopicAndPartition(topic, partition)\n+      allTopicPartitions.foreach(topicPartition => {\n+        val threadId = threadAssignor.next()\n+        if (threadId.consumer == ctx.consumerId)\n+          partitionOwnershipDecision += (topicPartition -> threadId)\n       })\n-    }.toSeq.sortWith((topicPartition1, topicPartition2) => {\n-      /*\n-       * Randomize the order by taking the hashcode to reduce the likelihood of all partitions of a given topic ending\n-       * up on one consumer (if it has a high enough stream count).\n-       */\n-      topicPartition1.toString.hashCode < topicPartition2.toString.hashCode\n-    })\n-\n-    allTopicPartitions.foreach(topicPartition => {\n-      val threadId = threadAssignor.next()\n-      if (threadId.consumer == ctx.consumerId)\n-        partitionOwnershipDecision += (topicPartition -> threadId)\n-    })\n+    }\n \n     partitionOwnershipDecision\n   }",
-                "raw_url": "https://github.com/apache/kafka/raw/58e58529b350a3da860b1f51fdfa356dfc42761f/core/src/main/scala/kafka/consumer/PartitionAssignor.scala",
-                "sha": "e6ff7683a0df4a7d221e949767e57c34703d5aad",
-                "status": "modified"
-            },
-            {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/kafka/blob/58e58529b350a3da860b1f51fdfa356dfc42761f/core/src/test/scala/unit/kafka/consumer/PartitionAssignorTest.scala",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/test/scala/unit/kafka/consumer/PartitionAssignorTest.scala?ref=58e58529b350a3da860b1f51fdfa356dfc42761f",
-                "deletions": 1,
-                "filename": "core/src/test/scala/unit/kafka/consumer/PartitionAssignorTest.scala",
-                "patch": "@@ -87,7 +87,7 @@ private object PartitionAssignorTest extends Logging {\n   private val MaxConsumerCount = 10\n   private val MaxStreamCount = 8\n   private val MaxTopicCount = 100\n-  private val MinTopicCount = 20\n+  private val MinTopicCount = 0\n   private val MaxPartitionCount = 120\n   private val MinPartitionCount = 8\n ",
-                "raw_url": "https://github.com/apache/kafka/raw/58e58529b350a3da860b1f51fdfa356dfc42761f/core/src/test/scala/unit/kafka/consumer/PartitionAssignorTest.scala",
-                "sha": "24954de66ccc5158696166b7e2aabad0f1b1f287",
-                "status": "modified"
-            }
-        ],
-        "message": "KAFKA-1648; Robin consumer balance throws an NPE when there are no topics",
-        "parent": "https://github.com/apache/kafka/commit/a314461fa04b3249608607d1040c8e0cf8724bac",
-        "patched_files": [
-            "PartitionAssignor.java"
-        ],
-        "repo": "kafka",
-        "unit_tests": [
-            "PartitionAssignorTest.java"
-        ]
-    },
-    "kafka_592678e": {
-        "bug_id": "kafka_592678e",
-        "commit": "https://github.com/apache/kafka/commit/592678e4d72151940002ffb1a367ec433b27f2ef",
-        "file": [
-            {
-                "additions": 2,
-                "blob_url": "https://github.com/apache/kafka/blob/592678e4d72151940002ffb1a367ec433b27f2ef/core/src/main/scala/kafka/consumer/TopicCount.scala",
-                "changes": 4,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/main/scala/kafka/consumer/TopicCount.scala?ref=592678e4d72151940002ffb1a367ec433b27f2ef",
-                "deletions": 2,
-                "filename": "core/src/main/scala/kafka/consumer/TopicCount.scala",
-                "patch": "@@ -19,7 +19,7 @@ package kafka.consumer\n \n import scala.collection._\n import org.I0Itec.zkclient.ZkClient\n-import kafka.utils.{Json, ZKGroupDirs, ZkUtils, Logging}\n+import kafka.utils.{Json, ZKGroupDirs, ZkUtils, Logging, Utils}\n import kafka.common.KafkaException\n \n private[kafka] trait TopicCount {\n@@ -127,7 +127,7 @@ private[kafka] class WildcardTopicCount(zkClient: ZkClient,\n     makeConsumerThreadIdsPerTopic(consumerIdString, Map(wildcardTopics.map((_, numStreams)): _*))\n   }\n \n-  def getTopicCountMap = Map(topicFilter.regex -> numStreams)\n+  def getTopicCountMap = Map(Utils.JSONEscapeString(topicFilter.regex) -> numStreams)\n \n   def pattern: String = {\n     topicFilter match {",
-                "raw_url": "https://github.com/apache/kafka/raw/592678e4d72151940002ffb1a367ec433b27f2ef/core/src/main/scala/kafka/consumer/TopicCount.scala",
-                "sha": "8b0ae5785e08272d0ea12483beae597f2eac4343",
-                "status": "modified"
-            },
-            {
-                "additions": 24,
-                "blob_url": "https://github.com/apache/kafka/blob/592678e4d72151940002ffb1a367ec433b27f2ef/core/src/main/scala/kafka/utils/Utils.scala",
-                "changes": 24,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/main/scala/kafka/utils/Utils.scala?ref=592678e4d72151940002ffb1a367ec433b27f2ef",
-                "deletions": 0,
-                "filename": "core/src/main/scala/kafka/utils/Utils.scala",
-                "patch": "@@ -545,4 +545,28 @@ object Utils extends Logging {\n       lock.unlock()\n     }\n   }\n+\n+    //JSON strings need to be escaped based on ECMA-404 standard http://json.org\n+  def JSONEscapeString (s : String) : String = {\n+    s.map {\n+      case '\"'  => \"\\\\\\\"\"\n+      case '\\\\' => \"\\\\\\\\\"\n+      case '/'  => \"\\\\/\"\n+      case '\\b' => \"\\\\b\"\n+      case '\\f' => \"\\\\f\"\n+      case '\\n' => \"\\\\n\"\n+      case '\\r' => \"\\\\r\"\n+      case '\\t' => \"\\\\t\"\n+      /* We'll unicode escape any control characters. These include:\n+       * 0x0 -> 0x1f  : ASCII Control (C0 Control Codes)\n+       * 0x7f         : ASCII DELETE\n+       * 0x80 -> 0x9f : C1 Control Codes\n+       *\n+       * Per RFC4627, section 2.5, we're not technically required to\n+       * encode the C1 codes, but we do to be safe.\n+       */\n+      case c if ((c >= '\\u0000' && c <= '\\u001f') || (c >= '\\u007f' && c <= '\\u009f')) => \"\\\\u%04x\".format(c: Int)\n+      case c => c\n+    }.mkString \n+  }\n }",
-                "raw_url": "https://github.com/apache/kafka/raw/592678e4d72151940002ffb1a367ec433b27f2ef/core/src/main/scala/kafka/utils/Utils.scala",
-                "sha": "6576adff9ede2e7283f1c602d861c98f7c2af9c3",
-                "status": "modified"
-            },
-            {
-                "additions": 26,
-                "blob_url": "https://github.com/apache/kafka/blob/592678e4d72151940002ffb1a367ec433b27f2ef/core/src/test/scala/unit/kafka/consumer/TopicFilterTest.scala",
-                "changes": 26,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/test/scala/unit/kafka/consumer/TopicFilterTest.scala?ref=592678e4d72151940002ffb1a367ec433b27f2ef",
-                "deletions": 0,
-                "filename": "core/src/test/scala/unit/kafka/consumer/TopicFilterTest.scala",
-                "patch": "@@ -43,6 +43,10 @@ class TopicFilterTest extends JUnitSuite {\n     val topicFilter3 = new Whitelist(\"white_listed-topic.+\")\n     assertTrue(topicFilter3.isTopicAllowed(\"white_listed-topic1\", excludeInternalTopics = true))\n     assertFalse(topicFilter3.isTopicAllowed(\"black1\", excludeInternalTopics = true))\n+\n+    val topicFilter4 = new Whitelist(\"test-(?!bad\\\\b)[\\\\w]+\")\n+    assertTrue(topicFilter4.isTopicAllowed(\"test-good\", excludeInternalTopics = true))\n+    assertFalse(topicFilter4.isTopicAllowed(\"test-bad\", excludeInternalTopics = true))    \n   }\n \n   @Test\n@@ -56,4 +60,26 @@ class TopicFilterTest extends JUnitSuite {\n     assertFalse(topicFilter1.isTopicAllowed(OffsetManager.OffsetsTopicName, excludeInternalTopics = true))\n     assertTrue(topicFilter1.isTopicAllowed(OffsetManager.OffsetsTopicName, excludeInternalTopics = false))\n   }\n+\n+  @Test\n+  def testWildcardTopicCountGetTopicCountMapEscapeJson() {\n+    def getTopicCountMapKey(regex: String): String = {\n+      val topicCount = new WildcardTopicCount(null, \"consumerId\", new Whitelist(regex), 1, true)\n+      topicCount.getTopicCountMap.head._1\n+    }\n+    //lets make sure that the JSON strings are escaping as we expect\n+    //if they are not then when they get saved to zookeeper and read back out they will be broken on parse\n+    assertEquals(\"-\\\\\\\"-\", getTopicCountMapKey(\"-\\\"-\"))\n+    assertEquals(\"-\\\\\\\\-\", getTopicCountMapKey(\"-\\\\-\"))\n+    assertEquals(\"-\\\\/-\", getTopicCountMapKey(\"-/-\"))\n+    assertEquals(\"-\\\\\\\\b-\", getTopicCountMapKey(\"-\\\\b-\"))\n+    assertEquals(\"-\\\\\\\\f-\", getTopicCountMapKey(\"-\\\\f-\"))\n+    assertEquals(\"-\\\\\\\\n-\", getTopicCountMapKey(\"-\\\\n-\"))\n+    assertEquals(\"-\\\\\\\\r-\", getTopicCountMapKey(\"-\\\\r-\"))\n+    assertEquals(\"-\\\\\\\\t-\", getTopicCountMapKey(\"-\\\\t-\"))\n+    assertEquals(\"-\\\\\\\\u0000-\", getTopicCountMapKey(\"-\\\\u0000-\"))\n+    assertEquals(\"-\\\\\\\\u001f-\", getTopicCountMapKey(\"-\\\\u001f-\"))\n+    assertEquals(\"-\\\\\\\\u007f-\", getTopicCountMapKey(\"-\\\\u007f-\"))\n+    assertEquals(\"-\\\\\\\\u009f-\", getTopicCountMapKey(\"-\\\\u009f-\"))\n+  }    \n }\n\\ No newline at end of file",
-                "raw_url": "https://github.com/apache/kafka/raw/592678e4d72151940002ffb1a367ec433b27f2ef/core/src/test/scala/unit/kafka/consumer/TopicFilterTest.scala",
-                "sha": "4f124af5c3e946045a78ad1519c37372a72c8985",
-                "status": "modified"
-            }
-        ],
-        "message": "KAFKA-1180 WhiteList topic filter gets a NullPointerException on complex Regex patch by Joe Stein, reviewed by Joel Koshy",
-        "parent": "https://github.com/apache/kafka/commit/fc0e03f79131746da81c05c12e056862c08d79d4",
-        "patched_files": [
-            "TopicCount.java",
-            "Utils.java"
-        ],
-        "repo": "kafka",
-        "unit_tests": [
-            "TopicFilterTest.java",
-            "TestUtils.java"
         ]
     },
     "kafka_5b6de9f": {
@@ -1898,70 +1533,31 @@
         "message": "KAFKA-8933; Fix NPE in DefaultMetadataUpdater after authentication failure (#7682)\n\nThis patch fixes an NPE in `DefaultMetadataUpdater` due to an inconsistency in event expectations. Whenever there is an authentication failure, we were treating it as a failed update even if was from a separate connection from an inflight metadata request. This patch fixes the problem by making the `MetadataUpdater` api clearer in terms of the events that are handled.\r\n\r\nReviewers: Stanislav Kozlovski <stanislav_kozlovski@outlook.com>, Rajini Sivaram <rajinisivaram@googlemail.com>",
         "parent": "https://github.com/apache/kafka/commit/95581f33f3f0a3dfb8769a2aa782cc11ffe1dccd",
         "patched_files": [
-            "AdminMetadataManager.java",
             "NetworkClient.java",
-            "ProducerMetadata.java",
-            "BrokerApiVersionsCommand.java",
-            "MetadataUpdater.java",
-            "ConsumerNetworkClient.java",
+            "Metadata.java",
+            "AdminMetadataManager.java",
             "KafkaConsumer.java",
-            "Fetcher.java",
-            "WorkerGroupMember.java",
             "MockSelector.java",
             "KafkaProducer.java",
-            "Metadata.java",
-            "ManualMetadataUpdater.java"
+            "WorkerGroupMember.java",
+            "Fetcher.java",
+            "BrokerApiVersionsCommand.scala",
+            "ManualMetadataUpdater.java",
+            "ConsumerNetworkClient.java",
+            "MetadataUpdater.java",
+            "ProducerMetadata.java"
         ],
         "repo": "kafka",
         "unit_tests": [
-            "ConsumerNetworkClientTest.java",
-            "KafkaConsumerTest.java",
-            "KafkaProducerTest.java",
-            "MetadataTest.java",
             "ProducerMetadataTest.java",
-            "FetcherTest.java",
-            "ClientAuthenticationFailureTest.java",
+            "AdminMetadataManagerTest.java",
+            "KafkaProducerTest.java",
             "NetworkClientTest.java",
-            "AdminMetadataManagerTest.java"
-        ]
-    },
-    "kafka_5d89365": {
-        "bug_id": "kafka_5d89365",
-        "commit": "https://github.com/apache/kafka/commit/5d893654489647e8be65c4d54864ab63b7285faa",
-        "file": [
-            {
-                "additions": 7,
-                "blob_url": "https://github.com/apache/kafka/blob/5d893654489647e8be65c4d54864ab63b7285faa/core/src/main/scala/kafka/server/ClientQuotaManager.scala",
-                "changes": 11,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/main/scala/kafka/server/ClientQuotaManager.scala?ref=5d893654489647e8be65c4d54864ab63b7285faa",
-                "deletions": 4,
-                "filename": "core/src/main/scala/kafka/server/ClientQuotaManager.scala",
-                "patch": "@@ -120,9 +120,9 @@ class ClientQuotaManager(private val config: ClientQuotaManagerConfig,\n         val clientMetric = metrics.metrics().get(clientRateMetricName(clientId))\n         throttleTimeMs = throttleTime(clientMetric, getQuotaMetricConfig(quota(clientId)))\n         clientSensors.throttleTimeSensor.record(throttleTimeMs)\n+        // If delayed, add the element to the delayQueue\n         delayQueue.add(new ThrottledResponse(time, throttleTimeMs, callback))\n         delayQueueSensor.record()\n-        // If delayed, add the element to the delayQueue\n         logger.debug(\"Quota violated for sensor (%s). Delay time: (%d)\".format(clientSensors.quotaSensor.name(), throttleTimeMs))\n     }\n     throttleTimeMs\n@@ -189,9 +189,9 @@ class ClientQuotaManager(private val config: ClientQuotaManagerConfig,\n     }\n \n     /* If the sensor is null, try to create it else return the created sensor\n-     * Also if quota sensor is null, the throttle time sensor must be null\n+     * Either of the sensors can be null, hence null checks on both\n      */\n-    if (quotaSensor == null) {\n+    if (quotaSensor == null || throttleTimeSensor == null) {\n       /* Acquire a write lock because the sensor may not have been created and we only want one thread to create it.\n        * Note that multiple threads may acquire the write lock if they all see a null sensor initially\n        * In this case, the writer checks the sensor after acquiring the lock again.\n@@ -204,7 +204,7 @@ class ClientQuotaManager(private val config: ClientQuotaManagerConfig,\n         // ensure that we initialise `ClientSensors` with non-null parameters.\n         quotaSensor = metrics.getSensor(quotaSensorName)\n         throttleTimeSensor = metrics.getSensor(throttleTimeSensorName)\n-        if (quotaSensor == null) {\n+        if (throttleTimeSensor == null) {\n           // create the throttle time sensor also. Use default metric config\n           throttleTimeSensor = metrics.sensor(throttleTimeSensorName,\n                                               null,\n@@ -214,7 +214,10 @@ class ClientQuotaManager(private val config: ClientQuotaManagerConfig,\n                                                 \"Tracking average throttle-time per client\",\n                                                 \"client-id\",\n                                                 clientId), new Avg())\n+        }\n+\n \n+        if (quotaSensor == null) {\n           quotaSensor = metrics.sensor(quotaSensorName,\n                                        getQuotaMetricConfig(quota(clientId)),\n                                        ClientQuotaManagerConfig.InactiveSensorExpirationTimeSeconds)",
-                "raw_url": "https://github.com/apache/kafka/raw/5d893654489647e8be65c4d54864ab63b7285faa/core/src/main/scala/kafka/server/ClientQuotaManager.scala",
-                "sha": "5863c72c037399725674fb18a8083c98100627db",
-                "status": "modified"
-            },
-            {
-                "additions": 47,
-                "blob_url": "https://github.com/apache/kafka/blob/5d893654489647e8be65c4d54864ab63b7285faa/core/src/test/scala/unit/kafka/server/ClientQuotaManagerTest.scala",
-                "changes": 52,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/test/scala/unit/kafka/server/ClientQuotaManagerTest.scala?ref=5d893654489647e8be65c4d54864ab63b7285faa",
-                "deletions": 5,
-                "filename": "core/src/test/scala/unit/kafka/server/ClientQuotaManagerTest.scala",
-                "patch": "@@ -18,7 +18,6 @@ package kafka.server\n \n import java.util.Collections\n \n-import org.apache.kafka.common.MetricName\n import org.apache.kafka.common.metrics.{MetricConfig, Metrics, Quota}\n import org.apache.kafka.common.utils.MockTime\n import org.junit.Assert.{assertEquals, assertTrue}\n@@ -44,8 +43,8 @@ class ClientQuotaManagerTest {\n     val clientMetrics = new ClientQuotaManager(config, newMetrics, \"producer\", time)\n \n     // Case 1: Update the quota. Assert that the new quota value is returned\n-    clientMetrics.updateQuota(\"p1\", new Quota(2000, true));\n-    clientMetrics.updateQuota(\"p2\", new Quota(4000, true));\n+    clientMetrics.updateQuota(\"p1\", new Quota(2000, true))\n+    clientMetrics.updateQuota(\"p2\", new Quota(4000, true))\n \n     try {\n       assertEquals(\"Default producer quota should be 500\", new Quota(500, true), clientMetrics.quota(\"random-client-id\"))\n@@ -58,14 +57,14 @@ class ClientQuotaManagerTest {\n \n       // Case 2: Change quota again. The quota should be updated within KafkaMetrics as well since the sensor was created.\n       // p1 should not longer be throttled after the quota change\n-      clientMetrics.updateQuota(\"p1\", new Quota(3000, true));\n+      clientMetrics.updateQuota(\"p1\", new Quota(3000, true))\n       assertEquals(\"Should return the newly overridden value (3000)\", new Quota(3000, true), clientMetrics.quota(\"p1\"))\n \n       throttleTimeMs = clientMetrics.recordAndMaybeThrottle(\"p1\", 0, this.callback)\n       assertEquals(s\"throttleTimeMs should be 0. was $throttleTimeMs\", 0, throttleTimeMs)\n \n       // Case 3: Change quota back to default. Should be throttled again\n-      clientMetrics.updateQuota(\"p1\", new Quota(500, true));\n+      clientMetrics.updateQuota(\"p1\", new Quota(500, true))\n       assertEquals(\"Should return the default value (500)\", new Quota(500, true), clientMetrics.quota(\"p1\"))\n \n       throttleTimeMs = clientMetrics.recordAndMaybeThrottle(\"p1\", 0, this.callback)\n@@ -123,6 +122,49 @@ class ClientQuotaManagerTest {\n     }\n   }\n \n+  @Test\n+  def testExpireThrottleTimeSensor() {\n+    val metrics = newMetrics\n+    val clientMetrics = new ClientQuotaManager(config, metrics, \"producer\", time)\n+    try {\n+      clientMetrics.recordAndMaybeThrottle(\"client1\", 100, callback)\n+      // remove the throttle time sensor\n+      metrics.removeSensor(\"producerThrottleTime-client1\")\n+      // should not throw an exception even if the throttle time sensor does not exist.\n+      val throttleTime = clientMetrics.recordAndMaybeThrottle(\"client1\", 10000, callback)\n+      assertTrue(\"Should be throttled\", throttleTime > 0)\n+      // the sensor should get recreated\n+      val throttleTimeSensor = metrics.getSensor(\"producerThrottleTime-client1\")\n+      assertTrue(\"Throttle time sensor should exist\", throttleTimeSensor != null)\n+    } finally {\n+      clientMetrics.shutdown()\n+    }\n+  }\n+\n+  @Test\n+  def testExpireQuotaSensors() {\n+    val metrics = newMetrics\n+    val clientMetrics = new ClientQuotaManager(config, metrics, \"producer\", time)\n+    try {\n+      clientMetrics.recordAndMaybeThrottle(\"client1\", 100, callback)\n+      // remove all the sensors\n+      metrics.removeSensor(\"producerThrottleTime-client1\")\n+      metrics.removeSensor(\"producer-client1\")\n+      // should not throw an exception\n+      val throttleTime = clientMetrics.recordAndMaybeThrottle(\"client1\", 10000, callback)\n+      assertTrue(\"Should be throttled\", throttleTime > 0)\n+\n+      // all the sensors should get recreated\n+      val throttleTimeSensor = metrics.getSensor(\"producerThrottleTime-client1\")\n+      assertTrue(\"Throttle time sensor should exist\", throttleTimeSensor != null)\n+\n+      val byteRateSensor = metrics.getSensor(\"producer-client1\")\n+      assertTrue(\"Byte rate sensor should exist\", byteRateSensor != null)\n+    } finally {\n+      clientMetrics.shutdown()\n+    }\n+  }\n+\n   def newMetrics: Metrics = {\n     new Metrics(new MetricConfig(), Collections.emptyList(), time)\n   }",
-                "raw_url": "https://github.com/apache/kafka/raw/5d893654489647e8be65c4d54864ab63b7285faa/core/src/test/scala/unit/kafka/server/ClientQuotaManagerTest.scala",
-                "sha": "193acfd2bb77159bf504f322e48f9c74772b8c33",
-                "status": "modified"
-            }
-        ],
-        "message": "KAFKA-3310; Fix for NPEs observed when throttling clients.\n\nThe fix basically ensures that the throttleTimeSensor is non-null before handing off to record the metric value. We also record the throttle time to 0 so that we don't recreate the sensor always.\n\nAuthor: Aditya Auradkar <aauradkar@linkedin.com>\n\nReviewers: Jiangjie Qin <becket.qin@gmail.com>, Jun Rao <junrao@gmail.com>\n\nCloses #989 from auradkar/KAFKA-3310",
-        "parent": "https://github.com/apache/kafka/commit/f25fe02d994a663b6a5a0d01ea290785d63e1e52",
-        "patched_files": [
-            "ClientQuotaManager.java"
-        ],
-        "repo": "kafka",
-        "unit_tests": [
-            "ClientQuotaManagerTest.java"
+            "ClientAuthenticationFailureTest.java",
+            "KafkaConsumerTest.java",
+            "MetadataTest.java",
+            "ConsumerNetworkClientTest.java",
+            "FetcherTest.java"
         ]
     },
     "kafka_5e277e5": {
@@ -2001,8 +1597,8 @@
         ],
         "repo": "kafka",
         "unit_tests": [
-            "JaasContextTest.java",
-            "TestJaasConfig.java"
+            "TestJaasConfig.java",
+            "JaasContextTest.java"
         ]
     },
     "kafka_5ecac84": {
@@ -2044,188 +1640,6 @@
             "TableProcessorNodeTest.java"
         ]
     },
-    "kafka_6021618": {
-        "bug_id": "kafka_6021618",
-        "commit": "https://github.com/apache/kafka/commit/6021618f9dafa3478104575d307e7bcd2cb4cca9",
-        "file": [
-            {
-                "additions": 3,
-                "blob_url": "https://github.com/apache/kafka/blob/6021618f9dafa3478104575d307e7bcd2cb4cca9/core/src/main/scala/kafka/controller/ControllerChannelManager.scala",
-                "changes": 4,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/main/scala/kafka/controller/ControllerChannelManager.scala?ref=6021618f9dafa3478104575d307e7bcd2cb4cca9",
-                "deletions": 1,
-                "filename": "core/src/main/scala/kafka/controller/ControllerChannelManager.scala",
-                "patch": "@@ -381,7 +381,9 @@ class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging\n     try {\n       leaderAndIsrRequestMap.foreach { case (broker, partitionStateInfos) =>\n         partitionStateInfos.foreach { case (topicPartition, state) =>\n-          val typeOfRequest = if (broker == state.leaderIsrAndControllerEpoch.leaderAndIsr.leader) \"become-leader\" else \"become-follower\"\n+          val typeOfRequest =\n+            if (broker == state.leaderIsrAndControllerEpoch.leaderAndIsr.leader) \"become-leader\"\n+            else \"become-follower\"\n           stateChangeLogger.trace((\"Controller %d epoch %d sending %s LeaderAndIsr request %s to broker %d \" +\n                                    \"for partition [%s,%d]\").format(controllerId, controllerEpoch, typeOfRequest,\n                                                                    state.leaderIsrAndControllerEpoch, broker,",
-                "raw_url": "https://github.com/apache/kafka/raw/6021618f9dafa3478104575d307e7bcd2cb4cca9/core/src/main/scala/kafka/controller/ControllerChannelManager.scala",
-                "sha": "8f98a8c26c246cf92c88db2bd1abf6a8125b66cb",
-                "status": "modified"
-            },
-            {
-                "additions": 50,
-                "blob_url": "https://github.com/apache/kafka/blob/6021618f9dafa3478104575d307e7bcd2cb4cca9/core/src/main/scala/kafka/controller/KafkaController.scala",
-                "changes": 113,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/main/scala/kafka/controller/KafkaController.scala?ref=6021618f9dafa3478104575d307e7bcd2cb4cca9",
-                "deletions": 63,
-                "filename": "core/src/main/scala/kafka/controller/KafkaController.scala",
-                "patch": "@@ -146,18 +146,20 @@ object KafkaController extends Logging {\n   }\n }\n \n-class KafkaController(val config: KafkaConfig, zkUtils: ZkUtils, val brokerState: BrokerState, time: Time, metrics: Metrics, threadNamePrefix: Option[String] = None) extends Logging with KafkaMetricsGroup {\n+class KafkaController(val config: KafkaConfig, zkUtils: ZkUtils, time: Time, metrics: Metrics, threadNamePrefix: Option[String] = None) extends Logging with KafkaMetricsGroup {\n   this.logIdent = \"[Controller \" + config.brokerId + \"]: \"\n   private val stateChangeLogger = KafkaController.stateChangeLogger\n   val controllerContext = new ControllerContext(zkUtils)\n   val partitionStateMachine = new PartitionStateMachine(this)\n   val replicaStateMachine = new ReplicaStateMachine(this)\n \n-  // have a separate scheduler for the controller to be able to start and stop independently of the\n-  // kafka server\n-  private val kafkaScheduler = new KafkaScheduler(1)\n+  // have a separate scheduler for the controller to be able to start and stop independently of the kafka server\n+  // visible for testing\n+  private[controller] val kafkaScheduler = new KafkaScheduler(1)\n \n-  private val eventManager = new ControllerEventManager(controllerContext.stats.rateAndTimeMetrics, _ => updateMetrics())\n+  // visible for testing\n+  private[controller] val eventManager = new ControllerEventManager(controllerContext.stats.rateAndTimeMetrics,\n+    _ => updateMetrics())\n \n   val topicDeletionManager = new TopicDeletionManager(this, eventManager)\n   val offlinePartitionSelector = new OfflinePartitionLeaderSelector(controllerContext, config)\n@@ -290,7 +292,6 @@ class KafkaController(val config: KafkaConfig, zkUtils: ZkUtils, val brokerState\n   /**\n    * This callback is invoked by the zookeeper leader elector when the current broker resigns as the controller. This is\n    * required to clean up internal controller data structures\n-   * Note:We need to resign as a controller out of the controller lock to avoid potential deadlock issue\n    */\n   def onControllerResignation() {\n     debug(\"Controller resigning, broker id %d\".format(config.brokerId))\n@@ -318,9 +319,7 @@ class KafkaController(val config: KafkaConfig, zkUtils: ZkUtils, val brokerState\n     replicaStateMachine.shutdown()\n     deregisterBrokerChangeListener()\n \n-    // reset controller context\n     resetControllerContext()\n-    brokerState.newState(RunningAsBroker)\n \n     info(\"Broker %d resigned as the controller\".format(config.brokerId))\n   }\n@@ -746,18 +745,15 @@ class KafkaController(val config: KafkaConfig, zkUtils: ZkUtils, val brokerState\n   }\n \n   def updateLeaderAndIsrCache(topicAndPartitions: Set[TopicAndPartition] = controllerContext.partitionReplicaAssignment.keySet) {\n-    val leaderAndIsrInfo = zkUtils.getPartitionLeaderAndIsrForTopics(zkUtils.zkClient, topicAndPartitions)\n-    for((topicPartition, leaderIsrAndControllerEpoch) <- leaderAndIsrInfo)\n+    val leaderAndIsrInfo = zkUtils.getPartitionLeaderAndIsrForTopics(topicAndPartitions)\n+    for ((topicPartition, leaderIsrAndControllerEpoch) <- leaderAndIsrInfo)\n       controllerContext.partitionLeadershipInfo.put(topicPartition, leaderIsrAndControllerEpoch)\n   }\n \n   private def areReplicasInIsr(topic: String, partition: Int, replicas: Seq[Int]): Boolean = {\n-    zkUtils.getLeaderAndIsrForPartition(topic, partition) match {\n-      case Some(leaderAndIsr) =>\n-        val replicasNotInIsr = replicas.filterNot(r => leaderAndIsr.isr.contains(r))\n-        replicasNotInIsr.isEmpty\n-      case None => false\n-    }\n+    zkUtils.getLeaderAndIsrForPartition(topic, partition).map { leaderAndIsr =>\n+      replicas.forall(leaderAndIsr.isr.contains)\n+    }.getOrElse(false)\n   }\n \n   private def moveReassignedPartitionLeaderIfRequired(topicAndPartition: TopicAndPartition,\n@@ -824,22 +820,16 @@ class KafkaController(val config: KafkaConfig, zkUtils: ZkUtils, val brokerState\n   }\n \n   private def updateLeaderEpochAndSendRequest(topicAndPartition: TopicAndPartition, replicasToReceiveRequest: Seq[Int], newAssignedReplicas: Seq[Int]) {\n-    brokerRequestBatch.newBatch()\n     updateLeaderEpoch(topicAndPartition.topic, topicAndPartition.partition) match {\n       case Some(updatedLeaderIsrAndControllerEpoch) =>\n         try {\n+          brokerRequestBatch.newBatch()\n           brokerRequestBatch.addLeaderAndIsrRequestForBrokers(replicasToReceiveRequest, topicAndPartition.topic,\n             topicAndPartition.partition, updatedLeaderIsrAndControllerEpoch, newAssignedReplicas)\n           brokerRequestBatch.sendRequestsToBrokers(controllerContext.epoch)\n         } catch {\n-          case e : IllegalStateException => {\n-            // Resign if the controller is in an illegal state\n-            error(\"Forcing the controller to resign\")\n-            brokerRequestBatch.clear()\n-            triggerControllerMove()\n-\n-            throw e\n-          }\n+          case e: IllegalStateException =>\n+            handleIllegalState(e)\n         }\n         stateChangeLogger.trace((\"Controller %d epoch %d sent LeaderAndIsr request %s with new assigned replica list %s \" +\n           \"to leader %d for partition being reassigned %s\").format(config.brokerId, controllerContext.epoch, updatedLeaderIsrAndControllerEpoch,\n@@ -986,14 +976,8 @@ class KafkaController(val config: KafkaConfig, zkUtils: ZkUtils, val brokerState\n       brokerRequestBatch.addUpdateMetadataRequestForBrokers(brokers, partitions)\n       brokerRequestBatch.sendRequestsToBrokers(epoch)\n     } catch {\n-      case e : IllegalStateException => {\n-        // Resign if the controller is in an illegal state\n-        error(\"Forcing the controller to resign\")\n-        brokerRequestBatch.clear()\n-        triggerControllerMove()\n-\n-        throw e\n-      }\n+      case e: IllegalStateException =>\n+        handleIllegalState(e)\n     }\n   }\n \n@@ -1425,39 +1409,32 @@ class KafkaController(val config: KafkaConfig, zkUtils: ZkUtils, val brokerState\n           controllerContext.partitionsOnBroker(id)\n             .map(topicAndPartition => (topicAndPartition, controllerContext.partitionReplicaAssignment(topicAndPartition).size))\n \n-      allPartitionsAndReplicationFactorOnBroker.foreach {\n-        case(topicAndPartition, replicationFactor) =>\n-          controllerContext.partitionLeadershipInfo.get(topicAndPartition).foreach { currLeaderIsrAndControllerEpoch =>\n-            if (replicationFactor > 1) {\n-              if (currLeaderIsrAndControllerEpoch.leaderAndIsr.leader == id) {\n-                // If the broker leads the topic partition, transition the leader and update isr. Updates zk and\n-                // notifies all affected brokers\n-                partitionStateMachine.handleStateChanges(Set(topicAndPartition), OnlinePartition,\n-                  controlledShutdownPartitionLeaderSelector)\n-              } else {\n-                // Stop the replica first. The state change below initiates ZK changes which should take some time\n-                // before which the stop replica request should be completed (in most cases)\n-                try {\n-                  brokerRequestBatch.newBatch()\n-                  brokerRequestBatch.addStopReplicaRequestForBrokers(Seq(id), topicAndPartition.topic,\n-                    topicAndPartition.partition, deletePartition = false)\n-                  brokerRequestBatch.sendRequestsToBrokers(epoch)\n-                } catch {\n-                  case e : IllegalStateException => {\n-                    // Resign if the controller is in an illegal state\n-                    error(\"Forcing the controller to resign\")\n-                    brokerRequestBatch.clear()\n-                    triggerControllerMove()\n-\n-                    throw e\n-                  }\n-                }\n-                // If the broker is a follower, updates the isr in ZK and notifies the current leader\n-                replicaStateMachine.handleStateChanges(Set(PartitionAndReplica(topicAndPartition.topic,\n-                  topicAndPartition.partition, id)), OfflineReplica)\n+      allPartitionsAndReplicationFactorOnBroker.foreach { case (topicAndPartition, replicationFactor) =>\n+        controllerContext.partitionLeadershipInfo.get(topicAndPartition).foreach { currLeaderIsrAndControllerEpoch =>\n+          if (replicationFactor > 1) {\n+            if (currLeaderIsrAndControllerEpoch.leaderAndIsr.leader == id) {\n+              // If the broker leads the topic partition, transition the leader and update isr. Updates zk and\n+              // notifies all affected brokers\n+              partitionStateMachine.handleStateChanges(Set(topicAndPartition), OnlinePartition,\n+                controlledShutdownPartitionLeaderSelector)\n+            } else {\n+              // Stop the replica first. The state change below initiates ZK changes which should take some time\n+              // before which the stop replica request should be completed (in most cases)\n+              try {\n+                brokerRequestBatch.newBatch()\n+                brokerRequestBatch.addStopReplicaRequestForBrokers(Seq(id), topicAndPartition.topic,\n+                  topicAndPartition.partition, deletePartition = false)\n+                brokerRequestBatch.sendRequestsToBrokers(epoch)\n+              } catch {\n+                case e: IllegalStateException =>\n+                  handleIllegalState(e)\n               }\n+              // If the broker is a follower, updates the isr in ZK and notifies the current leader\n+              replicaStateMachine.handleStateChanges(Set(PartitionAndReplica(topicAndPartition.topic,\n+                topicAndPartition.partition, id)), OfflineReplica)\n             }\n           }\n+        }\n       }\n       def replicatedPartitionsBrokerLeads() = {\n         trace(\"All leaders = \" + controllerContext.partitionLeadershipInfo.mkString(\",\"))\n@@ -1557,7 +1534,17 @@ class KafkaController(val config: KafkaConfig, zkUtils: ZkUtils, val brokerState\n       }\n   }\n \n+  // visible for testing\n+  private[controller] def handleIllegalState(e: IllegalStateException): Nothing = {\n+    // Resign if the controller is in an illegal state\n+    error(\"Forcing the controller to resign\")\n+    brokerRequestBatch.clear()\n+    triggerControllerMove()\n+    throw e\n+  }\n+\n   private def triggerControllerMove(): Unit = {\n+    onControllerResignation()\n     activeControllerId = -1\n     controllerContext.zkUtils.deletePath(ZkUtils.ControllerPath)\n   }",
-                "raw_url": "https://github.com/apache/kafka/raw/6021618f9dafa3478104575d307e7bcd2cb4cca9/core/src/main/scala/kafka/controller/KafkaController.scala",
-                "sha": "956d1caba126464a30371de3df62353bfc65c9bf",
-                "status": "modified"
-            },
-            {
-                "additions": 3,
-                "blob_url": "https://github.com/apache/kafka/blob/6021618f9dafa3478104575d307e7bcd2cb4cca9/core/src/main/scala/kafka/controller/PartitionStateMachine.scala",
-                "changes": 6,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/main/scala/kafka/controller/PartitionStateMachine.scala?ref=6021618f9dafa3478104575d307e7bcd2cb4cca9",
-                "deletions": 3,
-                "filename": "core/src/main/scala/kafka/controller/PartitionStateMachine.scala",
-                "patch": "@@ -79,9 +79,9 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {\n       brokerRequestBatch.newBatch()\n       // try to move all partitions in NewPartition or OfflinePartition state to OnlinePartition state except partitions\n       // that belong to topics to be deleted\n-      for((topicAndPartition, partitionState) <- partitionState\n+      for ((topicAndPartition, partitionState) <- partitionState\n           if !controller.topicDeletionManager.isTopicQueuedUpForDeletion(topicAndPartition.topic)) {\n-        if(partitionState.equals(OfflinePartition) || partitionState.equals(NewPartition))\n+        if (partitionState.equals(OfflinePartition) || partitionState.equals(NewPartition))\n           handleStateChange(topicAndPartition.topic, topicAndPartition.partition, OnlinePartition, controller.offlinePartitionSelector,\n                             (new CallbackBuilder).build)\n       }\n@@ -111,7 +111,7 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {\n         handleStateChange(topicAndPartition.topic, topicAndPartition.partition, targetState, leaderSelector, callbacks)\n       }\n       brokerRequestBatch.sendRequestsToBrokers(controller.epoch)\n-    }catch {\n+    } catch {\n       case e: Throwable => error(\"Error while moving some partitions to %s state\".format(targetState), e)\n       // TODO: It is not enough to bail out and log an error, it is important to trigger state changes for those partitions\n     }",
-                "raw_url": "https://github.com/apache/kafka/raw/6021618f9dafa3478104575d307e7bcd2cb4cca9/core/src/main/scala/kafka/controller/PartitionStateMachine.scala",
-                "sha": "5751e17de0c05b987b5baed76f1707afec51b699",
-                "status": "modified"
-            },
-            {
-                "additions": 2,
-                "blob_url": "https://github.com/apache/kafka/blob/6021618f9dafa3478104575d307e7bcd2cb4cca9/core/src/main/scala/kafka/controller/ReplicaStateMachine.scala",
-                "changes": 4,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/main/scala/kafka/controller/ReplicaStateMachine.scala?ref=6021618f9dafa3478104575d307e7bcd2cb4cca9",
-                "deletions": 2,
-                "filename": "core/src/main/scala/kafka/controller/ReplicaStateMachine.scala",
-                "patch": "@@ -81,13 +81,13 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {\n    */\n   def handleStateChanges(replicas: Set[PartitionAndReplica], targetState: ReplicaState,\n                          callbacks: Callbacks = (new CallbackBuilder).build) {\n-    if(replicas.nonEmpty) {\n+    if (replicas.nonEmpty) {\n       info(\"Invoking state change to %s for replicas %s\".format(targetState, replicas.mkString(\",\")))\n       try {\n         brokerRequestBatch.newBatch()\n         replicas.foreach(r => handleStateChange(r, targetState, callbacks))\n         brokerRequestBatch.sendRequestsToBrokers(controller.epoch)\n-      }catch {\n+      } catch {\n         case e: Throwable => error(\"Error while moving some replicas to %s state\".format(targetState), e)\n       }\n     }",
-                "raw_url": "https://github.com/apache/kafka/raw/6021618f9dafa3478104575d307e7bcd2cb4cca9/core/src/main/scala/kafka/controller/ReplicaStateMachine.scala",
-                "sha": "60b99908d5635543e5b986b85539856731d195e0",
-                "status": "modified"
-            },
-            {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/kafka/blob/6021618f9dafa3478104575d307e7bcd2cb4cca9/core/src/main/scala/kafka/server/KafkaServer.scala",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/main/scala/kafka/server/KafkaServer.scala?ref=6021618f9dafa3478104575d307e7bcd2cb4cca9",
-                "deletions": 1,
-                "filename": "core/src/main/scala/kafka/server/KafkaServer.scala",
-                "patch": "@@ -226,7 +226,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP\n         replicaManager.startup()\n \n         /* start kafka controller */\n-        kafkaController = new KafkaController(config, zkUtils, brokerState, time, metrics, threadNamePrefix)\n+        kafkaController = new KafkaController(config, zkUtils, time, metrics, threadNamePrefix)\n         kafkaController.startup()\n \n         adminManager = new AdminManager(config, metrics, metadataCache, zkUtils)",
-                "raw_url": "https://github.com/apache/kafka/raw/6021618f9dafa3478104575d307e7bcd2cb4cca9/core/src/main/scala/kafka/server/KafkaServer.scala",
-                "sha": "0a87750d9495b3365d1e8cad4f21aef4f2c8fed4",
-                "status": "modified"
-            },
-            {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/kafka/blob/6021618f9dafa3478104575d307e7bcd2cb4cca9/core/src/main/scala/kafka/utils/ZkUtils.scala",
-                "changes": 3,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/main/scala/kafka/utils/ZkUtils.scala?ref=6021618f9dafa3478104575d307e7bcd2cb4cca9",
-                "deletions": 2,
-                "filename": "core/src/main/scala/kafka/utils/ZkUtils.scala",
-                "patch": "@@ -701,8 +701,7 @@ class ZkUtils(val zkClient: ZkClient,\n     cluster\n   }\n \n-  def getPartitionLeaderAndIsrForTopics(zkClient: ZkClient, topicAndPartitions: Set[TopicAndPartition])\n-  : mutable.Map[TopicAndPartition, LeaderIsrAndControllerEpoch] = {\n+  def getPartitionLeaderAndIsrForTopics(topicAndPartitions: Set[TopicAndPartition]): mutable.Map[TopicAndPartition, LeaderIsrAndControllerEpoch] = {\n     val ret = new mutable.HashMap[TopicAndPartition, LeaderIsrAndControllerEpoch]\n     for(topicAndPartition <- topicAndPartitions) {\n       ReplicationUtils.getLeaderIsrAndEpochForPartition(this, topicAndPartition.topic, topicAndPartition.partition) match {",
-                "raw_url": "https://github.com/apache/kafka/raw/6021618f9dafa3478104575d307e7bcd2cb4cca9/core/src/main/scala/kafka/utils/ZkUtils.scala",
-                "sha": "ac497c4eb9139d68d8f4b3ab2ed94f56ad050571",
-                "status": "modified"
-            },
-            {
-                "additions": 3,
-                "blob_url": "https://github.com/apache/kafka/blob/6021618f9dafa3478104575d307e7bcd2cb4cca9/core/src/test/scala/unit/kafka/controller/ControllerEventManagerTest.scala",
-                "changes": 15,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/test/scala/unit/kafka/controller/ControllerEventManagerTest.scala?ref=6021618f9dafa3478104575d307e7bcd2cb4cca9",
-                "deletions": 12,
-                "filename": "core/src/test/scala/unit/kafka/controller/ControllerEventManagerTest.scala",
-                "patch": "@@ -23,7 +23,6 @@ import java.util.concurrent.atomic.AtomicInteger\n import com.yammer.metrics.Metrics\n import com.yammer.metrics.core.Timer\n import kafka.utils.TestUtils\n-import org.easymock.{EasyMock, IAnswer}\n import org.junit.{After, Test}\n import org.junit.Assert.{assertEquals, fail}\n \n@@ -60,21 +59,13 @@ class ControllerEventManagerTest {\n \n     val initialTimerCount = timer(metricName).count\n \n-    // `ControllerEvent` is sealed so we use EasyMock to create a subclass\n-    val eventMock = EasyMock.createMock(classOf[ControllerEvent])\n-    EasyMock.expect(eventMock.state).andReturn(controllerState)\n-\n     // Only return from `process()` once we have checked `controllerEventManager.state`\n     val latch = new CountDownLatch(1)\n-    EasyMock.expect(eventMock.process()).andAnswer(new IAnswer[Unit]() {\n-      def answer(): Unit = {\n-        latch.await()\n-        process()\n-      }\n+    val eventMock = ControllerTestUtils.createMockControllerEvent(controllerState, { () =>\n+      latch.await()\n+      process()\n     })\n \n-    EasyMock.replay(eventMock)\n-\n     controllerEventManager.put(eventMock)\n     TestUtils.waitUntilTrue(() => controllerEventManager.state == controllerState,\n       s\"Controller state is not $controllerState\")",
-                "raw_url": "https://github.com/apache/kafka/raw/6021618f9dafa3478104575d307e7bcd2cb4cca9/core/src/test/scala/unit/kafka/controller/ControllerEventManagerTest.scala",
-                "sha": "ec9343e042560242b61453e2f97dd04c1b7d1632",
-                "status": "modified"
-            },
-            {
-                "additions": 36,
-                "blob_url": "https://github.com/apache/kafka/blob/6021618f9dafa3478104575d307e7bcd2cb4cca9/core/src/test/scala/unit/kafka/controller/ControllerFailoverTest.scala",
-                "changes": 148,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/test/scala/unit/kafka/controller/ControllerFailoverTest.scala?ref=6021618f9dafa3478104575d307e7bcd2cb4cca9",
-                "deletions": 112,
-                "filename": "core/src/test/scala/unit/kafka/controller/ControllerFailoverTest.scala",
-                "patch": "@@ -18,18 +18,17 @@\n package kafka.controller\n \n import java.util.Properties\n-import java.util.concurrent.LinkedBlockingQueue\n+import java.util.concurrent.CountDownLatch\n \n+import kafka.admin.AdminUtils\n import kafka.common.TopicAndPartition\n import kafka.integration.KafkaServerTestHarness\n-import kafka.server.{KafkaConfig, KafkaServer}\n+import kafka.server.KafkaConfig\n import kafka.utils._\n import org.apache.kafka.common.metrics.Metrics\n-import org.apache.kafka.common.utils.Time\n-import org.apache.log4j.{Level, Logger}\n-import org.junit.{After, Ignore, Test}\n-\n-import scala.collection.mutable\n+import org.apache.log4j.Logger\n+import org.junit.{After, Test}\n+import org.junit.Assert._\n \n class ControllerFailoverTest extends KafkaServerTestHarness with Logging {\n   val log = Logger.getLogger(classOf[ControllerFailoverTest])\n@@ -54,119 +53,44 @@ class ControllerFailoverTest extends KafkaServerTestHarness with Logging {\n    * See @link{https://issues.apache.org/jira/browse/KAFKA-2300}\n    * for the background of this test case\n    */\n-  @Ignore // This needs to be reworked as described here: https://github.com/apache/kafka/pull/2935#discussion_r114374412\n   @Test\n-  def testMetadataUpdate() {\n-    log.setLevel(Level.INFO)\n-    var controller: KafkaServer = this.servers.head\n-    // Find the current controller\n-    val epochMap: mutable.Map[Int, Int] = mutable.Map.empty\n-    for (server <- this.servers) {\n-      epochMap += (server.config.brokerId -> server.kafkaController.epoch)\n-      if(server.kafkaController.isActive) {\n-        controller = server\n-      }\n+  def testHandleIllegalStateException() {\n+    val initialController = servers.find(_.kafkaController.isActive).map(_.kafkaController).getOrElse {\n+      fail(\"Could not find controller\")\n     }\n+    val initialEpoch = initialController.epoch\n     // Create topic with one partition\n-    kafka.admin.AdminUtils.createTopic(controller.zkUtils, topic, 1, 1)\n+    AdminUtils.createTopic(servers.head.zkUtils, topic, 1, 1)\n     val topicPartition = TopicAndPartition(\"topic1\", 0)\n-    var partitions = controller.kafkaController.partitionStateMachine.partitionsInState(OnlinePartition)\n-    while (!partitions.contains(topicPartition)) {\n-      partitions = controller.kafkaController.partitionStateMachine.partitionsInState(OnlinePartition)\n-      Thread.sleep(100)\n-    }\n-    // Replace channel manager with our mock manager\n-    controller.kafkaController.controllerContext.controllerChannelManager.shutdown()\n-    val channelManager = new MockChannelManager(controller.kafkaController.controllerContext, \n-                                                  controller.kafkaController.config, metrics)\n-    channelManager.startup()\n-    controller.kafkaController.controllerContext.controllerChannelManager = channelManager\n-    channelManager.shrinkBlockingQueue(0)\n-    channelManager.stopSendThread(0)\n-    // Spawn a new thread to block on the outgoing channel\n-    // queue\n-    val thread = new Thread(new Runnable {\n-      def run() {\n-        try {\n-          controller.kafkaController.sendUpdateMetadataRequest(Seq(0), Set(topicPartition))\n-          log.info(\"Queue state %d %d\".format(channelManager.queueCapacity(0), channelManager.queueSize(0)))\n-          controller.kafkaController.sendUpdateMetadataRequest(Seq(0), Set(topicPartition))\n-          log.info(\"Queue state %d %d\".format(channelManager.queueCapacity(0), channelManager.queueSize(0)))\n-        } catch {\n-          case _: Exception => log.info(\"Thread interrupted\")\n-        }\n+    TestUtils.waitUntilTrue(() =>\n+      initialController.partitionStateMachine.partitionsInState(OnlinePartition).contains(topicPartition),\n+      s\"Partition $topicPartition did not transition to online state\")\n+\n+    // Wait until we have verified that we have resigned\n+    val latch = new CountDownLatch(1)\n+    @volatile var expectedExceptionThrown = false\n+    @volatile var unexpectedExceptionThrown: Option[Throwable] = None\n+    val illegalStateEvent = ControllerTestUtils.createMockControllerEvent(ControllerState.BrokerChange, { () =>\n+      try initialController.handleIllegalState(new IllegalStateException(\"Thrown for test purposes\"))\n+      catch {\n+        case _: IllegalStateException => expectedExceptionThrown = true\n+        case t: Throwable => unexpectedExceptionThrown = Some(t)\n       }\n+      latch.await()\n     })\n-    thread.setName(\"mythread\")\n-    thread.start()\n-    while (thread.getState() != Thread.State.WAITING) {\n-      Thread.sleep(100)\n-    }\n-    // Assume that the thread is WAITING because it is\n-    // blocked on the queue, so interrupt and move forward\n-    thread.interrupt()\n-    thread.join()\n-    channelManager.resumeSendThread(0)\n-    // Wait and find current controller\n-    var found = false\n-    var counter = 0\n-    while (!found && counter < 10) {\n-      for (server <- this.servers) {\n-        val previousEpoch = epochMap get server.config.brokerId match {\n-          case Some(epoch) =>\n-            epoch\n-          case None =>\n-            val msg = String.format(\"Missing element in epoch map %s\", epochMap.mkString(\", \"))\n-            throw new IllegalStateException(msg)\n-        }\n+    initialController.eventManager.put(illegalStateEvent)\n+    // Check that we have shutdown the scheduler (via onControllerResigned)\n+    TestUtils.waitUntilTrue(() => !initialController.kafkaScheduler.isStarted, \"Scheduler was not shutdown\")\n+    TestUtils.waitUntilTrue(() => !initialController.isActive, \"Controller did not become inactive\")\n+    latch.countDown()\n+    assertTrue(\"IllegalStateException was not thrown\", expectedExceptionThrown)\n+    assertEquals(\"Unexpected exception thrown\", None, unexpectedExceptionThrown)\n \n-        if (server.kafkaController.isActive\n-            && previousEpoch < server.kafkaController.epoch) {\n-          controller = server\n-          found = true\n-        }\n+    TestUtils.waitUntilTrue(() => {\n+      servers.exists { server =>\n+        server.kafkaController.isActive && server.kafkaController.epoch > initialController.epoch\n       }\n-      if (!found) {\n-          Thread.sleep(100)\n-          counter += 1\n-      }\n-    }\n-    // Give it a shot to make sure that sending isn't blocking\n-    try {\n-      controller.kafkaController.sendUpdateMetadataRequest(Seq(0), Set(topicPartition))\n-    } catch {\n-      case e : Throwable => {\n-        fail(e)\n-      }\n-    }\n-  }\n-}\n-\n-class MockChannelManager(private val controllerContext: ControllerContext, config: KafkaConfig, metrics: Metrics)\n-  extends ControllerChannelManager(controllerContext, config, Time.SYSTEM, metrics) {\n-\n-  def stopSendThread(brokerId: Int) {\n-    val requestThread = brokerStateInfo(brokerId).requestSendThread\n-    requestThread.isRunning.set(false)\n-    requestThread.interrupt\n-    requestThread.join\n-  }\n-\n-  def shrinkBlockingQueue(brokerId: Int) {\n-    val messageQueue = new LinkedBlockingQueue[QueueItem](1)\n-    val brokerInfo = this.brokerStateInfo(brokerId)\n-    this.brokerStateInfo.put(brokerId, brokerInfo.copy(messageQueue = messageQueue))\n-  }\n-\n-  def resumeSendThread (brokerId: Int) {\n-    this.startRequestSendThread(0)\n-  }\n-\n-  def queueCapacity(brokerId: Int): Int = {\n-    this.brokerStateInfo(brokerId).messageQueue.remainingCapacity\n-  }\n+    }, \"Failed to find controller\")\n \n-  def queueSize(brokerId: Int): Int = {\n-    this.brokerStateInfo(brokerId).messageQueue.size\n   }\n }",
-                "raw_url": "https://github.com/apache/kafka/raw/6021618f9dafa3478104575d307e7bcd2cb4cca9/core/src/test/scala/unit/kafka/controller/ControllerFailoverTest.scala",
-                "sha": "7a91bef570d788fd32bdfb23ad72c4bf1ee15556",
-                "status": "modified"
-            },
-            {
-                "additions": 3,
-                "blob_url": "https://github.com/apache/kafka/blob/6021618f9dafa3478104575d307e7bcd2cb4cca9/core/src/test/scala/unit/kafka/controller/ControllerIntegrationTest.scala",
-                "changes": 6,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/test/scala/unit/kafka/controller/ControllerIntegrationTest.scala?ref=6021618f9dafa3478104575d307e7bcd2cb4cca9",
-                "deletions": 3,
-                "filename": "core/src/test/scala/unit/kafka/controller/ControllerIntegrationTest.scala",
-                "patch": "@@ -264,7 +264,7 @@ class ControllerIntegrationTest extends ZooKeeperTestHarness {\n     servers(otherBrokerId).shutdown()\n     servers(otherBrokerId).awaitShutdown()\n     TestUtils.waitUntilTrue(() => {\n-      val leaderIsrAndControllerEpochMap = zkUtils.getPartitionLeaderAndIsrForTopics(null, Set(tp))\n+      val leaderIsrAndControllerEpochMap = zkUtils.getPartitionLeaderAndIsrForTopics(Set(tp))\n       leaderIsrAndControllerEpochMap.contains(tp) &&\n         isExpectedPartitionState(leaderIsrAndControllerEpochMap(tp), KafkaController.InitialControllerEpoch, LeaderAndIsr.NoLeader, LeaderAndIsr.initialLeaderEpoch + 1) &&\n         leaderIsrAndControllerEpochMap(tp).leaderAndIsr.isr == List(otherBrokerId)\n@@ -284,7 +284,7 @@ class ControllerIntegrationTest extends ZooKeeperTestHarness {\n     servers(1).shutdown()\n     servers(1).awaitShutdown()\n     TestUtils.waitUntilTrue(() => {\n-      val leaderIsrAndControllerEpochMap = zkUtils.getPartitionLeaderAndIsrForTopics(null, Set(tp))\n+      val leaderIsrAndControllerEpochMap = zkUtils.getPartitionLeaderAndIsrForTopics(Set(tp))\n       leaderIsrAndControllerEpochMap.contains(tp) &&\n         isExpectedPartitionState(leaderIsrAndControllerEpochMap(tp), KafkaController.InitialControllerEpoch, LeaderAndIsr.NoLeader, LeaderAndIsr.initialLeaderEpoch + 1) &&\n         leaderIsrAndControllerEpochMap(tp).leaderAndIsr.isr == List.empty\n@@ -301,7 +301,7 @@ class ControllerIntegrationTest extends ZooKeeperTestHarness {\n                                     leaderEpoch: Int,\n                                     message: String): Unit = {\n     TestUtils.waitUntilTrue(() => {\n-      val leaderIsrAndControllerEpochMap = zkUtils.getPartitionLeaderAndIsrForTopics(null, Set(tp))\n+      val leaderIsrAndControllerEpochMap = zkUtils.getPartitionLeaderAndIsrForTopics(Set(tp))\n       leaderIsrAndControllerEpochMap.contains(tp) &&\n         isExpectedPartitionState(leaderIsrAndControllerEpochMap(tp), controllerEpoch, leader, leaderEpoch)\n     }, message)",
-                "raw_url": "https://github.com/apache/kafka/raw/6021618f9dafa3478104575d307e7bcd2cb4cca9/core/src/test/scala/unit/kafka/controller/ControllerIntegrationTest.scala",
-                "sha": "d5f2fe0a2d612c654e5de6b8ae862e5ad953de0f",
-                "status": "modified"
-            },
-            {
-                "additions": 35,
-                "blob_url": "https://github.com/apache/kafka/blob/6021618f9dafa3478104575d307e7bcd2cb4cca9/core/src/test/scala/unit/kafka/controller/ControllerTestUtils.scala",
-                "changes": 35,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/test/scala/unit/kafka/controller/ControllerTestUtils.scala?ref=6021618f9dafa3478104575d307e7bcd2cb4cca9",
-                "deletions": 0,
-                "filename": "core/src/test/scala/unit/kafka/controller/ControllerTestUtils.scala",
-                "patch": "@@ -0,0 +1,35 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one or more\n+ * contributor license agreements. See the NOTICE file distributed with\n+ * this work for additional information regarding copyright ownership.\n+ * The ASF licenses this file to You under the Apache License, Version 2.0\n+ * (the \"License\"); you may not use this file except in compliance with\n+ * the License. You may obtain a copy of the License at\n+ *\n+ *    http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing, software\n+ * distributed under the License is distributed on an \"AS IS\" BASIS,\n+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n+ * See the License for the specific language governing permissions and\n+ * limitations under the License.\n+ */\n+package kafka.controller\n+\n+import org.easymock.{EasyMock, IAnswer}\n+\n+object ControllerTestUtils {\n+\n+  /** Since ControllerEvent is sealed, return a subclass of ControllerEvent created with EasyMock */\n+  def createMockControllerEvent(controllerState: ControllerState, process: () => Unit): ControllerEvent = {\n+    val mockEvent = EasyMock.createMock(classOf[ControllerEvent])\n+    EasyMock.expect(mockEvent.state).andReturn(controllerState)\n+    EasyMock.expect(mockEvent.process()).andAnswer(new IAnswer[Unit]() {\n+      def answer(): Unit = {\n+        process()\n+      }\n+    })\n+    EasyMock.replay(mockEvent)\n+    mockEvent\n+  }\n+}",
-                "raw_url": "https://github.com/apache/kafka/raw/6021618f9dafa3478104575d307e7bcd2cb4cca9/core/src/test/scala/unit/kafka/controller/ControllerTestUtils.scala",
-                "sha": "407297a87131427d0077d3720ef62ff4f713c1b9",
-                "status": "added"
-            }
-        ],
-        "message": "MINOR: onControllerResignation should be invoked if triggerControllerMove is called\n\nAlso update the test to be simpler since we can use a mock event to simulate the issue\nmore easily (thanks Jun for the suggestion). This should fix two issues:\n\n1. A transient test failure due to a NPE in ControllerFailoverTest.testMetadataUpdate:\n\n```text\nCaused by: java.lang.NullPointerException\n\tat kafka.controller.ControllerBrokerRequestBatch.addUpdateMetadataRequestForBrokers(ControllerChannelManager.scala:338)\n\tat kafka.controller.KafkaController.sendUpdateMetadataRequest(KafkaController.scala:975)\n\tat kafka.controller.ControllerFailoverTest.testMetadataUpdate(ControllerFailoverTest.scala:141)\n```\n\nThe test was creating an additional thread and it does not seem like it was doing the\nappropriate synchronization (perhaps this became more of an issue after we changed\nthe Controller to be single-threaded and changed the locking)\n\n2. Setting `activeControllerId.set(-1)` in `triggerControllerMove` causes `Reelect` not to invoke `onControllerResignation`. Among other things, this causes an `IllegalStateException` to be thrown when `KafkaScheduler.startup` is invoked for the second time without the corresponding `shutdown`. We now simply call `onControllerResignation` as part of `triggerControllerMove`.\n\nFinally, I included a few clean-ups:\n\n1. No longer update the broker state in `onControllerFailover`. This is no longer needed\nsince we removed the `RunningAsController` state (KAFKA-3761).\n2. Trivial clean-ups in KafkaController\n3. Removed unused parameter in `ZkUtils.getPartitionLeaderAndIsrForTopics`\n\nAuthor: Ismael Juma <ismael@juma.me.uk>\n\nReviewers: Jun Rao <junrao@gmail.com>\n\nCloses #2935 from ijuma/on-controller-resignation-if-trigger-controller-move",
-        "parent": "https://github.com/apache/kafka/commit/b38b74bb77e6d12e4ea74b51216bdc15e47dbbce",
-        "patched_files": [
-            "KafkaServer.java",
-            "KafkaController.java",
-            "ZkUtils.java",
-            "ControllerChannelManager.java",
-            "ReplicaStateMachine.java",
-            "PartitionStateMachine.java",
-            "ControllerTestUtils.java"
-        ],
-        "repo": "kafka",
-        "unit_tests": [
-            "ControllerEventManagerTest.java",
-            "ControllerIntegrationTest.java",
-            "ControllerFailoverTest.java"
-        ]
-    },
-    "kafka_62f03ba": {
-        "bug_id": "kafka_62f03ba",
-        "commit": "https://github.com/apache/kafka/commit/62f03ba2cd27880562dbf85c5ef6699d25bc5b43",
-        "file": [
-            {
-                "additions": 5,
-                "blob_url": "https://github.com/apache/kafka/blob/62f03ba2cd27880562dbf85c5ef6699d25bc5b43/core/src/main/scala/kafka/common/ZkNodeChangeNotificationListener.scala",
-                "changes": 8,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/main/scala/kafka/common/ZkNodeChangeNotificationListener.scala?ref=62f03ba2cd27880562dbf85c5ef6699d25bc5b43",
-                "deletions": 3,
-                "filename": "core/src/main/scala/kafka/common/ZkNodeChangeNotificationListener.scala",
-                "patch": "@@ -93,12 +93,14 @@ class ZkNodeChangeNotificationListener(private val zkUtils: ZkUtils,\n           val changeId = changeNumber(notification)\n           if (changeId > lastExecutedChange) {\n             val changeZnode = seqNodeRoot + \"/\" + notification\n-            val (data, _) = zkUtils.readDataMaybeNull(changeZnode)\n-            data.map(notificationHandler.processNotification(_)).getOrElse {\n+            val data = zkUtils.readDataMaybeNull(changeZnode)._1.orNull\n+            if (data != null) {\n+              notificationHandler.processNotification(data)\n+            } else {\n               logger.warn(s\"read null data from $changeZnode when processing notification $notification\")\n             }\n+            lastExecutedChange = changeId\n           }\n-          lastExecutedChange = changeId\n         }\n         purgeObsoleteNotifications(now, notifications)\n       } catch {",
-                "raw_url": "https://github.com/apache/kafka/raw/62f03ba2cd27880562dbf85c5ef6699d25bc5b43/core/src/main/scala/kafka/common/ZkNodeChangeNotificationListener.scala",
-                "sha": "450707bd4cf91367fe08696856c1f268e753e1d2",
-                "status": "modified"
-            },
-            {
-                "additions": 17,
-                "blob_url": "https://github.com/apache/kafka/blob/62f03ba2cd27880562dbf85c5ef6699d25bc5b43/core/src/test/scala/unit/kafka/common/ZkNodeChangeNotificationListenerTest.scala",
-                "changes": 24,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/test/scala/unit/kafka/common/ZkNodeChangeNotificationListenerTest.scala?ref=62f03ba2cd27880562dbf85c5ef6699d25bc5b43",
-                "deletions": 7,
-                "filename": "core/src/test/scala/unit/kafka/common/ZkNodeChangeNotificationListenerTest.scala",
-                "patch": "@@ -41,21 +41,31 @@ class ZkNodeChangeNotificationListenerTest extends KafkaServerTestHarness {\n     val seqNodePath = seqNodeRoot + \"/\" + seqNodePrefix\n     val notificationMessage1 = \"message1\"\n     val notificationMessage2 = \"message2\"\n-    val changeExpirationMs = 100\n+    val changeExpirationMs = 1000\n \n     val notificationListener = new ZkNodeChangeNotificationListener(zkUtils, seqNodeRoot, seqNodePrefix, notificationHandler, changeExpirationMs)\n     notificationListener.init()\n \n     zkUtils.createSequentialPersistentPath(seqNodePath, notificationMessage1)\n \n-    TestUtils.waitUntilTrue(() => invocationCount == 1 && notification == notificationMessage1, \"failed to send/process notification message in the timeout period.\")\n+    TestUtils.waitUntilTrue(() => invocationCount == 1 && notification == notificationMessage1,\n+      \"Failed to send/process notification message in the timeout period.\")\n \n-    /*There is no easy way to test that purging. Even if we mock kafka time with MockTime, the purging compares kafka time with the time stored in zookeeper stat and the\n-    embeded zookeeper server does not provide a way to mock time. so to test purging we will have to use Time.SYSTEM.sleep(changeExpirationMs + 1) issue a write and check\n-    Assert.assertEquals(1, ZkUtils.getChildren(zkClient, seqNodeRoot).size) however even after that the assertion can fail as the second node it self can be deleted\n-    depending on how threads get scheduled.*/\n+    /*\n+     * There is no easy way to test purging. Even if we mock kafka time with MockTime, the purging compares kafka time\n+     * with the time stored in zookeeper stat and the embedded zookeeper server does not provide a way to mock time.\n+     * So to test purging we would have to use Time.SYSTEM.sleep(changeExpirationMs + 1) issue a write and check\n+     * Assert.assertEquals(1, ZkUtils.getChildren(zkClient, seqNodeRoot).size). However even that the assertion\n+     * can fail as the second node can be deleted depending on how threads get scheduled.\n+     */\n \n     zkUtils.createSequentialPersistentPath(seqNodePath, notificationMessage2)\n-    TestUtils.waitUntilTrue(() => invocationCount == 2 && notification == notificationMessage2, \"failed to send/process notification message in the timeout period.\")\n+    TestUtils.waitUntilTrue(() => invocationCount == 2 && notification == notificationMessage2,\n+      \"Failed to send/process notification message in the timeout period.\")\n+\n+    (3 to 10).foreach(i => zkUtils.createSequentialPersistentPath(seqNodePath, \"message\" + i))\n+\n+    TestUtils.waitUntilTrue(() => invocationCount == 10 ,\n+      s\"Expected 10 invocations of processNotifications, but there were $invocationCount\")\n   }\n }",
-                "raw_url": "https://github.com/apache/kafka/raw/62f03ba2cd27880562dbf85c5ef6699d25bc5b43/core/src/test/scala/unit/kafka/common/ZkNodeChangeNotificationListenerTest.scala",
-                "sha": "a646ced14eec87de628f58cf50f4a7ee0a20a2ca",
-                "status": "modified"
-            }
-        ],
-        "message": "MINOR: Avoid duplicate processing of notifications in ZkNodeChangeNotificationListener\n\nAlso fix potential NPE.\n\nAuthor: Manikumar Reddy <manikumar.reddy@gmail.com>\n\nReviewers: Ismael Juma <ismael@juma.me.uk>\n\nCloses #3615 from omkreddy/zk-notif-duplicates",
-        "parent": "https://github.com/apache/kafka/commit/e7f7d4093968d8de494e371a6d3c85e555332cbb",
-        "patched_files": [
-            "ZkNodeChangeNotificationListener.java"
-        ],
-        "repo": "kafka",
-        "unit_tests": [
-            "ZkNodeChangeNotificationListenerTest.java"
-        ]
-    },
     "kafka_6352a30": {
         "bug_id": "kafka_6352a30",
         "commit": "https://github.com/apache/kafka/commit/6352a30f46f2da11a8dc3e58912d0a2db8284c35",
@@ -2251,45 +1665,6 @@
         "repo": "kafka",
         "unit_tests": [
             "StreamThreadTest.java"
-        ]
-    },
-    "kafka_635c213": {
-        "bug_id": "kafka_635c213",
-        "commit": "https://github.com/apache/kafka/commit/635c21311f6bf0405e743dcf5004ef6ea36737e0",
-        "file": [
-            {
-                "additions": 9,
-                "blob_url": "https://github.com/apache/kafka/blob/635c21311f6bf0405e743dcf5004ef6ea36737e0/core/src/main/scala/kafka/log/Log.scala",
-                "changes": 9,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/main/scala/kafka/log/Log.scala?ref=635c21311f6bf0405e743dcf5004ef6ea36737e0",
-                "deletions": 0,
-                "filename": "core/src/main/scala/kafka/log/Log.scala",
-                "patch": "@@ -633,6 +633,15 @@ class Log(@volatile var dir: File,\n       activeSegment.resizeIndexes(config.maxIndexSize)\n       nextOffset\n     } else {\n+       if (logSegments.isEmpty) {\n+          addSegment(LogSegment.open(dir = dir,\n+            baseOffset = 0,\n+            config,\n+            time = time,\n+            fileAlreadyExists = false,\n+            initFileSize = this.initFileSize,\n+            preallocate = false))\n+       }\n       0\n     }\n   }",
-                "raw_url": "https://github.com/apache/kafka/raw/635c21311f6bf0405e743dcf5004ef6ea36737e0/core/src/main/scala/kafka/log/Log.scala",
-                "sha": "7ad43b4c92c6ba25b564180d6f184264ba563acd",
-                "status": "modified"
-            },
-            {
-                "additions": 11,
-                "blob_url": "https://github.com/apache/kafka/blob/635c21311f6bf0405e743dcf5004ef6ea36737e0/core/src/test/scala/unit/kafka/log/LogTest.scala",
-                "changes": 12,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/test/scala/unit/kafka/log/LogTest.scala?ref=635c21311f6bf0405e743dcf5004ef6ea36737e0",
-                "deletions": 1,
-                "filename": "core/src/test/scala/unit/kafka/log/LogTest.scala",
-                "patch": "@@ -3741,7 +3741,17 @@ class LogTest {\n     assertEquals(new AbortedTransaction(pid, 0), fetchDataInfo.abortedTransactions.get.head)\n   }\n \n- private def allAbortedTransactions(log: Log) = log.logSegments.flatMap(_.txnIndex.allAbortedTxns)\n+  @Test\n+  def testLoadPartitionDirWithNoSegmentsShouldNotThrow() {\n+    val dirName = Log.logDeleteDirName(new TopicPartition(\"foo\", 3))\n+    val logDir = new File(tmpDir, dirName)\n+    logDir.mkdirs()\n+    val logConfig = LogTest.createLogConfig()\n+    val log = createLog(logDir, logConfig)\n+    assertEquals(1, log.numberOfSegments)\n+  }\n+\n+  private def allAbortedTransactions(log: Log) = log.logSegments.flatMap(_.txnIndex.allAbortedTxns)\n \n   private def appendTransactionalAsLeader(log: Log, producerId: Long, producerEpoch: Short): Int => Unit = {\n     var sequence = 0",
-                "raw_url": "https://github.com/apache/kafka/raw/635c21311f6bf0405e743dcf5004ef6ea36737e0/core/src/test/scala/unit/kafka/log/LogTest.scala",
-                "sha": "9cd53e529ba93db479d38d2fd8b03242166f677c",
-                "status": "modified"
-            }
-        ],
-        "message": "KAFKA-8564; Fix NPE on deleted partition dir when no segments remain (#6968)\n\nKafka should not NPE while loading a deleted partition dir with no log segments. This patch ensures that there will always be at least one segment after initialization.\r\n\r\nCo-authored-by: Edoardo Comar <ecomar@uk.ibm.com>\r\nCo-authored-by: Mickael Maison <mickael.maison@gmail.com>\r\n\r\nReviewers: Ismael Juma <ismael@juma.me.uk>, Jason Gustafson <jason@confluent.io>",
-        "parent": "https://github.com/apache/kafka/commit/a7e771c6da72bb7f3c5c5cbab3dc9c4fd403f866",
-        "patched_files": [
-            "Log.java"
-        ],
-        "repo": "kafka",
-        "unit_tests": [
-            "LogTest.java"
         ]
     },
     "kafka_65f6a79": {
@@ -2409,45 +1784,6 @@
             "InternalTopologyBuilderTest.java"
         ]
     },
-    "kafka_70828ce": {
-        "bug_id": "kafka_70828ce",
-        "commit": "https://github.com/apache/kafka/commit/70828cea49ab8a3ceb54a9017618b84e0d9c1420",
-        "file": [
-            {
-                "additions": 17,
-                "blob_url": "https://github.com/apache/kafka/blob/70828cea49ab8a3ceb54a9017618b84e0d9c1420/core/src/main/scala/kafka/server/AbstractFetcherThread.scala",
-                "changes": 30,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/main/scala/kafka/server/AbstractFetcherThread.scala?ref=70828cea49ab8a3ceb54a9017618b84e0d9c1420",
-                "deletions": 13,
-                "filename": "core/src/main/scala/kafka/server/AbstractFetcherThread.scala",
-                "patch": "@@ -205,23 +205,27 @@ abstract class AbstractFetcherThread(name: String,\n     }\n   }\n \n-  private def truncateToHighWatermark(partitions: Set[TopicPartition]): Unit = inLock(partitionMapLock) {\n+  // Visible for testing\n+  private[server] def truncateToHighWatermark(partitions: Set[TopicPartition]): Unit = inLock(partitionMapLock) {\n     val fetchOffsets = mutable.HashMap.empty[TopicPartition, OffsetTruncationState]\n     val partitionsWithError = mutable.HashSet.empty[TopicPartition]\n \n     for (tp <- partitions) {\n-      try {\n-        val highWatermark = partitionStates.stateValue(tp).fetchOffset\n-        val truncationState = OffsetTruncationState(highWatermark, truncationCompleted = true)\n-\n-        info(s\"Truncating partition $tp to local high watermark $highWatermark\")\n-        truncate(tp, truncationState)\n-\n-        fetchOffsets.put(tp, truncationState)\n-      } catch {\n-        case e: KafkaStorageException =>\n-          info(s\"Failed to truncate $tp\", e)\n-          partitionsWithError += tp\n+      val partitionState = partitionStates.stateValue(tp)\n+      if (partitionState != null) {\n+        try {\n+          val highWatermark = partitionState.fetchOffset\n+          val truncationState = OffsetTruncationState(highWatermark, truncationCompleted = true)\n+\n+          info(s\"Truncating partition $tp to local high watermark $highWatermark\")\n+          truncate(tp, truncationState)\n+\n+          fetchOffsets.put(tp, truncationState)\n+        } catch {\n+          case e: KafkaStorageException =>\n+            info(s\"Failed to truncate $tp\", e)\n+            partitionsWithError += tp\n+        }\n       }\n     }\n ",
-                "raw_url": "https://github.com/apache/kafka/raw/70828cea49ab8a3ceb54a9017618b84e0d9c1420/core/src/main/scala/kafka/server/AbstractFetcherThread.scala",
-                "sha": "3cc6137fcb732fff7c5613666b42195eaf9a9a16",
-                "status": "modified"
-            },
-            {
-                "additions": 72,
-                "blob_url": "https://github.com/apache/kafka/blob/70828cea49ab8a3ceb54a9017618b84e0d9c1420/core/src/test/scala/unit/kafka/server/AbstractFetcherThreadTest.scala",
-                "changes": 72,
-                "contents_url": "https://api.github.com/repos/apache/kafka/contents/core/src/test/scala/unit/kafka/server/AbstractFetcherThreadTest.scala?ref=70828cea49ab8a3ceb54a9017618b84e0d9c1420",
-                "deletions": 0,
-                "filename": "core/src/test/scala/unit/kafka/server/AbstractFetcherThreadTest.scala",
-                "patch": "@@ -41,6 +41,8 @@ import scala.collection.{Map, Set, mutable}\n import scala.util.Random\n import org.scalatest.Assertions.assertThrows\n \n+import scala.collection.mutable.ArrayBuffer\n+\n class AbstractFetcherThreadTest {\n \n   @Before\n@@ -346,6 +348,34 @@ class AbstractFetcherThreadTest {\n     assertTrue(fetcher.fetchState(partition).get.isReadyForFetch)\n   }\n \n+  @Test\n+  def testTruncateToHighWatermarkDuringRemovePartitions(): Unit = {\n+    val highWatermark = 2L\n+    val partition = new TopicPartition(\"topic\", 0)\n+    val fetcher = new MockFetcherThread {\n+      override def truncateToHighWatermark(partitions: Set[TopicPartition]): Unit = {\n+        removePartitions(Set(partition))\n+        super.truncateToHighWatermark(partitions)\n+      }\n+\n+      override def latestEpoch(topicPartition: TopicPartition): Option[Int] = None\n+    }\n+\n+    val replicaLog = Seq(\n+      mkBatch(baseOffset = 0, leaderEpoch = 0, new SimpleRecord(\"a\".getBytes)),\n+      mkBatch(baseOffset = 1, leaderEpoch = 2, new SimpleRecord(\"b\".getBytes)),\n+      mkBatch(baseOffset = 2, leaderEpoch = 4, new SimpleRecord(\"c\".getBytes)))\n+\n+    val replicaState = MockFetcherThread.PartitionState(replicaLog, leaderEpoch = 5, highWatermark)\n+    fetcher.setReplicaState(partition, replicaState)\n+    fetcher.addPartitions(Map(partition -> offsetAndEpoch(highWatermark, leaderEpoch = 5)))\n+\n+    fetcher.doWork()\n+\n+    assertEquals(replicaLog.last.nextOffset(), replicaState.logEndOffset)\n+    assertTrue(fetcher.fetchState(partition).isEmpty)\n+  }\n+\n   @Test\n   def testTruncationSkippedIfNoEpochChange(): Unit = {\n     val partition = new TopicPartition(\"topic\", 0)\n@@ -630,6 +660,48 @@ class AbstractFetcherThreadTest {\n     assertEquals(fetcher.leaderPartitionState(partition).log, fetcher.replicaPartitionState(partition).log)\n   }\n \n+  @Test\n+  def testTruncateToEpochEndOffsetsDuringRemovePartitions(): Unit = {\n+    val partition = new TopicPartition(\"topic\", 0)\n+    val leaderEpochOnLeader = 0\n+    val initialLeaderEpochOnFollower = 0\n+    val nextLeaderEpochOnFollower = initialLeaderEpochOnFollower + 1\n+\n+    val fetcher = new MockFetcherThread {\n+      override def fetchEpochEndOffsets(partitions: Map[TopicPartition, EpochData]): Map[TopicPartition, EpochEndOffset] = {\n+        val fetchedEpochs = super.fetchEpochEndOffsets(partitions)\n+        // leader epoch changes while fetching epochs from leader\n+        // at the same time, the replica fetcher manager removes the partition\n+        removePartitions(Set(partition))\n+        setReplicaState(partition, MockFetcherThread.PartitionState(leaderEpoch = nextLeaderEpochOnFollower))\n+        fetchedEpochs\n+      }\n+    }\n+\n+    fetcher.setReplicaState(partition, MockFetcherThread.PartitionState(leaderEpoch = initialLeaderEpochOnFollower))\n+    fetcher.addPartitions(Map(partition -> offsetAndEpoch(0L, leaderEpoch = initialLeaderEpochOnFollower)))\n+\n+    val leaderLog = Seq(\n+      mkBatch(baseOffset = 0, leaderEpoch = initialLeaderEpochOnFollower, new SimpleRecord(\"c\".getBytes)))\n+    val leaderState = MockFetcherThread.PartitionState(leaderLog, leaderEpochOnLeader, highWatermark = 0L)\n+    fetcher.setLeaderState(partition, leaderState)\n+\n+    // first round of work\n+    fetcher.doWork()\n+\n+    // since the partition was removed before the fetched endOffsets were filtered against the leader epoch,\n+    // we do not expect the partition to be in Truncating state\n+    assertEquals(None, fetcher.fetchState(partition).map(_.state))\n+    assertEquals(None, fetcher.fetchState(partition).map(_.currentLeaderEpoch))\n+\n+    fetcher.setLeaderState(\n+      partition, MockFetcherThread.PartitionState(leaderLog, nextLeaderEpochOnFollower, highWatermark = 0L))\n+\n+    // make sure the fetcher is able to continue work\n+    fetcher.doWork()\n+    assertEquals(ArrayBuffer.empty, fetcher.replicaPartitionState(partition).log)\n+  }\n+\n   @Test\n   def testTruncationThrowsExceptionIfLeaderReturnsPartitionsNotRequestedInFetchEpochs(): Unit = {\n     val partition = new TopicPartition(\"topic\", 0)",
-                "raw_url": "https://github.com/apache/kafka/raw/70828cea49ab8a3ceb54a9017618b84e0d9c1420/core/src/test/scala/unit/kafka/server/AbstractFetcherThreadTest.scala",
-                "sha": "1fc079dde5387066606bd1f808315779a75797c9",
-                "status": "modified"
-            }
-        ],
-        "message": "KAFKA-8012; Ensure partitionStates have not been removed before truncating. (#6333)\n\nThis patch fixes a regression in the replica fetcher which occurs when the replica fetcher manager simultaneously calls `removeFetcherForPartitions`, removing the corresponding partitionStates, while a replica fetcher thread attempts to truncate the same partition(s) in `truncateToHighWatermark`. This causes an NPE which causes the fetcher to crash.\r\n\r\nThis change simply checks that the `partitionState` is not null first. Note that a similar guard exists in `truncateToEpochEndOffsets`.\r\n\r\nReviewers: Stanislav Kozlovski <stanislav_kozlovski@outlook.com>, Jason Gustafson <jason@confluent.io>",
-        "parent": "https://github.com/apache/kafka/commit/45adc80366e6e61187484d7e88467df05af2470f",
-        "patched_files": [
-            "AbstractFetcherThread.java"
-        ],
-        "repo": "kafka",
-        "unit_tests": [
-            "AbstractFetcherThreadTest.java"
-        ]
-    },
     "kafka_70d8828": {
         "bug_id": "kafka_70d8828",
         "commit": "https://github.com/apache/kafka/commit/70d882861e1bf3eb503c84a31834e8b628de2df9",
@@ -2528,16 +1864,16 @@
         "message": "KAFKA-7228: Set errorHandlingMetrics for dead letter queue\n\nDLQ reporter does not get a `errorHandlingMetrics` object when created by the worker. This results in an NPE.\n\nSigned-off-by: Arjun Satish <arjunconfluent.io>\n\n*More detailed description of your change,\nif necessary. The PR title and PR message become\nthe squashed commit message, so use a separate\ncomment to ping reviewers.*\n\n*Summary of testing strategy (including rationale)\nfor the feature or bug fix. Unit and/or integration\ntests are expected for any behaviour change and\nsystem tests should be considered for larger changes.*\n\nAuthor: Arjun Satish <arjun@confluent.io>\n\nReviewers: Konstantine Karantasis <konstantine@confluent.io>, Ewen Cheslack-Postava <ewen@confluent.io>\n\nCloses #5440 from wicknicks/KAFKA-7228",
         "parent": "https://github.com/apache/kafka/commit/596c6c0c0b27c13f2017c770ea37cd39e27e5dcf",
         "patched_files": [
+            "LogReporter.java",
             "DeadLetterQueueReporter.java",
-            "Worker.java",
             "ErrorReporter.java",
-            "LogReporter.java"
+            "Worker.java"
         ],
         "repo": "kafka",
         "unit_tests": [
             "ErrorHandlingTaskTest.java",
-            "WorkerTest.java",
-            "ErrorReporterTest.java"
+            "ErrorReporterTest.java",
+            "WorkerTest.java"
         ]
     },
     "kafka_7334222": {
@@ -2596,9 +1932,9 @@
         "message": "KAFKA-8412: Fix nullpointer exception thrown on flushing before closing producers (#7207)\n\nPrior to this change an NPE is raised when calling AssignedTasks.close\r\nunder the following conditions:\r\n\r\n1. EOS is enabled\r\n2. The task was in a suspended state\r\n\r\nThe cause for the NPE is that when a clean close is requested for a\r\nStreamTask the StreamTask tries to commit. However, in the suspended\r\nstate there is no producer so ultimately an NPE is thrown for the\r\ncontained RecordCollector in flush.\r\n\r\nThe fix put forth in this commit is to have AssignedTasks call\r\ncloseSuspended when it knows the underlying StreamTask is suspended.\r\n\r\nNote also that this test is quite involved. I could have just tested\r\nthat AssignedTasks calls closeSuspended when appropriate, but that is\r\ntesting, IMO, a detail of the implementation and doesn't actually verify\r\nwe reproduced the original problem as it was described. I feel much more\r\nconfident that we are reproducing the behavior - and we can test exactly\r\nthe conditions that lead to it - when testing across AssignedTasks and\r\nStreamTask. I believe this is an additional support for the argument of\r\neventually consolidating the state split across classes.\r\n\r\nReviewers: Matthias J. Sax <matthias@confluent.io>, Guozhang Wang <wangguoz@gmail.com>",
         "parent": "https://github.com/apache/kafka/commit/d7f8ec8628ee18326d22f6a58c787629a8faf307",
         "patched_files": [
+            "import-control.xml",
             "StreamTask.java",
             "AssignedStreamsTasks.java",
-            "import-control.java",
             "AssignedTasks.java"
         ],
         "repo": "kafka",
@@ -2682,8 +2018,8 @@
         ],
         "repo": "kafka",
         "unit_tests": [
-            "StreamsGraphTest.java",
-            "InternalStreamsBuilderTest.java"
+            "InternalStreamsBuilderTest.java",
+            "StreamsGraphTest.java"
         ]
     },
     "kafka_7b16b47": {
@@ -2781,9 +2117,9 @@
         "message": "KAFKA-7324: NPE due to lack of SASLExtensions in SASL/OAUTHBEARER (#5552)\n\nSet empty extensions if null is passed in.\r\n\r\nReviewers: Satish Duggana <sduggana@hortonworks.com>, Stanislav Kozlovski <stanislav_kozlovski@outlook.com>, Rajini Sivaram <rajinisivaram@googlemail.com>",
         "parent": "https://github.com/apache/kafka/commit/9e23af3115ddfbf311f6b37c273327b3fa8e9a14",
         "patched_files": [
-            "OAuthBearerClientInitialResponse.java",
             "OAuthBearerSaslClient.java",
             "SaslExtensions.java",
+            "OAuthBearerClientInitialResponse.java",
             "SaslExtensionsCallback.java"
         ],
         "repo": "kafka",
@@ -2888,14 +2224,14 @@
         "message": "KAFKA-3661; fix NPE in o.a.k.c.c.RoundRobinAssignor when topic metadata not found\n\nAbstractPartitionAssignor.assign has an ambiguous line in its documentation:\n> param partitionsPerTopic The number of partitions for each subscribed topic (may be empty for some topics)\n\nDoes empty mean the topic has an entry with value zero, or that the entry is excluded from the map altogether? The current implementation in AbstractPartitionAssignor excludes the entry from partitionsPerTopic if the topic isn't in the metadata.\n\nRoundRobinAssignorTest.testOneConsumerNonexistentTopic interprets emptiness as providing the topic with a zero value.\nRangeAssignor interprets emptiness as excluding the entry from the map.\nRangeAssignorTest.testOneConsumerNonexistentTopic interprets emptiness as providing the topic with a zero value.\n\nThis implementation chooses to solve the NPE by deciding to exclude topics from partitionsPerTopic when the topic is not in the metadata.\n\nAuthor: Onur Karaman <okaraman@linkedin.com>\n\nReviewers: Jason Gustafson <jason@confluent.io>, Ismael Juma <ismael@juma.me.uk>\n\nCloses #1326 from onurkaraman/KAFKA-3661",
         "parent": "https://github.com/apache/kafka/commit/7f4e3ccde820eedd962b4cfd3abaecd8a49b83a8",
         "patched_files": [
+            "RangeAssignor.java",
             "RoundRobinAssignor.java",
-            "AbstractPartitionAssignor.java",
-            "RangeAssignor.java"
+            "AbstractPartitionAssignor.java"
         ],
         "repo": "kafka",
         "unit_tests": [
-            "RangeAssignorTest.java",
-            "RoundRobinAssignorTest.java"
+            "RoundRobinAssignorTest.java",
+            "RangeAssignorTest.java"
         ]
     },
     "kafka_87d493f": {
@@ -2946,8 +2282,8 @@
         ],
         "repo": "kafka",
         "unit_tests": [
-            "RecordConvertersTest.java",
-            "StateRestorationIntegrationTest.java"
+            "StateRestorationIntegrationTest.java",
+            "RecordConvertersTest.java"
         ]
     },
     "kafka_88448f6": {
@@ -3111,9 +2447,9 @@
         "message": "KAFKA-5325; Avoid and handle exceptions for Kerberos re-login\n\nIf producer creates a connection during Kerberos re-login (after logout,\nbefore login), there are no principals in the subject and\n`SaslClientAuthenticator.configure` may throw an exception while trying\nto determine the principal. A socket channel is created and its key\nregistered with the selector, but the `RuntimeException` thrown leaves\nthe key registered with the selector without adding the channel to the\nchannel list. This results in an infinite loop of `NullPointerExceptions`.\nThe PR applies two fixes:\n\n1. Convert the `RuntimeException` to a meaningful `KafkaException`\n2. Handle any exception in `buildChannel`, cleanup and throw `IOException`.\nRetries will take care of re-connections.\n\nAuthor: Rajini Sivaram <rajinisivaram@googlemail.com>\n\nReviewers: Jun Rao <junrao@gmail.com>, Ismael Juma <ismael@juma.me.uk>\n\nCloses #3208 from rajinisivaram/KAFKA-5325",
         "parent": "https://github.com/apache/kafka/commit/2bb48a4fa45422d0773f2f4ea5b38328d3c173ac",
         "patched_files": [
-            "SaslClientAuthenticator.java",
+            "Selector.java",
             "SaslServerAuthenticator.java",
-            "Selector.java"
+            "SaslClientAuthenticator.java"
         ],
         "repo": "kafka",
         "unit_tests": [
@@ -3223,8 +2559,8 @@
         ],
         "repo": "kafka",
         "unit_tests": [
-            "InMemorySessionStoreTest.java",
-            "SessionBytesStoreTest.java"
+            "SessionBytesStoreTest.java",
+            "InMemorySessionStoreTest.java"
         ]
     },
     "kafka_a1f7925": {
@@ -3310,8 +2646,8 @@
         "message": "KAFKA-5506; Fix NPE in OffsetFetchRequest.toString and logging improvements\n\nNetworkClient's logging improvements:\n- Include correlation id in a number of log statements\n- Avoid eager toString call in parameter passed to log.debug\n- Use node.toString instead of passing a subset of fields to the\nlogger\n- Use requestBuilder instead of clientRequest in one of the log\nstatements\n\nAuthor: Ismael Juma <ismael@juma.me.uk>\n\nReviewers: Damian Guy <damian.guy@gmail.com>, Jason Gustafson <jason@confluent.io>\n\nCloses #3420 from ijuma/kafka-5506-offset-fetch-request-to-string-npe",
         "parent": "https://github.com/apache/kafka/commit/ee5eac715d58e6b16a115692ede93ae481ae7785",
         "patched_files": [
-            "OffsetFetchRequest.java",
-            "NetworkClient.java"
+            "NetworkClient.java",
+            "OffsetFetchRequest.java"
         ],
         "repo": "kafka",
         "unit_tests": [
@@ -3640,52 +2976,52 @@
         "message": "KAFKA-9113: Extract clients from tasks to record collectors (#7833)\n\nThis is part1 of a series of PRs for task management cleanup:\r\n\r\n1. Primarily cleanup MockRecordCollectors: remove unnecessary anonymous inheritance but just consolidate on the NoOpRecordCollector -> renamed to MockRecordCollector. Most relevant changes are unit tests that would be relying on this MockRecordCollector.\r\n\r\n2. Let StandbyContextImpl#recordCollector() to return null instead of returning a no-op collector, since in standby tasks we should ALWAYS bypass the logging logic and only use the inner store for restoreBatch. Returning null helps us to realize this assertion failed as NPE as early as possible whereas a no-op collector just hides the bug.\r\n\r\nReviewers: Guozhang Wang <wangguoz@gmail.com>",
         "parent": "https://github.com/apache/kafka/commit/16d36f1674f4867b4dc498464df20a0e8e18eb3f",
         "patched_files": [
-            "ChangeLoggingKeyValueBytesStore.java",
-            "MockInternalProcessorContext.java",
-            "StreamTask.java",
             "InMemorySessionStore.java",
-            "MeteredWindowStore.java",
-            "ChangeLoggingSessionBytesStore.java",
-            "AbstractRocksDBSegmentedBytesStore.java",
-            "CompositeReadOnlyKeyValueStore.java",
-            "MeteredTimestampedWindowStore.java",
-            "ChangeLoggingWindowBytesStore.java",
-            "StreamsTestUtils.java",
-            "MockRecordCollector.java",
-            "SegmentIterator.java",
-            "ChangeLoggingTimestampedWindowBytesStore.java",
             "RocksDBSessionStore.java",
-            "TimestampedSegments.java",
-            "StoreChangeLogger.java",
-            "TimeOrderedKeyValueBuffer.java",
-            "RocksDBWindowStore.java",
+            "StreamTask.java",
             "StandbyContextImpl.java",
+            "ChangeLoggingSessionBytesStore.java",
+            "SegmentIterator.java",
+            "MockInternalProcessorContext.java",
+            "ChangeLoggingKeyValueBytesStore.java",
+            "MockRecordCollector.java",
+            "MeteredTimestampedWindowStore.java",
+            "ChangeLoggingTimestampedWindowBytesStore.java",
+            "RocksDBWindowStore.java",
+            "ChangeLoggingWindowBytesStore.java",
+            "MeteredWindowStore.java",
+            "TimeOrderedKeyValueBuffer.java",
+            "CompositeReadOnlyKeyValueStore.java",
+            "TimestampedSegments.java",
+            "StreamsTestUtils.java",
+            "ChangeLoggingTimestampedKeyValueBytesStore.java",
+            "StoreChangeLogger.java",
             "KeyValueSegments.java",
-            "ChangeLoggingTimestampedKeyValueBytesStore.java"
+            "AbstractRocksDBSegmentedBytesStore.java"
         ],
         "repo": "kafka",
         "unit_tests": [
-            "ChangeLoggingKeyValueBytesStoreTest.java",
-            "SessionBytesStoreTest.java",
+            "KStreamSessionWindowAggregateProcessorTest.java",
+            "MeteredWindowStoreTest.java",
             "AbstractRocksDBSegmentedBytesStoreTest.java",
             "ChangeLoggingSessionBytesStoreTest.java",
-            "ChangeLoggingWindowBytesStoreTest.java",
-            "CompositeReadOnlyKeyValueStoreTest.java",
-            "ChangeLoggingTimestampedKeyValueBytesStoreTest.java",
-            "KeyValueSegmentsTest.java",
-            "RocksDBWindowStoreTest.java",
+            "MeteredTimestampedWindowStoreTest.java",
             "TimeOrderedKeyValueBufferTest.java",
             "StreamTaskTest.java",
-            "ChangeLoggingTimestampedWindowBytesStoreTest.java",
-            "InMemorySessionStoreTest.java",
-            "MeteredTimestampedWindowStoreTest.java",
+            "ChangeLoggingWindowBytesStoreTest.java",
+            "RocksDBWindowStoreTest.java",
             "RocksDBSessionStoreTest.java",
+            "SessionBytesStoreTest.java",
+            "StoreChangeLoggerTest.java",
+            "TimestampedSegmentsTest.java",
+            "KeyValueSegmentsTest.java",
+            "ChangeLoggingKeyValueBytesStoreTest.java",
             "SegmentIteratorTest.java",
             "WindowBytesStoreTest.java",
-            "TimestampedSegmentsTest.java",
-            "StoreChangeLoggerTest.java",
-            "MeteredWindowStoreTest.java",
-            "KStreamSessionWindowAggregateProcessorTest.java"
+            "InMemorySessionStoreTest.java",
+            "ChangeLoggingTimestampedWindowBytesStoreTest.java",
+            "ChangeLoggingTimestampedKeyValueBytesStoreTest.java",
+            "CompositeReadOnlyKeyValueStoreTest.java"
         ]
     },
     "kafka_b380a82": {
@@ -3822,8 +3158,8 @@
         "message": "KAFKA-4312: If filePath is empty string writeAsText should have more meaningful error message\n\n\u2026eaningful error message\n\nAuthor: bbejeck <bbejeck@gmail.com>\n\nReviewers: Guozhang Wang <wangguoz@gmail.com>\n\nCloses #2042 from bbejeck/KAFKA-4312_write_as_text_throws_NPE_empty_string",
         "parent": "https://github.com/apache/kafka/commit/c2a8b86117ede2ffda4cc4a8800b46f65ef9922d",
         "patched_files": [
-            "KStreamImpl.java",
-            "KTableImpl.java"
+            "KTableImpl.java",
+            "KStreamImpl.java"
         ],
         "repo": "kafka",
         "unit_tests": [
@@ -3863,8 +3199,8 @@
         "message": "KAFKA-7678: Avoid NPE when closing the RecordCollector (#5993)\n\nReviewers: Matthias J. Sax <matthias@confluent.io>, Bill Bejeck <bill@confluent.io>",
         "parent": "https://github.com/apache/kafka/commit/ec501f305e53a09072580fb3824048c170d32a48",
         "patched_files": [
-            "RecordCollectorImpl.java",
-            "RecordCollector.java"
+            "RecordCollector.java",
+            "RecordCollectorImpl.java"
         ],
         "repo": "kafka",
         "unit_tests": [
@@ -3943,13 +3279,13 @@
         "message": "MINOR: Change order of Property Check To Avoid NPE (#5528)\n\nReviewer: Matthias J. Sax <matthias@confluent.io>",
         "parent": "https://github.com/apache/kafka/commit/7c4e6724699bb6fc65112b5513848c733a03019e",
         "patched_files": [
-            "InternalStreamsBuilder.java",
-            "StreamsBuilder.java"
+            "StreamsBuilder.java",
+            "InternalStreamsBuilder.java"
         ],
         "repo": "kafka",
         "unit_tests": [
-            "StreamsBuilderTest.java",
-            "InternalStreamsBuilderTest.java"
+            "InternalStreamsBuilderTest.java",
+            "StreamsBuilderTest.java"
         ]
     },
     "kafka_c439268": {
@@ -3996,7 +3332,7 @@
         "message": "KAFKA-3562; Handle topic deletion during a send\n\nFix timing window in producer by holding onto cluster object while processing send requests so that changes to cluster during metadata refresh don't cause NPE if a topic is deleted.\n\nAuthor: Rajini Sivaram <rajinisivaram@googlemail.com>\n\nReviewers: Sriharsha Chintalapani <harsha@hortonworks.com>, Ewen Cheslack-Postava <ewen@confluent.io>, Ismael Juma <ismael@juma.me.uk>\n\nCloses #1478 from rajinisivaram/KAFKA-3562",
         "parent": "https://github.com/apache/kafka/commit/383cec9cf38607cdfbda0256d3447d253dcdde7d",
         "patched_files": [
-            "build.java",
+            "build.gradle",
             "KafkaProducer.java"
         ],
         "repo": "kafka",
@@ -4060,15 +3396,15 @@
         "message": "[HOT FIX] Check for null before deserializing in MeteredSessionStore  (#6575)\n\nThe fetchSession() method of SessionStore searches for a (single) specific session and returns null if none are found. This is analogous to fetch(key, time) in WindowStore or get(key) in KeyValueStore. MeteredWindowStore and MeteredKeyValueStore both check for a null result before attempting to deserialize, however MeteredSessionStore just blindly deserializes and as a result NPE is thrown when we search for a record that does not exist.\r\n\r\nReviewers: Guozhang Wang <wangguoz@gmail.com>, Bill Bejeck <bbejeck@gmail.com>, Bruno Cadonna <bruno@confluent.io>",
         "parent": "https://github.com/apache/kafka/commit/555d05971e16123a497ad423ef4786e0831b2101",
         "patched_files": [
+            "MeteredSessionStore.java",
             "MeteredKeyValueStore.java",
-            "MeteredWindowStore.java",
-            "MeteredSessionStore.java"
+            "MeteredWindowStore.java"
         ],
         "repo": "kafka",
         "unit_tests": [
-            "MeteredWindowStoreTest.java",
             "MeteredKeyValueStoreTest.java",
-            "MeteredSessionStoreTest.java"
+            "MeteredSessionStoreTest.java",
+            "MeteredWindowStoreTest.java"
         ]
     },
     "kafka_d01f01e": {
@@ -4163,17 +3499,17 @@
         "message": "KAFKA-6260; Ensure selection keys are removed from all collections on socket close\n\nWhen a socket is closed, we must remove corresponding selection keys from internal collections. This fixes an NPE which is caused by attempting to access the selection key's attached channel after it had been cleared after disconnecting.\n\nAuthor: Jason Gustafson <jason@confluent.io>\n\nReviewers: Ismael Juma <ismael@juma.me.uk>, Rajini Sivaram <rajinisivaram@googlemail.com>\n\nCloses #4276 from hachikuji/KAFKA-6260",
         "parent": "https://github.com/apache/kafka/commit/18e34482e685098ebef90233d78ae803f906633a",
         "patched_files": [
-            "TransportLayer.java",
             "PlaintextTransportLayer.java",
+            "KafkaChannel.java",
             "SslTransportLayer.java",
             "Selector.java",
-            "KafkaChannel.java"
+            "TransportLayer.java"
         ],
         "repo": "kafka",
         "unit_tests": [
             "SelectorTest.java",
-            "SslSelectorTest.java",
-            "SslTransportLayerTest.java"
+            "SslTransportLayerTest.java",
+            "SslSelectorTest.java"
         ]
     },
     "kafka_d06da1b": {
@@ -4311,15 +3647,15 @@
         "message": "KAFKA-6728: Corrected the worker\u2019s instantiation of the HeaderConverter\n\n## Summary of the problem\nWhen the `header.converter` is not specified in the worker config or the connector config, a bug in the `Plugins` test causes it to never instantiate the `HeaderConverter` instance, even though there is a default value.\n\nThis is a problem as soon as the connector deals with headers, either in records created by a source connector or in messages on the Kafka topics consumed by a sink connector. As soon as that happens, a NPE occurs.\n\nA workaround is to explicitly set the `header.converter` configuration property, but this was added in AK 1.1 and thus means that upgrading to AK 1.1 will not be backward compatible and will require this configuration change.\n\n## The Changes\n\nThe `Plugins.newHeaderConverter` methods were always returning null if the `header.converter` configuration value was not specified in the supplied connector or worker configuration. Thus, even though the `header.converter` property has a default, it was never being used.\n\nThe fix was to only check whether a `header.converter` property was specified when the connector configuration was being used, and if no such property exists in the connector configuration to return null. Then, when the worker configuration is being used, the method simply gets the `header.converter` value (or the default if no value was explicitly set).\n\nAlso, the ConnectorConfig had the same default value for the `header.converter` property as the WorkerConfig, but this resulted in very confusing log messages that implied the default header converter should be used even when the worker config specified the `header.converter` value. By removing the default, the log messages now make sense, and the Worker still properly instantiates the correct header converter.\n\nFinally, updated comments and added log messages to make it more clear which converters are being used and how they are being converted.\n\n## Testing\n\nSeveral new unit tests for `Plugins.newHeaderConverter` were added to check the various behavior. Additionally, the runtime JAR with these changes was built and inserted into an AK 1.1 installation, and a source connector was manually tested with 8 different combinations of settings for the `header.converter` configuration:\n\n1. default value\n1. worker configuration has `header.converter` explicitly set to the default\n1. worker configuration has `header.converter` set to a custom `HeaderConverter` implementation in the same plugin\n1. worker configuration has `header.converter` set to a custom `HeaderConverter` implementation in a _different_ plugin\n1. connector configuration has `header.converter` explicitly set to the default\n1. connector configuration has `header.converter` set to a custom `HeaderConverter` implementation in the same plugin\n1. connector configuration has `header.converter` set to a custom `HeaderConverter` implementation in a _different_ plugin\n1. worker configuration has `header.converter` explicitly set to the default, and the connector configuration has `header.converter` set to a custom `HeaderConverter` implementation in a _different_ plugin\n\nThe worker created the correct `HeaderConverter` implementation with the correct configuration in all of these tests.\n\nFinally, the default configuration was used with the aforementioned custom source connector that generated records with headers, and an S3 connector that consumes the records with headers (but didn't do anything with them). This test also passed.\n\nAuthor: Randall Hauch <rhauch@gmail.com>\n\nReviewers: Ewen Cheslack-Postava <ewen@confluent.io>\n\nCloses #4815 from rhauch/kafka-6728",
         "parent": "https://github.com/apache/kafka/commit/67077ebbcf24448e48d6223dc7090d5d94ea7780",
         "patched_files": [
-            "ConnectorConfig.java",
+            "Plugins.java",
             "Worker.java",
-            "Plugins.java"
+            "ConnectorConfig.java"
         ],
         "repo": "kafka",
         "unit_tests": [
+            "ConnectorConfigTest.java",
             "PluginsTest.java",
-            "WorkerTest.java",
-            "ConnectorConfigTest.java"
+            "WorkerTest.java"
         ]
     },
     "kafka_e2ec2d7": {
@@ -4378,8 +3714,8 @@
         "message": "KAFKA-7044; Fix Fetcher.fetchOffsetsByTimes and NPE in describe consumer group (#5627)\n\nA call to `kafka-consumer-groups --describe --group ...` can result in NullPointerException for two reasons:\r\n1)  `Fetcher.fetchOffsetsByTimes()` may return too early, without sending list offsets request for topic partitions that are not in cached metadata.\r\n2) `ConsumerGroupCommand.getLogEndOffsets()` and `getLogStartOffsets()` assumed that endOffsets()/beginningOffsets() which eventually call Fetcher.fetchOffsetsByTimes(), would return a map with all the topic partitions passed to endOffsets()/beginningOffsets() and that values are not null. Because of (1), null values were possible if some of the topic partitions were already known (in metadata cache) and some not (metadata cache did not have entries for some of the topic partitions). However, even with fixing (1), endOffsets()/beginningOffsets() may return a map with some topic partitions missing, when list offset request returns a non-retriable error. This happens in corner cases such as message format on broker is before 0.10, or maybe in cases of some other errors. \r\n\r\nTesting:\r\n-- added unit test to verify fix in Fetcher.fetchOffsetsByTimes() \r\n-- did some manual testing with `kafka-consumer-groups --describe`, causing NPE. Was not able to reproduce any NPE cases with DescribeConsumerGroupTest.scala,\r\n\r\nReviewers: Jason Gustafson <jason@confluent.io>",
         "parent": "https://github.com/apache/kafka/commit/79ad9026a667469a2013ce82961c0c90f3bb0877",
         "patched_files": [
-            "ConsumerGroupCommand.java",
-            "suppressions.java",
+            "ConsumerGroupCommand.scala",
+            "suppressions.xml",
             "Fetcher.java"
         ],
         "repo": "kafka",
@@ -4424,8 +3760,8 @@
         ],
         "repo": "kafka",
         "unit_tests": [
-            "CachingWindowStoreTest.java",
-            "CachingKeyValueStoreTest.java"
+            "CachingKeyValueStoreTest.java",
+            "CachingWindowStoreTest.java"
         ]
     },
     "kafka_fc4fea6": {
@@ -4590,8 +3926,8 @@
         "parent": "https://github.com/apache/kafka/commit/ce7fe8fe5f8333e1e6936e2198713211bfb0dfe5",
         "patched_files": [
             "GlobalStateManagerImpl.java",
-            "ProcessorStateManager.java",
-            "AbstractStateManager.java"
+            "AbstractStateManager.java",
+            "ProcessorStateManager.java"
         ],
         "repo": "kafka",
         "unit_tests": [

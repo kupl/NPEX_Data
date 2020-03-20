@@ -1,0 +1,49 @@
+[
+    {
+        "repo": "hbase",
+        "commit": "https://github.com/apache/hbase/commit/2ba4c4eb9fe568b962f9d71de829531f51c5375b",
+        "bug_id": "hbase_2ba4c4e",
+        "message": "HBASE-13520 NullPointerException in TagRewriteCell.(Josh Elser)",
+        "parent": "https://github.com/apache/hbase/commit/eb82b8b3098d6a9ac62aa50189f9d4b289f38472",
+        "patched_files": [
+            "TagRewriteCell.java"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 5,
+                "raw_url": "https://github.com/apache/hbase/raw/2ba4c4eb9fe568b962f9d71de829531f51c5375b/hbase-server/src/main/java/org/apache/hadoop/hbase/TagRewriteCell.java",
+                "contents_url": "https://api.github.com/repos/apache/hbase/contents/hbase-server/src/main/java/org/apache/hadoop/hbase/TagRewriteCell.java?ref=2ba4c4eb9fe568b962f9d71de829531f51c5375b",
+                "filename": "hbase-server/src/main/java/org/apache/hadoop/hbase/TagRewriteCell.java",
+                "deletions": 0,
+                "sha": "eb6d3bef82f8511270033e96a6c6f4c3b8f24d5d",
+                "blob_url": "https://github.com/apache/hbase/blob/2ba4c4eb9fe568b962f9d71de829531f51c5375b/hbase-server/src/main/java/org/apache/hadoop/hbase/TagRewriteCell.java",
+                "patch": "@@ -41,6 +41,7 @@\n   public TagRewriteCell(Cell cell, byte[] tags) {\n     assert cell instanceof SettableSequenceId;\n     assert cell instanceof SettableTimestamp;\n+    assert tags != null;\n     this.cell = cell;\n     this.tags = tags;\n     // tag offset will be treated as 0 and length this.tags.length\n@@ -143,6 +144,10 @@ public int getTagsOffset() {\n \n   @Override\n   public int getTagsLength() {\n+    if (null == this.tags) {\n+      // Nulled out tags array optimization in constructor\n+      return 0;\n+    }\n     return this.tags.length;\n   }\n ",
+                "changes": 5
+            },
+            {
+                "status": "added",
+                "additions": 48,
+                "raw_url": "https://github.com/apache/hbase/raw/2ba4c4eb9fe568b962f9d71de829531f51c5375b/hbase-server/src/test/java/org/apache/hadoop/hbase/TestTagRewriteCell.java",
+                "contents_url": "https://api.github.com/repos/apache/hbase/contents/hbase-server/src/test/java/org/apache/hadoop/hbase/TestTagRewriteCell.java?ref=2ba4c4eb9fe568b962f9d71de829531f51c5375b",
+                "filename": "hbase-server/src/test/java/org/apache/hadoop/hbase/TestTagRewriteCell.java",
+                "deletions": 0,
+                "sha": "56cecf4ca4046f082d75aea6b11b5606a8f5cedf",
+                "blob_url": "https://github.com/apache/hbase/blob/2ba4c4eb9fe568b962f9d71de829531f51c5375b/hbase-server/src/test/java/org/apache/hadoop/hbase/TestTagRewriteCell.java",
+                "patch": "@@ -0,0 +1,48 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one or more\n+ * contributor license agreements.  See the NOTICE file distributed with\n+ * this work for additional information regarding copyright ownership.\n+ * The ASF licenses this file to You under the Apache License, Version 2.0\n+ * (the \"License\"); you may not use this file except in compliance with\n+ * the License.  You may obtain a copy of the License at\n+ *\n+ *     http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing, software\n+ * distributed under the License is distributed on an \"AS IS\" BASIS,\n+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n+ * See the License for the specific language governing permissions and\n+ * limitations under the License.\n+ */\n+package org.apache.hadoop.hbase;\n+\n+import static org.junit.Assert.assertTrue;\n+\n+import org.apache.hadoop.hbase.testclassification.SmallTests;\n+import org.apache.hadoop.hbase.util.Bytes;\n+import org.junit.Test;\n+import org.junit.experimental.categories.Category;\n+\n+@Category(SmallTests.class)\n+public class TestTagRewriteCell {\n+\n+  @Test\n+  public void testHeapSize() {\n+    Cell originalCell = CellUtil.createCell(Bytes.toBytes(\"row\"), Bytes.toBytes(\"value\"));\n+    final int fakeTagArrayLength = 10;\n+    TagRewriteCell trCell = new TagRewriteCell(originalCell, new byte[fakeTagArrayLength]);\n+\n+    // Get the heapSize before the internal tags array in trCell are nuked\n+    long trCellHeapSize = trCell.heapSize();\n+\n+    // Make another TagRewriteCell with the original TagRewriteCell\n+    // This happens on systems with more than one RegionObserver/Coproc loaded (such as\n+    // VisibilityController and AccessController)\n+    TagRewriteCell trCell2 = new TagRewriteCell(trCell, new byte[fakeTagArrayLength]);\n+\n+    assertTrue(\"TagRewriteCell containing a TagRewriteCell's heapsize should be larger than a \" +\n+        \"single TagRewriteCell's heapsize\", trCellHeapSize < trCell2.heapSize());\n+    assertTrue(\"TagRewriteCell should have had nulled out tags array\", trCell.heapSize() <\n+        trCellHeapSize);\n+  }\n+}",
+                "changes": 48
+            }
+        ],
+        "unit_tests": [
+            "TestTagRewriteCell.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "hbase-server/src/test/java/org/apache/hadoop/hbase/TestTagRewriteCell.java",
+        "buggy_files": [
+            "hbase-server/src/main/java/org/apache/hadoop/hbase/TagRewriteCell.java"
+        ],
+        "fixed": true
+    }
+]

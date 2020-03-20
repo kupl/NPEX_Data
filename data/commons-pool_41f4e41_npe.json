@@ -1,0 +1,63 @@
+[
+    {
+        "repo": "commons-pool",
+        "commit": "https://github.com/apache/commons-pool/commit/41f4e410b3e7dc34b294ac9941721073bf5e5271",
+        "bug_id": "commons-pool_41f4e41",
+        "message": "[POOL-374]\norg.apache.commons.pool2.impl.GenericKeyedObjectPool.returnObject(K, T)\nshould throw IllegalStateException instead of NullPointerException when\na key is not found in the pool map.",
+        "parent": "https://github.com/apache/commons-pool/commit/11521c1fdbfbb079cc1859034a425191112f5358",
+        "patched_files": [
+            "changes.xml",
+            "GenericKeyedObjectPool.java"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 6,
+                "raw_url": "https://github.com/apache/commons-pool/raw/41f4e410b3e7dc34b294ac9941721073bf5e5271/src/changes/changes.xml",
+                "contents_url": "https://api.github.com/repos/apache/commons-pool/contents/src/changes/changes.xml?ref=41f4e410b3e7dc34b294ac9941721073bf5e5271",
+                "filename": "src/changes/changes.xml",
+                "deletions": 1,
+                "sha": "89b89a56cd58fe1fb794f492993c2a9dbe5cda18",
+                "blob_url": "https://github.com/apache/commons-pool/blob/41f4e410b3e7dc34b294ac9941721073bf5e5271/src/changes/changes.xml",
+                "patch": "@@ -43,7 +43,12 @@ The <action> type attribute can be add,update,fix,remove.\n     <title>Apache Commons Pool Release Notes</title>\r\n   </properties>\r\n   <body>\r\n-  <release version=\"2.7.0\" date=\"2019-MM-DD\" description=\"This is a feature release (Java 8).\">\r\n+  <release version=\"2.7.1\" date=\"2019-MM-DD\" description=\"This is a maintenance release (Java 8).\">\r\n+    <action dev=\"ggregory\" issue=\"POOL-374\" type=\"fix\" due-to=\"Gary Gregory, Phil Steitz\">\r\n+       org.apache.commons.pool2.impl.GenericKeyedObjectPool.returnObject(K, T) should throw IllegalStateException instead of NullPointerException when a key is not found in the pool map.\r\n+    </action>\r\n+  </release>\r\n+  <release version=\"2.7.0\" date=\"2019-07-25\" description=\"This is a feature release (Java 8).\">\r\n     <action dev=\"ggregory\" issue=\"POOL-364\" type=\"update\" due-to=\"Gary Gregory\">\r\n        Update from Java 7 to Java 8.\r\n     </action>\r",
+                "changes": 7
+            },
+            {
+                "status": "modified",
+                "additions": 5,
+                "raw_url": "https://github.com/apache/commons-pool/raw/41f4e410b3e7dc34b294ac9941721073bf5e5271/src/main/java/org/apache/commons/pool2/impl/GenericKeyedObjectPool.java",
+                "contents_url": "https://api.github.com/repos/apache/commons-pool/contents/src/main/java/org/apache/commons/pool2/impl/GenericKeyedObjectPool.java?ref=41f4e410b3e7dc34b294ac9941721073bf5e5271",
+                "filename": "src/main/java/org/apache/commons/pool2/impl/GenericKeyedObjectPool.java",
+                "deletions": 0,
+                "sha": "7a282f11eba22e504a44939948adaed400809bec",
+                "blob_url": "https://github.com/apache/commons-pool/blob/41f4e410b3e7dc34b294ac9941721073bf5e5271/src/main/java/org/apache/commons/pool2/impl/GenericKeyedObjectPool.java",
+                "patch": "@@ -447,6 +447,11 @@ public void returnObject(final K key, final T obj) {\n \n         final ObjectDeque<T> objectDeque = poolMap.get(key);\n \n+        if (objectDeque == null) {\n+            throw new IllegalStateException(\n+                    \"Returned object not currently part of this pool\");\n+        }\n+\n         final PooledObject<T> p = objectDeque.getAllObjects().get(new IdentityWrapper<>(obj));\n \n         if (p == null) {",
+                "changes": 5
+            },
+            {
+                "status": "modified",
+                "additions": 10,
+                "raw_url": "https://github.com/apache/commons-pool/raw/41f4e410b3e7dc34b294ac9941721073bf5e5271/src/test/java/org/apache/commons/pool2/impl/TestGenericKeyedObjectPool.java",
+                "contents_url": "https://api.github.com/repos/apache/commons-pool/contents/src/test/java/org/apache/commons/pool2/impl/TestGenericKeyedObjectPool.java?ref=41f4e410b3e7dc34b294ac9941721073bf5e5271",
+                "filename": "src/test/java/org/apache/commons/pool2/impl/TestGenericKeyedObjectPool.java",
+                "deletions": 2,
+                "sha": "f148bc01a712580a29389cd6488a99f9d2f5fda3",
+                "blob_url": "https://github.com/apache/commons-pool/blob/41f4e410b3e7dc34b294ac9941721073bf5e5271/src/test/java/org/apache/commons/pool2/impl/TestGenericKeyedObjectPool.java",
+                "patch": "@@ -195,6 +195,13 @@ public void testNumActiveNumIdle2() throws Exception {\n         assertEquals(2,gkoPool.getNumIdle(\"B\"));\n     }\n \n+    @Test(expected = IllegalStateException.class)\n+    public void testReturnObjectThrowsIllegalStateException() {\n+        try (final GenericKeyedObjectPool<String, String> pool = new GenericKeyedObjectPool<>(new SimpleFactory<String>())) {\n+            pool.returnObject(\"Foo\", \"Bar\");\n+        }\n+    }\n+\n     @Test(timeout=60000)\n     public void testMaxIdle() throws Exception {\n         gkoPool.setMaxTotalPerKey(100);\n@@ -1069,7 +1076,7 @@ public void testBorrowObjectFairness() throws Exception {\n         final int numThreads = 40;\n         final int maxTotal = 40;\n \n-        final GenericKeyedObjectPoolConfig config = new GenericKeyedObjectPoolConfig();\n+        final GenericKeyedObjectPoolConfig<String> config = new GenericKeyedObjectPoolConfig<String>();\n         config.setMaxTotalPerKey(maxTotal);\n         config.setFairness(true);\n         config.setLifo(false);\n@@ -1086,7 +1093,7 @@ public void testBorrowObjectFairness() throws Exception {\n         // Start and park threads waiting to borrow objects\n         final TestThread[] threads = new TestThread[numThreads];\n         for(int i=0;i<numThreads;i++) {\n-            threads[i] = new TestThread(gkoPool, 1, 0, 2000, false, \"0\" + String.valueOf(i % maxTotal), \"0\");\n+            threads[i] = new TestThread<String>(gkoPool, 1, 0, 2000, false, \"0\" + String.valueOf(i % maxTotal), \"0\");\n             final Thread t = new Thread(threads[i]);\n             t.start();\n             // Short delay to ensure threads start in correct order\n@@ -2371,6 +2378,7 @@ public Object create(final Integer key)\n             return new DefaultPooledObject<>(value);\n         }\n     }\n+    \n }\n \n ",
+                "changes": 12
+            }
+        ],
+        "unit_tests": [
+            "TestGenericKeyedObjectPool.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "src/test/java/org/apache/commons/pool2/impl/TestGenericKeyedObjectPool.java",
+        "buggy_files": [
+            "src/changes/changes.xml",
+            "src/main/java/org/apache/commons/pool2/impl/GenericKeyedObjectPool.java"
+        ],
+        "fixed": true
+    }
+]

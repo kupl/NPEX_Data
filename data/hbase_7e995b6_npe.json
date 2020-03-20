@@ -1,0 +1,49 @@
+[
+    {
+        "repo": "hbase",
+        "commit": "https://github.com/apache/hbase/commit/7e995b6496a44c057337535363aee778f52318b9",
+        "bug_id": "hbase_7e995b6",
+        "message": "HBASE-12229 NullPointerException in SnapshotTestingUtils\n\n* Implemented the waitUntilAllRegionsOnline in HBaseTestingUtility#createTable\n* Add waitFor around #isTableAvailable call that previously didn't do anything\n* Remove unused byte[] hex\n\nSigned-off-by: stack <stack@apache.org>",
+        "parent": "https://github.com/apache/hbase/commit/349a56ae2c88e62917ba8923283ad4ca0c83841c",
+        "patched_files": [
+            "HBaseTestingUtility.java"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 15,
+                "raw_url": "https://github.com/apache/hbase/raw/7e995b6496a44c057337535363aee778f52318b9/hbase-server/src/test/java/org/apache/hadoop/hbase/HBaseTestingUtility.java",
+                "contents_url": "https://api.github.com/repos/apache/hbase/contents/hbase-server/src/test/java/org/apache/hadoop/hbase/HBaseTestingUtility.java?ref=7e995b6496a44c057337535363aee778f52318b9",
+                "filename": "hbase-server/src/test/java/org/apache/hadoop/hbase/HBaseTestingUtility.java",
+                "deletions": 0,
+                "sha": "450e805028ef63d24dc67f8468ed5cc840c68871",
+                "blob_url": "https://github.com/apache/hbase/blob/7e995b6496a44c057337535363aee778f52318b9/hbase-server/src/test/java/org/apache/hadoop/hbase/HBaseTestingUtility.java",
+                "patch": "@@ -1206,6 +1206,21 @@ public HTable createTable(HTableDescriptor htd, byte[][] families, Configuration\n     return new HTable(c, htd.getTableName());\n   }\n \n+  /**\n+   * Create a table.\n+   * @param htd\n+   * @param splitRows\n+   * @return An HTable instance for the created table.\n+   * @throws IOException\n+   */\n+  public HTable createTable(HTableDescriptor htd, byte[][] splitRows)\n+      throws IOException {\n+    getHBaseAdmin().createTable(htd, splitRows);\n+    // HBaseAdmin only waits for regions to appear in hbase:meta we should wait until they are assigned\n+    waitUntilAllRegionsAssigned(htd.getTableName());\n+    return new HTable(getConfiguration(), htd.getTableName());\n+  }\n+\n   /**\n    * Create a table.\n    * @param tableName",
+                "changes": 15
+            },
+            {
+                "status": "modified",
+                "additions": 12,
+                "raw_url": "https://github.com/apache/hbase/raw/7e995b6496a44c057337535363aee778f52318b9/hbase-server/src/test/java/org/apache/hadoop/hbase/snapshot/SnapshotTestingUtils.java",
+                "contents_url": "https://api.github.com/repos/apache/hbase/contents/hbase-server/src/test/java/org/apache/hadoop/hbase/snapshot/SnapshotTestingUtils.java?ref=7e995b6496a44c057337535363aee778f52318b9",
+                "filename": "hbase-server/src/test/java/org/apache/hadoop/hbase/snapshot/SnapshotTestingUtils.java",
+                "deletions": 5,
+                "sha": "f0070d8dbc4c5cb6b554de9c6867baad41502a79",
+                "blob_url": "https://github.com/apache/hbase/blob/7e995b6496a44c057337535363aee778f52318b9/hbase-server/src/test/java/org/apache/hadoop/hbase/snapshot/SnapshotTestingUtils.java",
+                "patch": "@@ -45,8 +45,10 @@\n import org.apache.hadoop.hbase.TableDescriptor;\n import org.apache.hadoop.hbase.TableName;\n import org.apache.hadoop.hbase.TableNotEnabledException;\n+import org.apache.hadoop.hbase.Waiter;\n import org.apache.hadoop.hbase.client.Admin;\n import org.apache.hadoop.hbase.client.Durability;\n+import org.apache.hadoop.hbase.client.HBaseAdmin;\n import org.apache.hadoop.hbase.client.HTable;\n import org.apache.hadoop.hbase.client.Put;\n import org.apache.hadoop.hbase.client.Table;\n@@ -633,27 +635,32 @@ public static void waitForTableToBeOnline(final HBaseTestingUtility util,\n     for (HRegion region : onlineRegions) {\n       region.waitForFlushesAndCompactions();\n     }\n-    util.getHBaseAdmin().isTableAvailable(tableName);\n+    // Wait up to 60 seconds for a table to be available.\n+    final HBaseAdmin hBaseAdmin = util.getHBaseAdmin();\n+    util.waitFor(60000, new Waiter.Predicate<IOException>() {\n+      @Override\n+      public boolean evaluate() throws IOException {\n+        return hBaseAdmin.isTableAvailable(tableName);\n+      }\n+    });\n   }\n \n   public static void createTable(final HBaseTestingUtility util, final TableName tableName,\n       int regionReplication, final byte[]... families) throws IOException, InterruptedException {\n     HTableDescriptor htd = new HTableDescriptor(tableName);\n     htd.setRegionReplication(regionReplication);\n-    for (byte[] family: families) {\n+    for (byte[] family : families) {\n       HColumnDescriptor hcd = new HColumnDescriptor(family);\n       htd.addFamily(hcd);\n     }\n     byte[][] splitKeys = getSplitKeys();\n-    util.getHBaseAdmin().createTable(htd, splitKeys);\n-    waitForTableToBeOnline(util, tableName);\n+    util.createTable(htd, splitKeys);\n     assertEquals((splitKeys.length + 1) * regionReplication,\n         util.getHBaseAdmin().getTableRegions(tableName).size());\n   }\n \n   public static byte[][] getSplitKeys() {\n     byte[][] splitKeys = new byte[KEYS.length-2][];\n-    byte[] hex = Bytes.toBytes(\"123456789abcde\");\n     for (int i = 0; i < splitKeys.length; ++i) {\n       splitKeys[i] = new byte[] { KEYS[i+1] };\n     }",
+                "changes": 17
+            }
+        ],
+        "unit_tests": [
+            "TestHBaseTestingUtility.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "hbase-server/src/test/java/org/apache/hadoop/hbase/TestHBaseTestingUtility.java",
+        "buggy_files": [
+            "hbase-server/src/test/java/org/apache/hadoop/hbase/HBaseTestingUtility.java"
+        ],
+        "fixed": true
+    }
+]

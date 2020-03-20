@@ -1,0 +1,77 @@
+[
+    {
+        "repo": "tinkerpop",
+        "commit": "https://github.com/apache/tinkerpop/commit/8646af7d6a3a5dafcc5c3ffc5e8ceccbd9a11735",
+        "bug_id": "tinkerpop_8646af7",
+        "message": "Found another bug in my manual testing of Spark. If the SparkContext is open, the graphRDD prior to finalization is persited -- eek. Made it so that it is unpersisted() correctly. Moreover, added test cases to ensure that unnamed persited RDDs are not dangling around between jobs on a persited context. Also, found a NullPointerException. Ran full spark integration tests. CTR.",
+        "parent": "https://github.com/apache/tinkerpop/commit/2ca4cba87d98101b404340ccd80bc44f7a417f9e",
+        "patched_files": [
+            "SparkGraphComputer.java",
+            "SparkExecutor.java",
+            "SparkContextStorage.java"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 5,
+                "raw_url": "https://github.com/apache/tinkerpop/raw/8646af7d6a3a5dafcc5c3ffc5e8ceccbd9a11735/spark-gremlin/src/main/java/org/apache/tinkerpop/gremlin/spark/process/computer/SparkExecutor.java",
+                "contents_url": "https://api.github.com/repos/apache/tinkerpop/contents/spark-gremlin/src/main/java/org/apache/tinkerpop/gremlin/spark/process/computer/SparkExecutor.java?ref=8646af7d6a3a5dafcc5c3ffc5e8ceccbd9a11735",
+                "filename": "spark-gremlin/src/main/java/org/apache/tinkerpop/gremlin/spark/process/computer/SparkExecutor.java",
+                "deletions": 2,
+                "sha": "d3f31cb595b5eac4ac3f7748ff0ddafbbfece2cf",
+                "blob_url": "https://github.com/apache/tinkerpop/blob/8646af7d6a3a5dafcc5c3ffc5e8ceccbd9a11735/spark-gremlin/src/main/java/org/apache/tinkerpop/gremlin/spark/process/computer/SparkExecutor.java",
+                "patch": "@@ -133,9 +133,9 @@ private SparkExecutor() {\n         return newViewIncomingRDD;\n     }\n \n-    public static <M> JavaPairRDD<Object, VertexWritable> prepareFinalGraphRDD(final JavaPairRDD<Object, VertexWritable> graphRDD, final JavaPairRDD<Object, ViewIncomingPayload<M>> viewIncomingRDD, final String[] elementComputeKeys) {\n+    public static <M> JavaPairRDD<Object, VertexWritable> prepareFinalGraphRDD(final JavaPairRDD<Object, VertexWritable> graphRDD, final JavaPairRDD<Object, ViewIncomingPayload<M>> viewIncomingRDD, final String[] elementComputeKeys, final boolean unpersistInput) {\n         // attach the final computed view to the cached graph\n-        return graphRDD.leftOuterJoin(viewIncomingRDD)\n+        final JavaPairRDD<Object, VertexWritable> finalGraphRDD = graphRDD.leftOuterJoin(viewIncomingRDD)\n                 .mapValues(tuple -> {\n                     final StarGraph.StarVertex vertex = tuple._1().get();\n                     vertex.dropVertexProperties(elementComputeKeys);\n@@ -144,6 +144,9 @@ private SparkExecutor() {\n                     view.clear(); // no longer needed so kill it from memory\n                     return tuple._1();\n                 });\n+        if (unpersistInput)\n+            graphRDD.unpersist();\n+        return finalGraphRDD;\n     }\n \n     /////////////////",
+                "changes": 7
+            },
+            {
+                "status": "modified",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/tinkerpop/raw/8646af7d6a3a5dafcc5c3ffc5e8ceccbd9a11735/spark-gremlin/src/main/java/org/apache/tinkerpop/gremlin/spark/process/computer/SparkGraphComputer.java",
+                "contents_url": "https://api.github.com/repos/apache/tinkerpop/contents/spark-gremlin/src/main/java/org/apache/tinkerpop/gremlin/spark/process/computer/SparkGraphComputer.java?ref=8646af7d6a3a5dafcc5c3ffc5e8ceccbd9a11735",
+                "filename": "spark-gremlin/src/main/java/org/apache/tinkerpop/gremlin/spark/process/computer/SparkGraphComputer.java",
+                "deletions": 1,
+                "sha": "30f4dba71f7de2589e0ff19d644b436fb0d1f8f2",
+                "blob_url": "https://github.com/apache/tinkerpop/blob/8646af7d6a3a5dafcc5c3ffc5e8ceccbd9a11735/spark-gremlin/src/main/java/org/apache/tinkerpop/gremlin/spark/process/computer/SparkGraphComputer.java",
+                "patch": "@@ -207,7 +207,7 @@ else if (graphRDD.partitions().size() < this.workers) // ensures that the graphR\n                     }\n                     // write the graph rdd using the output rdd\n                     final String[] elementComputeKeys = this.vertexProgram == null ? new String[0] : this.vertexProgram.getElementComputeKeys().toArray(new String[this.vertexProgram.getElementComputeKeys().size()]);\n-                    graphRDD = SparkExecutor.prepareFinalGraphRDD(graphRDD, viewIncomingRDD, elementComputeKeys);\n+                    graphRDD = SparkExecutor.prepareFinalGraphRDD(graphRDD, viewIncomingRDD, elementComputeKeys, !inputFromSpark);\n                     if ((hadoopConfiguration.get(Constants.GREMLIN_HADOOP_GRAPH_OUTPUT_FORMAT, null) != null ||\n                             hadoopConfiguration.get(Constants.GREMLIN_SPARK_GRAPH_OUTPUT_RDD, null) != null) &&\n                             !this.persist.equals(GraphComputer.Persist.NOTHING)) {",
+                "changes": 2
+            },
+            {
+                "status": "modified",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/tinkerpop/raw/8646af7d6a3a5dafcc5c3ffc5e8ceccbd9a11735/spark-gremlin/src/main/java/org/apache/tinkerpop/gremlin/spark/structure/io/SparkContextStorage.java",
+                "contents_url": "https://api.github.com/repos/apache/tinkerpop/contents/spark-gremlin/src/main/java/org/apache/tinkerpop/gremlin/spark/structure/io/SparkContextStorage.java?ref=8646af7d6a3a5dafcc5c3ffc5e8ceccbd9a11735",
+                "filename": "spark-gremlin/src/main/java/org/apache/tinkerpop/gremlin/spark/structure/io/SparkContextStorage.java",
+                "deletions": 1,
+                "sha": "76a3299719aca5cdb75c7fa26c28525ab232efaf",
+                "blob_url": "https://github.com/apache/tinkerpop/blob/8646af7d6a3a5dafcc5c3ffc5e8ceccbd9a11735/spark-gremlin/src/main/java/org/apache/tinkerpop/gremlin/spark/structure/io/SparkContextStorage.java",
+                "patch": "@@ -160,6 +160,6 @@ public String describe(final String location) {\n \n     @Override\n     public String toString() {\n-        return StringFactory.storageString(Spark.getContext().master());\n+        return StringFactory.storageString(null == Spark.getContext() ? \"spark:none\" : Spark.getContext().master());\n     }\n }",
+                "changes": 2
+            },
+            {
+                "status": "modified",
+                "additions": 26,
+                "raw_url": "https://github.com/apache/tinkerpop/raw/8646af7d6a3a5dafcc5c3ffc5e8ceccbd9a11735/spark-gremlin/src/test/java/org/apache/tinkerpop/gremlin/spark/structure/io/PersistedInputOutputRDDTest.java",
+                "contents_url": "https://api.github.com/repos/apache/tinkerpop/contents/spark-gremlin/src/test/java/org/apache/tinkerpop/gremlin/spark/structure/io/PersistedInputOutputRDDTest.java?ref=8646af7d6a3a5dafcc5c3ffc5e8ceccbd9a11735",
+                "filename": "spark-gremlin/src/test/java/org/apache/tinkerpop/gremlin/spark/structure/io/PersistedInputOutputRDDTest.java",
+                "deletions": 1,
+                "sha": "6dac97f0e2b2fb088ca724818dcfecf3c7e04d9f",
+                "blob_url": "https://github.com/apache/tinkerpop/blob/8646af7d6a3a5dafcc5c3ffc5e8ceccbd9a11735/spark-gremlin/src/test/java/org/apache/tinkerpop/gremlin/spark/structure/io/PersistedInputOutputRDDTest.java",
+                "patch": "@@ -26,6 +26,7 @@\n import org.apache.tinkerpop.gremlin.hadoop.Constants;\n import org.apache.tinkerpop.gremlin.hadoop.structure.HadoopGraph;\n import org.apache.tinkerpop.gremlin.hadoop.structure.io.gryo.GryoInputFormat;\n+import org.apache.tinkerpop.gremlin.hadoop.structure.io.gryo.GryoOutputFormat;\n import org.apache.tinkerpop.gremlin.process.computer.GraphComputer;\n import org.apache.tinkerpop.gremlin.process.computer.bulkloading.BulkLoaderVertexProgram;\n import org.apache.tinkerpop.gremlin.process.computer.ranking.pagerank.PageRankVertexProgram;\n@@ -55,12 +56,33 @@\n  */\n public class PersistedInputOutputRDDTest extends AbstractSparkTest {\n \n+    @Test\n+    public void shouldNotHaveDanglingPersistedComputeRDDs() throws Exception {\n+        Spark.create(\"local[4]\");\n+        final String rddName = TestHelper.makeTestDataDirectory(PersistedInputOutputRDDTest.class, UUID.randomUUID().toString());\n+        final Configuration configuration = super.getBaseConfiguration();\n+        configuration.setProperty(Constants.GREMLIN_HADOOP_INPUT_LOCATION, SparkHadoopGraphProvider.PATHS.get(\"tinkerpop-modern.kryo\"));\n+        configuration.setProperty(Constants.GREMLIN_HADOOP_GRAPH_INPUT_FORMAT, GryoInputFormat.class.getCanonicalName());\n+        configuration.setProperty(Constants.GREMLIN_HADOOP_GRAPH_OUTPUT_FORMAT, GryoOutputFormat.class.getCanonicalName());\n+        configuration.setProperty(Constants.GREMLIN_HADOOP_OUTPUT_LOCATION, rddName);\n+        configuration.setProperty(Constants.GREMLIN_SPARK_PERSIST_CONTEXT, true);\n+        Graph graph = GraphFactory.open(configuration);\n+        assertEquals(6, graph.traversal(GraphTraversalSource.computer(SparkGraphComputer.class)).V().out().count().next().longValue());\n+        ////////\n+        assertFalse(Spark.hasRDD(Constants.getGraphLocation(rddName)));\n+        assertEquals(0, Spark.getContext().getPersistentRDDs().size());\n+        ///////\n+        Spark.close();\n+    }\n+\n+\n     @Test\n     public void shouldPersistRDDBasedOnStorageLevel() throws Exception {\n         Spark.create(\"local[4]\");\n         int counter = 0;\n-        for (final String storageLevel : Arrays.asList(\"MEMORY_ONLY\", \"DISK_ONLY\",\"MEMORY_ONLY_SER\",\"MEMORY_AND_DISK_SER\",\"OFF_HEAP\")) {\n+        for (final String storageLevel : Arrays.asList(\"MEMORY_ONLY\", \"DISK_ONLY\", \"MEMORY_ONLY_SER\", \"MEMORY_AND_DISK_SER\", \"OFF_HEAP\")) {\n             assertEquals(counter * 2, Spark.getRDDs().size());\n+            assertEquals(counter * 2, Spark.getContext().getPersistentRDDs().size());\n             counter++;\n             final String rddName = TestHelper.makeTestDataDirectory(PersistedInputOutputRDDTest.class, UUID.randomUUID().toString());\n             final Configuration configuration = new BaseConfiguration();\n@@ -88,6 +110,7 @@ public void shouldPersistRDDBasedOnStorageLevel() throws Exception {\n             assertTrue(Spark.hasRDD(Constants.getMemoryLocation(rddName, Graph.Hidden.hide(\"traversers\"))));\n             assertEquals(StorageLevel.fromString(storageLevel), Spark.getRDD(Constants.getMemoryLocation(rddName, Graph.Hidden.hide(\"traversers\"))).getStorageLevel());\n             assertEquals(counter * 2, Spark.getRDDs().size());\n+            assertEquals(counter * 2, Spark.getContext().getPersistentRDDs().size());\n             //System.out.println(SparkContextStorage.open().ls());\n         }\n         Spark.close();\n@@ -194,6 +217,7 @@ public void testBulkLoaderVertexProgramChain() throws Exception {\n                 .submit().get();\n         ////\n         assertTrue(Spark.hasRDD(Constants.getGraphLocation(rddName)));\n+        assertEquals(1, Spark.getContext().getPersistentRDDs().size());\n         ////\n         final Graph graph = TinkerGraph.open();\n         final GraphTraversalSource g = graph.traversal();\n@@ -237,6 +261,7 @@ public void testBulkLoaderVertexProgramChainWithInputOutputHelperMapping() throw\n         ////\n         Spark.create(readConfiguration);\n         assertTrue(Spark.hasRDD(Constants.getGraphLocation(rddName)));\n+        assertEquals(1, Spark.getContext().getPersistentRDDs().size());\n         ////\n         final Graph graph = TinkerGraph.open();\n         final GraphTraversalSource g = graph.traversal();",
+                "changes": 27
+            }
+        ],
+        "unit_tests": [
+            "PersistedInputOutputRDDTest.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "spark-gremlin/src/test/java/org/apache/tinkerpop/gremlin/spark/structure/io/PersistedInputOutputRDDTest.java",
+        "buggy_files": [
+            "spark-gremlin/src/main/java/org/apache/tinkerpop/gremlin/spark/process/computer/SparkGraphComputer.java",
+            "spark-gremlin/src/main/java/org/apache/tinkerpop/gremlin/spark/process/computer/SparkExecutor.java",
+            "spark-gremlin/src/main/java/org/apache/tinkerpop/gremlin/spark/structure/io/SparkContextStorage.java"
+        ],
+        "fixed": true
+    }
+]

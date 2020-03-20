@@ -1,0 +1,65 @@
+[
+    {
+        "repo": "crunch",
+        "commit": "https://github.com/apache/crunch/commit/5c523231f6e5d664197f14b8977f5fb1620162a1",
+        "bug_id": "crunch_5c52323",
+        "message": "Merge pull request #25 from tzolov/master\n\nFix NPE thrown on write or materialize of Union collections",
+        "parent": "https://github.com/apache/crunch/commit/db5054f6f8835e499a512353e69881c067e68fc2",
+        "patched_files": [
+            "UnionCollection.java",
+            "MemCollection.java",
+            "MRPipeline.java"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 2,
+                "raw_url": "https://github.com/apache/crunch/raw/5c523231f6e5d664197f14b8977f5fb1620162a1/src/main/java/com/cloudera/crunch/impl/mem/collect/MemCollection.java",
+                "contents_url": "https://api.github.com/repos/apache/crunch/contents/src/main/java/com/cloudera/crunch/impl/mem/collect/MemCollection.java?ref=5c523231f6e5d664197f14b8977f5fb1620162a1",
+                "filename": "src/main/java/com/cloudera/crunch/impl/mem/collect/MemCollection.java",
+                "deletions": 2,
+                "sha": "3a1a4f7429907e48db9d5d4ed552da0ab27a2bfa",
+                "blob_url": "https://github.com/apache/crunch/blob/5c523231f6e5d664197f14b8977f5fb1620162a1/src/main/java/com/cloudera/crunch/impl/mem/collect/MemCollection.java",
+                "patch": "@@ -63,13 +63,13 @@ public Pipeline getPipeline() {\n \n   @Override\n   public PCollection<S> union(PCollection<S>... collections) {\n-    Collection<S> output = Lists.newArrayList();\n-    output.addAll(collect);\n+    Collection<S> output = Lists.newArrayList();    \n     for (PCollection<S> pcollect : collections) {\n       for (S s : pcollect.materialize()) {\n         output.add(s);\n       }\n     }\n+    output.addAll(collect);\n     return new MemCollection<S>(output, collections[0].getPType());\n   }\n ",
+                "changes": 4
+            },
+            {
+                "status": "modified",
+                "additions": 13,
+                "raw_url": "https://github.com/apache/crunch/raw/5c523231f6e5d664197f14b8977f5fb1620162a1/src/main/java/com/cloudera/crunch/impl/mr/MRPipeline.java",
+                "contents_url": "https://api.github.com/repos/apache/crunch/contents/src/main/java/com/cloudera/crunch/impl/mr/MRPipeline.java?ref=5c523231f6e5d664197f14b8977f5fb1620162a1",
+                "filename": "src/main/java/com/cloudera/crunch/impl/mr/MRPipeline.java",
+                "deletions": 0,
+                "sha": "9d2628f53aaf1e1aad40d86438172983d9935b97",
+                "blob_url": "https://github.com/apache/crunch/blob/5c523231f6e5d664197f14b8977f5fb1620162a1/src/main/java/com/cloudera/crunch/impl/mr/MRPipeline.java",
+                "patch": "@@ -26,6 +26,9 @@\n import org.apache.hadoop.fs.FileSystem;\n import org.apache.hadoop.fs.Path;\n \n+import com.cloudera.crunch.DoFn;\n+import com.cloudera.crunch.Emitter;\n+import com.cloudera.crunch.MapFn;\n import com.cloudera.crunch.PCollection;\n import com.cloudera.crunch.PTable;\n import com.cloudera.crunch.Pipeline;\n@@ -38,6 +41,7 @@\n import com.cloudera.crunch.impl.mr.collect.InputTable;\n import com.cloudera.crunch.impl.mr.collect.PCollectionImpl;\n import com.cloudera.crunch.impl.mr.collect.PGroupedTableImpl;\n+import com.cloudera.crunch.impl.mr.collect.UnionCollection;\n import com.cloudera.crunch.impl.mr.plan.MSCRPlanner;\n import com.cloudera.crunch.impl.mr.run.RuntimeParameters;\n import com.cloudera.crunch.io.At;\n@@ -135,9 +139,13 @@ public void done() {\n     return read(At.textFile(pathName));\n   }\n \n+  @SuppressWarnings(\"unchecked\")\n   public void write(PCollection<?> pcollection, Target target) {\n     if (pcollection instanceof PGroupedTableImpl) {\n       pcollection = ((PGroupedTableImpl) pcollection).ungroup();\n+    } else if (pcollection instanceof UnionCollection) {\n+      pcollection = pcollection.parallelDo(\"UnionCollectionWrapper\",  \n+    \t\t  (MapFn)IdentityFn.<Object>getInstance(), pcollection.getPType());\t \n     }\n     addOutput((PCollectionImpl) pcollection, target);\n   }\n@@ -151,6 +159,11 @@ private void addOutput(PCollectionImpl impl, Target target) {\n   \n   @Override\n   public <T> Iterable<T> materialize(PCollection<T> pcollection) {\n+\t  \n+    if (pcollection instanceof UnionCollection) {\n+    \tpcollection = pcollection.parallelDo(\"UnionCollectionWrapper\",  \n+\t        (MapFn)IdentityFn.<Object>getInstance(), pcollection.getPType());\t \n+\t}  \n     PCollectionImpl impl = (PCollectionImpl) pcollection;\n     SourceTarget<T> matTarget = impl.getMaterializedAt();\n     if (matTarget != null && matTarget instanceof ReadableSourceTarget) {",
+                "changes": 13
+            },
+            {
+                "status": "added",
+                "additions": 146,
+                "raw_url": "https://github.com/apache/crunch/raw/5c523231f6e5d664197f14b8977f5fb1620162a1/src/test/java/com/cloudera/crunch/impl/mr/collect/UnionCollectionTest.java",
+                "contents_url": "https://api.github.com/repos/apache/crunch/contents/src/test/java/com/cloudera/crunch/impl/mr/collect/UnionCollectionTest.java?ref=5c523231f6e5d664197f14b8977f5fb1620162a1",
+                "filename": "src/test/java/com/cloudera/crunch/impl/mr/collect/UnionCollectionTest.java",
+                "deletions": 0,
+                "sha": "4691e606c355817b6f771a4bebdd5587e8d48600",
+                "blob_url": "https://github.com/apache/crunch/blob/5c523231f6e5d664197f14b8977f5fb1620162a1/src/test/java/com/cloudera/crunch/impl/mr/collect/UnionCollectionTest.java",
+                "patch": "@@ -0,0 +1,146 @@\n+package com.cloudera.crunch.impl.mr.collect;\n+\n+import static org.junit.Assert.assertEquals;\n+\n+import java.io.File;\n+import java.io.IOException;\n+import java.util.ArrayList;\n+import java.util.Arrays;\n+import java.util.Collection;\n+\n+import org.apache.commons.logging.Log;\n+import org.apache.commons.logging.LogFactory;\n+import org.junit.After;\n+import org.junit.Before;\n+import org.junit.Test;\n+import org.junit.runner.RunWith;\n+import org.junit.runners.Parameterized;\n+import org.junit.runners.Parameterized.Parameters;\n+\n+import com.cloudera.crunch.PCollection;\n+import com.cloudera.crunch.PTableKeyValueTest;\n+import com.cloudera.crunch.Pipeline;\n+import com.cloudera.crunch.impl.mem.MemPipeline;\n+import com.cloudera.crunch.impl.mr.MRPipeline;\n+import com.cloudera.crunch.io.At;\n+import com.cloudera.crunch.io.To;\n+import com.cloudera.crunch.test.FileHelper;\n+import com.cloudera.crunch.type.PTypeFamily;\n+import com.cloudera.crunch.type.avro.AvroTypeFamily;\n+import com.cloudera.crunch.type.avro.Avros;\n+import com.cloudera.crunch.type.writable.WritableTypeFamily;\n+import com.google.common.collect.Lists;\n+\n+@RunWith(value = Parameterized.class)\n+public class UnionCollectionTest {\n+\n+\tprivate static final Log LOG = LogFactory.getLog(UnionCollectionTest.class);\n+\n+\tprivate PTypeFamily typeFamily;\n+\tprivate Pipeline pipeline;\n+\tprivate PCollection<String> union;\n+\n+\tprivate ArrayList<String> EXPECTED = Lists.newArrayList(\"b\", \"c\", \"a\", \"e\",\n+\t\t\t\"c\", \"d\", \"a\");\n+\n+\t@Before\n+\t@SuppressWarnings(\"unchecked\")\n+\tpublic void setUp() throws IOException {\n+\t\tString inputFile1 = FileHelper.createTempCopyOf(\"set1.txt\");\n+\t\tString inputFile2 = FileHelper.createTempCopyOf(\"set2.txt\");\n+\n+\t\tPCollection<String> firstCollection = pipeline.read(At.textFile(\n+\t\t\t\tinputFile1, typeFamily.strings()));\n+\t\tPCollection<String> secondCollection = pipeline.read(At.textFile(\n+\t\t\t\tinputFile2, typeFamily.strings()));\n+\n+\t\tLOG.info(\"Test fixture: [\" + pipeline.getClass().getSimpleName()\n+\t\t\t\t+ \" : \" + typeFamily.getClass().getSimpleName() + \"]  First: \"\n+\t\t\t\t+ Lists.newArrayList(firstCollection.materialize().iterator())\n+\t\t\t\t+ \", Second: \"\n+\t\t\t\t+ Lists.newArrayList(secondCollection.materialize().iterator()));\n+\n+\t\tunion = secondCollection.union(firstCollection);\n+\t}\n+\n+\t@After\n+\tpublic void tearDown() {\n+\t\tpipeline.done();\n+\t}\n+\n+\t@Parameters\n+\tpublic static Collection<Object[]> data() throws IOException {\n+\t\tObject[][] data = new Object[][] {\n+\t\t\t\t{ WritableTypeFamily.getInstance(),\n+\t\t\t\t\t\tnew MRPipeline(PTableKeyValueTest.class) },\n+\t\t\t\t{ WritableTypeFamily.getInstance(), MemPipeline.getInstance() },\n+\t\t\t\t{ AvroTypeFamily.getInstance(),\n+\t\t\t\t\t\tnew MRPipeline(PTableKeyValueTest.class) },\n+\t\t\t\t{ AvroTypeFamily.getInstance(), MemPipeline.getInstance() } };\n+\t\treturn Arrays.asList(data);\n+\t}\n+\n+\tpublic UnionCollectionTest(PTypeFamily typeFamily, Pipeline pipeline) {\n+\t\tthis.typeFamily = typeFamily;\n+\t\tthis.pipeline = pipeline;\n+\t}\n+\n+\t@Test\n+\tpublic void unionMaterializeShouldNotThrowNPE() {\n+\t\tcheckMaterialized(union.materialize());\n+\t\tcheckMaterialized(pipeline.materialize(union));\n+\t}\n+\n+\tprivate void checkMaterialized(Iterable<String> materialized) {\n+\n+\t\tArrayList<String> list = Lists.newArrayList(materialized.iterator());\n+\t\tLOG.info(\"Materialized union: \" + list);\n+\n+\t\tassertEquals(EXPECTED, list);\n+\t}\n+\n+\t@Test\n+\tpublic void unionWriteShouldNotThrowNPE() throws IOException {\n+\n+\t\tFile outputPath1 = FileHelper.createOutputPath();\n+\t\tFile outputPath2 = FileHelper.createOutputPath();\n+\t\tFile outputPath3 = FileHelper.createOutputPath();\n+\n+\t\tif (typeFamily == AvroTypeFamily.getInstance()) {\n+\t\t\tunion.write(To.avroFile(outputPath1.getAbsolutePath()));\n+\t\t\tpipeline.write(union, To.avroFile(outputPath2.getAbsolutePath()));\n+\n+\t\t\tpipeline.run();\n+\n+\t\t\tcheckFileContents(outputPath1.getAbsolutePath());\n+\t\t\tcheckFileContents(outputPath2.getAbsolutePath());\n+\n+\t\t} else {\n+\t\t\t\n+\t\t\tunion.write(To.textFile(outputPath1.getAbsolutePath()));\n+\t\t\tpipeline.write(union, To.textFile(outputPath2.getAbsolutePath()));\n+\t\t\tpipeline.writeTextFile(union, outputPath3.getAbsolutePath());\n+\n+\t\t\tpipeline.run();\n+\n+\t\t\tcheckFileContents(outputPath1.getAbsolutePath());\n+\t\t\tcheckFileContents(outputPath2.getAbsolutePath());\n+\t\t\tcheckFileContents(outputPath3.getAbsolutePath());\n+\t\t}\n+\n+\t}\n+\n+\tprivate void checkFileContents(String filePath) throws IOException {\n+\n+\t\tArrayList<String> result = (typeFamily != AvroTypeFamily.getInstance() || !(pipeline instanceof MRPipeline)) ? Lists\n+\t\t\t\t.newArrayList(pipeline\n+\t\t\t\t\t\t.read(At.textFile(filePath, typeFamily.strings()))\n+\t\t\t\t\t\t.materialize().iterator()) : Lists\n+\t\t\t\t.newArrayList(pipeline\n+\t\t\t\t\t\t.read(At.avroFile(filePath, Avros.strings()))\n+\t\t\t\t\t\t.materialize().iterator());\n+\n+\t\tLOG.info(\"Saved Union: \" + result);\n+\t\tassertEquals(EXPECTED, result);\n+\t}\n+}",
+                "changes": 146
+            }
+        ],
+        "unit_tests": [
+            "UnionCollectionTest.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "src/test/java/com/cloudera/crunch/impl/mr/collect/UnionCollectionTest.java",
+        "buggy_files": [
+            "src/main/java/com/cloudera/crunch/impl/mr/collect/UnionCollection.java",
+            "src/main/java/com/cloudera/crunch/impl/mem/collect/MemCollection.java",
+            "src/main/java/com/cloudera/crunch/impl/mr/MRPipeline.java"
+        ],
+        "fixed": true
+    }
+]

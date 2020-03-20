@@ -1,0 +1,49 @@
+[
+    {
+        "repo": "beam",
+        "commit": "https://github.com/apache/beam/commit/45ce497933ae351493c8e70bee972d91409028af",
+        "bug_id": "beam_45ce497",
+        "message": "Fix NPE in UnboundedReadFromBoundedSource",
+        "parent": "https://github.com/apache/beam/commit/be98b757b1a0c87b8a0f812ef50575749755513f",
+        "patched_files": [
+            "UnboundedReadFromBoundedSource.java"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 9,
+                "raw_url": "https://github.com/apache/beam/raw/45ce497933ae351493c8e70bee972d91409028af/runners/core-java/src/main/java/org/apache/beam/runners/core/UnboundedReadFromBoundedSource.java",
+                "contents_url": "https://api.github.com/repos/apache/beam/contents/runners/core-java/src/main/java/org/apache/beam/runners/core/UnboundedReadFromBoundedSource.java?ref=45ce497933ae351493c8e70bee972d91409028af",
+                "filename": "runners/core-java/src/main/java/org/apache/beam/runners/core/UnboundedReadFromBoundedSource.java",
+                "deletions": 10,
+                "sha": "f54af3b4437f1921cc1a449657602171651328f2",
+                "blob_url": "https://github.com/apache/beam/blob/45ce497933ae351493c8e70bee972d91409028af/runners/core-java/src/main/java/org/apache/beam/runners/core/UnboundedReadFromBoundedSource.java",
+                "patch": "@@ -167,10 +167,7 @@ public void validate() {\n     public Reader createReader(PipelineOptions options, Checkpoint<T> checkpoint)\n         throws IOException {\n       if (checkpoint == null) {\n-        return new Reader(\n-            Collections.<TimestampedValue<T>>emptyList() /* residualElements */,\n-            boundedSource,\n-            options);\n+        return new Reader(null /* residualElements */, boundedSource, options);\n       } else {\n         return new Reader(checkpoint.residualElements, checkpoint.residualSource, options);\n       }\n@@ -189,11 +186,11 @@ public Reader createReader(PipelineOptions options, Checkpoint<T> checkpoint)\n \n     @VisibleForTesting\n     static class Checkpoint<T> implements UnboundedSource.CheckpointMark {\n-      private final List<TimestampedValue<T>> residualElements;\n+      private final @Nullable List<TimestampedValue<T>> residualElements;\n       private final @Nullable BoundedSource<T> residualSource;\n \n       public Checkpoint(\n-          List<TimestampedValue<T>> residualElements,\n+          @Nullable List<TimestampedValue<T>> residualElements,\n           @Nullable BoundedSource<T> residualSource) {\n         this.residualElements = residualElements;\n         this.residualSource = residualSource;\n@@ -203,7 +200,7 @@ public Checkpoint(\n       public void finalizeCheckpoint() {}\n \n       @VisibleForTesting\n-      List<TimestampedValue<T>> getResidualElements() {\n+      @Nullable List<TimestampedValue<T>> getResidualElements() {\n         return residualElements;\n       }\n \n@@ -286,7 +283,7 @@ public void verifyDeterministic() throws NonDeterministicException {\n       private boolean done;\n \n       Reader(\n-          List<TimestampedValue<T>> residualElementsList,\n+          @Nullable List<TimestampedValue<T>> residualElementsList,\n           @Nullable BoundedSource<T> residualSource,\n           PipelineOptions options) {\n         init(residualElementsList, residualSource, options);\n@@ -295,10 +292,12 @@ public void verifyDeterministic() throws NonDeterministicException {\n       }\n \n       private void init(\n-          List<TimestampedValue<T>> residualElementsList,\n+          @Nullable List<TimestampedValue<T>> residualElementsList,\n           @Nullable BoundedSource<T> residualSource,\n           PipelineOptions options) {\n-        this.residualElements = new ResidualElements(residualElementsList);\n+        this.residualElements = residualElementsList == null\n+            ? new ResidualElements(Collections.<TimestampedValue<T>>emptyList())\n+                : new ResidualElements(residualElementsList);\n         this.residualSource =\n             residualSource == null ? null : new ResidualSource(residualSource, options);\n       }",
+                "changes": 19
+            },
+            {
+                "status": "modified",
+                "additions": 9,
+                "raw_url": "https://github.com/apache/beam/raw/45ce497933ae351493c8e70bee972d91409028af/runners/core-java/src/test/java/org/apache/beam/runners/core/UnboundedReadFromBoundedSourceTest.java",
+                "contents_url": "https://api.github.com/repos/apache/beam/contents/runners/core-java/src/test/java/org/apache/beam/runners/core/UnboundedReadFromBoundedSourceTest.java?ref=45ce497933ae351493c8e70bee972d91409028af",
+                "filename": "runners/core-java/src/test/java/org/apache/beam/runners/core/UnboundedReadFromBoundedSourceTest.java",
+                "deletions": 0,
+                "sha": "dfbc675c091945ac67f522520c73638bd9d1dee7",
+                "blob_url": "https://github.com/apache/beam/blob/45ce497933ae351493c8e70bee972d91409028af/runners/core-java/src/test/java/org/apache/beam/runners/core/UnboundedReadFromBoundedSourceTest.java",
+                "patch": "@@ -19,6 +19,7 @@\n \n import static org.junit.Assert.assertEquals;\n import static org.junit.Assert.assertNull;\n+import static org.junit.Assert.assertTrue;\n \n import org.apache.beam.runners.core.UnboundedReadFromBoundedSource.BoundedToUnboundedSourceAdapter;\n import org.apache.beam.runners.core.UnboundedReadFromBoundedSource.BoundedToUnboundedSourceAdapter.Checkpoint;\n@@ -169,6 +170,10 @@ public void testUnsplittableSourceToUnboundedCheckpoint() throws Exception {\n         checkpoint.finalizeCheckpoint();\n       }\n     }\n+    Checkpoint<T> checkpointDone = reader.getCheckpointMark();\n+    assertTrue(checkpointDone.getResidualElements() == null\n+        || checkpointDone.getResidualElements().isEmpty());\n+\n     assertEquals(expectedElements.size(), actual.size());\n     assertEquals(Sets.newHashSet(expectedElements), Sets.newHashSet(actual));\n   }\n@@ -230,6 +235,10 @@ public void testUnsplittableSourceToUnboundedCheckpointRestart() throws Exceptio\n         hasNext = reader.advance();\n       }\n     }\n+    Checkpoint<T> checkpointDone = reader.getCheckpointMark();\n+    assertTrue(checkpointDone.getResidualElements() == null\n+        || checkpointDone.getResidualElements().isEmpty());\n+\n     assertEquals(expectedElements.size(), actual.size());\n     assertEquals(Sets.newHashSet(expectedElements), Sets.newHashSet(actual));\n   }",
+                "changes": 9
+            }
+        ],
+        "unit_tests": [
+            "UnboundedReadFromBoundedSourceTest.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "runners/core-java/src/test/java/org/apache/beam/runners/core/UnboundedReadFromBoundedSourceTest.java",
+        "buggy_files": [
+            "runners/core-java/src/main/java/org/apache/beam/runners/core/UnboundedReadFromBoundedSource.java"
+        ],
+        "fixed": true
+    }
+]

@@ -1,0 +1,63 @@
+[
+    {
+        "repo": "logging-log4j2",
+        "commit": "https://github.com/apache/logging-log4j2/commit/0c51e1327ce808d52bff26363344329f914c6844",
+        "bug_id": "logging-log4j2_0c51e13",
+        "message": "LOG4J2-152 - RollingFileAppender's FileRenameAction was throwing a NullPointerException if no directory was specified on the target file name.\n\ngit-svn-id: https://svn.apache.org/repos/asf/logging/log4j/log4j2/trunk@1435044 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/logging-log4j2/commit/e5ec31c070467da7f2598aafbca088864e122cd6",
+        "patched_files": [
+            "changes.xml",
+            "FileRenameAction.java"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 7,
+                "raw_url": "https://github.com/apache/logging-log4j2/raw/0c51e1327ce808d52bff26363344329f914c6844/core/src/main/java/org/apache/logging/log4j/core/appender/rolling/helper/FileRenameAction.java",
+                "contents_url": "https://api.github.com/repos/apache/logging-log4j2/contents/core/src/main/java/org/apache/logging/log4j/core/appender/rolling/helper/FileRenameAction.java?ref=0c51e1327ce808d52bff26363344329f914c6844",
+                "filename": "core/src/main/java/org/apache/logging/log4j/core/appender/rolling/helper/FileRenameAction.java",
+                "deletions": 1,
+                "sha": "6d594fd3bff1bca6d40cf991cef376da2e175a87",
+                "blob_url": "https://github.com/apache/logging-log4j2/blob/0c51e1327ce808d52bff26363344329f914c6844/core/src/main/java/org/apache/logging/log4j/core/appender/rolling/helper/FileRenameAction.java",
+                "patch": "@@ -76,7 +76,7 @@ public boolean execute() {\n     public static boolean execute(final File source, final File destination, final boolean renameEmptyFiles) {\n         if (renameEmptyFiles || source.length() > 0) {\n             final File parent = destination.getParentFile();\n-            if (!parent.exists()) {\n+            if (parent != null && !parent.exists()) {\n                 if (!parent.mkdirs()) {\n                     LOGGER.error(\"Unable to create directory {}\", parent.getAbsolutePath());\n                     return false;\n@@ -102,6 +102,12 @@ public static boolean execute(final File source, final File destination, final b\n                         destination.getAbsolutePath(), iex.getMessage());\n                 }\n             }\n+        } else {\n+            try {\n+                source.delete();\n+            } catch (Exception ex) {\n+                LOGGER.error(\"Unable to delete empty file \" + source.getAbsolutePath());\n+            }\n         }\n \n         return false;",
+                "changes": 8
+            },
+            {
+                "status": "added",
+                "additions": 128,
+                "raw_url": "https://github.com/apache/logging-log4j2/raw/0c51e1327ce808d52bff26363344329f914c6844/core/src/test/java/org/apache/logging/log4j/core/appender/rolling/helper/FileRenameActionTest.java",
+                "contents_url": "https://api.github.com/repos/apache/logging-log4j2/contents/core/src/test/java/org/apache/logging/log4j/core/appender/rolling/helper/FileRenameActionTest.java?ref=0c51e1327ce808d52bff26363344329f914c6844",
+                "filename": "core/src/test/java/org/apache/logging/log4j/core/appender/rolling/helper/FileRenameActionTest.java",
+                "deletions": 0,
+                "sha": "43b2fa76bc4a7414dd80628262c0f0886ce8feb4",
+                "blob_url": "https://github.com/apache/logging-log4j2/blob/0c51e1327ce808d52bff26363344329f914c6844/core/src/test/java/org/apache/logging/log4j/core/appender/rolling/helper/FileRenameActionTest.java",
+                "patch": "@@ -0,0 +1,128 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one or more\n+ * contributor license agreements. See the NOTICE file distributed with\n+ * this work for additional information regarding copyright ownership.\n+ * The ASF licenses this file to You under the Apache license, Version 2.0\n+ * (the \"License\"); you may not use this file except in compliance with\n+ * the License. You may obtain a copy of the License at\n+ *\n+ *      http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing, software\n+ * distributed under the License is distributed on an \"AS IS\" BASIS,\n+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n+ * See the license for the specific language governing permissions and\n+ * limitations under the license.\n+ */\n+package org.apache.logging.log4j.core.appender.rolling.helper;\n+\n+import org.junit.After;\n+import org.junit.AfterClass;\n+import org.junit.BeforeClass;\n+import org.junit.Test;\n+\n+import java.io.File;\n+import java.io.PrintStream;\n+\n+import static org.junit.Assert.assertTrue;\n+\n+/**\n+ *\n+ */\n+public class FileRenameActionTest {\n+\n+    private static final String DIR = \"target/fileRename\";\n+\n+    @BeforeClass\n+    public static void beforeClass() throws Exception {\n+        File file = new File(DIR);\n+        file.mkdirs();\n+    }\n+\n+    @AfterClass\n+    public static void afterClass() {\n+        deleteDir();\n+    }\n+\n+    @After\n+    public void after() {\n+        deleteFiles();\n+    }\n+\n+    @Test\n+    public void testRename1() throws Exception {\n+        File file = new File(\"target/fileRename/fileRename.log\");\n+        PrintStream pos = new PrintStream(file);\n+        for (int i = 0; i < 100; ++i) {\n+            pos.println(\"This is line \" + i);\n+        }\n+        pos.close();\n+\n+        File dest = new File(\"target/fileRename/newFile.log\");\n+        FileRenameAction action = new FileRenameAction(file, dest, false);\n+        action.execute();\n+        assertTrue(\"Renamed file does not exist\", dest.exists());\n+        assertTrue(\"Old file exists\", !file.exists());\n+    }\n+\n+    @Test\n+    public void testEmpty() throws Exception {\n+        File file = new File(\"target/fileRename/fileRename.log\");\n+        PrintStream pos = new PrintStream(file);\n+        pos.close();\n+\n+        File dest = new File(\"target/fileRename/newFile.log\");\n+        FileRenameAction action = new FileRenameAction(file, dest, false);\n+        action.execute();\n+        assertTrue(\"Renamed file does not exist\", !dest.exists());\n+        assertTrue(\"Old file does not exist\", !file.exists());\n+    }\n+\n+\n+    @Test\n+    public void testNoParent() throws Exception {\n+        File file = new File(\"fileRename.log\");\n+        PrintStream pos = new PrintStream(file);\n+        for (int i = 0; i < 100; ++i) {\n+            pos.println(\"This is line \" + i);\n+        }\n+        pos.close();\n+\n+        File dest = new File(\"newFile.log\");\n+        try {\n+            FileRenameAction action = new FileRenameAction(file, dest, false);\n+            action.execute();\n+            assertTrue(\"Renamed file does not exist\", dest.exists());\n+            assertTrue(\"Old file exists\", !file.exists());\n+        } finally {\n+            try {\n+                dest.delete();\n+                file.delete();\n+            } catch (Exception ex) {\n+                System.out.println(\"Unable to cleanup files written to main directory\");\n+            }\n+        }\n+    }\n+\n+\n+    private static void deleteDir() {\n+        final File dir = new File(DIR);\n+        if (dir.exists()) {\n+            final File[] files = dir.listFiles();\n+            for (final File file : files) {\n+                file.delete();\n+            }\n+            dir.delete();\n+        }\n+    }\n+\n+    private static void deleteFiles() {\n+        final File dir = new File(DIR);\n+        if (dir.exists()) {\n+            final File[] files = dir.listFiles();\n+            for (final File file : files) {\n+                file.delete();\n+            }\n+        }\n+    }\n+}",
+                "changes": 128
+            },
+            {
+                "status": "modified",
+                "additions": 4,
+                "raw_url": "https://github.com/apache/logging-log4j2/raw/0c51e1327ce808d52bff26363344329f914c6844/src/changes/changes.xml",
+                "contents_url": "https://api.github.com/repos/apache/logging-log4j2/contents/src/changes/changes.xml?ref=0c51e1327ce808d52bff26363344329f914c6844",
+                "filename": "src/changes/changes.xml",
+                "deletions": 0,
+                "sha": "303d09f318a9f64c71a123e8562f35eea54205b6",
+                "blob_url": "https://github.com/apache/logging-log4j2/blob/0c51e1327ce808d52bff26363344329f914c6844/src/changes/changes.xml",
+                "patch": "@@ -23,6 +23,10 @@\n \n   <body>\n     <release version=\"2.0-beta4\" date=\"TBD\" description=\"Bug fixes and enhancements\">\n+      <action issue=\"LOG4J2-152\" dev=\"rgoers\" type=\"fix\" due-to=\"Remko Popma\">\n+        RollingFileAppender's FileRenameAction was throwing a NullPointerException if no directory was specified\n+        on the target file name.\n+      </action>\n       <action issue=\"LOG4J2-150\" dev=\"rgoers\" type=\"fix\">\n         Convert all System.getProperty calls to use PropertiesUtil to suppress SecurityExceptions.\n       </action>",
+                "changes": 4
+            }
+        ],
+        "unit_tests": [
+            "FileRenameActionTest.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "core/src/test/java/org/apache/logging/log4j/core/appender/rolling/helper/FileRenameActionTest.java",
+        "buggy_files": [
+            "src/changes/changes.xml",
+            "core/src/main/java/org/apache/logging/log4j/core/appender/rolling/helper/FileRenameAction.java"
+        ],
+        "fixed": true
+    }
+]

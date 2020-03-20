@@ -1,0 +1,49 @@
+[
+    {
+        "repo": "hive",
+        "commit": "https://github.com/apache/hive/commit/1d159ffd3c5016b78ca2814b837c02ab3f4be1de",
+        "bug_id": "hive_1d159ff",
+        "message": "HIVE-16122: NPE Hive Druid split introduced by HIVE-15928 (Slim Bouguerra, reviewed by Jesus Camacho Rodriguez)",
+        "parent": "https://github.com/apache/hive/commit/7f4a3e17ec2fa886276a7f278e5846e0e7ebc8a6",
+        "patched_files": [
+            "HiveDruidSplit.java"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 17,
+                "raw_url": "https://github.com/apache/hive/raw/1d159ffd3c5016b78ca2814b837c02ab3f4be1de/druid-handler/src/java/org/apache/hadoop/hive/druid/io/HiveDruidSplit.java",
+                "contents_url": "https://api.github.com/repos/apache/hive/contents/druid-handler/src/java/org/apache/hadoop/hive/druid/io/HiveDruidSplit.java?ref=1d159ffd3c5016b78ca2814b837c02ab3f4be1de",
+                "filename": "druid-handler/src/java/org/apache/hadoop/hive/druid/io/HiveDruidSplit.java",
+                "deletions": 2,
+                "sha": "5159b426df985a15817ec13071be783ab18cc51a",
+                "blob_url": "https://github.com/apache/hive/blob/1d159ffd3c5016b78ca2814b837c02ab3f4be1de/druid-handler/src/java/org/apache/hadoop/hive/druid/io/HiveDruidSplit.java",
+                "patch": "@@ -49,22 +49,37 @@ public HiveDruidSplit(String druidQuery, Path dummyPath, String hosts[]) {\n   public void write(DataOutput out) throws IOException {\n     super.write(out);\n     out.writeUTF(druidQuery);\n+    out.writeInt(hosts.length);\n+    for (String host : hosts) {\n+      out.writeUTF(host);\n+    }\n   }\n \n   @Override\n   public void readFields(DataInput in) throws IOException {\n     super.readFields(in);\n     druidQuery = in.readUTF();\n+    int length = in.readInt();\n+    String[] listHosts = new String[length];\n+    for (int i = 0; i < length; i++) {\n+      listHosts[i] = in.readUTF();\n+    }\n+    hosts = listHosts;\n   }\n \n   public String getDruidQuery() {\n     return druidQuery;\n   }\n \n+  @Override\n+  public String[] getLocations() throws IOException {\n+    return hosts;\n+  }\n+\n   @Override\n   public String toString() {\n-    return \"HiveDruidSplit{\" + druidQuery + \", \" \n-            + (hosts == null ? \"empty hosts\" : Arrays.toString(hosts))  + \"}\";\n+    return \"HiveDruidSplit{\" + druidQuery + \", \"\n+            + (hosts == null ? \"empty hosts\" : Arrays.toString(hosts)) + \"}\";\n   }\n \n }",
+                "changes": 19
+            },
+            {
+                "status": "added",
+                "additions": 46,
+                "raw_url": "https://github.com/apache/hive/raw/1d159ffd3c5016b78ca2814b837c02ab3f4be1de/druid-handler/src/test/org/apache/hadoop/hive/druid/io/TestHiveDruidSplit.java",
+                "contents_url": "https://api.github.com/repos/apache/hive/contents/druid-handler/src/test/org/apache/hadoop/hive/druid/io/TestHiveDruidSplit.java?ref=1d159ffd3c5016b78ca2814b837c02ab3f4be1de",
+                "filename": "druid-handler/src/test/org/apache/hadoop/hive/druid/io/TestHiveDruidSplit.java",
+                "deletions": 0,
+                "sha": "234c783d25354cfa48890f659cc0083eff1c0c66",
+                "blob_url": "https://github.com/apache/hive/blob/1d159ffd3c5016b78ca2814b837c02ab3f4be1de/druid-handler/src/test/org/apache/hadoop/hive/druid/io/TestHiveDruidSplit.java",
+                "patch": "@@ -0,0 +1,46 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one\n+ * or more contributor license agreements.  See the NOTICE file\n+ * distributed with this work for additional information\n+ * regarding copyright ownership.  The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance\n+ * with the License.  You may obtain a copy of the License at\n+ *\n+ *      http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing, software\n+ * distributed under the License is distributed on an \"AS IS\" BASIS,\n+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n+ * See the License for the specific language governing permissions and\n+ * limitations under the License.\n+ */\n+\n+package org.apache.hadoop.hive.druid.io;\n+\n+import org.apache.hadoop.fs.Path;\n+import org.junit.Assert;\n+import org.junit.Test;\n+\n+import java.io.ByteArrayInputStream;\n+import java.io.ByteArrayOutputStream;\n+import java.io.DataInputStream;\n+import java.io.DataOutput;\n+import java.io.DataOutputStream;\n+import java.io.IOException;\n+\n+public class TestHiveDruidSplit {\n+  @Test\n+  public void testSerDeser() throws IOException {\n+    HiveDruidSplit hiveDruidSplit = new HiveDruidSplit(\"query string\", new Path(\"test-path\"), new String []{\"host:8080\", \"host2:8090\"});\n+    ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();\n+    DataOutput dataOutput = new DataOutputStream(byteArrayOutputStream);\n+    hiveDruidSplit.write(dataOutput);\n+    ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(byteArrayOutputStream.toByteArray());\n+    HiveDruidSplit actualHiveDruidSplit = new HiveDruidSplit();\n+    actualHiveDruidSplit.readFields(new DataInputStream(byteArrayInputStream));\n+    Assert.assertEquals(actualHiveDruidSplit.getDruidQuery(), \"query string\");\n+    Assert.assertArrayEquals(actualHiveDruidSplit.getLocations(),  new String []{\"host:8080\", \"host2:8090\"});\n+  }\n+\n+}\n\\ No newline at end of file",
+                "changes": 46
+            }
+        ],
+        "unit_tests": [
+            "TestHiveDruidSplit.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "druid-handler/src/test/org/apache/hadoop/hive/druid/io/TestHiveDruidSplit.java",
+        "buggy_files": [
+            "druid-handler/src/java/org/apache/hadoop/hive/druid/io/HiveDruidSplit.java"
+        ],
+        "fixed": true
+    }
+]

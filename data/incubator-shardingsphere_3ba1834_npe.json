@@ -1,0 +1,49 @@
+[
+    {
+        "repo": "incubator-shardingsphere",
+        "commit": "https://github.com/apache/incubator-shardingsphere/commit/3ba18348c228fceb6610bd97a2ac21caea25d6b9",
+        "bug_id": "incubator-shardingsphere_3ba1834",
+        "message": "fix npe problem",
+        "parent": "https://github.com/apache/incubator-shardingsphere/commit/7f4faf2cfc42e8cf34458226b85f95ff013d92a0",
+        "patched_files": [
+            "OpenTracingSQLExecutionHook.java"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 8,
+                "raw_url": "https://github.com/apache/incubator-shardingsphere/raw/3ba18348c228fceb6610bd97a2ac21caea25d6b9/sharding-opentracing/src/main/java/org/apache/shardingsphere/opentracing/hook/OpenTracingSQLExecutionHook.java",
+                "contents_url": "https://api.github.com/repos/apache/incubator-shardingsphere/contents/sharding-opentracing/src/main/java/org/apache/shardingsphere/opentracing/hook/OpenTracingSQLExecutionHook.java?ref=3ba18348c228fceb6610bd97a2ac21caea25d6b9",
+                "filename": "sharding-opentracing/src/main/java/org/apache/shardingsphere/opentracing/hook/OpenTracingSQLExecutionHook.java",
+                "deletions": 1,
+                "sha": "2d97263930cefc1c51e53d5369aaa64698c17c9c",
+                "blob_url": "https://github.com/apache/incubator-shardingsphere/blob/3ba18348c228fceb6610bd97a2ac21caea25d6b9/sharding-opentracing/src/main/java/org/apache/shardingsphere/opentracing/hook/OpenTracingSQLExecutionHook.java",
+                "patch": "@@ -18,6 +18,9 @@\n package org.apache.shardingsphere.opentracing.hook;\n \n import com.google.common.base.Joiner;\n+import com.google.common.base.Strings;\n+import com.google.common.collect.Collections2;\n+import com.google.common.collect.Lists;\n import io.opentracing.ActiveSpan;\n import io.opentracing.Span;\n import io.opentracing.tag.Tags;\n@@ -61,7 +64,11 @@ public void start(final RouteUnit routeUnit, final DataSourceMetaData dataSource\n     }\n     \n     private String toString(final List<Object> parameterSets) {\n-        return parameterSets.isEmpty() ? \"\" : String.format(\"[%s]\", Joiner.on(\", \").join(parameterSets));\n+\n+        if (null == parameterSets || parameterSets.isEmpty()) {\n+            return \"\";\n+        }\n+        return String.format(\"[%s]\", Joiner.on(\", \").join(parameterSets));\n     }\n     \n     @Override",
+                "changes": 9
+            },
+            {
+                "status": "modified",
+                "additions": 24,
+                "raw_url": "https://github.com/apache/incubator-shardingsphere/raw/3ba18348c228fceb6610bd97a2ac21caea25d6b9/sharding-opentracing/src/test/java/org/apache/shardingsphere/opentracing/hook/OpenTracingSQLExecutionHookTest.java",
+                "contents_url": "https://api.github.com/repos/apache/incubator-shardingsphere/contents/sharding-opentracing/src/test/java/org/apache/shardingsphere/opentracing/hook/OpenTracingSQLExecutionHookTest.java?ref=3ba18348c228fceb6610bd97a2ac21caea25d6b9",
+                "filename": "sharding-opentracing/src/test/java/org/apache/shardingsphere/opentracing/hook/OpenTracingSQLExecutionHookTest.java",
+                "deletions": 0,
+                "sha": "38108e6e7bf162787f1908940b413f33fd260d9e",
+                "blob_url": "https://github.com/apache/incubator-shardingsphere/blob/3ba18348c228fceb6610bd97a2ac21caea25d6b9/sharding-opentracing/src/test/java/org/apache/shardingsphere/opentracing/hook/OpenTracingSQLExecutionHookTest.java",
+                "patch": "@@ -95,6 +95,30 @@ public void assertExecuteSuccessForTrunkThread() {\n         assertThat(actualTags.get(Tags.DB_STATEMENT.getKey()), CoreMatchers.<Object>is(\"SELECT * FROM success_tbl;\"));\n         assertThat(actualTags.get(ShardingTags.DB_BIND_VARIABLES.getKey()), CoreMatchers.<Object>is(\"[1, 2]\"));\n         verify(activeSpan, times(0)).deactivate();\n+\n+        sqlExecutionHook.start(createRouteUnit(\"success_ds\", \"SELECT * FROM success_tbl;\", null), dataSourceMetaData, true, null);\n+        sqlExecutionHook.finishSuccess();\n+    }\n+\n+    @Test\n+    public void assertExecuteSuccessForTrunkThreadWhenParamsIsNull() {\n+        DataSourceMetaData dataSourceMetaData = mock(DataSourceMetaData.class);\n+        when(dataSourceMetaData.getHostName()).thenReturn(\"localhost\");\n+        when(dataSourceMetaData.getPort()).thenReturn(8888);\n+        sqlExecutionHook.start(createRouteUnit(\"success_ds\", \"SELECT * FROM success_tbl;\", null), dataSourceMetaData, true, null);\n+        sqlExecutionHook.finishSuccess();\n+        MockSpan actual = getActualSpan();\n+        assertThat(actual.operationName(), is(\"/Sharding-Sphere/executeSQL/\"));\n+        Map<String, Object> actualTags = actual.tags();\n+        assertThat(actualTags.get(Tags.COMPONENT.getKey()), CoreMatchers.<Object>is(ShardingTags.COMPONENT_NAME));\n+        assertThat(actualTags.get(Tags.SPAN_KIND.getKey()), CoreMatchers.<Object>is(Tags.SPAN_KIND_CLIENT));\n+        assertThat(actualTags.get(Tags.PEER_HOSTNAME.getKey()), CoreMatchers.<Object>is(\"localhost\"));\n+        assertThat(actualTags.get(Tags.PEER_PORT.getKey()), CoreMatchers.<Object>is(8888));\n+        assertThat(actualTags.get(Tags.DB_TYPE.getKey()), CoreMatchers.<Object>is(\"sql\"));\n+        assertThat(actualTags.get(Tags.DB_INSTANCE.getKey()), CoreMatchers.<Object>is(\"success_ds\"));\n+        assertThat(actualTags.get(Tags.DB_STATEMENT.getKey()), CoreMatchers.<Object>is(\"SELECT * FROM success_tbl;\"));\n+        assertThat(actualTags.get(ShardingTags.DB_BIND_VARIABLES.getKey()), CoreMatchers.<Object>is(\"\"));\n+        verify(activeSpan, times(0)).deactivate();\n     }\n     \n     @Test",
+                "changes": 24
+            }
+        ],
+        "unit_tests": [
+            "OpenTracingSQLExecutionHookTest.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "sharding-opentracing/src/test/java/org/apache/shardingsphere/opentracing/hook/OpenTracingSQLExecutionHookTest.java",
+        "buggy_files": [
+            "sharding-opentracing/src/main/java/org/apache/shardingsphere/opentracing/hook/OpenTracingSQLExecutionHook.java"
+        ],
+        "fixed": true
+    }
+]

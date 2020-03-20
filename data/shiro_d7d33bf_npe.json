@@ -1,0 +1,49 @@
+[
+    {
+        "repo": "shiro",
+        "commit": "https://github.com/apache/shiro/commit/d7d33bfbd0a1d3f41b288d1ae8bf8f6fefe35022",
+        "bug_id": "shiro_d7d33bf",
+        "message": "[SHIRO-685]\u00a0Potential NullPointerException if PermissionResolver return null/empty string",
+        "parent": "https://github.com/apache/shiro/commit/6891aaf74e0b61296e4c47439bf333ada7b0032e",
+        "patched_files": [
+            "AuthorizingRealm.java"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 5,
+                "raw_url": "https://github.com/apache/shiro/raw/d7d33bfbd0a1d3f41b288d1ae8bf8f6fefe35022/core/src/main/java/org/apache/shiro/realm/AuthorizingRealm.java",
+                "contents_url": "https://api.github.com/repos/apache/shiro/contents/core/src/main/java/org/apache/shiro/realm/AuthorizingRealm.java?ref=d7d33bfbd0a1d3f41b288d1ae8bf8f6fefe35022",
+                "filename": "core/src/main/java/org/apache/shiro/realm/AuthorizingRealm.java",
+                "deletions": 2,
+                "sha": "8f69a2495a363d14bd15af374abf59a3e5cd931a",
+                "blob_url": "https://github.com/apache/shiro/blob/d7d33bfbd0a1d3f41b288d1ae8bf8f6fefe35022/core/src/main/java/org/apache/shiro/realm/AuthorizingRealm.java",
+                "patch": "@@ -26,6 +26,7 @@\n import org.apache.shiro.subject.PrincipalCollection;\n import org.apache.shiro.util.CollectionUtils;\n import org.apache.shiro.util.Initializable;\n+import org.apache.shiro.util.StringUtils;\n import org.slf4j.Logger;\n import org.slf4j.LoggerFactory;\n \n@@ -431,8 +432,10 @@ protected void clearCachedAuthorizationInfo(PrincipalCollection principals) {\n         if (resolver != null && !CollectionUtils.isEmpty(stringPerms)) {\n             perms = new LinkedHashSet<Permission>(stringPerms.size());\n             for (String strPermission : stringPerms) {\n-                Permission permission = resolver.resolvePermission(strPermission);\n-                perms.add(permission);\n+                if (StringUtils.clean(strPermission) != null) {\n+                    Permission permission = resolver.resolvePermission(strPermission);\n+                    perms.add(permission);\n+                }\n             }\n         }\n         return perms;",
+                "changes": 7
+            },
+            {
+                "status": "modified",
+                "additions": 52,
+                "raw_url": "https://github.com/apache/shiro/raw/d7d33bfbd0a1d3f41b288d1ae8bf8f6fefe35022/core/src/test/java/org/apache/shiro/realm/AuthorizingRealmTest.java",
+                "contents_url": "https://api.github.com/repos/apache/shiro/contents/core/src/test/java/org/apache/shiro/realm/AuthorizingRealmTest.java?ref=d7d33bfbd0a1d3f41b288d1ae8bf8f6fefe35022",
+                "filename": "core/src/test/java/org/apache/shiro/realm/AuthorizingRealmTest.java",
+                "deletions": 4,
+                "sha": "c78d66919f4c0cabeb825a8d661529b510d70694",
+                "blob_url": "https://github.com/apache/shiro/blob/d7d33bfbd0a1d3f41b288d1ae8bf8f6fefe35022/core/src/test/java/org/apache/shiro/realm/AuthorizingRealmTest.java",
+                "patch": "@@ -18,23 +18,37 @@\n  */\n package org.apache.shiro.realm;\n \n-import org.apache.shiro.authc.*;\n+import java.security.Principal;\n+import java.util.ArrayList;\n+import java.util.Collection;\n+import java.util.HashSet;\n+import java.util.List;\n+import java.util.Set;\n+import org.apache.shiro.authc.AuthenticationException;\n+import org.apache.shiro.authc.AuthenticationInfo;\n+import org.apache.shiro.authc.AuthenticationToken;\n+import org.apache.shiro.authc.SimpleAccount;\n+import org.apache.shiro.authc.SimpleAuthenticationInfo;\n+import org.apache.shiro.authc.UsernamePasswordToken;\n import org.apache.shiro.authc.credential.AllowAllCredentialsMatcher;\n import org.apache.shiro.authz.AuthorizationInfo;\n import org.apache.shiro.authz.Permission;\n import org.apache.shiro.authz.SimpleAuthorizationInfo;\n import org.apache.shiro.authz.UnauthorizedException;\n import org.apache.shiro.authz.permission.RolePermissionResolver;\n import org.apache.shiro.authz.permission.WildcardPermission;\n+import org.apache.shiro.authz.permission.WildcardPermissionResolver;\n import org.apache.shiro.subject.PrincipalCollection;\n import org.apache.shiro.subject.SimplePrincipalCollection;\n import org.junit.After;\n-import static org.junit.Assert.*;\n import org.junit.Before;\n import org.junit.Test;\n \n-import java.security.Principal;\n-import java.util.*;\n+import static org.junit.Assert.assertEquals;\n+import static org.junit.Assert.assertFalse;\n+import static org.junit.Assert.assertNotNull;\n+import static org.junit.Assert.assertTrue;\n+import static org.junit.Assert.fail;\n \n \n /**\n@@ -214,6 +228,40 @@ public void testRealmWithRolePermissionResolver()\n         assertTrue( realm.isPermitted( pCollection, \"other:bar:foo\" ) );\n     }\n \n+    @Test\n+    public void testRealmWithEmptyOrNullPermissions() {\n+        Principal principal = new UsernamePrincipal(\"rolePermResolver\");\n+        PrincipalCollection pCollection = new SimplePrincipalCollection(principal, \"testRealmWithRolePermissionResolver\");\n+\n+        AuthorizingRealm realm = new AllowAllRealm();\n+        realm.setRolePermissionResolver( new RolePermissionResolver()\n+        {\n+            public Collection<Permission> resolvePermissionsInRole( String roleString )\n+            {\n+                Collection<Permission> permissions = new HashSet<Permission>();\n+                if( roleString.equals( ROLE ))\n+                {\n+                    permissions.add( new WildcardPermission( ROLE + \":perm1\" ) );\n+                    permissions.add( new WildcardPermission( ROLE + \":perm2\" ) );\n+                    permissions.add( new WildcardPermission( ROLE + \": \" ) );\n+                    permissions.add( new WildcardPermission( ROLE + \":\\t\" ) );\n+                    permissions.add( new WildcardPermission( \"other:*:foo\" ) );\n+                }\n+                return permissions;\n+            }\n+        });\n+\n+        realm.setPermissionResolver(new WildcardPermissionResolver());\n+        SimpleAuthorizationInfo authorizationInfo = (SimpleAuthorizationInfo) realm.getAuthorizationInfo(pCollection);\n+        assertNotNull(authorizationInfo);\n+        authorizationInfo.addStringPermission(\"\");\n+        authorizationInfo.addStringPermission(\" \");\n+        authorizationInfo.addStringPermission(\"\\t\");\n+        authorizationInfo.addStringPermission(null);\n+        Collection<Permission> permissions = realm.getPermissions(authorizationInfo);\n+        assertEquals(permissions.size(), 4);\n+    }\n+\n     private void assertArrayEquals(boolean[] expected, boolean[] actual) {\n         if (expected.length != actual.length) {\n             fail(\"Expected array of length [\" + expected.length + \"] but received array of length [\" + actual.length + \"]\");",
+                "changes": 56
+            }
+        ],
+        "unit_tests": [
+            "AuthorizingRealmTest.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "core/src/test/java/org/apache/shiro/realm/AuthorizingRealmTest.java",
+        "buggy_files": [
+            "core/src/main/java/org/apache/shiro/realm/AuthorizingRealm.java"
+        ],
+        "fixed": true
+    }
+]

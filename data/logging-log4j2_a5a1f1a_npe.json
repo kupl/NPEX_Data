@@ -1,0 +1,119 @@
+[
+    {
+        "repo": "logging-log4j2",
+        "commit": "https://github.com/apache/logging-log4j2/commit/a5a1f1a271efaaccc15ae49ae0a3d64b711b3a89",
+        "bug_id": "logging-log4j2_a5a1f1a",
+        "message": "LOG4J2-639: prevent NPE if AsyncLogger/AsyncLoggerConfig is used after log4j was shut down\n\ngit-svn-id: https://svn.apache.org/repos/asf/logging/log4j/log4j2/trunk@1595507 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/logging-log4j2/commit/5c6a64444487e37d621a25aaff386abfd336c9ac",
+        "patched_files": [
+            "changes.xml",
+            "AsyncLoggerTest.xml",
+            "AsyncLoggerConfigHelper.java",
+            "AsyncLogger.java",
+            "AsyncLoggerConfigTest.xml"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 16,
+                "raw_url": "https://github.com/apache/logging-log4j2/raw/a5a1f1a271efaaccc15ae49ae0a3d64b711b3a89/log4j-core/src/main/java/org/apache/logging/log4j/core/async/AsyncLogger.java",
+                "contents_url": "https://api.github.com/repos/apache/logging-log4j2/contents/log4j-core/src/main/java/org/apache/logging/log4j/core/async/AsyncLogger.java?ref=a5a1f1a271efaaccc15ae49ae0a3d64b711b3a89",
+                "filename": "log4j-core/src/main/java/org/apache/logging/log4j/core/async/AsyncLogger.java",
+                "deletions": 2,
+                "sha": "c8329732d3ae84797f68f98d27af2c69acff7f72",
+                "blob_url": "https://github.com/apache/logging-log4j2/blob/a5a1f1a271efaaccc15ae49ae0a3d64b711b3a89/log4j-core/src/main/java/org/apache/logging/log4j/core/async/AsyncLogger.java",
+                "patch": "@@ -230,10 +230,16 @@ public void logMessage(final String fqcn, final Level level, final Marker marker\n             info = new Info(new RingBufferLogEventTranslator(), Thread.currentThread().getName(), false);\n             threadlocalInfo.set(info);\n         }\n+        \n+        Disruptor<RingBufferLogEvent> temp = disruptor;\n+        if (temp == null) { // LOG4J2-639\n+            LOGGER.fatal(\"Ignoring log event after log4j was shut down\");\n+            return;\n+        }\n \n         // LOG4J2-471: prevent deadlock when RingBuffer is full and object\n         // being logged calls Logger.log() from its toString() method\n-        if (info.isAppenderThread && disruptor.getRingBuffer().remainingCapacity() == 0) {\n+        if (info.isAppenderThread && temp.getRingBuffer().remainingCapacity() == 0) {\n             // bypass RingBuffer and invoke Appender directly\n             config.loggerConfig.log(getName(), fqcn, marker, level, message, thrown);\n             return;\n@@ -266,7 +272,15 @@ public void logMessage(final String fqcn, final Level level, final Marker marker\n                 // CachedClock: 10% faster than system clock, smaller gaps\n                 clock.currentTimeMillis());\n \n-        disruptor.publishEvent(info.translator);\n+        // LOG4J2-639: catch NPE if disruptor field was set to null after our check above\n+        try {\n+            // Note: do NOT use the temp variable above!\n+            // That could result in adding a log event to the disruptor after it was shut down,\n+            // which could cause the publishEvent method to hang and never return.\n+            disruptor.publishEvent(info.translator);\n+        } catch (NullPointerException npe) {\n+            LOGGER.fatal(\"Ignoring log event after log4j was shut down.\");\n+        }\n     }\n \n     private static StackTraceElement location(final String fqcnOfLogger) {",
+                "changes": 18
+            },
+            {
+                "status": "modified",
+                "additions": 15,
+                "raw_url": "https://github.com/apache/logging-log4j2/raw/a5a1f1a271efaaccc15ae49ae0a3d64b711b3a89/log4j-core/src/main/java/org/apache/logging/log4j/core/async/AsyncLoggerConfigHelper.java",
+                "contents_url": "https://api.github.com/repos/apache/logging-log4j2/contents/log4j-core/src/main/java/org/apache/logging/log4j/core/async/AsyncLoggerConfigHelper.java?ref=a5a1f1a271efaaccc15ae49ae0a3d64b711b3a89",
+                "filename": "log4j-core/src/main/java/org/apache/logging/log4j/core/async/AsyncLoggerConfigHelper.java",
+                "deletions": 2,
+                "sha": "2e8814c0656b074a0d54546a947687d18a0eee0f",
+                "blob_url": "https://github.com/apache/logging-log4j2/blob/a5a1f1a271efaaccc15ae49ae0a3d64b711b3a89/log4j-core/src/main/java/org/apache/logging/log4j/core/async/AsyncLoggerConfigHelper.java",
+                "patch": "@@ -316,16 +316,29 @@ public void run() {\n      *          calling thread needs to process the event itself\n      */\n     public boolean callAppendersFromAnotherThread(final LogEvent event) {\n+        Disruptor<Log4jEventWrapper> temp = disruptor;\n+        if (temp == null) { // LOG4J2-639\n+            LOGGER.fatal(\"Ignoring log event after log4j was shut down\");\n+            return true;\n+        }\n \n         // LOG4J2-471: prevent deadlock when RingBuffer is full and object\n         // being logged calls Logger.log() from its toString() method\n         if (isAppenderThread.get() == Boolean.TRUE //\n-                && disruptor.getRingBuffer().remainingCapacity() == 0) {\n+                && temp.getRingBuffer().remainingCapacity() == 0) {\n \n             // bypass RingBuffer and invoke Appender directly\n             return false;\n         }\n-        disruptor.getRingBuffer().publishEvent(translator, event, asyncLoggerConfig);\n+        // LOG4J2-639: catch NPE if disruptor field was set to null after our check above\n+        try {\n+            // Note: do NOT use the temp variable above!\n+            // That could result in adding a log event to the disruptor after it was shut down,\n+            // which could cause the publishEvent method to hang and never return.\n+            disruptor.getRingBuffer().publishEvent(translator, event, asyncLoggerConfig);\n+        } catch (NullPointerException npe) {\n+            LOGGER.fatal(\"Ignoring log event after log4j was shut down.\");\n+        }\n         return true;\n     }\n ",
+                "changes": 17
+            },
+            {
+                "status": "added",
+                "additions": 46,
+                "raw_url": "https://github.com/apache/logging-log4j2/raw/a5a1f1a271efaaccc15ae49ae0a3d64b711b3a89/log4j-core/src/test/java/org/apache/logging/log4j/core/async/AsyncLoggerConfigUseAfterShutdownTest.java",
+                "contents_url": "https://api.github.com/repos/apache/logging-log4j2/contents/log4j-core/src/test/java/org/apache/logging/log4j/core/async/AsyncLoggerConfigUseAfterShutdownTest.java?ref=a5a1f1a271efaaccc15ae49ae0a3d64b711b3a89",
+                "filename": "log4j-core/src/test/java/org/apache/logging/log4j/core/async/AsyncLoggerConfigUseAfterShutdownTest.java",
+                "deletions": 0,
+                "sha": "af0bd78f2bdc21c1c18c5eb7ef2a7f33ca895f1e",
+                "blob_url": "https://github.com/apache/logging-log4j2/blob/a5a1f1a271efaaccc15ae49ae0a3d64b711b3a89/log4j-core/src/test/java/org/apache/logging/log4j/core/async/AsyncLoggerConfigUseAfterShutdownTest.java",
+                "patch": "@@ -0,0 +1,46 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one or more\n+ * contributor license agreements. See the NOTICE file distributed with\n+ * this work for additional information regarding copyright ownership.\n+ * The ASF licenses this file to You under the Apache license, Version 2.0\n+ * (the \"License\"); you may not use this file except in compliance with\n+ * the License. You may obtain a copy of the License at\n+ *\n+ *      http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing, software\n+ * distributed under the License is distributed on an \"AS IS\" BASIS,\n+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n+ * See the license for the specific language governing permissions and\n+ * limitations under the license.\n+ */\n+package org.apache.logging.log4j.core.async;\n+\n+import org.apache.logging.log4j.Level;\n+import org.apache.logging.log4j.LogManager;\n+import org.apache.logging.log4j.Logger;\n+import org.apache.logging.log4j.core.LifeCycle;\n+import org.apache.logging.log4j.core.config.ConfigurationFactory;\n+import org.apache.logging.log4j.message.SimpleMessage;\n+import org.apache.logging.log4j.spi.AbstractLoggerProvider;\n+import org.junit.BeforeClass;\n+import org.junit.Test;\n+\n+public class AsyncLoggerConfigUseAfterShutdownTest {\n+\n+    @BeforeClass\n+    public static void beforeClass() {\n+        System.setProperty(ConfigurationFactory.CONFIGURATION_FILE_PROPERTY, \"AsyncLoggerConfigTest.xml\");\n+    }\n+\n+    @Test\n+    public void testNoErrorIfLogAfterShutdown() throws Exception {\n+        final Logger log = LogManager.getLogger(\"com.foo.Bar\");\n+        log.info(\"some message\");\n+        ((LifeCycle) LogManager.getContext()).stop(); // stop async thread\n+\n+        // call the #logMessage() method to bypass the isEnabled check: \n+        // before the LOG4J2-639 fix this would throw a NPE\n+        ((AbstractLoggerProvider) log).logMessage(\"com.foo.Bar\", Level.INFO, null, new SimpleMessage(\"msg\"), null);\n+   }\n+}",
+                "changes": 46
+            },
+            {
+                "status": "added",
+                "additions": 62,
+                "raw_url": "https://github.com/apache/logging-log4j2/raw/a5a1f1a271efaaccc15ae49ae0a3d64b711b3a89/log4j-core/src/test/java/org/apache/logging/log4j/core/async/AsyncLoggerUseAfterShutdownTest.java",
+                "contents_url": "https://api.github.com/repos/apache/logging-log4j2/contents/log4j-core/src/test/java/org/apache/logging/log4j/core/async/AsyncLoggerUseAfterShutdownTest.java?ref=a5a1f1a271efaaccc15ae49ae0a3d64b711b3a89",
+                "filename": "log4j-core/src/test/java/org/apache/logging/log4j/core/async/AsyncLoggerUseAfterShutdownTest.java",
+                "deletions": 0,
+                "sha": "8cf09f7f5186b54f07788218736975e24b0434b6",
+                "blob_url": "https://github.com/apache/logging-log4j2/blob/a5a1f1a271efaaccc15ae49ae0a3d64b711b3a89/log4j-core/src/test/java/org/apache/logging/log4j/core/async/AsyncLoggerUseAfterShutdownTest.java",
+                "patch": "@@ -0,0 +1,62 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one or more\n+ * contributor license agreements. See the NOTICE file distributed with\n+ * this work for additional information regarding copyright ownership.\n+ * The ASF licenses this file to You under the Apache license, Version 2.0\n+ * (the \"License\"); you may not use this file except in compliance with\n+ * the License. You may obtain a copy of the License at\n+ *\n+ *      http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing, software\n+ * distributed under the License is distributed on an \"AS IS\" BASIS,\n+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n+ * See the license for the specific language governing permissions and\n+ * limitations under the license.\n+ */\n+package org.apache.logging.log4j.core.async;\n+\n+import org.apache.logging.log4j.Level;\n+import org.apache.logging.log4j.LogManager;\n+import org.apache.logging.log4j.Logger;\n+import org.apache.logging.log4j.core.LifeCycle;\n+import org.apache.logging.log4j.core.config.ConfigurationFactory;\n+import org.apache.logging.log4j.core.util.Constants;\n+import org.apache.logging.log4j.message.SimpleMessage;\n+import org.apache.logging.log4j.spi.AbstractLoggerProvider;\n+import org.apache.logging.log4j.util.Strings;\n+import org.junit.AfterClass;\n+import org.junit.BeforeClass;\n+import org.junit.Test;\n+\n+/**\n+ * Test for https://issues.apache.org/jira/browse/LOG4J2-639\n+ */\n+public class AsyncLoggerUseAfterShutdownTest {\n+\n+    @BeforeClass\n+    public static void beforeClass() {\n+        System.setProperty(Constants.LOG4J_CONTEXT_SELECTOR,\n+                AsyncLoggerContextSelector.class.getName());\n+        System.setProperty(ConfigurationFactory.CONFIGURATION_FILE_PROPERTY,\n+                \"AsyncLoggerTest.xml\");\n+    }\n+\n+    @AfterClass\n+    public static void afterClass() {\n+        System.setProperty(Constants.LOG4J_CONTEXT_SELECTOR, Strings.EMPTY);\n+    }\n+\n+    @Test\n+    public void testNoErrorIfLogAfterShutdown() throws Exception {\n+        final Logger log = LogManager.getLogger(\"com.foo.Bar\");\n+        final String msg = \"Async logger msg\";\n+        log.info(msg, new InternalError(\"this is not a real error\"));\n+        ((LifeCycle) LogManager.getContext()).stop(); // stop async thread\n+\n+        // call the #logMessage() method to bypass the isEnabled check: \n+        // before the LOG4J2-639 fix this would throw a NPE\n+        ((AbstractLoggerProvider) log).logMessage(\"com.foo.Bar\", Level.INFO, null, new SimpleMessage(\"msg\"), null);\n+    }\n+\n+}",
+                "changes": 62
+            },
+            {
+                "status": "modified",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/logging-log4j2/raw/a5a1f1a271efaaccc15ae49ae0a3d64b711b3a89/log4j-core/src/test/resources/AsyncLoggerConfigTest.xml",
+                "contents_url": "https://api.github.com/repos/apache/logging-log4j2/contents/log4j-core/src/test/resources/AsyncLoggerConfigTest.xml?ref=a5a1f1a271efaaccc15ae49ae0a3d64b711b3a89",
+                "filename": "log4j-core/src/test/resources/AsyncLoggerConfigTest.xml",
+                "deletions": 1,
+                "sha": "dace6b7a89564e26233da49601f7ae7b5fb1fff8",
+                "blob_url": "https://github.com/apache/logging-log4j2/blob/a5a1f1a271efaaccc15ae49ae0a3d64b711b3a89/log4j-core/src/test/resources/AsyncLoggerConfigTest.xml",
+                "patch": "@@ -1,5 +1,5 @@\n <?xml version=\"1.0\" encoding=\"UTF-8\"?>\n-<Configuration status=\"OFF\">\n+<Configuration status=\"ERROR\">\n   <Appenders>\n     <File name=\"File\" \n           fileName=\"target/AsyncLoggerConfigTest.log\" ",
+                "changes": 2
+            },
+            {
+                "status": "modified",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/logging-log4j2/raw/a5a1f1a271efaaccc15ae49ae0a3d64b711b3a89/log4j-core/src/test/resources/AsyncLoggerTest.xml",
+                "contents_url": "https://api.github.com/repos/apache/logging-log4j2/contents/log4j-core/src/test/resources/AsyncLoggerTest.xml?ref=a5a1f1a271efaaccc15ae49ae0a3d64b711b3a89",
+                "filename": "log4j-core/src/test/resources/AsyncLoggerTest.xml",
+                "deletions": 1,
+                "sha": "644dd9343bf27467d3f9597d9b1e1e53f6a4d95b",
+                "blob_url": "https://github.com/apache/logging-log4j2/blob/a5a1f1a271efaaccc15ae49ae0a3d64b711b3a89/log4j-core/src/test/resources/AsyncLoggerTest.xml",
+                "patch": "@@ -1,5 +1,5 @@\n <?xml version=\"1.0\" encoding=\"UTF-8\"?>\n-<Configuration status=\"OFF\">\n+<Configuration status=\"ERROR\">\n   <Appenders>\n     <RandomAccessFile name=\"RandomAccessFile\" fileName=\"target/AsyncLoggerTest.log\" \n \t    \t\timmediateFlush=\"false\" append=\"false\">",
+                "changes": 2
+            },
+            {
+                "status": "modified",
+                "additions": 3,
+                "raw_url": "https://github.com/apache/logging-log4j2/raw/a5a1f1a271efaaccc15ae49ae0a3d64b711b3a89/src/changes/changes.xml",
+                "contents_url": "https://api.github.com/repos/apache/logging-log4j2/contents/src/changes/changes.xml?ref=a5a1f1a271efaaccc15ae49ae0a3d64b711b3a89",
+                "filename": "src/changes/changes.xml",
+                "deletions": 0,
+                "sha": "8d7ad6523a0769c2eeb0734c76477884c65f69df",
+                "blob_url": "https://github.com/apache/logging-log4j2/blob/a5a1f1a271efaaccc15ae49ae0a3d64b711b3a89/src/changes/changes.xml",
+                "patch": "@@ -22,6 +22,9 @@\n   </properties>\n   <body>\n     <release version=\"2.0-rc2\" date=\"2014-MM-DD\" description=\"Bug fixes and enhancements\">\n+      <action issue=\"LOG4J2-639\" dev=\"rpopma\" type=\"fix\" due-to=\"Mck SembWever\">\n+        Prevent NPE in AsyncLogger and AsyncLoggerConfig if logger is used after log4j has been shut down.\n+      </action>\n       <action issue=\"LOG4J2-469\" dev=\"rgoers\" type=\"fix\">\n         FailoverAppender was not resetting its status after the primary appender recovered.\n       </action>",
+                "changes": 3
+            }
+        ],
+        "unit_tests": [
+            "AsyncLoggerUseAfterShutdownTest.java",
+            "AsyncLoggerConfigUseAfterShutdownTest.java",
+            "AsyncLoggerTest.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "log4j-core/src/test/java/org/apache/logging/log4j/core/async/AsyncLoggerUseAfterShutdownTest.java",
+        "buggy_files": [
+            "src/changes/changes.xml",
+            "log4j-core/src/test/resources/AsyncLoggerTest.xml",
+            "log4j-core/src/main/java/org/apache/logging/log4j/core/async/AsyncLoggerConfigHelper.java",
+            "log4j-core/src/main/java/org/apache/logging/log4j/core/async/AsyncLogger.java",
+            "log4j-core/src/test/resources/AsyncLoggerConfigTest.xml"
+        ],
+        "fixed": true
+    }
+]

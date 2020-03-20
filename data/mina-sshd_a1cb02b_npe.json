@@ -1,0 +1,73 @@
+[
+    {
+        "repo": "mina-sshd",
+        "commit": "https://github.com/apache/mina-sshd/commit/a1cb02b41355c176693ead60c0bce80eb858eb5b",
+        "bug_id": "mina-sshd_a1cb02b",
+        "message": "[SSHD-734] When ClientSessionImpl construction fails, AbstractSessionIoHandler#exceptionCaught may throw NPE",
+        "parent": "https://github.com/apache/mina-sshd/commit/6ecd949a9d855feee2f1d2231b7c002d1df7f4cb",
+        "patched_files": [
+            "AbstractSessionIoHandler.java",
+            "AbstractSession.java"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 2,
+                "raw_url": "https://github.com/apache/mina-sshd/raw/a1cb02b41355c176693ead60c0bce80eb858eb5b/sshd-core/src/main/java/org/apache/sshd/common/session/helpers/AbstractSession.java",
+                "contents_url": "https://api.github.com/repos/apache/mina-sshd/contents/sshd-core/src/main/java/org/apache/sshd/common/session/helpers/AbstractSession.java?ref=a1cb02b41355c176693ead60c0bce80eb858eb5b",
+                "filename": "sshd-core/src/main/java/org/apache/sshd/common/session/helpers/AbstractSession.java",
+                "deletions": 0,
+                "sha": "49ce76b009509efae282edb8e830e3bf04c7a813",
+                "blob_url": "https://github.com/apache/mina-sshd/blob/a1cb02b41355c176693ead60c0bce80eb858eb5b/sshd-core/src/main/java/org/apache/sshd/common/session/helpers/AbstractSession.java",
+                "patch": "@@ -255,6 +255,8 @@ protected AbstractSession(boolean isServer, FactoryManager factoryManager, IoSes\n         this.ioSession = ioSession;\n         this.decoderBuffer = new SessionWorkBuffer(this);\n \n+        attachSession(ioSession, this);\n+\n         Factory<Random> factory = ValidateUtils.checkNotNull(factoryManager.getRandomFactory(), \"No random factory for %s\", ioSession);\n         random = ValidateUtils.checkNotNull(factory.create(), \"No randomizer instance for %s\", ioSession);\n ",
+                "changes": 2
+            },
+            {
+                "status": "modified",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/mina-sshd/raw/a1cb02b41355c176693ead60c0bce80eb858eb5b/sshd-core/src/main/java/org/apache/sshd/common/session/helpers/AbstractSessionIoHandler.java",
+                "contents_url": "https://api.github.com/repos/apache/mina-sshd/contents/sshd-core/src/main/java/org/apache/sshd/common/session/helpers/AbstractSessionIoHandler.java?ref=a1cb02b41355c176693ead60c0bce80eb858eb5b",
+                "filename": "sshd-core/src/main/java/org/apache/sshd/common/session/helpers/AbstractSessionIoHandler.java",
+                "deletions": 2,
+                "sha": "1610030f4ff8b26acb50ebba707d72599ba63a96",
+                "blob_url": "https://github.com/apache/mina-sshd/blob/a1cb02b41355c176693ead60c0bce80eb858eb5b/sshd-core/src/main/java/org/apache/sshd/common/session/helpers/AbstractSessionIoHandler.java",
+                "patch": "@@ -37,9 +37,8 @@ protected AbstractSessionIoHandler() {\n \n     @Override\n     public void sessionCreated(IoSession ioSession) throws Exception {\n-        AbstractSession session = ValidateUtils.checkNotNull(\n+        ValidateUtils.checkNotNull(\n                 createSession(ioSession), \"No session created for %s\", ioSession);\n-        AbstractSession.attachSession(ioSession, session);\n     }\n \n     @Override",
+                "changes": 3
+            },
+            {
+                "status": "added",
+                "additions": 86,
+                "raw_url": "https://github.com/apache/mina-sshd/raw/a1cb02b41355c176693ead60c0bce80eb858eb5b/sshd-core/src/test/java/org/apache/sshd/client/ClientDeadlockTest.java",
+                "contents_url": "https://api.github.com/repos/apache/mina-sshd/contents/sshd-core/src/test/java/org/apache/sshd/client/ClientDeadlockTest.java?ref=a1cb02b41355c176693ead60c0bce80eb858eb5b",
+                "filename": "sshd-core/src/test/java/org/apache/sshd/client/ClientDeadlockTest.java",
+                "deletions": 0,
+                "sha": "bff2420f0c977aec290bd397217283ecb12875e7",
+                "blob_url": "https://github.com/apache/mina-sshd/blob/a1cb02b41355c176693ead60c0bce80eb858eb5b/sshd-core/src/test/java/org/apache/sshd/client/ClientDeadlockTest.java",
+                "patch": "@@ -0,0 +1,86 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one\n+ * or more contributor license agreements. See the NOTICE file\n+ * distributed with this work for additional information\n+ * regarding copyright ownership. The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance\n+ * with the License. You may obtain a copy of the License at\n+ *\n+ * http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing,\n+ * software distributed under the License is distributed on an\n+ * \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+ * KIND, either express or implied. See the License for the\n+ * specific language governing permissions and limitations\n+ * under the License.\n+ */\n+package org.apache.sshd.client;\n+\n+import java.io.IOException;\n+import java.util.EnumSet;\n+import java.util.concurrent.TimeUnit;\n+\n+import org.apache.sshd.client.future.ConnectFuture;\n+import org.apache.sshd.client.session.ClientSession;\n+import org.apache.sshd.common.io.IoSession;\n+import org.apache.sshd.server.SshServer;\n+import org.apache.sshd.server.session.ServerSessionImpl;\n+import org.apache.sshd.server.session.SessionFactory;\n+import org.apache.sshd.util.test.BaseTestSupport;\n+import org.junit.After;\n+import org.junit.Before;\n+import org.junit.Test;\n+\n+/**\n+ * TODO Add javadoc\n+ *\n+ * @author <a href=\"mailto:dev@mina.apache.org\">Apache MINA SSHD Project</a>\n+ */\n+public class ClientDeadlockTest extends BaseTestSupport {\n+\n+    private SshServer sshd;\n+    private SshClient client;\n+    private int port;\n+\n+    public ClientDeadlockTest() {\n+        super();\n+    }\n+\n+    @Before\n+    public void setUp() throws Exception {\n+        sshd = setupTestServer();\n+        sshd.setSessionFactory(new SessionFactory(sshd) {\n+            @Override\n+            protected ServerSessionImpl doCreateSession(IoSession ioSession) throws Exception {\n+                throw new IOException(\"Closing\");\n+            }\n+        });\n+        sshd.start();\n+        port = sshd.getPort();\n+\n+        client = setupTestClient();\n+    }\n+\n+    @After\n+    public void tearDown() throws Exception {\n+        if (sshd != null) {\n+            sshd.stop(true);\n+        }\n+        if (client != null) {\n+            client.stop();\n+        }\n+    }\n+\n+    @Test\n+    public void testSimpleClient() throws Exception {\n+        client.start();\n+\n+        ConnectFuture future = client.connect(getCurrentTestName(), TEST_LOCALHOST, port);\n+        ClientSession session = future.verify(5, TimeUnit.SECONDS).getSession();\n+        session.waitFor(EnumSet.of(ClientSession.ClientSessionEvent.CLOSED), TimeUnit.SECONDS.toMillis(3L));\n+        assertTrue(session.isClosed());\n+    }\n+\n+}",
+                "changes": 86
+            }
+        ],
+        "unit_tests": [
+            "ClientDeadlockTest.java",
+            "AbstractSessionTest.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "sshd-core/src/test/java/org/apache/sshd/client/ClientDeadlockTest.java",
+        "buggy_files": [
+            "sshd-core/src/main/java/org/apache/sshd/common/session/helpers/AbstractSessionIoHandler.java",
+            "sshd-core/src/main/java/org/apache/sshd/common/session/helpers/AbstractSession.java"
+        ],
+        "fixed": true
+    },
+    {
+        "buggy": false,
+        "test_file": "sshd-core/src/test/java/org/apache/sshd/common/session/helpers/AbstractSessionTest.java",
+        "buggy_files": [
+            "sshd-core/src/main/java/org/apache/sshd/common/session/helpers/AbstractSessionIoHandler.java",
+            "sshd-core/src/main/java/org/apache/sshd/common/session/helpers/AbstractSession.java"
+        ],
+        "fixed": true
+    }
+]

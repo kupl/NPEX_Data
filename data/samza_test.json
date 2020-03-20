@@ -31,182 +31,13 @@
         "message": "SAMZA-1647: Fix NPE in onJobModelExpired handler in StreamProcessor.\n\n**Changes:**\n* Switching to using explicit lock in StreamProcessor to make things simpler on state updation.\n* Switch from using synchronized in ZkJobCoordinator to prevent any potential deadlocks\nbetween two threads (where one thread holds the StreamProcessor and other thread has ZkJobCoordinator lock).\n* Misc cleanups in StreamProcessor: Remove volatile qualifiers from state variables in StreamProcessor. Remove reinstantiating the\nexecutorService in onNewJobModel.\n* ZkJobCoordinator cleanups: Make some state variables as immutable.\n\n**NOTE**: The classes in which these changes were made were aynonymous inner classes,\nso to add proper unit tests we need to do big haul of refactor.\n\nAuthor: Shanthoosh Venkataraman <santhoshvenkat1988@gmail.com>\n\nReviewers: Jagadish <jagadish@apache.org>\n\nCloses #493 from shanthoosh/fix_npe_in_jobmodel_expired_handler",
         "parent": "https://github.com/apache/samza/commit/72ad7523fffdcafdc01a0c6922fc94ccd1e482a5",
         "patched_files": [
-            "StreamProcessor.java",
-            "ZkJobCoordinator.java"
+            "ZkJobCoordinator.java",
+            "StreamProcessor.java"
         ],
         "repo": "samza",
         "unit_tests": [
-            "TestStreamProcessor.java",
-            "TestZkJobCoordinator.java"
-        ]
-    },
-    "samza_04d00f5": {
-        "bug_id": "samza_04d00f5",
-        "commit": "https://github.com/apache/samza/commit/04d00f5a4291f54b2e64d555d7ef7f9641011c19",
-        "file": [
-            {
-                "additions": 12,
-                "blob_url": "https://github.com/apache/samza/blob/04d00f5a4291f54b2e64d555d7ef7f9641011c19/samza-core/src/main/scala/org/apache/samza/util/Util.scala",
-                "changes": 16,
-                "contents_url": "https://api.github.com/repos/apache/samza/contents/samza-core/src/main/scala/org/apache/samza/util/Util.scala?ref=04d00f5a4291f54b2e64d555d7ef7f9641011c19",
-                "deletions": 4,
-                "filename": "samza-core/src/main/scala/org/apache/samza/util/Util.scala",
-                "patch": "@@ -102,21 +102,29 @@ object Util extends Logging {\n   }\n \n   /**\n-   * Returns a SystemStream object based on the system stream name given. For \n+   * Returns a SystemStream object based on the system stream name given. For\n    * example, kafka.topic would return new SystemStream(\"kafka\", \"topic\").\n    */\n   def getSystemStreamFromNames(systemStreamNames: String): SystemStream = {\n     val idx = systemStreamNames.indexOf('.')\n-    if(idx < 0)\n+    if (idx < 0)\n       throw new IllegalArgumentException(\"No '.' in stream name '\" + systemStreamNames + \"'. Stream names should be in the form 'system.stream'\")\n     new SystemStream(systemStreamNames.substring(0, idx), systemStreamNames.substring(idx + 1, systemStreamNames.length))\n   }\n-  \n+\n   /**\n-   * Returns a SystemStream object based on the system stream name given. For \n+   * Returns a SystemStream object based on the system stream name given. For\n    * example, kafka.topic would return new SystemStream(\"kafka\", \"topic\").\n    */\n   def getNameFromSystemStream(systemStream: SystemStream) = {\n     systemStream.getSystem + \".\" + systemStream.getStream\n   }\n+\n+  /**\n+   * Makes sure that an object is not null, and throws a NullPointerException\n+   * if it is.\n+   */\n+  def notNull[T](obj: T, msg: String) = if (obj == null) {\n+    throw new NullPointerException(msg)\n+  }\n }",
-                "raw_url": "https://github.com/apache/samza/raw/04d00f5a4291f54b2e64d555d7ef7f9641011c19/samza-core/src/main/scala/org/apache/samza/util/Util.scala",
-                "sha": "6b2ec49747181cbd3eb40c0cf49fd0077f1a7904",
-                "status": "modified"
-            },
-            {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/samza/blob/04d00f5a4291f54b2e64d555d7ef7f9641011c19/samza-kv/src/main/scala/org/apache/samza/storage/kv/KeyValueStorageEngineFactory.scala",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/samza/contents/samza-kv/src/main/scala/org/apache/samza/storage/kv/KeyValueStorageEngineFactory.scala?ref=04d00f5a4291f54b2e64d555d7ef7f9641011c19",
-                "deletions": 1,
-                "filename": "samza-kv/src/main/scala/org/apache/samza/storage/kv/KeyValueStorageEngineFactory.scala",
-                "patch": "@@ -73,7 +73,7 @@ class KeyValueStorageEngineFactory[K, V] extends StorageEngineFactory[K, V] {\n     } else {\n       serialized\n     }\n-    val db = maybeCachedStore\n+    val db = new NullSafeKeyValueStore(maybeCachedStore)\n     val keyValueStorageEngineMetrics = new KeyValueStorageEngineMetrics(storeName, registry)\n \n     // Decide if we should use raw bytes when restoring",
-                "raw_url": "https://github.com/apache/samza/raw/04d00f5a4291f54b2e64d555d7ef7f9641011c19/samza-kv/src/main/scala/org/apache/samza/storage/kv/KeyValueStorageEngineFactory.scala",
-                "sha": "ea75fab9c315a005cd15efe79cbd4ec0d5f13f38",
-                "status": "modified"
-            },
-            {
-                "additions": 74,
-                "blob_url": "https://github.com/apache/samza/blob/04d00f5a4291f54b2e64d555d7ef7f9641011c19/samza-kv/src/main/scala/org/apache/samza/storage/kv/NullSafeKeyValueStore.scala",
-                "changes": 74,
-                "contents_url": "https://api.github.com/repos/apache/samza/contents/samza-kv/src/main/scala/org/apache/samza/storage/kv/NullSafeKeyValueStore.scala?ref=04d00f5a4291f54b2e64d555d7ef7f9641011c19",
-                "deletions": 0,
-                "filename": "samza-kv/src/main/scala/org/apache/samza/storage/kv/NullSafeKeyValueStore.scala",
-                "patch": "@@ -0,0 +1,74 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one\n+ * or more contributor license agreements.  See the NOTICE file\n+ * distributed with this work for additional information\n+ * regarding copyright ownership.  The ASF licenses this file\n+ * to you under the Apache License, Version 2.0 (the\n+ * \"License\"); you may not use this file except in compliance\n+ * with the License.  You may obtain a copy of the License at\n+ *\n+ *   http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing,\n+ * software distributed under the License is distributed on an\n+ * \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\n+ * KIND, either express or implied.  See the License for the\n+ * specific language governing permissions and limitations\n+ * under the License.\n+ */\n+\n+package org.apache.samza.storage.kv\n+\n+import org.apache.samza.util.Util.notNull\n+import scala.collection.JavaConversions._\n+\n+object NullSafeKeyValueStore {\n+  val KEY_ERROR_MSG = \"Null is not a valid key.\"\n+  val VAL_ERROR_MSG = \"Null is not a valid value.\"\n+}\n+\n+class NullSafeKeyValueStore[K, V](store: KeyValueStore[K, V]) extends KeyValueStore[K, V] {\n+  import NullSafeKeyValueStore._\n+\n+  def get(key: K): V = {\n+    notNull(key, KEY_ERROR_MSG)\n+    store.get(key)\n+  }\n+\n+  def put(key: K, value: V) {\n+    notNull(key, KEY_ERROR_MSG)\n+    notNull(value, VAL_ERROR_MSG)\n+    store.put(key, value)\n+  }\n+\n+  def putAll(entries: java.util.List[Entry[K, V]]) {\n+    entries.foreach(entry => {\n+      notNull(entry.getKey, KEY_ERROR_MSG)\n+      notNull(entry.getValue, VAL_ERROR_MSG)\n+    })\n+    store.putAll(entries)\n+  }\n+\n+  def delete(key: K) {\n+    notNull(key, KEY_ERROR_MSG)\n+    store.delete(key)\n+  }\n+\n+  def range(from: K, to: K): KeyValueIterator[K, V] = {\n+    notNull(from, KEY_ERROR_MSG)\n+    notNull(to, KEY_ERROR_MSG)\n+    store.range(from, to)\n+  }\n+\n+  def all(): KeyValueIterator[K, V] = {\n+    store.all\n+  }\n+\n+  def flush {\n+    store.flush\n+  }\n+\n+  def close {\n+    store.close\n+  }\n+}\n\\ No newline at end of file",
-                "raw_url": "https://github.com/apache/samza/raw/04d00f5a4291f54b2e64d555d7ef7f9641011c19/samza-kv/src/main/scala/org/apache/samza/storage/kv/NullSafeKeyValueStore.scala",
-                "sha": "00f9af319c780d9513b735016b1c3e016714f5c8",
-                "status": "added"
-            },
-            {
-                "additions": 24,
-                "blob_url": "https://github.com/apache/samza/blob/04d00f5a4291f54b2e64d555d7ef7f9641011c19/samza-kv/src/main/scala/org/apache/samza/storage/kv/SerializedKeyValueStore.scala",
-                "changes": 70,
-                "contents_url": "https://api.github.com/repos/apache/samza/contents/samza-kv/src/main/scala/org/apache/samza/storage/kv/SerializedKeyValueStore.scala?ref=04d00f5a4291f54b2e64d555d7ef7f9641011c19",
-                "deletions": 46,
-                "filename": "samza-kv/src/main/scala/org/apache/samza/storage/kv/SerializedKeyValueStore.scala",
-                "patch": "@@ -33,57 +33,42 @@ class SerializedKeyValueStore[K, V](\n   metrics: SerializedKeyValueStoreMetrics = new SerializedKeyValueStoreMetrics) extends KeyValueStore[K, V] with Logging {\n \n   def get(key: K): V = {\n-    val keyBytes = bytesNotNull(key, keySerde)\n+    val keyBytes = toBytesOrNull(key, keySerde)\n     val found = store.get(keyBytes)\n     metrics.gets.inc\n-    metrics.bytesSerialized.inc(keyBytes.size)\n-    if (found == null) {\n-      null.asInstanceOf[V]\n-    } else {\n-      metrics.bytesDeserialized.inc(found.size)\n-      msgSerde.fromBytes(found).asInstanceOf[V]\n-    }\n+    fromBytesOrNull(found, msgSerde)\n   }\n \n   def put(key: K, value: V) {\n     metrics.puts.inc\n-    val keyBytes = bytesNotNull(key, keySerde)\n-    val valBytes = bytesNotNull(value, msgSerde)\n-    metrics.bytesSerialized.inc(keyBytes.size + valBytes.size)\n+    val keyBytes = toBytesOrNull(key, keySerde)\n+    val valBytes = toBytesOrNull(value, msgSerde)\n     store.put(keyBytes, valBytes)\n   }\n \n   def putAll(entries: java.util.List[Entry[K, V]]) {\n     val list = new java.util.ArrayList[Entry[Array[Byte], Array[Byte]]](entries.size())\n     val iter = entries.iterator\n-    var bytesSerialized = 0L\n     while (iter.hasNext) {\n       val curr = iter.next\n-      val keyBytes = bytesNotNull(curr.getKey, keySerde)\n-      val valBytes = bytesNotNull(curr.getValue, msgSerde)\n-      bytesSerialized += keyBytes.size\n-      if (valBytes != null) {\n-        bytesSerialized += valBytes.size\n-      }\n+      val keyBytes = toBytesOrNull(curr.getKey, keySerde)\n+      val valBytes = toBytesOrNull(curr.getValue, msgSerde)\n       list.add(new Entry(keyBytes, valBytes))\n     }\n     store.putAll(list)\n     metrics.puts.inc(list.size)\n-    metrics.bytesSerialized.inc(bytesSerialized)\n   }\n \n   def delete(key: K) {\n     metrics.deletes.inc\n-    val keyBytes = bytesNotNull(key, keySerde)\n-    metrics.bytesSerialized.inc(keyBytes.size)\n+    val keyBytes = toBytesOrNull(key, keySerde)\n     store.delete(keyBytes)\n   }\n \n   def range(from: K, to: K): KeyValueIterator[K, V] = {\n     metrics.ranges.inc\n-    val fromBytes = bytesNotNull(from, keySerde)\n-    val toBytes = bytesNotNull(to, keySerde)\n-    metrics.bytesSerialized.inc(fromBytes.size + toBytes.size)\n+    val fromBytes = toBytesOrNull(from, keySerde)\n+    val toBytes = toBytesOrNull(to, keySerde)\n     new DeserializingIterator(store.range(fromBytes, toBytes))\n   }\n \n@@ -98,21 +83,8 @@ class SerializedKeyValueStore[K, V](\n     def close() = iter.close()\n     def next(): Entry[K, V] = {\n       val nxt = iter.next()\n-      val keyBytes = nxt.getKey\n-      val valBytes = nxt.getValue\n-      val key = if (keyBytes != null) {\n-        metrics.bytesDeserialized.inc(keyBytes.size)\n-        keySerde.fromBytes(keyBytes).asInstanceOf[K]\n-      } else {\n-        warn(\"Got a null key while iterating over a store. This is highly unexpected, since null in key and value is disallowed for key value stores.\")\n-        null.asInstanceOf[K]\n-      }\n-      val value = if (valBytes != null) {\n-        metrics.bytesDeserialized.inc(valBytes.size)\n-        msgSerde.fromBytes(valBytes)\n-      } else {\n-        null.asInstanceOf[V]\n-      }\n+      val key = fromBytesOrNull(nxt.getKey, keySerde)\n+      val value = fromBytesOrNull(nxt.getValue, msgSerde)\n       new Entry(key, value)\n     }\n   }\n@@ -131,13 +103,19 @@ class SerializedKeyValueStore[K, V](\n     store.close\n   }\n \n-  /**\n-   * Null is not allowed for keys and values because some change log systems\n-   * (Kafka) model deletes as null.\n-   */\n-  private def bytesNotNull[T](t: T, serde: Serde[T]): Array[Byte] = if (t != null) {\n-    serde.toBytes(t)\n+  def toBytesOrNull[T](t: T, serde: Serde[T]): Array[Byte] = if (t == null) {\n+    null\n+  } else {\n+    val bytes = serde.toBytes(t)\n+    metrics.bytesSerialized.inc(bytes.size)\n+    bytes\n+  }\n+\n+  def fromBytesOrNull[T](bytes: Array[Byte], serde: Serde[T]): T = if (bytes == null) {\n+    null.asInstanceOf[T]\n   } else {\n-    throw new NullPointerException(\"Null is not a valid key or value.\")\n+    val obj = serde.fromBytes(bytes)\n+    metrics.bytesDeserialized.inc(bytes.size)\n+    obj\n   }\n }",
-                "raw_url": "https://github.com/apache/samza/raw/04d00f5a4291f54b2e64d555d7ef7f9641011c19/samza-kv/src/main/scala/org/apache/samza/storage/kv/SerializedKeyValueStore.scala",
-                "sha": "2d3b6e55c20172aa5f149c6d6728cab8229312c3",
-                "status": "modified"
-            },
-            {
-                "additions": 42,
-                "blob_url": "https://github.com/apache/samza/blob/04d00f5a4291f54b2e64d555d7ef7f9641011c19/samza-kv/src/test/scala/org/apache/samza/storage/kv/TestKeyValueStores.scala",
-                "changes": 62,
-                "contents_url": "https://api.github.com/repos/apache/samza/contents/samza-kv/src/test/scala/org/apache/samza/storage/kv/TestKeyValueStores.scala?ref=04d00f5a4291f54b2e64d555d7ef7f9641011c19",
-                "deletions": 20,
-                "filename": "samza-kv/src/test/scala/org/apache/samza/storage/kv/TestKeyValueStores.scala",
-                "patch": "@@ -34,24 +34,42 @@ import org.junit.runners.Parameterized\n import org.junit.runners.Parameterized.Parameters\n import org.apache.samza.serializers.StringSerde\n import org.apache.samza.util.TestUtil._\n+import org.apache.samza.serializers.Serde\n \n @RunWith(value = classOf[Parameterized])\n-class TestKeyValueStores(cache: Boolean) {\n-\n+class TestKeyValueStores(typeOfStore: String) {\n   import TestKeyValueStores._\n \n   val letters = \"abcdefghijklmnopqrstuvwxyz\".map(_.toString)\n   val dir = new File(System.getProperty(\"java.io.tmpdir\"), \"leveldb-test-\" + new Random().nextInt(Int.MaxValue))\n   var store: KeyValueStore[Array[Byte], Array[Byte]] = null\n+  var cache = false\n+  var serde = false\n \n   @Before\n   def setup() {\n     dir.mkdirs()\n     val leveldb = new LevelDbKeyValueStore(dir, new Options)\n-    if (cache)\n-      store = new CachedStore(leveldb, CacheSize, BatchSize)\n-    else\n-      store = leveldb\n+    val passThroughSerde = new Serde[Array[Byte]] {\n+      def toBytes(obj: Array[Byte]) = obj\n+      def fromBytes(bytes: Array[Byte]) = bytes\n+    }\n+    store = if (\"cache\".equals(typeOfStore)) {\n+      cache = true\n+      new CachedStore(leveldb, CacheSize, BatchSize)\n+    } else if (\"serde\".equals(typeOfStore)) {\n+      serde = true\n+      new SerializedKeyValueStore(leveldb, passThroughSerde, passThroughSerde)\n+    } else if (\"cache-and-serde\".equals(typeOfStore)) {\n+      val serializedStore = new SerializedKeyValueStore(leveldb, passThroughSerde, passThroughSerde)\n+      serde = true\n+      cache = true\n+      new CachedStore(serializedStore, CacheSize, BatchSize)\n+    } else {\n+      leveldb\n+    }\n+\n+    store = new NullSafeKeyValueStore(store)\n   }\n \n   @After\n@@ -82,19 +100,21 @@ class TestKeyValueStores(cache: Boolean) {\n   }\n \n   @Test\n-  def testNulls() {\n-    val stringSerde = new StringSerde(\"UTF-8\")\n-    val serializedStore = new SerializedKeyValueStore(store, stringSerde, stringSerde)\n-    val expectedNPEMessage = Some(\"Null is not a valid key or value.\")\n-\n-    expect(classOf[NullPointerException], expectedNPEMessage) { serializedStore.get(null) }\n-    expect(classOf[NullPointerException], expectedNPEMessage) { serializedStore.delete(null) }\n-    expect(classOf[NullPointerException], expectedNPEMessage) { serializedStore.put(null, \"\") }\n-    expect(classOf[NullPointerException], expectedNPEMessage) { serializedStore.put(\"\", null) }\n-    expect(classOf[NullPointerException], expectedNPEMessage) { serializedStore.putAll(List(new Entry(\"\", \"\"), new Entry[String, String](\"\", null))) }\n-    expect(classOf[NullPointerException], expectedNPEMessage) { serializedStore.putAll(List(new Entry[String, String](null, \"\"))) }\n-    expect(classOf[NullPointerException], expectedNPEMessage) { serializedStore.range(\"\", null) }\n-    expect(classOf[NullPointerException], expectedNPEMessage) { serializedStore.range(null, \"\") }\n+  def testNullsWithSerde() {\n+    if (serde) {\n+      val a = b(\"a\")\n+      val keyMsg = Some(NullSafeKeyValueStore.KEY_ERROR_MSG)\n+      val valMsg = Some(NullSafeKeyValueStore.VAL_ERROR_MSG)\n+\n+      expect(classOf[NullPointerException], keyMsg) { store.get(null) }\n+      expect(classOf[NullPointerException], keyMsg) { store.delete(null) }\n+      expect(classOf[NullPointerException], keyMsg) { store.put(null, a) }\n+      expect(classOf[NullPointerException], valMsg) { store.put(a, null) }\n+      expect(classOf[NullPointerException], valMsg) { store.putAll(List(new Entry(a, a), new Entry[Array[Byte], Array[Byte]](a, null))) }\n+      expect(classOf[NullPointerException], keyMsg) { store.putAll(List(new Entry[Array[Byte], Array[Byte]](null, a))) }\n+      expect(classOf[NullPointerException], keyMsg) { store.range(a, null) }\n+      expect(classOf[NullPointerException], keyMsg) { store.range(null, a) }\n+    }\n   }\n \n   @Test\n@@ -137,7 +157,9 @@ class TestKeyValueStores(cache: Boolean) {\n   @Test\n   def testDelete() {\n     val a = b(\"a\")\n+    assertNull(store.get(a))\n     store.put(a, a)\n+    assertTrue(Arrays.equals(a, store.get(a)))\n     store.delete(a)\n     assertNull(store.get(a))\n   }\n@@ -291,5 +313,5 @@ object TestKeyValueStores {\n   val CacheSize = 10\n   val BatchSize = 5\n   @Parameters\n-  def parameters: java.util.Collection[Array[java.lang.Boolean]] = Arrays.asList(Array(java.lang.Boolean.TRUE), Array(java.lang.Boolean.FALSE))\n+  def parameters: java.util.Collection[Array[String]] = Arrays.asList(Array(\"cache\"), Array(\"serde\"), Array(\"cache-and-serde\"), Array(\"levledb\"))\n }",
-                "raw_url": "https://github.com/apache/samza/raw/04d00f5a4291f54b2e64d555d7ef7f9641011c19/samza-kv/src/test/scala/org/apache/samza/storage/kv/TestKeyValueStores.scala",
-                "sha": "e99d4598abc5eaba443f90253530aa1e67a685b1",
-                "status": "modified"
-            }
-        ],
-        "message": "SAMZA-104; Fix NPE in kv store when delete is used with cached store and serde store.",
-        "parent": "https://github.com/apache/samza/commit/a268b7e0ba763d639fb01513fdc39ac5a4ef1edd",
-        "patched_files": [
-            "KeyValueStorageEngineFactory.java",
-            "NullSafeKeyValueStore.java",
-            "Util.java",
-            "SerializedKeyValueStore.java"
-        ],
-        "repo": "samza",
-        "unit_tests": [
-            "TestKeyValueStores.java"
-        ]
-    },
-    "samza_0c64c54": {
-        "bug_id": "samza_0c64c54",
-        "commit": "https://github.com/apache/samza/commit/0c64c54eb3597ebd40d237e57c81cb28b80047ae",
-        "file": [
-            {
-                "additions": 9,
-                "blob_url": "https://github.com/apache/samza/blob/0c64c54eb3597ebd40d237e57c81cb28b80047ae/samza-core/src/main/scala/org/apache/samza/storage/TaskStorageManager.scala",
-                "changes": 12,
-                "contents_url": "https://api.github.com/repos/apache/samza/contents/samza-core/src/main/scala/org/apache/samza/storage/TaskStorageManager.scala?ref=0c64c54eb3597ebd40d237e57c81cb28b80047ae",
-                "deletions": 3,
-                "filename": "samza-core/src/main/scala/org/apache/samza/storage/TaskStorageManager.scala",
-                "patch": "@@ -206,9 +206,15 @@ class TaskStorageManager(\n                           .get(partition)\n       val newestOffset = sspMetadata.getNewestOffset\n \n-      val offsetFile = new File(TaskStorageManager.getStorePartitionDir(loggedStoreBaseDir, store, taskName), offsetFileName)\n-      Util.writeDataToFile(offsetFile, newestOffset)\n-      info(\"Successfully stored offset %s for store %s in OFFSET file \" format (newestOffset, store))\n+      if (newestOffset != null) {\n+        val offsetFile = new File(TaskStorageManager.getStorePartitionDir(loggedStoreBaseDir, store, taskName), offsetFileName)\n+        Util.writeDataToFile(offsetFile, newestOffset)\n+        info(\"Successfully stored offset %s for store %s in OFFSET file \" format (newestOffset, store))\n+      }\n+      else {\n+        //if newestOffset is null, then it means the store is empty. No need to persist the offset file\n+        info(\"Not storing OFFSET file for taskName %s. Store %s backed by changelog topic : %s, partition: %s is empty. \" format (taskName, store, systemStream.getStream, partition.getPartitionId))\n+      }\n     }}\n   }\n ",
-                "raw_url": "https://github.com/apache/samza/raw/0c64c54eb3597ebd40d237e57c81cb28b80047ae/samza-core/src/main/scala/org/apache/samza/storage/TaskStorageManager.scala",
-                "sha": "422799a099dd391a50f934fe65d5b37471264af6",
-                "status": "modified"
-            },
-            {
-                "additions": 27,
-                "blob_url": "https://github.com/apache/samza/blob/0c64c54eb3597ebd40d237e57c81cb28b80047ae/samza-core/src/test/scala/org/apache/samza/storage/TestTaskStorageManager.scala",
-                "changes": 27,
-                "contents_url": "https://api.github.com/repos/apache/samza/contents/samza-core/src/test/scala/org/apache/samza/storage/TestTaskStorageManager.scala?ref=0c64c54eb3597ebd40d237e57c81cb28b80047ae",
-                "deletions": 0,
-                "filename": "samza-core/src/test/scala/org/apache/samza/storage/TestTaskStorageManager.scala",
-                "patch": "@@ -123,6 +123,33 @@ class TestTaskStorageManager extends MockitoSugar {\n     assertTrue(\"Offset file doesn't exist!\", offsetFilePath.exists())\n     assertEquals(\"Found incorrect value in offset file!\", \"100\", Util.readDataFromFile(offsetFilePath))\n   }\n+\n+  @Test\n+  def testStopShouldNotCreateOffsetFileForEmptyStore() {\n+    val partition = new Partition(0)\n+\n+    val offsetFilePath = new File(TaskStorageManager.getStorePartitionDir(TaskStorageManagerBuilder.defaultLoggedStoreBaseDir, loggedStore, taskName) + File.separator + \"OFFSET\")\n+\n+    val mockSystemAdmin = mock[SystemAdmin]\n+    val mockSspMetadata = Map(\"testStream\" -> new SystemStreamMetadata(\"testStream\" , JavaConversions.mapAsJavaMap[Partition, SystemStreamPartitionMetadata](Map(partition -> new SystemStreamPartitionMetadata(\"20\", null, null)))))\n+    val myMap = JavaConversions.mapAsJavaMap[String, SystemStreamMetadata](mockSspMetadata)\n+    when(mockSystemAdmin.getSystemStreamMetadata(any(JavaConversions.setAsJavaSet(Set(\"\")).getClass))).thenReturn(myMap)\n+\n+    //Build TaskStorageManager\n+    val taskStorageManager = new TaskStorageManagerBuilder()\n+      .addStore(loggedStore)\n+      .setSystemAdmin(\"kafka\", mockSystemAdmin)\n+      .setPartition(partition)\n+      .build\n+\n+    //Invoke test method\n+    val stopMethod = taskStorageManager.getClass.getDeclaredMethod(\"stop\", new Array[java.lang.Class[_]](0):_*)\n+    stopMethod.setAccessible(true)\n+    stopMethod.invoke(taskStorageManager, new Array[Object](0):_*)\n+\n+    //Check conditions\n+    assertTrue(\"Offset file should not exist!\", !offsetFilePath.exists())\n+  }\n }\n \n object TaskStorageManagerBuilder {",
-                "raw_url": "https://github.com/apache/samza/raw/0c64c54eb3597ebd40d237e57c81cb28b80047ae/samza-core/src/test/scala/org/apache/samza/storage/TestTaskStorageManager.scala",
-                "sha": "f08e8ddd6fc3b2cbf4ca195f22049d368abe6e62",
-                "status": "modified"
-            }
-        ],
-        "message": "SAMZA-827: fix NPE while clean-shutdown state store with host-affinity enabled",
-        "parent": "https://github.com/apache/samza/commit/5d50c08308b1626be397a11521e3494ce086fb9f",
-        "patched_files": [
-            "TaskStorageManager.java"
-        ],
-        "repo": "samza",
-        "unit_tests": [
-            "TestTaskStorageManager.java"
-        ]
-    },
-    "samza_12594fb": {
-        "bug_id": "samza_12594fb",
-        "commit": "https://github.com/apache/samza/commit/12594fb710260b62f9a21a8be785bd8dd5dcdd01",
-        "file": [
-            {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/samza/blob/12594fb710260b62f9a21a8be785bd8dd5dcdd01/samza-kafka/src/main/scala/org/apache/samza/system/kafka/KafkaSystemConsumer.scala",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/samza/contents/samza-kafka/src/main/scala/org/apache/samza/system/kafka/KafkaSystemConsumer.scala?ref=12594fb710260b62f9a21a8be785bd8dd5dcdd01",
-                "deletions": 1,
-                "filename": "samza-kafka/src/main/scala/org/apache/samza/system/kafka/KafkaSystemConsumer.scala",
-                "patch": "@@ -169,7 +169,7 @@ private[kafka] class KafkaSystemConsumer(\n       } else {\n         null\n       }\n-      val message = if (msg.message.buffer != null) {\n+      val message = if (!msg.message.isNull) {\n         deserializer.fromBytes(Utils.readBytes(msg.message.payload))\n       } else {\n         null",
-                "raw_url": "https://github.com/apache/samza/raw/12594fb710260b62f9a21a8be785bd8dd5dcdd01/samza-kafka/src/main/scala/org/apache/samza/system/kafka/KafkaSystemConsumer.scala",
-                "sha": "afbd7cdc1436a0d9a83857c0f410a2977812ee77",
-                "status": "modified"
-            },
-            {
-                "additions": 5,
-                "blob_url": "https://github.com/apache/samza/blob/12594fb710260b62f9a21a8be785bd8dd5dcdd01/samza-kv/src/main/scala/org/apache/samza/storage/kv/KeyValueStorageEngine.scala",
-                "changes": 6,
-                "contents_url": "https://api.github.com/repos/apache/samza/contents/samza-kv/src/main/scala/org/apache/samza/storage/kv/KeyValueStorageEngine.scala?ref=12594fb710260b62f9a21a8be785bd8dd5dcdd01",
-                "deletions": 1,
-                "filename": "samza-kv/src/main/scala/org/apache/samza/storage/kv/KeyValueStorageEngine.scala",
-                "patch": "@@ -91,7 +91,11 @@ class KeyValueStorageEngine[K, V](\n         batch.clear()\n       }\n \n-      metrics.restoredBytes.inc(keyBytes.size + valBytes.size)\n+      if (valBytes != null) {\n+        metrics.restoredBytes.inc(valBytes.size)\n+      }\n+\n+      metrics.restoredBytes.inc(keyBytes.size)\n       metrics.restoredMessages.inc\n       count += 1\n ",
-                "raw_url": "https://github.com/apache/samza/raw/12594fb710260b62f9a21a8be785bd8dd5dcdd01/samza-kv/src/main/scala/org/apache/samza/storage/kv/KeyValueStorageEngine.scala",
-                "sha": "f42ea026cd4a2ae633d71149af6dacef68dab352",
-                "status": "modified"
-            },
-            {
-                "additions": 31,
-                "blob_url": "https://github.com/apache/samza/blob/12594fb710260b62f9a21a8be785bd8dd5dcdd01/samza-test/src/test/scala/org/apache/samza/test/integration/TestStatefulTask.scala",
-                "changes": 43,
-                "contents_url": "https://api.github.com/repos/apache/samza/contents/samza-test/src/test/scala/org/apache/samza/test/integration/TestStatefulTask.scala?ref=12594fb710260b62f9a21a8be785bd8dd5dcdd01",
-                "deletions": 12,
-                "filename": "samza-test/src/test/scala/org/apache/samza/test/integration/TestStatefulTask.scala",
-                "patch": "@@ -250,15 +250,19 @@ class TestStatefulTask {\n     send(task, \"2\")\n     send(task, \"3\")\n     send(task, \"2\")\n+    send(task, \"99\")\n+    send(task, \"-99\")\n \n     // Validate that messages appear in store stream.\n-    val messages = readAll(STATE_TOPIC, 3, \"testShouldStartTaskForFirstTime\")\n+    val messages = readAll(STATE_TOPIC, 5, \"testShouldStartTaskForFirstTime\")\n \n-    assertEquals(4, messages.length)\n+    assertEquals(6, messages.length)\n     assertEquals(\"1\", messages(0))\n     assertEquals(\"2\", messages(1))\n     assertEquals(\"3\", messages(2))\n     assertEquals(\"2\", messages(3))\n+    assertEquals(\"99\", messages(4))\n+    assertEquals(null, messages(5))\n \n     stopJob(job)\n   }\n@@ -292,23 +296,27 @@ class TestStatefulTask {\n     send(task, \"5\")\n \n     // Validate that messages appear in store stream.\n-    val messages = readAll(STATE_TOPIC, 10, \"testShouldRestoreStore\")\n+    val messages = readAll(STATE_TOPIC, 14, \"testShouldRestoreStore\")\n \n-    assertEquals(11, messages.length)\n+    assertEquals(15, messages.length)\n     // From initial start.\n     assertEquals(\"1\", messages(0))\n     assertEquals(\"2\", messages(1))\n     assertEquals(\"3\", messages(2))\n     assertEquals(\"2\", messages(3))\n+    assertEquals(\"99\", messages(4))\n+    assertEquals(null, messages(5))\n     // From second startup.\n-    assertEquals(\"1\", messages(4))\n-    assertEquals(\"2\", messages(5))\n-    assertEquals(\"3\", messages(6))\n+    assertEquals(\"1\", messages(6))\n     assertEquals(\"2\", messages(7))\n+    assertEquals(\"3\", messages(8))\n+    assertEquals(\"2\", messages(9))\n+    assertEquals(\"99\", messages(10))\n+    assertEquals(null, messages(11))\n     // From sending in this method.\n-    assertEquals(\"4\", messages(8))\n-    assertEquals(\"5\", messages(9))\n-    assertEquals(\"5\", messages(10))\n+    assertEquals(\"4\", messages(12))\n+    assertEquals(\"5\", messages(13))\n+    assertEquals(\"5\", messages(14))\n \n     stopJob(job)\n   }\n@@ -376,7 +384,11 @@ class TestStatefulTask {\n \n     while (message == null || message.offset < maxOffsetInclusive) {\n       message = stream.next\n-      messages += new String(message.message, \"UTF-8\")\n+      if (message.message == null) {\n+        messages += null\n+      } else {\n+        messages += new String(message.message, \"UTF-8\")\n+      }\n       System.err.println(\"TestStatefulTask.readAll(): offset=%s, message=%s\" format (message.offset, messages.last))\n     }\n \n@@ -436,7 +448,14 @@ class TestTask extends StreamTask with InitableTask {\n     System.err.println(\"TestTask.process(): %s\" format msg)\n \n     received += msg\n-    store.put(msg, msg)\n+\n+    // A negative string means delete\n+    if (msg.startsWith(\"-\")) {\n+      store.delete(msg.substring(1))\n+    } else {\n+      store.put(msg, msg)\n+    }\n+\n     coordinator.commit\n \n     // Notify sender that we got a message.",
-                "raw_url": "https://github.com/apache/samza/raw/12594fb710260b62f9a21a8be785bd8dd5dcdd01/samza-test/src/test/scala/org/apache/samza/test/integration/TestStatefulTask.scala",
-                "sha": "7e813870ef07cee889d3be526d62f4e7574ce100",
-                "status": "modified"
-            }
-        ],
-        "message": "SAMZA-173; fix NPE when changelog restore includes a message with a null value",
-        "parent": "https://github.com/apache/samza/commit/55929095f5abc0911278ca8336bccbc835122c84",
-        "patched_files": [
-            "KafkaSystemConsumer.java",
-            "KeyValueStorageEngine.java"
-        ],
-        "repo": "samza",
-        "unit_tests": [
-            "TestStatefulTask.java"
+            "TestZkJobCoordinator.java",
+            "TestStreamProcessor.java"
         ]
     },
     "samza_130ece5": {
@@ -389,72 +220,20 @@
         "parent": "https://github.com/apache/samza/commit/bdce47707a32f91032574f1d6d05b6e659a4aa33",
         "patched_files": [
             "BaseReadableTable.java",
-            "TableReadMetrics.java",
             "LocalReadableTable.java",
             "RemoteReadWriteTable.java",
+            "LocalReadWriteTable.java",
+            "CachingTable.java",
             "RemoteReadableTable.java",
             "TableWriteMetrics.java",
-            "LocalReadWriteTable.java",
-            "CachingTable.java"
+            "TableReadMetrics.java"
         ],
         "repo": "samza",
         "unit_tests": [
-            "TestLocalReadableTable.java",
             "TestLocalReadWriteTable.java",
-            "TestCachingTable.java",
-            "TestRemoteReadWriteTable.java"
-        ]
-    },
-    "samza_2cd1827": {
-        "bug_id": "samza_2cd1827",
-        "commit": "https://github.com/apache/samza/commit/2cd18279c61c92597ad6d2892b1f01b5106ffcb1",
-        "file": [
-            {
-                "additions": 5,
-                "blob_url": "https://github.com/apache/samza/blob/2cd18279c61c92597ad6d2892b1f01b5106ffcb1/samza-core/src/main/scala/org/apache/samza/serializers/IntegerSerde.scala",
-                "changes": 10,
-                "contents_url": "https://api.github.com/repos/apache/samza/contents/samza-core/src/main/scala/org/apache/samza/serializers/IntegerSerde.scala?ref=2cd18279c61c92597ad6d2892b1f01b5106ffcb1",
-                "deletions": 5,
-                "filename": "samza-core/src/main/scala/org/apache/samza/serializers/IntegerSerde.scala",
-                "patch": "@@ -25,19 +25,19 @@ import org.apache.samza.config.Config\n /**\n  * A serializer for integers\n  */\n-class IntegerSerdeFactory extends SerdeFactory[Integer] {\n-  def getSerde(name: String, config: Config): Serde[Integer] = new IntegerSerde\n+class IntegerSerdeFactory extends SerdeFactory[java.lang.Integer] {\n+  def getSerde(name: String, config: Config): Serde[java.lang.Integer] = new IntegerSerde\n }\n \n-class IntegerSerde extends Serde[Integer] {\n-  def toBytes(obj: Integer): Array[Byte] = if (obj != null) {\n+class IntegerSerde extends Serde[java.lang.Integer] {\n+  def toBytes(obj: java.lang.Integer): Array[Byte] = if (obj != null) {\n     ByteBuffer.allocate(4).putInt(obj.intValue).array\n   } else {\n     null\n   }\n \n   // big-endian by default\n-  def fromBytes(bytes: Array[Byte]): Integer = if (bytes != null) {\n+  def fromBytes(bytes: Array[Byte]): java.lang.Integer = if (bytes != null) {\n     ByteBuffer.wrap(bytes).getInt\n   } else {\n     null",
-                "raw_url": "https://github.com/apache/samza/raw/2cd18279c61c92597ad6d2892b1f01b5106ffcb1/samza-core/src/main/scala/org/apache/samza/serializers/IntegerSerde.scala",
-                "sha": "46509f7e25bae29829d70c8e7a59dee654da4329",
-                "status": "modified"
-            },
-            {
-                "additions": 4,
-                "blob_url": "https://github.com/apache/samza/blob/2cd18279c61c92597ad6d2892b1f01b5106ffcb1/samza-kv/src/main/scala/org/apache/samza/storage/kv/SerializedKeyValueStore.scala",
-                "changes": 5,
-                "contents_url": "https://api.github.com/repos/apache/samza/contents/samza-kv/src/main/scala/org/apache/samza/storage/kv/SerializedKeyValueStore.scala?ref=2cd18279c61c92597ad6d2892b1f01b5106ffcb1",
-                "deletions": 1,
-                "filename": "samza-kv/src/main/scala/org/apache/samza/storage/kv/SerializedKeyValueStore.scala",
-                "patch": "@@ -61,7 +61,10 @@ class SerializedKeyValueStore[K, V](\n       val curr = iter.next\n       val keyBytes = keySerde.toBytes(curr.getKey)\n       val valBytes = msgSerde.toBytes(curr.getValue)\n-      bytesSerialized += keyBytes.size + valBytes.size\n+      bytesSerialized += keyBytes.size\n+      if (valBytes != null) {\n+        bytesSerialized += valBytes.size\n+      }\n       list.add(new Entry(keyBytes, valBytes))\n     }\n     store.putAll(list)",
-                "raw_url": "https://github.com/apache/samza/raw/2cd18279c61c92597ad6d2892b1f01b5106ffcb1/samza-kv/src/main/scala/org/apache/samza/storage/kv/SerializedKeyValueStore.scala",
-                "sha": "53a5cbeddcee61c05beb9c858eb81d11a1cd5d93",
-                "status": "modified"
-            },
-            {
-                "additions": 11,
-                "blob_url": "https://github.com/apache/samza/blob/2cd18279c61c92597ad6d2892b1f01b5106ffcb1/samza-kv/src/test/scala/org/apache/samza/storage/kv/TestKeyValueStores.scala",
-                "changes": 11,
-                "contents_url": "https://api.github.com/repos/apache/samza/contents/samza-kv/src/test/scala/org/apache/samza/storage/kv/TestKeyValueStores.scala?ref=2cd18279c61c92597ad6d2892b1f01b5106ffcb1",
-                "deletions": 0,
-                "filename": "samza-kv/src/test/scala/org/apache/samza/storage/kv/TestKeyValueStores.scala",
-                "patch": "@@ -25,6 +25,7 @@ import java.util.Random\n \n import scala.collection.JavaConversions._\n \n+import org.apache.samza.serializers.IntegerSerde\n import org.iq80.leveldb.Options\n import org.junit.After\n import org.junit.Assert.assertEquals\n@@ -141,6 +142,16 @@ class TestKeyValueStores(cache: Boolean) {\n     vals.foreach(v => assertNull(store.get(v)))\n   }\n \n+  @Test\n+  def testSerializedValueIsNull {\n+    val serializedStore = new SerializedKeyValueStore(\n+      store,\n+      new IntegerSerde,\n+      new IntegerSerde)\n+\n+    serializedStore.putAll(List(new Entry[java.lang.Integer, java.lang.Integer](0, null)))\n+  }\n+\n   def checkRange(vals: IndexedSeq[String], iter: KeyValueIterator[Array[Byte], Array[Byte]]) {\n     for (v <- vals) {\n       assertTrue(iter.hasNext)",
-                "raw_url": "https://github.com/apache/samza/raw/2cd18279c61c92597ad6d2892b1f01b5106ffcb1/samza-kv/src/test/scala/org/apache/samza/storage/kv/TestKeyValueStores.scala",
-                "sha": "03a189e71191af364aaec21baf5876c683cbf782",
-                "status": "modified"
-            }
-        ],
-        "message": "SAMZA-57; fix npe in serialized key value store.",
-        "parent": "https://github.com/apache/samza/commit/63cc71c5f750b8af615e85d46ab35871f6e777b2",
-        "patched_files": [
-            "IntegerSerde.java",
-            "SerializedKeyValueStore.java"
-        ],
-        "repo": "samza",
-        "unit_tests": [
-            "TestKeyValueStores.java"
+            "TestLocalReadableTable.java",
+            "TestRemoteReadWriteTable.java",
+            "TestCachingTable.java"
         ]
     },
     "samza_4aaa589": {
@@ -522,97 +301,6 @@
             "TestCoordinatorStreamSystemConsumer.java"
         ]
     },
-    "samza_4bf3f5e": {
-        "bug_id": "samza_4bf3f5e",
-        "commit": "https://github.com/apache/samza/commit/4bf3f5eb0d2fbbfebc2fdeb6f38bd9b55de61597",
-        "file": [
-            {
-                "additions": 5,
-                "blob_url": "https://github.com/apache/samza/blob/4bf3f5eb0d2fbbfebc2fdeb6f38bd9b55de61597/samza-core/src/main/scala/org/apache/samza/metrics/MetricsHelper.scala",
-                "changes": 5,
-                "contents_url": "https://api.github.com/repos/apache/samza/contents/samza-core/src/main/scala/org/apache/samza/metrics/MetricsHelper.scala?ref=4bf3f5eb0d2fbbfebc2fdeb6f38bd9b55de61597",
-                "deletions": 0,
-                "filename": "samza-core/src/main/scala/org/apache/samza/metrics/MetricsHelper.scala",
-                "patch": "@@ -37,6 +37,11 @@ trait MetricsHelper {\n     registry.newGauge(group, new Gauge((getPrefix + name).toLowerCase, value))\n   }\n \n+  /**\n+   * Specify a dynamic gauge that always returns the latest value when polled. \n+   * The value closure must be thread safe, since metrics reporters may access \n+   * it from another thread.\n+   */\n   def newGauge[T](name: String, value: () => T) = {\n     registry.newGauge(group, new Gauge((getPrefix + name).toLowerCase, value()) {\n       override def getValue = value()",
-                "raw_url": "https://github.com/apache/samza/raw/4bf3f5eb0d2fbbfebc2fdeb6f38bd9b55de61597/samza-core/src/main/scala/org/apache/samza/metrics/MetricsHelper.scala",
-                "sha": "8043f37cafdabaa6944d9fd8ca8876eac85c00cb",
-                "status": "modified"
-            },
-            {
-                "additions": 17,
-                "blob_url": "https://github.com/apache/samza/blob/4bf3f5eb0d2fbbfebc2fdeb6f38bd9b55de61597/samza-kv/src/main/scala/org/apache/samza/storage/kv/CachedStore.scala",
-                "changes": 20,
-                "contents_url": "https://api.github.com/repos/apache/samza/contents/samza-kv/src/main/scala/org/apache/samza/storage/kv/CachedStore.scala?ref=4bf3f5eb0d2fbbfebc2fdeb6f38bd9b55de61597",
-                "deletions": 3,
-                "filename": "samza-kv/src/main/scala/org/apache/samza/storage/kv/CachedStore.scala",
-                "patch": "@@ -49,7 +49,10 @@ class CachedStore[K, V](\n   val metrics: CachedStoreMetrics = new CachedStoreMetrics) extends KeyValueStore[K, V] with Logging {\n \n   /** the number of items in the dirty list */\n-  private var dirtyCount = 0\n+  @volatile private var dirtyCount = 0\n+\n+  /** the number of items currently in the cache */\n+  @volatile private var cacheCount = 0\n \n   /** the list of items to be written out on flush from newest to oldest */\n   private var dirty = new mutable.DoubleLinkedList[K]()\n@@ -68,8 +71,12 @@ class CachedStore[K, V](\n     }\n   }\n \n+  // Use counters here, rather than directly accessing variables using .size \n+  // since metrics can be accessed in other threads, and cache.size is not \n+  // thread safe since we're using a LinkedHashMap, and dirty.size is slow\n+  // since it requires a full traversal of the linked list.\n   metrics.setDirtyCount(() => dirtyCount)\n-  metrics.setCacheSize(() => cache.size)\n+  metrics.setCacheSize(() => cacheCount)\n \n   def get(key: K) = {\n     metrics.gets.inc\n@@ -81,6 +88,7 @@ class CachedStore[K, V](\n     } else {\n       val v = store.get(key)\n       cache.put(key, new CacheEntry(v, null))\n+      cacheCount = cache.size\n       v\n     }\n   }\n@@ -114,11 +122,17 @@ class CachedStore[K, V](\n         found.dirty.remove\n       }\n     }\n-    this.dirty = new mutable.DoubleLinkedList(key, this.dirty)\n+\n+    // We have to manually manage the prev value because Scala 2.8 is totally \n+    // broken. See SAMZA-80 for details.\n+    val oldDirtyList = this.dirty\n+    this.dirty = new mutable.DoubleLinkedList(key, oldDirtyList)\n+    oldDirtyList.prev = this.dirty\n \n     // add the key to the cache (but don't allocate a new cache entry if we already have one)\n     if (found == null) {\n       cache.put(key, new CacheEntry(value, this.dirty))\n+      cacheCount = cache.size\n     } else {\n       found.value = value\n       found.dirty = this.dirty",
-                "raw_url": "https://github.com/apache/samza/raw/4bf3f5eb0d2fbbfebc2fdeb6f38bd9b55de61597/samza-kv/src/main/scala/org/apache/samza/storage/kv/CachedStore.scala",
-                "sha": "429f51a4d269e3d18627c183359af672c68b8b00",
-                "status": "modified"
-            },
-            {
-                "additions": 110,
-                "blob_url": "https://github.com/apache/samza/blob/4bf3f5eb0d2fbbfebc2fdeb6f38bd9b55de61597/samza-kv/src/test/scala/org/apache/samza/storage/kv/TestKeyValueStores.scala",
-                "changes": 115,
-                "contents_url": "https://api.github.com/repos/apache/samza/contents/samza-kv/src/test/scala/org/apache/samza/storage/kv/TestKeyValueStores.scala?ref=4bf3f5eb0d2fbbfebc2fdeb6f38bd9b55de61597",
-                "deletions": 5,
-                "filename": "samza-kv/src/test/scala/org/apache/samza/storage/kv/TestKeyValueStores.scala",
-                "patch": "@@ -28,10 +28,7 @@ import scala.collection.JavaConversions._\n import org.apache.samza.serializers.IntegerSerde\n import org.iq80.leveldb.Options\n import org.junit.After\n-import org.junit.Assert.assertEquals\n-import org.junit.Assert.assertFalse\n-import org.junit.Assert.assertNull\n-import org.junit.Assert.assertTrue\n+import org.junit.Assert._\n import org.junit.Before\n import org.junit.Test\n import org.junit.runner.RunWith\n@@ -152,6 +149,114 @@ class TestKeyValueStores(cache: Boolean) {\n     serializedStore.putAll(List(new Entry[java.lang.Integer, java.lang.Integer](0, null)))\n   }\n \n+  /**\n+   * This test specifically targets an issue in Scala 2.8.1's DoubleLinkedList\n+   * implementation. The issue is that it doesn't work. More specifically,\n+   * creating a DoubleLinkedList from an existing list does not update the\n+   * \"prev\" field of the existing list's head to point to the new head. As a\n+   * result, in Scala 2.8.1, every DoulbeLinkedList node's prev field is null.\n+   * Samza gets around this by manually updating the field itself. See SAMZA-80\n+   * for details.\n+   *\n+   * This issue is exposed in Samza's KV cache implementation, which uses\n+   * DoubleLinkedList, so all comments in this method are discussing the cached\n+   * implementation, but the test is still useful as a sanity check for\n+   * non-cached stores.\n+   */\n+  @Test\n+  def testBrokenScalaDoubleLinkedList() {\n+    val something = b(\"\")\n+    val keys = letters\n+      .map(b(_))\n+      .toArray\n+\n+    // Load the cache to capacity.\n+    letters\n+      .slice(0, TestKeyValueStores.CacheSize)\n+      .map(b(_))\n+      .foreach(store.put(_, something))\n+\n+    // Now keep everything in the cache, but with an empty dirty list.\n+    store.flush\n+\n+    // Dirty list is now empty, and every CacheEntry has dirty=null.\n+\n+    // Corrupt the dirty list by creating two dirty lists that toggle back and \n+    // forth depending on whether the last dirty write was to 1 or 0. The trick\n+    // here is that every element in the cache is treated as the \"head\" of the\n+    // DoulbeLinkedList (prev==null), even though it's not necessarily. Thus,\n+    // You can end up with multiple nodes each having their own version of the \n+    // dirty list with different elements in them.\n+    store.put(keys(1), something)\n+    store.put(keys(0), something)\n+    store.put(keys(1), something)\n+    store.flush\n+    // The dirty list is now empty, but 0's dirty field actually has 0 and 1.\n+    store.put(keys(0), something)\n+    // The dirty list now has 0 and 1, but 1's dirty field is null in the \n+    // cache because it was just flushed.\n+\n+    // Get rid of 1 from the cache by reading every other element, and then \n+    // putting one new element.\n+    letters\n+      .slice(2, TestKeyValueStores.CacheSize)\n+      .map(b(_))\n+      .foreach(store.get(_))\n+    store.put(keys(TestKeyValueStores.CacheSize), something)\n+\n+    // Now try and trigger an NPE since the dirty list has an element (1) \n+    // that's no longer in the cache.\n+    store.flush\n+  }\n+\n+  /**\n+   * A little test that tries to simulate a few common patterns:\n+   * read-modify-write, and do-some-stuff-then-delete (windowing).\n+   */\n+  @Test\n+  def testRandomReadWriteRemove() {\n+    // Make test deterministic by seeding the random number generator.\n+    val rand = new Random(12345)\n+    val keys = letters\n+      .map(b(_))\n+      .toArray\n+\n+    // Map from letter to key byte array used for letter, and expected value.\n+    // We have to go through some acrobatics here since Java's byte array uses \n+    // object identity for .equals. Two byte arrays can have identical byte \n+    // elements, but not be equal.\n+    var expected = Map[String, (Array[Byte], String)]()\n+\n+    (0 until 100).foreach(loop => {\n+      (0 until 30).foreach(i => {\n+        val idx = rand.nextInt(keys.length)\n+        val randomValue = letters(rand.nextInt(keys.length))\n+        val key = keys(idx)\n+        val currentVal = store.get(key)\n+        store.put(key, b(randomValue))\n+        expected += letters(idx) -> (key, randomValue)\n+      })\n+\n+      for ((k, v) <- expected) {\n+        val bytes = store.get(v._1)\n+        assertNotNull(bytes)\n+        assertEquals(v._2, new String(bytes, \"UTF-8\"))\n+      }\n+\n+      val iterator = store.all\n+\n+      while (iterator.hasNext) {\n+        val key = iterator.next.getKey\n+        store.delete(key)\n+        expected -= new String(key, \"UTF-8\")\n+      }\n+\n+      iterator.close\n+\n+      assertEquals(0, expected.size)\n+    })\n+  }\n+\n   def checkRange(vals: IndexedSeq[String], iter: KeyValueIterator[Array[Byte], Array[Byte]]) {\n     for (v <- vals) {\n       assertTrue(iter.hasNext)\n@@ -178,7 +283,7 @@ class TestKeyValueStores(cache: Boolean) {\n \n object TestKeyValueStores {\n   val CacheSize = 10\n-  val BatchSize = 2\n+  val BatchSize = 5\n   @Parameters\n   def parameters: java.util.Collection[Array[java.lang.Boolean]] = Arrays.asList(Array(java.lang.Boolean.TRUE), Array(java.lang.Boolean.FALSE))\n }",
-                "raw_url": "https://github.com/apache/samza/raw/4bf3f5eb0d2fbbfebc2fdeb6f38bd9b55de61597/samza-kv/src/test/scala/org/apache/samza/storage/kv/TestKeyValueStores.scala",
-                "sha": "2e5f6a3fe8db96fcbb409619b4890ac5359f6d17",
-                "status": "modified"
-            }
-        ],
-        "message": "SAMZA-80; fix issue with scala 2.8's double linked list in cached store that was leading to an npe.",
-        "parent": "https://github.com/apache/samza/commit/2ec5eb8d0d55fda20d9cea5625b67897f548bfcd",
-        "patched_files": [
-            "CachedStore.java",
-            "MetricsHelper.java"
-        ],
-        "repo": "samza",
-        "unit_tests": [
-            "TestKeyValueStores.java"
-        ]
-    },
-    "samza_4ec463b": {
-        "bug_id": "samza_4ec463b",
-        "commit": "https://github.com/apache/samza/commit/4ec463b35e71f470e5b296f1ec65bb5866f495c4",
-        "file": [
-            {
-                "additions": 2,
-                "blob_url": "https://github.com/apache/samza/blob/4ec463b35e71f470e5b296f1ec65bb5866f495c4/samza-kv/src/main/scala/org/apache/samza/storage/kv/CachedStore.scala",
-                "changes": 4,
-                "contents_url": "https://api.github.com/repos/apache/samza/contents/samza-kv/src/main/scala/org/apache/samza/storage/kv/CachedStore.scala?ref=4ec463b35e71f470e5b296f1ec65bb5866f495c4",
-                "deletions": 2,
-                "filename": "samza-kv/src/main/scala/org/apache/samza/storage/kv/CachedStore.scala",
-                "patch": "@@ -90,9 +90,9 @@ class CachedStore[K, V](val store: KeyValueStore[K, V],\n   def put(key: K, value: V) {\n     // add the key to the front of the dirty list (and remove any prior occurrences to dedupe)\n     val found = cache.get(key)\n-    if (found == null || found.dirty == null)\n+    if (found == null || found.dirty == null) {\n       this.dirtyCount += 1\n-    else {\n+    } else {\n       // If we are removing the head of the list, move the head to the next element.\n       if(found.dirty.prev == null) {\n         this.dirty = found.dirty.next",
-                "raw_url": "https://github.com/apache/samza/raw/4ec463b35e71f470e5b296f1ec65bb5866f495c4/samza-kv/src/main/scala/org/apache/samza/storage/kv/CachedStore.scala",
-                "sha": "81e33b882c1cb69e6c73054919e2ebf34e7ab015",
-                "status": "modified"
-            },
-            {
-                "additions": 2,
-                "blob_url": "https://github.com/apache/samza/blob/4ec463b35e71f470e5b296f1ec65bb5866f495c4/samza-kv/src/test/scala/org/apache/samza/storage/kv/TestKeyValueStores.scala",
-                "changes": 3,
-                "contents_url": "https://api.github.com/repos/apache/samza/contents/samza-kv/src/test/scala/org/apache/samza/storage/kv/TestKeyValueStores.scala?ref=4ec463b35e71f470e5b296f1ec65bb5866f495c4",
-                "deletions": 1,
-                "filename": "samza-kv/src/test/scala/org/apache/samza/storage/kv/TestKeyValueStores.scala",
-                "patch": "@@ -79,7 +79,8 @@ class TestKeyValueStores(cache: Boolean) {\n     val k = b(\"k2\")\n     store.put(k, b(\"v1\"))\n     store.put(k, b(\"v2\"))\n-    assertTrue(Arrays.equals(b(\"v2\"), store.get(k)))\n+    store.put(k, b(\"v3\"))\n+    assertTrue(Arrays.equals(b(\"v3\"), store.get(k)))\n   }\n \n   @Test",
-                "raw_url": "https://github.com/apache/samza/raw/4ec463b35e71f470e5b296f1ec65bb5866f495c4/samza-kv/src/test/scala/org/apache/samza/storage/kv/TestKeyValueStores.scala",
-                "sha": "0be0722db5cdbba900b42895508d2529fb81d7d0",
-                "status": "modified"
-            }
-        ],
-        "message": "tweak kv test to trigger NPE when test is run with Scala 2.8.1. Validate that patch fixes the bug. Add brackets in if else in cached store for style.",
-        "parent": "https://github.com/apache/samza/commit/39cf91efc44d756df5db294f49ae9cf4a8c93b52",
-        "patched_files": [
-            "CachedStore.java"
-        ],
-        "repo": "samza",
-        "unit_tests": [
-            "TestKeyValueStores.java"
-        ]
-    },
     "samza_5e14946": {
         "bug_id": "samza_5e14946",
         "commit": "https://github.com/apache/samza/commit/5e14946826e6abb8b0a852818f8affce363a7337",
@@ -645,8 +333,8 @@
         "message": "SAMZA-1263: Samza Fluent: NPE is streams.id.samza.system is missing\n\nAuthor: Jacob Maes <jmaes@linkedin.com>\n\nReviewers: Xinyu Liu <xiliu@linkedin.com>, Prateek Maheshwari <pmaheshw@linkedin.com>\n\nCloses #165 from jmakes/samza-1263",
         "parent": "https://github.com/apache/samza/commit/435d4fe1f9caf7dd310a788e8158bc94c3f23878",
         "patched_files": [
-            "StreamSpec.java",
-            "AbstractApplicationRunner.java"
+            "AbstractApplicationRunner.java",
+            "StreamSpec.java"
         ],
         "repo": "samza",
         "unit_tests": [
@@ -697,8 +385,8 @@
         "message": "SAMZA-1249: Fix equality for WindowKey for Non-keyed tumbling windows\n\n- Fix a `ClassCastException` and an NPE when using Tumbling window without keys\n- Fix equality and hashCode for `WindowKey`\n- Refactor the `TestWindowOperator` unit tests using simpler types and a mock `MessageCollector`.\n\nMore details in `SAMZA-1249`\n\nAuthor: vjagadish1989 <jvenkatr@linkedin.com>\n\nReviewers: Prateek Maheshwari <pmaheshw@linkedin.com>, Jacob Maes <jmaes@linkedin.com>\n\nCloses #149 from vjagadish1989/samza-1249",
         "parent": "https://github.com/apache/samza/commit/20b427cc88c5f8d2a6b2e0283ce18b4b5f01cc17",
         "patched_files": [
-            "Windows.java",
-            "WindowKey.java"
+            "WindowKey.java",
+            "Windows.java"
         ],
         "repo": "samza",
         "unit_tests": [
@@ -749,9 +437,9 @@
         "message": "Fix build failures after master merge\n\nChanges\n* Fix checkstyle errors from #243\n* Fix failure after bad merge in #244\n\nAuthor: Shanthoosh Venkataraman <svenkataraman@linkedin.com>\n\nReviewers: Navina Ramesh <navina@apache.org>\n\nCloses #252 from shanthoosh/fix_NPE_after_master_merge",
         "parent": "https://github.com/apache/samza/commit/57758615b3f8713364ac1afecab4f5355f64d1d4",
         "patched_files": [
+            "ContainerProcessManager.java",
             "ZkJobCoordinator.java",
-            "MockContainerAllocator.java",
-            "ContainerProcessManager.java"
+            "MockContainerAllocator.java"
         ],
         "repo": "samza",
         "unit_tests": [
@@ -887,165 +575,22 @@
         "message": "SAMZA-1933: Fix NPE in LocalityManager.\n\nAuthor: Shanthoosh Venkataraman <spvenkat@usc.edu>\n\nReviewers: Prateek Maheshwari <pmaheshwari@apache.org>\n\nCloses #684 from shanthoosh/fix_NPE_in_task_assignment_manager",
         "parent": "https://github.com/apache/samza/commit/d48cf5f74b2268762d3175d8c068769b418b578e",
         "patched_files": [
-            "TaskAssignmentManager.java",
             "GroupByContainerCount.java",
             "SamzaTaskProxy.java",
+            "GroupByContainerIds.java",
             "GroupByContainerCountFactory.java",
             "LocalityManager.java",
             "ApplicationMasterRestClient.java",
-            "GroupByContainerIds.java"
+            "TaskAssignmentManager.java"
         ],
         "repo": "samza",
         "unit_tests": [
-            "TestTaskAssignmentManager.java",
-            "TestGroupByContainerIds.java",
-            "TestJobModelManager.java",
-            "TestGroupByContainerCount.java",
             "TestApplicationMasterRestClient.java",
-            "TestLocalityManager.java"
-        ]
-    },
-    "samza_bda8df6": {
-        "bug_id": "samza_bda8df6",
-        "commit": "https://github.com/apache/samza/commit/bda8df6e21c02060831ca05a1a23af1685f0ea07",
-        "file": [
-            {
-                "additions": 2,
-                "blob_url": "https://github.com/apache/samza/blob/bda8df6e21c02060831ca05a1a23af1685f0ea07/samza-kafka/src/main/scala/org/apache/samza/system/kafka/BrokerProxy.scala",
-                "changes": 4,
-                "contents_url": "https://api.github.com/repos/apache/samza/contents/samza-kafka/src/main/scala/org/apache/samza/system/kafka/BrokerProxy.scala?ref=bda8df6e21c02060831ca05a1a23af1685f0ea07",
-                "deletions": 2,
-                "filename": "samza-kafka/src/main/scala/org/apache/samza/system/kafka/BrokerProxy.scala",
-                "patch": "@@ -77,7 +77,7 @@ abstract class BrokerProxy(\n     sc\n   }\n \n-  def addTopicPartition(tp: TopicAndPartition, lastCheckpointedOffset: String) = {\n+  def addTopicPartition(tp: TopicAndPartition, lastCheckpointedOffset: Option[String]) = {\n     debug(\"Adding new topic and partition %s to queue for %s\" format (tp, host))\n     if (nextOffsets.containsKey(tp)) toss(\"Already consuming TopicPartition %s\" format tp)\n \n@@ -181,7 +181,7 @@ abstract class BrokerProxy(\n       warn(\"Received OffsetOutOfRange exception for %s. Current offset = %s\" format (e.tp, nextOffsets.getOrElse(e.tp, \"not found in map, likely removed in the interim\")))\n \n       try {\n-        val newOffset = offsetGetter.getNextOffset(simpleConsumer, e.tp, null)\n+        val newOffset = offsetGetter.getNextOffset(simpleConsumer, e.tp, Option(null))\n         // Put the new offset into the map (if the tp still exists).  Will catch it on the next go-around\n         nextOffsets.replace(e.tp, newOffset)\n       } catch {",
-                "raw_url": "https://github.com/apache/samza/raw/bda8df6e21c02060831ca05a1a23af1685f0ea07/samza-kafka/src/main/scala/org/apache/samza/system/kafka/BrokerProxy.scala",
-                "sha": "53b2e22e369c0ee678bfb479ed847159f9ddaa0c",
-                "status": "modified"
-            },
-            {
-                "additions": 3,
-                "blob_url": "https://github.com/apache/samza/blob/bda8df6e21c02060831ca05a1a23af1685f0ea07/samza-kafka/src/main/scala/org/apache/samza/system/kafka/GetOffset.scala",
-                "changes": 6,
-                "contents_url": "https://api.github.com/repos/apache/samza/contents/samza-kafka/src/main/scala/org/apache/samza/system/kafka/GetOffset.scala?ref=bda8df6e21c02060831ca05a1a23af1685f0ea07",
-                "deletions": 3,
-                "filename": "samza-kafka/src/main/scala/org/apache/samza/system/kafka/GetOffset.scala",
-                "patch": "@@ -87,7 +87,7 @@ class GetOffset(default: String, autoOffsetResetTopics: Map[String, String] = Ma\n    * @param lastCheckpointedOffset Null is acceptable. If not null, return the last checkpointed offset, after checking it is valid\n    * @return Next offset to read or throw an exception if one has been received via the simple consumer\n    */\n-  def getNextOffset(sc: DefaultFetchSimpleConsumer, tp: TopicAndPartition, lastCheckpointedOffset: String): Long = {\n+ def getNextOffset(sc: DefaultFetchSimpleConsumer, tp: TopicAndPartition, lastCheckpointedOffset: Option[String]): Long = {\n     val offsetRequest = new OffsetRequest(Map(tp -> new PartitionOffsetRequestInfo(getAutoOffset(tp.topic), 1)))\n     val offsetResponse = sc.getOffsetsBefore(offsetRequest)\n     val partitionOffsetResponse = offsetResponse.partitionErrorAndOffsets.get(tp).getOrElse(toss(\"Unable to find offset information for %s\" format tp))\n@@ -96,9 +96,9 @@ class GetOffset(default: String, autoOffsetResetTopics: Map[String, String] = Ma\n \n     val autoOffset = partitionOffsetResponse.offsets.headOption.getOrElse(toss(\"Got response, but no offsets defined for %s\" format tp))\n \n-    val actualOffset = Option(lastCheckpointedOffset) match {\n+    val actualOffset = lastCheckpointedOffset match {\n       case Some(last) => useLastCheckpointedOffset(sc, last, tp).getOrElse(autoOffset)\n-      case None => autoOffset\n+      case _ => autoOffset\n     }\n \n     info(\"Final offset to be returned for Topic and Partition %s = %d\" format (tp, actualOffset))",
-                "raw_url": "https://github.com/apache/samza/raw/bda8df6e21c02060831ca05a1a23af1685f0ea07/samza-kafka/src/main/scala/org/apache/samza/system/kafka/GetOffset.scala",
-                "sha": "25cd52cbfad33d39f682a9764a5b6b3fbaa9ac97",
-                "status": "modified"
-            },
-            {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/samza/blob/bda8df6e21c02060831ca05a1a23af1685f0ea07/samza-kafka/src/main/scala/org/apache/samza/system/kafka/KafkaSystemConsumer.scala",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/samza/contents/samza-kafka/src/main/scala/org/apache/samza/system/kafka/KafkaSystemConsumer.scala?ref=bda8df6e21c02060831ca05a1a23af1685f0ea07",
-                "deletions": 1,
-                "filename": "samza-kafka/src/main/scala/org/apache/samza/system/kafka/KafkaSystemConsumer.scala",
-                "patch": "@@ -118,7 +118,7 @@ private[kafka] class KafkaSystemConsumer(\n                 val messageSink: MessageSink = sink\n               })\n \n-              brokerProxy.addTopicPartition(head, lastOffset)\n+              brokerProxy.addTopicPartition(head, Option(lastOffset))\n             case None => warn(\"No such topic-partition: %s, dropping.\" format head)\n           }\n           rest",
-                "raw_url": "https://github.com/apache/samza/raw/bda8df6e21c02060831ca05a1a23af1685f0ea07/samza-kafka/src/main/scala/org/apache/samza/system/kafka/KafkaSystemConsumer.scala",
-                "sha": "5dbcd945984f4c71a02e4bbba10e71fce871229c",
-                "status": "modified"
-            },
-            {
-                "additions": 6,
-                "blob_url": "https://github.com/apache/samza/blob/bda8df6e21c02060831ca05a1a23af1685f0ea07/samza-kafka/src/test/scala/org/apache/samza/system/kafka/TestBrokerProxy.scala",
-                "changes": 12,
-                "contents_url": "https://api.github.com/repos/apache/samza/contents/samza-kafka/src/test/scala/org/apache/samza/system/kafka/TestBrokerProxy.scala?ref=bda8df6e21c02060831ca05a1a23af1685f0ea07",
-                "deletions": 6,
-                "filename": "samza-kafka/src/test/scala/org/apache/samza/system/kafka/TestBrokerProxy.scala",
-                "patch": "@@ -162,9 +162,9 @@ class TestBrokerProxy extends Logging {\n     val (bp, tp, sink) = getMockBrokerProxy()\n \n     bp.start\n-    bp.addTopicPartition(tp, \"0\")\n+    bp.addTopicPartition(tp, Option(\"0\"))\n     // Add tp2, which should never receive messages since sink disables it.\n-    bp.addTopicPartition(tp2, \"0\")\n+    bp.addTopicPartition(tp2, Option(\"0\"))\n     Thread.sleep(1000)\n     assertEquals(2, sink.receivedMessages.size)\n     assertEquals(42, sink.receivedMessages.get(0)._2.offset)\n@@ -174,10 +174,10 @@ class TestBrokerProxy extends Logging {\n   @Test def brokerProxyThrowsExceptionOnDuplicateTopicPartitions() = {\n     val (bp, tp, _) = getMockBrokerProxy()\n     bp.start\n-    bp.addTopicPartition(tp, \"0\")\n+    bp.addTopicPartition(tp, Option(\"0\"))\n \n     try {\n-      bp.addTopicPartition(tp, \"1\")\n+      bp.addTopicPartition(tp, Option(\"1\"))\n       fail(\"Should have thrown an exception\")\n     } catch {\n       case se: SamzaException => assertEquals(se.getMessage, \"Already consuming TopicPartition [Redbird,2012]\")\n@@ -199,7 +199,7 @@ class TestBrokerProxy extends Logging {\n \n     val mockOffsetGetter = mock(classOf[GetOffset])\n     // This will be used by the simple consumer below, and this is the response that simple consumer needs\n-    when(mockOffsetGetter.getNextOffset(any(classOf[DefaultFetchSimpleConsumer]), Matchers.eq(tp), Matchers.eq(null))).thenReturn(1492l)\n+    when(mockOffsetGetter.getNextOffset(any(classOf[DefaultFetchSimpleConsumer]), Matchers.eq(tp), Matchers.eq(Option(null)))).thenReturn(1492l)\n \n     var callsToCreateSimpleConsumer = 0\n     val mockSimpleConsumer = mock(classOf[DefaultFetchSimpleConsumer])\n@@ -256,7 +256,7 @@ class TestBrokerProxy extends Logging {\n       }\n     }\n \n-    bp.addTopicPartition(tp, \"earliest\")\n+    bp.addTopicPartition(tp, Option(\"earliest\"))\n     bp.start\n     countdownLatch.await()\n     bp.stop",
-                "raw_url": "https://github.com/apache/samza/raw/bda8df6e21c02060831ca05a1a23af1685f0ea07/samza-kafka/src/test/scala/org/apache/samza/system/kafka/TestBrokerProxy.scala",
-                "sha": "9a3a29edf89244fa0bb8877a747446ec0b9dedc1",
-                "status": "modified"
-            }
-        ],
-        "message": "SAMZA-86; Convert GetOffset.getNextOffset to use Option instead of null when no offset is available. Applying patch again, with fixed NPE issue.",
-        "parent": "https://github.com/apache/samza/commit/df6bd392acb5dd1600d191a5157dd6cd54519463",
-        "patched_files": [
-            "GetOffset.java",
-            "KafkaSystemConsumer.java",
-            "BrokerProxy.java"
-        ],
-        "repo": "samza",
-        "unit_tests": [
-            "TestBrokerProxy.java"
-        ]
-    },
-    "samza_c587a35": {
-        "bug_id": "samza_c587a35",
-        "commit": "https://github.com/apache/samza/commit/c587a3513947c4c8c31176a99debff16cc436b18",
-        "file": [
-            {
-                "additions": 2,
-                "blob_url": "https://github.com/apache/samza/blob/c587a3513947c4c8c31176a99debff16cc436b18/samza-kv/src/main/scala/org/apache/samza/storage/kv/CachedStore.scala",
-                "changes": 4,
-                "contents_url": "https://api.github.com/repos/apache/samza/contents/samza-kv/src/main/scala/org/apache/samza/storage/kv/CachedStore.scala?ref=c587a3513947c4c8c31176a99debff16cc436b18",
-                "deletions": 2,
-                "filename": "samza-kv/src/main/scala/org/apache/samza/storage/kv/CachedStore.scala",
-                "patch": "@@ -90,9 +90,9 @@ class CachedStore[K, V](val store: KeyValueStore[K, V],\n   def put(key: K, value: V) {\n     // add the key to the front of the dirty list (and remove any prior occurrences to dedupe)\n     val found = cache.get(key)\n-    if (found == null || found.dirty == null)\n+    if (found == null || found.dirty == null) {\n       this.dirtyCount += 1\n-    else {\n+    } else {\n       // If we are removing the head of the list, move the head to the next element.\n       if(found.dirty.prev == null) {\n         this.dirty = found.dirty.next",
-                "raw_url": "https://github.com/apache/samza/raw/c587a3513947c4c8c31176a99debff16cc436b18/samza-kv/src/main/scala/org/apache/samza/storage/kv/CachedStore.scala",
-                "sha": "81e33b882c1cb69e6c73054919e2ebf34e7ab015",
-                "status": "modified"
-            },
-            {
-                "additions": 2,
-                "blob_url": "https://github.com/apache/samza/blob/c587a3513947c4c8c31176a99debff16cc436b18/samza-kv/src/test/scala/org/apache/samza/storage/kv/TestKeyValueStores.scala",
-                "changes": 3,
-                "contents_url": "https://api.github.com/repos/apache/samza/contents/samza-kv/src/test/scala/org/apache/samza/storage/kv/TestKeyValueStores.scala?ref=c587a3513947c4c8c31176a99debff16cc436b18",
-                "deletions": 1,
-                "filename": "samza-kv/src/test/scala/org/apache/samza/storage/kv/TestKeyValueStores.scala",
-                "patch": "@@ -79,7 +79,8 @@ class TestKeyValueStores(cache: Boolean) {\n     val k = b(\"k2\")\n     store.put(k, b(\"v1\"))\n     store.put(k, b(\"v2\"))\n-    assertTrue(Arrays.equals(b(\"v2\"), store.get(k)))\n+    store.put(k, b(\"v3\"))\n+    assertTrue(Arrays.equals(b(\"v3\"), store.get(k)))\n   }\n \n   @Test",
-                "raw_url": "https://github.com/apache/samza/raw/c587a3513947c4c8c31176a99debff16cc436b18/samza-kv/src/test/scala/org/apache/samza/storage/kv/TestKeyValueStores.scala",
-                "sha": "0be0722db5cdbba900b42895508d2529fb81d7d0",
-                "status": "modified"
-            }
-        ],
-        "message": "tweak kv test to trigger NPE when test is run with Scala 2.8.1. Validate that patch fixes the bug. Add brackets in if else in cached store for style.",
-        "parent": "https://github.com/apache/samza/commit/f59be90682fbc99adb0bef220a5e919d876d5ead",
-        "patched_files": [
-            "CachedStore.java"
-        ],
-        "repo": "samza",
-        "unit_tests": [
-            "TestKeyValueStores.java"
-        ]
-    },
-    "samza_c688d86": {
-        "bug_id": "samza_c688d86",
-        "commit": "https://github.com/apache/samza/commit/c688d86ffe52b9a1d187e992657eb054b847a6e0",
-        "file": [
-            {
-                "additions": 10,
-                "blob_url": "https://github.com/apache/samza/blob/c688d86ffe52b9a1d187e992657eb054b847a6e0/samza-kv/src/main/scala/org/apache/samza/storage/kv/CachedStore.scala",
-                "changes": 13,
-                "contents_url": "https://api.github.com/repos/apache/samza/contents/samza-kv/src/main/scala/org/apache/samza/storage/kv/CachedStore.scala?ref=c688d86ffe52b9a1d187e992657eb054b847a6e0",
-                "deletions": 3,
-                "filename": "samza-kv/src/main/scala/org/apache/samza/storage/kv/CachedStore.scala",
-                "patch": "@@ -90,10 +90,17 @@ class CachedStore[K, V](val store: KeyValueStore[K, V],\n   def put(key: K, value: V) {\n     // add the key to the front of the dirty list (and remove any prior occurrences to dedupe)\n     val found = cache.get(key)\n-    if (found == null || found.dirty == null)\n+    if (found == null || found.dirty == null) {\n       this.dirtyCount += 1\n-    else\n-      found.dirty.remove()\n+    } else {\n+      // If we are removing the head of the list, move the head to the next element.\n+      if(found.dirty.prev == null) {\n+        this.dirty = found.dirty.next\n+        this.dirty.prev = null\n+      } else {\n+        found.dirty.remove\n+      }\n+    }\n     this.dirty = new mutable.DoubleLinkedList(key, this.dirty)\n \n     // add the key to the cache (but don't allocate a new cache entry if we already have one)",
-                "raw_url": "https://github.com/apache/samza/raw/c688d86ffe52b9a1d187e992657eb054b847a6e0/samza-kv/src/main/scala/org/apache/samza/storage/kv/CachedStore.scala",
-                "sha": "81e33b882c1cb69e6c73054919e2ebf34e7ab015",
-                "status": "modified"
-            },
-            {
-                "additions": 2,
-                "blob_url": "https://github.com/apache/samza/blob/c688d86ffe52b9a1d187e992657eb054b847a6e0/samza-kv/src/test/scala/org/apache/samza/storage/kv/TestKeyValueStores.scala",
-                "changes": 3,
-                "contents_url": "https://api.github.com/repos/apache/samza/contents/samza-kv/src/test/scala/org/apache/samza/storage/kv/TestKeyValueStores.scala?ref=c688d86ffe52b9a1d187e992657eb054b847a6e0",
-                "deletions": 1,
-                "filename": "samza-kv/src/test/scala/org/apache/samza/storage/kv/TestKeyValueStores.scala",
-                "patch": "@@ -79,7 +79,8 @@ class TestKeyValueStores(cache: Boolean) {\n     val k = b(\"k2\")\n     store.put(k, b(\"v1\"))\n     store.put(k, b(\"v2\"))\n-    assertTrue(Arrays.equals(b(\"v2\"), store.get(k)))\n+    store.put(k, b(\"v3\"))\n+    assertTrue(Arrays.equals(b(\"v3\"), store.get(k)))\n   }\n \n   @Test",
-                "raw_url": "https://github.com/apache/samza/raw/c688d86ffe52b9a1d187e992657eb054b847a6e0/samza-kv/src/test/scala/org/apache/samza/storage/kv/TestKeyValueStores.scala",
-                "sha": "0be0722db5cdbba900b42895508d2529fb81d7d0",
-                "status": "modified"
-            }
-        ],
-        "message": "Merge branch 'SAMZA-45_NPE-in-linked-list-in-samza-kv-cachedstore'",
-        "parent": "https://github.com/apache/samza/commit/251b42deaa04718c93edce69bdf44951ec816342",
-        "patched_files": [
-            "CachedStore.java"
-        ],
-        "repo": "samza",
-        "unit_tests": [
-            "TestKeyValueStores.java"
+            "TestGroupByContainerCount.java",
+            "TestLocalityManager.java",
+            "TestJobModelManager.java",
+            "TestTaskAssignmentManager.java",
+            "TestGroupByContainerIds.java"
         ]
     },
     "samza_e11ccd2": {
@@ -1266,23 +811,23 @@
         "message": "SAMZA-1324: Fix NullPointerException in ZkUtils api's.\n\nProblem:\nRead/Write api methods in ZkUtils updates counters/timers in `metrics` field. In a ZkUtils constructor this fields is not initialized properly. Java default for uninitialized field is null resulting in NPE.\n\nFix:\nInitialize private fields of ZkUtils class with appropriate defaults.\n\nAuthor: Shanthoosh Venkataraman <svenkataraman@linkedin.com>\n\nReviewers: Navina Ramesh <navina@apache.org>\n\nCloses #235 from shanthoosh/fix_zkutils_api",
         "parent": "https://github.com/apache/samza/commit/be989935c2fcc6ead114ce308ebaa93855ecb582",
         "patched_files": [
-            "ZkBarrierForVersionUpgrade.java",
-            "ZkUtilsMetrics.java",
-            "ZkUtils.java",
+            "metrics-table.html",
             "ZkLeaderElector.java",
-            "ZkProcessorLatch.java",
             "ZkJobCoordinator.java",
+            "ZkUtilsMetrics.java",
+            "ZkBarrierForVersionUpgrade.java",
             "ZkJobCoordinatorMetrics.java",
             "ZkCoordinationServiceFactory.java",
-            "metrics-table.java"
+            "ZkUtils.java",
+            "ZkProcessorLatch.java"
         ],
         "repo": "samza",
         "unit_tests": [
-            "TestZkLocalApplicationRunner.java",
+            "TestZkBarrierForVersionUpgrade.java",
             "TestZkProcessorLatch.java",
-            "TestZkLeaderElector.java",
             "TestZkUtils.java",
-            "TestZkBarrierForVersionUpgrade.java"
+            "TestZkLocalApplicationRunner.java",
+            "TestZkLeaderElector.java"
         ]
     },
     "samza_ebeccd2": {
@@ -1524,28 +1069,28 @@
         "message": "Upgrade to latest event hub version (1.0.1)\n\n* Upgrade to the latest event hub version 1.0.1\n* Adding configs for prefetchCount and maxEventPerPoll\n* Fix the high cpu usage issue in SamzaHistogram\n* Fixing a race condition in event hub system producer where the future was getting removed while it was being checked for completion resulting in NPE.\n\nAuthor: Srinivasulu Punuru <spunuru@linkedin.com>\n\nReviewers: Prateek Maheshwari <pmaheshwari@apache.org>\n\nCloses #467 from srinipunuru/upgrade-eh-1.0.1",
         "parent": "https://github.com/apache/samza/commit/8e000f3984e6158b504bc9cad0c81ea3d260cea3",
         "patched_files": [
-            "EventHubConsoleConsumer.java",
-            "EventHubConfig.java",
-            "SamzaEventHubClientManager.java",
-            "ITestEventHubSystemProducer.java",
+            "configuration-table.html",
+            "EventHubSystemConsumer.java",
             "EventHubSystemProducer.java",
-            "build.java",
+            "MockEventHubClientManagerFactory.java",
             "EventHubClientManagerFactory.java",
             "MetricsRegistry.java",
-            "EventHubSystemConsumer.java",
+            "SamzaEventHubClientManager.java",
+            "SamzaHistogram.java",
+            "ITestEventHubSystemProducer.java",
+            "build.gradle",
+            "EventHubConsoleConsumer.java",
             "EventHubSystemAdmin.java",
             "AsyncSystemProducer.java",
-            "MockEventData.java",
-            "configuration-table.java",
-            "SamzaHistogram.java",
-            "MockEventHubClientManagerFactory.java"
+            "EventHubConfig.java",
+            "MockEventData.java"
         ],
         "repo": "samza",
         "unit_tests": [
+            "TestEventHubSystemConsumer.java",
             "TestMetricsRegistry.java",
-            "TestEventHubSystemProducer.java",
             "TestEventHubSystemAdmin.java",
-            "TestEventHubSystemConsumer.java"
+            "TestEventHubSystemProducer.java"
         ]
     }
 }

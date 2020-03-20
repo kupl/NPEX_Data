@@ -1,0 +1,65 @@
+[
+    {
+        "repo": "phoenix",
+        "commit": "https://github.com/apache/phoenix/commit/21c12b11b1bc1b18ac667666dd715ed91d48ed4f",
+        "bug_id": "phoenix_21c12b1",
+        "message": "PHOENIX-2425 Invalid sql syntax produces NPE instead of meaningful error message",
+        "parent": "https://github.com/apache/phoenix/commit/27a152eb03279cd30e6a633d5adbe06363c696a6",
+        "patched_files": [
+            "ProjectionCompiler.java",
+            "QueryCompiler.java",
+            "SQLExceptionCode.java"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 6,
+                "raw_url": "https://github.com/apache/phoenix/raw/21c12b11b1bc1b18ac667666dd715ed91d48ed4f/phoenix-core/src/main/java/org/apache/phoenix/compile/ProjectionCompiler.java",
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/compile/ProjectionCompiler.java?ref=21c12b11b1bc1b18ac667666dd715ed91d48ed4f",
+                "filename": "phoenix-core/src/main/java/org/apache/phoenix/compile/ProjectionCompiler.java",
+                "deletions": 0,
+                "sha": "e4770096d1deee70fc14fdfcdd1ea2ad6f281aea",
+                "blob_url": "https://github.com/apache/phoenix/blob/21c12b11b1bc1b18ac667666dd715ed91d48ed4f/phoenix-core/src/main/java/org/apache/phoenix/compile/ProjectionCompiler.java",
+                "patch": "@@ -364,6 +364,9 @@ public static RowProjector compile(StatementContext context, SelectStatement sta\n                 if (statement.isAggregate()) {\n                     ExpressionCompiler.throwNonAggExpressionInAggException(node.toString());\n                 }\n+                if (tableRef == TableRef.EMPTY_TABLE_REF) {\n+                    throw new SQLExceptionInfo.Builder(SQLExceptionCode.NO_TABLE_SPECIFIED_FOR_WILDCARD_SELECT).build().buildException();\n+                }\n                 isWildcard = true;\n                 if (tableRef.getTable().getType() == PTableType.INDEX && ((WildcardParseNode)node).isRewrite()) {\n                 \tprojectAllIndexColumns(context, tableRef, resolveColumn, projectedExpressions, projectedColumns, targetColumns);\n@@ -382,6 +385,9 @@ public static RowProjector compile(StatementContext context, SelectStatement sta\n                     projectAllTableColumns(context, tRef, true, projectedExpressions, projectedColumns, targetColumns);\n                 }                \n             } else if (node instanceof  FamilyWildcardParseNode){\n+                if (tableRef == TableRef.EMPTY_TABLE_REF) {\n+                    throw new SQLExceptionInfo.Builder(SQLExceptionCode.NO_TABLE_SPECIFIED_FOR_WILDCARD_SELECT).build().buildException();\n+                }\n                 // Project everything for SELECT cf.*\n                 String cfName = ((FamilyWildcardParseNode) node).getName();\n                 // Delay projecting to scan, as when any other column in the column family gets",
+                "changes": 6
+            },
+            {
+                "status": "modified",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/phoenix/raw/21c12b11b1bc1b18ac667666dd715ed91d48ed4f/phoenix-core/src/main/java/org/apache/phoenix/exception/SQLExceptionCode.java",
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/exception/SQLExceptionCode.java?ref=21c12b11b1bc1b18ac667666dd715ed91d48ed4f",
+                "filename": "phoenix-core/src/main/java/org/apache/phoenix/exception/SQLExceptionCode.java",
+                "deletions": 0,
+                "sha": "bb76ccb4dfcc34d68e1ea5e8ee5c017a12890cae",
+                "blob_url": "https://github.com/apache/phoenix/blob/21c12b11b1bc1b18ac667666dd715ed91d48ed4f/phoenix-core/src/main/java/org/apache/phoenix/exception/SQLExceptionCode.java",
+                "patch": "@@ -226,6 +226,7 @@ public SQLException newException(SQLExceptionInfo info) {\n     AGGREGATE_WITH_NOT_GROUP_BY_COLUMN(1018, \"42Y27\", \"Aggregate may not contain columns not in GROUP BY.\"),\n     ONLY_AGGREGATE_IN_HAVING_CLAUSE(1019, \"42Y26\", \"Only aggregate maybe used in the HAVING clause.\"),\n     UPSERT_COLUMN_NUMBERS_MISMATCH(1020, \"42Y60\", \"Number of columns upserting must match number of values.\"),\n+    NO_TABLE_SPECIFIED_FOR_WILDCARD_SELECT(1057, \"42Y10\", \"No table specified for wildcard select.\"),\n     // Table properties exception.\n     INVALID_BUCKET_NUM(1021, \"42Y80\", \"Salt bucket numbers should be with 1 and 256.\"),\n     NO_SPLITS_ON_SALTED_TABLE(1022, \"42Y81\", \"Should not specify split points on salted table with default row key order.\"),",
+                "changes": 1
+            },
+            {
+                "status": "modified",
+                "additions": 21,
+                "raw_url": "https://github.com/apache/phoenix/raw/21c12b11b1bc1b18ac667666dd715ed91d48ed4f/phoenix-core/src/test/java/org/apache/phoenix/compile/QueryCompilerTest.java",
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/test/java/org/apache/phoenix/compile/QueryCompilerTest.java?ref=21c12b11b1bc1b18ac667666dd715ed91d48ed4f",
+                "filename": "phoenix-core/src/test/java/org/apache/phoenix/compile/QueryCompilerTest.java",
+                "deletions": 3,
+                "sha": "23eb147107c50dea9e169bc2fe5c5118b2100a12",
+                "blob_url": "https://github.com/apache/phoenix/blob/21c12b11b1bc1b18ac667666dd715ed91d48ed4f/phoenix-core/src/test/java/org/apache/phoenix/compile/QueryCompilerTest.java",
+                "patch": "@@ -1985,9 +1985,27 @@ public void testNoFromClauseSelect() throws Exception {\n      public void testFailNoFromClauseSelect() throws Exception {\n          Connection conn = DriverManager.getConnection(getUrl());\n          try {\n-             conn.createStatement().executeQuery(\"SELECT foo, bar\");\n-             fail(\"Should have got ColumnNotFoundException\");\n-         } catch (ColumnNotFoundException e) {            \n+             try {\n+                 conn.createStatement().executeQuery(\"SELECT foo, bar\");\n+                 fail(\"Should have got ColumnNotFoundException\");\n+             } catch (ColumnNotFoundException e) {            \n+             }\n+             \n+             try {\n+                 conn.createStatement().executeQuery(\"SELECT *\");\n+                 fail(\"Should have got SQLException\");\n+             } catch (SQLException e) {\n+                 assertEquals(SQLExceptionCode.NO_TABLE_SPECIFIED_FOR_WILDCARD_SELECT.getErrorCode(), e.getErrorCode());\n+             }\n+             \n+             try {\n+                 conn.createStatement().executeQuery(\"SELECT A.*\");\n+                 fail(\"Should have got SQLException\");\n+             } catch (SQLException e) {\n+                 assertEquals(SQLExceptionCode.NO_TABLE_SPECIFIED_FOR_WILDCARD_SELECT.getErrorCode(), e.getErrorCode());\n+             }\n+         } finally {\n+             conn.close();\n          }\n      }\n ",
+                "changes": 24
+            }
+        ],
+        "unit_tests": [
+            "QueryCompilerTest.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "phoenix-core/src/test/java/org/apache/phoenix/compile/QueryCompilerTest.java",
+        "buggy_files": [
+            "phoenix-core/src/main/java/org/apache/phoenix/compile/ProjectionCompiler.java",
+            "phoenix-core/src/main/java/org/apache/phoenix/compile/QueryCompiler.java",
+            "phoenix-core/src/main/java/org/apache/phoenix/exception/SQLExceptionCode.java"
+        ],
+        "fixed": true
+    }
+]

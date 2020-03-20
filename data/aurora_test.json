@@ -1,56 +1,4 @@
 {
-    "aurora_0e12155": {
-        "bug_id": "aurora_0e12155",
-        "commit": "https://github.com/apache/aurora/commit/0e1215538c485f1a8f23cff0ba8b0be29c31793e",
-        "file": [
-            {
-                "additions": 6,
-                "blob_url": "https://github.com/apache/aurora/blob/0e1215538c485f1a8f23cff0ba8b0be29c31793e/src/main/java/org/apache/aurora/scheduler/updater/InstanceActionHandler.java",
-                "changes": 7,
-                "contents_url": "https://api.github.com/repos/apache/aurora/contents/src/main/java/org/apache/aurora/scheduler/updater/InstanceActionHandler.java?ref=0e1215538c485f1a8f23cff0ba8b0be29c31793e",
-                "deletions": 1,
-                "filename": "src/main/java/org/apache/aurora/scheduler/updater/InstanceActionHandler.java",
-                "patch": "@@ -207,7 +207,12 @@ private void killAndMaybeReserve(\n         IJobUpdateInstructions instructions) throws UpdateStateException {\n \n       if (status == ROLLING_FORWARD) {\n-        return Optional.ofNullable(instructions.getDesiredState().getTask().getSlaPolicy());\n+        // It is possible that an update only removes instances. In this case, there is no desired\n+        // state. Otherwise, get the task associated (this should never be null) and return an\n+        // optional of the SlaPolicy of the task (or empty if null).\n+        return Optional\n+            .ofNullable(instructions.getDesiredState())\n+            .map(desiredState -> desiredState.getTask().getSlaPolicy());\n       } else if (status == ROLLING_BACK) {\n         return getConfig(instance.getInstanceId(), instructions.getInitialState())\n             .map(ITaskConfig::getSlaPolicy);",
-                "raw_url": "https://github.com/apache/aurora/raw/0e1215538c485f1a8f23cff0ba8b0be29c31793e/src/main/java/org/apache/aurora/scheduler/updater/InstanceActionHandler.java",
-                "sha": "97906b5a0306aeac0930276deb950d825e52d778",
-                "status": "modified"
-            },
-            {
-                "additions": 2,
-                "blob_url": "https://github.com/apache/aurora/blob/0e1215538c485f1a8f23cff0ba8b0be29c31793e/src/test/sh/org/apache/aurora/e2e/http/http_example.aurora",
-                "changes": 3,
-                "contents_url": "https://api.github.com/repos/apache/aurora/contents/src/test/sh/org/apache/aurora/e2e/http/http_example.aurora?ref=0e1215538c485f1a8f23cff0ba8b0be29c31793e",
-                "deletions": 1,
-                "filename": "src/test/sh/org/apache/aurora/e2e/http/http_example.aurora",
-                "patch": "@@ -18,6 +18,7 @@ class DefaultProfile(Struct):\n   role=Default(String, getpass.getuser())\n   cmd=Default(String, 'cp /vagrant/src/test/sh/org/apache/aurora/e2e/http_example.py .')\n   gpu=Default(Integer, 0)\n+  instances=Default(Integer, 1)\n \n \n ContainerProfile = DefaultProfile(\n@@ -115,7 +116,7 @@ shell_health_check_config = HealthCheckConfig(\n \n job = Service(\n   cluster = 'devcluster',\n-  instances = 1,\n+  instances = '{{profile.instances}}',\n   update_config = update_config,\n   health_check_config = health_check_config,\n   task = test_task,",
-                "raw_url": "https://github.com/apache/aurora/raw/0e1215538c485f1a8f23cff0ba8b0be29c31793e/src/test/sh/org/apache/aurora/e2e/http/http_example.aurora",
-                "sha": "bd4d4a17f2f60fbaa7736c1684f8e956a7e6984a",
-                "status": "modified"
-            },
-            {
-                "additions": 59,
-                "blob_url": "https://github.com/apache/aurora/blob/0e1215538c485f1a8f23cff0ba8b0be29c31793e/src/test/sh/org/apache/aurora/e2e/test_end_to_end.sh",
-                "changes": 76,
-                "contents_url": "https://api.github.com/repos/apache/aurora/contents/src/test/sh/org/apache/aurora/e2e/test_end_to_end.sh?ref=0e1215538c485f1a8f23cff0ba8b0be29c31793e",
-                "deletions": 17,
-                "filename": "src/test/sh/org/apache/aurora/e2e/test_end_to_end.sh",
-                "patch": "@@ -213,7 +213,7 @@ test_restart() {\n   aurora job restart --batch-size=2 --watch-secs=10 $_jobkey\n }\n \n-assert_update_state() {\n+assert_active_update_state() {\n   local _jobkey=$1 _expected_state=$2\n \n   local _state=$(aurora update list $_jobkey --status active | tail -n +2 | awk '{print $3}')\n@@ -223,6 +223,17 @@ assert_update_state() {\n   fi\n }\n \n+assert_update_state_by_id() {\n+  # Assert that a given update ID is in an expected state\n+  local _jobkey=$1 _update_id=$2 _expected_state=$3\n+\n+  local _state=$(aurora update info $_jobkey $_update_id | grep 'Current status' | awk '{print $NF}')\n+  if [[ $_state != $_expected_state ]]; then\n+    echo \"Update should have completed in $_expected_state state, but found $_state\"\n+    exit 1\n+  fi\n+}\n+\n assert_task_status() {\n   local _jobkey=$1 _id=$2 _expected_state=$3\n \n@@ -294,30 +305,64 @@ wait_until_task_counts() {\n   fi\n }\n \n+test_update_add_only_kill_only() {\n+  # Tests update functionality where we only add or kill instances\n+  local _jobkey=$1 _config=$2 _cluster=$3\n+  shift 3\n+  local _extra_args=\"${@}\"\n+\n+  # Create the initial update with 3 instances\n+  aurora update start $_jobkey $_config $_extra_args --bind profile.instances=3\n+  assert_active_update_state $_jobkey 'ROLLING_FORWARD'\n+  local _update_id=$(aurora update list $_jobkey --status ROLLING_FORWARD \\\n+      | tail -n +2 | awk '{print $2}')\n+  aurora update wait $_jobkey $_update_id\n+  assert_update_state_by_id $_jobkey $_update_id 'ROLLED_FORWARD'\n+  wait_until_task_counts $_jobkey 3 0\n+\n+  # Update and kill 2 instances only\n+  aurora update start $_jobkey $_config $_extra_args --bind profile.instances=1\n+  assert_active_update_state $_jobkey 'ROLLING_FORWARD'\n+  local _update_id=$(aurora update list $_jobkey --status ROLLING_FORWARD \\\n+      | tail -n +2 | awk '{print $2}')\n+  aurora update wait $_jobkey $_update_id\n+  assert_update_state_by_id $_jobkey $_update_id 'ROLLED_FORWARD'\n+  wait_until_task_counts $_jobkey 1 0\n+\n+  # Update and add 2 instances only\n+  aurora update start $_jobkey $_config $_extra_args --bind profile.instances=3\n+  assert_active_update_state $_jobkey 'ROLLING_FORWARD'\n+  local _update_id=$(aurora update list $_jobkey --status ROLLING_FORWARD \\\n+      | tail -n +2 | awk '{print $2}')\n+  aurora update wait $_jobkey $_update_id\n+  assert_update_state_by_id $_jobkey $_update_id 'ROLLED_FORWARD'\n+  wait_until_task_counts $_jobkey 3 0\n+\n+  # Clean up\n+  aurora job killall $_jobkey\n+}\n+\n test_update() {\n+  # Tests generic update functionality like pausing and resuming\n   local _jobkey=$1 _config=$2 _cluster=$3\n   shift 3\n   local _extra_args=\"${@}\"\n \n   aurora update start $_jobkey $_config $_extra_args\n-  assert_update_state $_jobkey 'ROLLING_FORWARD'\n+  assert_active_update_state $_jobkey 'ROLLING_FORWARD'\n   local _update_id=$(aurora update list $_jobkey --status ROLLING_FORWARD \\\n       | tail -n +2 | awk '{print $2}')\n   aurora_admin scheduler_snapshot devcluster\n   sudo systemctl restart aurora-scheduler\n-  assert_update_state $_jobkey 'ROLLING_FORWARD'\n+  assert_active_update_state $_jobkey 'ROLLING_FORWARD'\n   aurora update pause $_jobkey --message='hello'\n-  assert_update_state $_jobkey 'ROLL_FORWARD_PAUSED'\n+  assert_active_update_state $_jobkey 'ROLL_FORWARD_PAUSED'\n   aurora update resume $_jobkey\n-  assert_update_state $_jobkey 'ROLLING_FORWARD'\n+  assert_active_update_state $_jobkey 'ROLLING_FORWARD'\n   aurora update wait $_jobkey $_update_id\n \n   # Check that the update ended in ROLLED_FORWARD state.  Assumes the status is the last column.\n-  local status=$(aurora update info $_jobkey $_update_id | grep 'Current status' | awk '{print $NF}')\n-  if [[ $status != \"ROLLED_FORWARD\" ]]; then\n-    echo \"Update should have completed in ROLLED_FORWARD state\"\n-    exit 1\n-  fi\n+  assert_update_state_by_id $_jobkey $_update_id 'ROLLED_FORWARD'\n }\n \n test_update_fail() {\n@@ -327,7 +372,7 @@ test_update_fail() {\n \n   # Make sure our updates works.\n   aurora update start $_jobkey $_config $_extra_args\n-  assert_update_state $_jobkey 'ROLLING_FORWARD'\n+  assert_active_update_state $_jobkey 'ROLLING_FORWARD'\n   local _update_id=$(aurora update list $_jobkey --status ROLLING_FORWARD \\\n       | tail -n +2 | awk '{print $2}')\n   # Need to wait until udpate finishes before we can start one that we want to fail.\n@@ -339,12 +384,8 @@ test_update_fail() {\n       | tail -n +2 | awk '{print $2}')\n   # || is so that we don't return an EXIT so that `trap collect_result` doesn't get triggered.\n   aurora update wait $_jobkey $_update_id || echo $?\n-  # Making sure we rolled back.\n-  local status=$(aurora update info $_jobkey $_update_id | grep 'Current status' | awk '{print $NF}')\n-  if [[ $status != \"ROLLED_BACK\" ]]; then\n-    echo \"Update should have completed in ROLLED_BACK state due to failed healthcheck.\"\n-    exit 1\n-  fi\n+  # Making sure we rolled back due to a failed health check\n+  assert_update_state_by_id $_jobkey $_update_id 'ROLLED_BACK'\n }\n \n test_partition_awareness() {\n@@ -665,6 +706,7 @@ test_http_example() {\n   test_thermos_profile $_jobkey\n   test_file_mount $_cluster $_role $_env $_job\n   test_restart $_jobkey\n+  test_update_add_only_kill_only $_jobkey $_base_config $_cluster $_bind_parameters\n   test_update $_jobkey $_updated_config $_cluster $_bind_parameters\n   test_update_fail $_jobkey $_base_config  $_cluster $_bad_healthcheck_config $_bind_parameters\n   # Running test_update second time to change state to success.",
-                "raw_url": "https://github.com/apache/aurora/raw/0e1215538c485f1a8f23cff0ba8b0be29c31793e/src/test/sh/org/apache/aurora/e2e/test_end_to_end.sh",
-                "sha": "7c68679871533e206ee1af817f0705b710e8883e",
-                "status": "modified"
-            }
-        ],
-        "message": "Merge pull request #33 from jordanly/jly/fix-npe-in-sla-aware-updates\n\nFix possible NullPointerException in InstanceActionHandler",
-        "parent": "https://github.com/apache/aurora/commit/d46a8d91aa69ab9cf1ebc2b13552f8093d366fe9",
-        "patched_files": [
-            "http_example.java",
-            "InstanceActionHandler.java"
-        ],
-        "repo": "aurora",
-        "unit_tests": [
-            "test_end_to_end.java"
-        ]
-    },
     "aurora_10ed36a": {
         "bug_id": "aurora_10ed36a",
         "commit": "https://github.com/apache/aurora/commit/10ed36a7477282b5dac35ca9ba82732eddf47a2f",
@@ -95,8 +43,8 @@
         "message": "Reproduced SchedulingFilter NPE in test and fixed.",
         "parent": "https://github.com/apache/aurora/commit/372f50c28a1dd5e8adb2d25149a04b0f995b1177",
         "patched_files": [
-            "SchedulerCoreImpl.java",
-            "ConfigurationManager.java"
+            "ConfigurationManager.java",
+            "SchedulerCoreImpl.java"
         ],
         "repo": "aurora",
         "unit_tests": [
@@ -128,58 +76,6 @@
         "repo": "aurora",
         "unit_tests": [
             "UpdateLogicTest.java"
-        ]
-    },
-    "aurora_86675fc": {
-        "bug_id": "aurora_86675fc",
-        "commit": "https://github.com/apache/aurora/commit/86675fc48d63f04c8ed4e658b2980fe675cec923",
-        "file": [
-            {
-                "additions": 6,
-                "blob_url": "https://github.com/apache/aurora/blob/86675fc48d63f04c8ed4e658b2980fe675cec923/src/main/java/org/apache/aurora/scheduler/updater/InstanceActionHandler.java",
-                "changes": 7,
-                "contents_url": "https://api.github.com/repos/apache/aurora/contents/src/main/java/org/apache/aurora/scheduler/updater/InstanceActionHandler.java?ref=86675fc48d63f04c8ed4e658b2980fe675cec923",
-                "deletions": 1,
-                "filename": "src/main/java/org/apache/aurora/scheduler/updater/InstanceActionHandler.java",
-                "patch": "@@ -207,7 +207,12 @@ private void killAndMaybeReserve(\n         IJobUpdateInstructions instructions) throws UpdateStateException {\n \n       if (status == ROLLING_FORWARD) {\n-        return Optional.ofNullable(instructions.getDesiredState().getTask().getSlaPolicy());\n+        // It is possible that an update only removes instances. In this case, there is no desired\n+        // state. Otherwise, get the task associated (this should never be null) and return an\n+        // optional of the SlaPolicy of the task (or empty if null).\n+        return Optional\n+            .ofNullable(instructions.getDesiredState())\n+            .map(desiredState -> desiredState.getTask().getSlaPolicy());\n       } else if (status == ROLLING_BACK) {\n         return getConfig(instance.getInstanceId(), instructions.getInitialState())\n             .map(ITaskConfig::getSlaPolicy);",
-                "raw_url": "https://github.com/apache/aurora/raw/86675fc48d63f04c8ed4e658b2980fe675cec923/src/main/java/org/apache/aurora/scheduler/updater/InstanceActionHandler.java",
-                "sha": "97906b5a0306aeac0930276deb950d825e52d778",
-                "status": "modified"
-            },
-            {
-                "additions": 2,
-                "blob_url": "https://github.com/apache/aurora/blob/86675fc48d63f04c8ed4e658b2980fe675cec923/src/test/sh/org/apache/aurora/e2e/http/http_example.aurora",
-                "changes": 3,
-                "contents_url": "https://api.github.com/repos/apache/aurora/contents/src/test/sh/org/apache/aurora/e2e/http/http_example.aurora?ref=86675fc48d63f04c8ed4e658b2980fe675cec923",
-                "deletions": 1,
-                "filename": "src/test/sh/org/apache/aurora/e2e/http/http_example.aurora",
-                "patch": "@@ -18,6 +18,7 @@ class DefaultProfile(Struct):\n   role=Default(String, getpass.getuser())\n   cmd=Default(String, 'cp /vagrant/src/test/sh/org/apache/aurora/e2e/http_example.py .')\n   gpu=Default(Integer, 0)\n+  instances=Default(Integer, 1)\n \n \n ContainerProfile = DefaultProfile(\n@@ -115,7 +116,7 @@ shell_health_check_config = HealthCheckConfig(\n \n job = Service(\n   cluster = 'devcluster',\n-  instances = 1,\n+  instances = '{{profile.instances}}',\n   update_config = update_config,\n   health_check_config = health_check_config,\n   task = test_task,",
-                "raw_url": "https://github.com/apache/aurora/raw/86675fc48d63f04c8ed4e658b2980fe675cec923/src/test/sh/org/apache/aurora/e2e/http/http_example.aurora",
-                "sha": "bd4d4a17f2f60fbaa7736c1684f8e956a7e6984a",
-                "status": "modified"
-            },
-            {
-                "additions": 59,
-                "blob_url": "https://github.com/apache/aurora/blob/86675fc48d63f04c8ed4e658b2980fe675cec923/src/test/sh/org/apache/aurora/e2e/test_end_to_end.sh",
-                "changes": 76,
-                "contents_url": "https://api.github.com/repos/apache/aurora/contents/src/test/sh/org/apache/aurora/e2e/test_end_to_end.sh?ref=86675fc48d63f04c8ed4e658b2980fe675cec923",
-                "deletions": 17,
-                "filename": "src/test/sh/org/apache/aurora/e2e/test_end_to_end.sh",
-                "patch": "@@ -213,7 +213,7 @@ test_restart() {\n   aurora job restart --batch-size=2 --watch-secs=10 $_jobkey\n }\n \n-assert_update_state() {\n+assert_active_update_state() {\n   local _jobkey=$1 _expected_state=$2\n \n   local _state=$(aurora update list $_jobkey --status active | tail -n +2 | awk '{print $3}')\n@@ -223,6 +223,17 @@ assert_update_state() {\n   fi\n }\n \n+assert_update_id_state() {\n+  # Assert that a given update ID is in an expected state\n+  local _jobkey=$1 _update_id=$2 _expected_state=$3\n+\n+  local _state=$(aurora update info $_jobkey $_update_id | grep 'Current status' | awk '{print $NF}')\n+  if [[ $_state != $_expected_state ]]; then\n+    echo \"Update should have completed in $_expected_state state, but found $_state\"\n+    exit 1\n+  fi\n+}\n+\n assert_task_status() {\n   local _jobkey=$1 _id=$2 _expected_state=$3\n \n@@ -294,30 +305,64 @@ wait_until_task_counts() {\n   fi\n }\n \n+test_update_add_only_kill_only() {\n+  # Tests update functionality where we only add or kill instances\n+  local _jobkey=$1 _config=$2 _cluster=$3\n+  shift 3\n+  local _extra_args=\"${@}\"\n+\n+  # Create the initial update with 3 instances\n+  aurora update start $_jobkey $_config $_extra_args --bind profile.instances=3\n+  assert_active_update_state $_jobkey 'ROLLING_FORWARD'\n+  local _update_id=$(aurora update list $_jobkey --status ROLLING_FORWARD \\\n+      | tail -n +2 | awk '{print $2}')\n+  aurora update wait $_jobkey $_update_id\n+  assert_update_id_state $_jobkey $_update_id 'ROLLED_FORWARD'\n+  wait_until_task_counts $_jobkey 3 0\n+\n+  # Update and kill 2 instances only\n+  aurora update start $_jobkey $_config $_extra_args --bind profile.instances=1\n+  assert_active_update_state $_jobkey 'ROLLING_FORWARD'\n+  local _update_id=$(aurora update list $_jobkey --status ROLLING_FORWARD \\\n+      | tail -n +2 | awk '{print $2}')\n+  aurora update wait $_jobkey $_update_id\n+  assert_update_id_state $_jobkey $_update_id 'ROLLED_FORWARD'\n+  wait_until_task_counts $_jobkey 1 0\n+\n+  # Update and add 2 instances only\n+  aurora update start $_jobkey $_config $_extra_args --bind profile.instances=3\n+  assert_active_update_state $_jobkey 'ROLLING_FORWARD'\n+  local _update_id=$(aurora update list $_jobkey --status ROLLING_FORWARD \\\n+      | tail -n +2 | awk '{print $2}')\n+  aurora update wait $_jobkey $_update_id\n+  assert_update_id_state $_jobkey $_update_id 'ROLLED_FORWARD'\n+  wait_until_task_counts $_jobkey 3 0\n+\n+  # Clean up\n+  aurora job killall $_jobkey\n+}\n+\n test_update() {\n+  # Tests generic update functionality like pausing and resuming\n   local _jobkey=$1 _config=$2 _cluster=$3\n   shift 3\n   local _extra_args=\"${@}\"\n \n   aurora update start $_jobkey $_config $_extra_args\n-  assert_update_state $_jobkey 'ROLLING_FORWARD'\n+  assert_active_update_state $_jobkey 'ROLLING_FORWARD'\n   local _update_id=$(aurora update list $_jobkey --status ROLLING_FORWARD \\\n       | tail -n +2 | awk '{print $2}')\n   aurora_admin scheduler_snapshot devcluster\n   sudo systemctl restart aurora-scheduler\n-  assert_update_state $_jobkey 'ROLLING_FORWARD'\n+  assert_active_update_state $_jobkey 'ROLLING_FORWARD'\n   aurora update pause $_jobkey --message='hello'\n-  assert_update_state $_jobkey 'ROLL_FORWARD_PAUSED'\n+  assert_active_update_state $_jobkey 'ROLL_FORWARD_PAUSED'\n   aurora update resume $_jobkey\n-  assert_update_state $_jobkey 'ROLLING_FORWARD'\n+  assert_active_update_state $_jobkey 'ROLLING_FORWARD'\n   aurora update wait $_jobkey $_update_id\n \n   # Check that the update ended in ROLLED_FORWARD state.  Assumes the status is the last column.\n-  local status=$(aurora update info $_jobkey $_update_id | grep 'Current status' | awk '{print $NF}')\n-  if [[ $status != \"ROLLED_FORWARD\" ]]; then\n-    echo \"Update should have completed in ROLLED_FORWARD state\"\n-    exit 1\n-  fi\n+  assert_update_id_state $_jobkey $_update_id 'ROLLED_FORWARD'\n }\n \n test_update_fail() {\n@@ -327,7 +372,7 @@ test_update_fail() {\n \n   # Make sure our updates works.\n   aurora update start $_jobkey $_config $_extra_args\n-  assert_update_state $_jobkey 'ROLLING_FORWARD'\n+  assert_active_update_state $_jobkey 'ROLLING_FORWARD'\n   local _update_id=$(aurora update list $_jobkey --status ROLLING_FORWARD \\\n       | tail -n +2 | awk '{print $2}')\n   # Need to wait until udpate finishes before we can start one that we want to fail.\n@@ -339,12 +384,8 @@ test_update_fail() {\n       | tail -n +2 | awk '{print $2}')\n   # || is so that we don't return an EXIT so that `trap collect_result` doesn't get triggered.\n   aurora update wait $_jobkey $_update_id || echo $?\n-  # Making sure we rolled back.\n-  local status=$(aurora update info $_jobkey $_update_id | grep 'Current status' | awk '{print $NF}')\n-  if [[ $status != \"ROLLED_BACK\" ]]; then\n-    echo \"Update should have completed in ROLLED_BACK state due to failed healthcheck.\"\n-    exit 1\n-  fi\n+  # Making sure we rolled back due to a failed health check\n+  assert_update_id_state $_jobkey $_update_id 'ROLLED_BACK'\n }\n \n test_partition_awareness() {\n@@ -665,6 +706,7 @@ test_http_example() {\n   test_thermos_profile $_jobkey\n   test_file_mount $_cluster $_role $_env $_job\n   test_restart $_jobkey\n+  test_update_add_only_kill_only $_jobkey $_base_config $_cluster $_bind_parameters\n   test_update $_jobkey $_updated_config $_cluster $_bind_parameters\n   test_update_fail $_jobkey $_base_config  $_cluster $_bad_healthcheck_config $_bind_parameters\n   # Running test_update second time to change state to success.",
-                "raw_url": "https://github.com/apache/aurora/raw/86675fc48d63f04c8ed4e658b2980fe675cec923/src/test/sh/org/apache/aurora/e2e/test_end_to_end.sh",
-                "sha": "89959ab5cf4aae9d56c94c7ab25bd0437b2c9a29",
-                "status": "modified"
-            }
-        ],
-        "message": "Fix possible NullPointerException in InstanceActionHandler, add e2e tests around feature",
-        "parent": "https://github.com/apache/aurora/commit/d46a8d91aa69ab9cf1ebc2b13552f8093d366fe9",
-        "patched_files": [
-            "http_example.java",
-            "InstanceActionHandler.java"
-        ],
-        "repo": "aurora",
-        "unit_tests": [
-            "test_end_to_end.java"
         ]
     },
     "aurora_91ddb07": {

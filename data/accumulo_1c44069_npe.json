@@ -1,0 +1,63 @@
+[
+    {
+        "repo": "accumulo",
+        "commit": "https://github.com/apache/accumulo/commit/1c44069a35a1acfb2b806e1103c1992190c389eb",
+        "bug_id": "accumulo_1c44069",
+        "message": "ACCUMULO-1565 fixed clone table NPE when excluding props",
+        "parent": "https://github.com/apache/accumulo/commit/d8e5de664d12440df3ac629d53fb67e67b14db89",
+        "patched_files": [
+            "Master.java",
+            "TableOperationsImpl.java"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 11,
+                "raw_url": "https://github.com/apache/accumulo/raw/1c44069a35a1acfb2b806e1103c1992190c389eb/core/src/main/java/org/apache/accumulo/core/client/admin/TableOperationsImpl.java",
+                "contents_url": "https://api.github.com/repos/apache/accumulo/contents/core/src/main/java/org/apache/accumulo/core/client/admin/TableOperationsImpl.java?ref=1c44069a35a1acfb2b806e1103c1992190c389eb",
+                "filename": "core/src/main/java/org/apache/accumulo/core/client/admin/TableOperationsImpl.java",
+                "deletions": 3,
+                "sha": "3aca348b29d2f3c4c920534f5591434224ed8f74",
+                "blob_url": "https://github.com/apache/accumulo/blob/1c44069a35a1acfb2b806e1103c1992190c389eb/core/src/main/java/org/apache/accumulo/core/client/admin/TableOperationsImpl.java",
+                "patch": "@@ -113,6 +113,8 @@\n   private Instance instance;\n   private TCredentials credentials;\n   \n+  public static final String CLONE_EXCLUDE_PREFIX = \"!\";\n+\n   private static final Logger log = Logger.getLogger(TableOperations.class);\n   \n   /**\n@@ -673,9 +675,15 @@ public void clone(String srcTableName, String newTableName, boolean flush, Map<S\n     \n     List<ByteBuffer> args = Arrays.asList(ByteBuffer.wrap(srcTableId.getBytes()), ByteBuffer.wrap(newTableName.getBytes()));\n     Map<String,String> opts = new HashMap<String,String>();\n-    opts.putAll(propertiesToSet);\n-    for (String prop : propertiesToExclude)\n-      opts.put(prop, null);\n+    for (Entry<String,String> entry : propertiesToSet.entrySet()) {\n+      if (entry.getKey().startsWith(CLONE_EXCLUDE_PREFIX))\n+        throw new IllegalArgumentException(\"Property can not start with \" + CLONE_EXCLUDE_PREFIX);\n+      opts.put(entry.getKey(), entry.getValue());\n+    }\n+    \n+    for (String prop : propertiesToExclude) {\n+      opts.put(CLONE_EXCLUDE_PREFIX + prop, \"\");\n+    }\n     \n     doTableOperation(TableOperation.CLONE, args, opts);\n   }",
+                "changes": 14
+            },
+            {
+                "status": "modified",
+                "additions": 4,
+                "raw_url": "https://github.com/apache/accumulo/raw/1c44069a35a1acfb2b806e1103c1992190c389eb/server/src/main/java/org/apache/accumulo/server/master/Master.java",
+                "contents_url": "https://api.github.com/repos/apache/accumulo/contents/server/src/main/java/org/apache/accumulo/server/master/Master.java?ref=1c44069a35a1acfb2b806e1103c1992190c389eb",
+                "filename": "server/src/main/java/org/apache/accumulo/server/master/Master.java",
+                "deletions": 3,
+                "sha": "64e29306db0df1b2324748ff3b2b76e6362f3b60",
+                "blob_url": "https://github.com/apache/accumulo/blob/1c44069a35a1acfb2b806e1103c1992190c389eb/server/src/main/java/org/apache/accumulo/server/master/Master.java",
+                "patch": "@@ -50,6 +50,7 @@\n import org.apache.accumulo.core.client.RowIterator;\n import org.apache.accumulo.core.client.Scanner;\n import org.apache.accumulo.core.client.TableNotFoundException;\n+import org.apache.accumulo.core.client.admin.TableOperationsImpl;\n import org.apache.accumulo.core.client.impl.Tables;\n import org.apache.accumulo.core.client.impl.ThriftTransportPool;\n import org.apache.accumulo.core.client.impl.thrift.SecurityErrorCode;\n@@ -661,7 +662,7 @@ private void alterTableProperty(TCredentials c, String tableName, String propert\n         throw new ThriftSecurityException(c.getPrincipal(), SecurityErrorCode.PERMISSION_DENIED);\n       \n       try {\n-        if (value == null) {\n+        if (value == null || value.isEmpty()) {\n           TablePropUtil.removeTableProperty(tableId, property);\n         } else if (!TablePropUtil.setTableProperty(tableId, property, value)) {\n           throw new Exception(\"Invalid table property.\");\n@@ -861,8 +862,8 @@ public void executeTableOperation(TInfo tinfo, TCredentials c, long opid, org.ap\n           Set<String> propertiesToExclude = new HashSet<String>();\n           \n           for (Entry<String,String> entry : options.entrySet()) {\n-            if (entry.getValue() == null) {\n-              propertiesToExclude.add(entry.getKey());\n+            if (entry.getKey().startsWith(TableOperationsImpl.CLONE_EXCLUDE_PREFIX)) {\n+              propertiesToExclude.add(entry.getKey().substring(TableOperationsImpl.CLONE_EXCLUDE_PREFIX.length()));\n               continue;\n             }\n             ",
+                "changes": 7
+            },
+            {
+                "status": "added",
+                "additions": 133,
+                "raw_url": "https://github.com/apache/accumulo/raw/1c44069a35a1acfb2b806e1103c1992190c389eb/test/src/test/java/org/apache/accumulo/test/CloneTest.java",
+                "contents_url": "https://api.github.com/repos/apache/accumulo/contents/test/src/test/java/org/apache/accumulo/test/CloneTest.java?ref=1c44069a35a1acfb2b806e1103c1992190c389eb",
+                "filename": "test/src/test/java/org/apache/accumulo/test/CloneTest.java",
+                "deletions": 0,
+                "sha": "01affd98c4eb0faaeafc255006ae585e42c48a13",
+                "blob_url": "https://github.com/apache/accumulo/blob/1c44069a35a1acfb2b806e1103c1992190c389eb/test/src/test/java/org/apache/accumulo/test/CloneTest.java",
+                "patch": "@@ -0,0 +1,133 @@\n+/*\n+ * Licensed to the Apache Software Foundation (ASF) under one or more\n+ * contributor license agreements.  See the NOTICE file distributed with\n+ * this work for additional information regarding copyright ownership.\n+ * The ASF licenses this file to You under the Apache License, Version 2.0\n+ * (the \"License\"); you may not use this file except in compliance with\n+ * the License.  You may obtain a copy of the License at\n+ *\n+ *     http://www.apache.org/licenses/LICENSE-2.0\n+ *\n+ * Unless required by applicable law or agreed to in writing, software\n+ * distributed under the License is distributed on an \"AS IS\" BASIS,\n+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n+ * See the License for the specific language governing permissions and\n+ * limitations under the License.\n+ */\n+package org.apache.accumulo.test;\n+\n+import java.util.HashMap;\n+import java.util.HashSet;\n+import java.util.Map;\n+import java.util.Map.Entry;\n+import java.util.Set;\n+\n+import org.apache.accumulo.core.Constants;\n+import org.apache.accumulo.core.client.BatchWriter;\n+import org.apache.accumulo.core.client.BatchWriterConfig;\n+import org.apache.accumulo.core.client.Connector;\n+import org.apache.accumulo.core.client.Scanner;\n+import org.apache.accumulo.core.client.ZooKeeperInstance;\n+import org.apache.accumulo.core.client.security.tokens.PasswordToken;\n+import org.apache.accumulo.core.conf.Property;\n+import org.apache.accumulo.core.data.Key;\n+import org.apache.accumulo.core.data.Mutation;\n+import org.apache.accumulo.core.data.Value;\n+import org.apache.accumulo.minicluster.MiniAccumuloCluster;\n+import org.junit.After;\n+import org.junit.Assert;\n+import org.junit.Before;\n+import org.junit.Test;\n+import org.junit.rules.TemporaryFolder;\n+\n+/**\n+ * \n+ */\n+public class CloneTest {\n+  \n+  public static TemporaryFolder folder = new TemporaryFolder();\n+  private MiniAccumuloCluster accumulo;\n+  private String secret = \"secret\";\n+  \n+  @Before\n+  public void setUp() throws Exception {\n+    folder.create();\n+    accumulo = new MiniAccumuloCluster(folder.getRoot(), secret);\n+    accumulo.start();\n+  }\n+  \n+  @After\n+  public void tearDown() throws Exception {\n+    accumulo.stop();\n+    folder.delete();\n+  }\n+  \n+  @Test(timeout = 120 * 1000)\n+  public void run() throws Exception {\n+    String table1 = \"clone1\";\n+    String table2 = \"clone2\";\n+    \n+    ZooKeeperInstance zki = new ZooKeeperInstance(accumulo.getInstanceName(), accumulo.getZooKeepers());\n+    Connector c = zki.getConnector(\"root\", new PasswordToken(secret));\n+    \n+    c.tableOperations().create(table1);\n+    \n+    c.tableOperations().setProperty(table1, Property.TABLE_FILE_COMPRESSED_BLOCK_SIZE.getKey(), \"1M\");\n+    c.tableOperations().setProperty(table1, Property.TABLE_FILE_COMPRESSED_BLOCK_SIZE_INDEX.getKey(), \"2M\");\n+    c.tableOperations().setProperty(table1, Property.TABLE_FILE_MAX.getKey(), \"23\");\n+    \n+    BatchWriter bw = c.createBatchWriter(table1, new BatchWriterConfig());\n+    \n+    Mutation m1 = new Mutation(\"001\");\n+    m1.put(\"data\", \"x\", \"9\");\n+    m1.put(\"data\", \"y\", \"7\");\n+    \n+    Mutation m2 = new Mutation(\"008\");\n+    m2.put(\"data\", \"x\", \"3\");\n+    m2.put(\"data\", \"y\", \"4\");\n+    \n+    bw.addMutation(m1);\n+    bw.addMutation(m2);\n+    \n+    bw.flush();\n+    \n+    Map<String,String> props = new HashMap<String,String>();\n+    props.put(Property.TABLE_FILE_COMPRESSED_BLOCK_SIZE.getKey(), \"500K\");\n+    \n+    Set<String> exclude = new HashSet<String>();\n+    exclude.add(Property.TABLE_FILE_MAX.getKey());\n+    \n+    c.tableOperations().clone(table1, table2, true, props, exclude);\n+    \n+    Mutation m3 = new Mutation(\"009\");\n+    m3.put(\"data\", \"x\", \"1\");\n+    m3.put(\"data\", \"y\", \"2\");\n+    bw.addMutation(m3);\n+    bw.close();\n+\n+    Scanner scanner = c.createScanner(table2, Constants.NO_AUTHS);\n+    \n+    HashMap<String,String> expected = new HashMap<String,String>();\n+    expected.put(\"001:x\", \"9\");\n+    expected.put(\"001:y\", \"7\");\n+    expected.put(\"008:x\", \"3\");\n+    expected.put(\"008:y\", \"4\");\n+    \n+    HashMap<String,String> actual = new HashMap<String,String>();\n+    \n+    for (Entry<Key,Value> entry : scanner)\n+      actual.put(entry.getKey().getRowData().toString() + \":\" + entry.getKey().getColumnQualifierData().toString(), entry.getValue().toString());\n+    \n+    Assert.assertEquals(expected, actual);\n+    \n+    HashMap<String,String> tableProps = new HashMap<String,String>();\n+    for (Entry<String,String> prop : c.tableOperations().getProperties(table2)) {\n+      tableProps.put(prop.getKey(), prop.getValue());\n+    }\n+\n+    Assert.assertEquals(\"500K\", tableProps.get(Property.TABLE_FILE_COMPRESSED_BLOCK_SIZE.getKey()));\n+    Assert.assertEquals(Property.TABLE_FILE_MAX.getDefaultValue(), tableProps.get(Property.TABLE_FILE_MAX.getKey()));\n+    Assert.assertEquals(\"2M\", tableProps.get(Property.TABLE_FILE_COMPRESSED_BLOCK_SIZE_INDEX.getKey()));\n+    \n+  }\n+}",
+                "changes": 133
+            }
+        ],
+        "unit_tests": [
+            "CloneTest.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "server/src/test/java/org/apache/accumulo/server/util/CloneTest.java",
+        "buggy_files": [
+            "server/src/main/java/org/apache/accumulo/server/master/Master.java",
+            "core/src/main/java/org/apache/accumulo/core/client/admin/TableOperationsImpl.java"
+        ],
+        "fixed": true
+    }
+]

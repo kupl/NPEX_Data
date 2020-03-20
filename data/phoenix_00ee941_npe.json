@@ -1,0 +1,61 @@
+[
+    {
+        "repo": "phoenix",
+        "commit": "https://github.com/apache/phoenix/commit/00ee9415a95668c34e95b43003354fc898f6b4ea",
+        "bug_id": "phoenix_00ee941",
+        "message": "PHOENIX-2402 NPE when using UPSERT SELECT with a char array (Julian Jaffe)",
+        "parent": "https://github.com/apache/phoenix/commit/49be33e71b592e330f1304cfa20bbffc8bd18637",
+        "patched_files": [
+            "CoerceExpression.java"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 55,
+                "raw_url": "https://github.com/apache/phoenix/raw/00ee9415a95668c34e95b43003354fc898f6b4ea/phoenix-core/src/it/java/org/apache/phoenix/end2end/UpsertSelectIT.java",
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/it/java/org/apache/phoenix/end2end/UpsertSelectIT.java?ref=00ee9415a95668c34e95b43003354fc898f6b4ea",
+                "filename": "phoenix-core/src/it/java/org/apache/phoenix/end2end/UpsertSelectIT.java",
+                "deletions": 0,
+                "sha": "689562af42c48c1050fc2d05fd849e59b52d57a8",
+                "blob_url": "https://github.com/apache/phoenix/blob/00ee9415a95668c34e95b43003354fc898f6b4ea/phoenix-core/src/it/java/org/apache/phoenix/end2end/UpsertSelectIT.java",
+                "patch": "@@ -1318,6 +1318,61 @@ public void testDisallowNegativeValuesForRowTsColumn() throws Exception {\n         }\n     }\n     \n+    @Test\n+    public void testUpsertSelectWithFixedWidthNullByteSizeArray() throws Exception {\n+        long ts = nextTimestamp();\n+        Properties props = new Properties();\n+        props.setProperty(PhoenixRuntime.CURRENT_SCN_ATTRIB, Long.toString(ts));\n+        Connection conn = DriverManager.getConnection(getUrl(), props);\n+        conn.createStatement().execute(\n+                \"create table t1 (id bigint not null primary key, ca char(3)[])\");\n+        conn.close();\n+\n+        props.setProperty(PhoenixRuntime.CURRENT_SCN_ATTRIB, Long.toString(ts + 10));\n+        conn = DriverManager.getConnection(getUrl(), props);\n+        conn.createStatement().execute(\"upsert into t1 values (1, ARRAY['aaa', 'bbb'])\");\n+        conn.commit();\n+\n+        props.setProperty(PhoenixRuntime.CURRENT_SCN_ATTRIB, Long.toString(ts + 15));\n+        conn = DriverManager.getConnection(getUrl(), props);\n+        conn.createStatement().execute(\n+                \"upsert into t1(id, ca) select id, ARRAY['ccc', 'ddd'] from t1 WHERE id = 1\");\n+        conn.commit();\n+\n+        props.setProperty(PhoenixRuntime.CURRENT_SCN_ATTRIB, Long.toString(ts + 20));\n+        conn = DriverManager.getConnection(getUrl(), props);\n+        ResultSet rs = conn.createStatement().executeQuery(\"select * from t1\");\n+\n+        assertTrue(rs.next());\n+        assertEquals(1, rs.getLong(1));\n+        assertEquals(\"['ccc', 'ddd']\", rs.getArray(2).toString());\n+\n+        props.setProperty(PhoenixRuntime.CURRENT_SCN_ATTRIB, Long.toString(ts + 25));\n+        conn = DriverManager.getConnection(getUrl(), props);\n+        conn.createStatement().execute(\n+                \"create table t2 (id bigint not null primary key, ba binary(4)[])\");\n+        conn.close();\n+\n+        props.setProperty(PhoenixRuntime.CURRENT_SCN_ATTRIB, Long.toString(ts + 30));\n+        conn = DriverManager.getConnection(getUrl(), props);\n+        conn.createStatement().execute(\"upsert into t2 values (2, ARRAY[1, 27])\");\n+        conn.commit();\n+\n+        props.setProperty(PhoenixRuntime.CURRENT_SCN_ATTRIB, Long.toString(ts + 35));\n+        conn = DriverManager.getConnection(getUrl(), props);\n+        conn.createStatement().execute(\n+                \"upsert into t2(id, ba) select id, ARRAY[54, 1024] from t2 WHERE id = 2\");\n+        conn.commit();\n+\n+        props.setProperty(PhoenixRuntime.CURRENT_SCN_ATTRIB, Long.toString(ts + 40));\n+        conn = DriverManager.getConnection(getUrl(), props);\n+        rs = conn.createStatement().executeQuery(\"select * from t2\");\n+\n+        assertTrue(rs.next());\n+        assertEquals(2, rs.getLong(1));\n+        assertEquals(\"[[128,0,0,54], [128,0,4,0]]\", rs.getArray(2).toString());\n+    }\n+\n     private static Connection getConnection(long ts) throws SQLException {\n         Properties props = PropertiesUtil.deepCopy(TestUtil.TEST_PROPERTIES);\n         props.setProperty(PhoenixRuntime.CURRENT_SCN_ATTRIB, Long.toString(ts));",
+                "changes": 55
+            },
+            {
+                "status": "modified",
+                "additions": 2,
+                "raw_url": "https://github.com/apache/phoenix/raw/00ee9415a95668c34e95b43003354fc898f6b4ea/phoenix-core/src/main/java/org/apache/phoenix/compile/ProjectionCompiler.java",
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/compile/ProjectionCompiler.java?ref=00ee9415a95668c34e95b43003354fc898f6b4ea",
+                "filename": "phoenix-core/src/main/java/org/apache/phoenix/compile/ProjectionCompiler.java",
+                "deletions": 2,
+                "sha": "7cc2e6638782e89bf6c346a8abbc93dcef155ea3",
+                "blob_url": "https://github.com/apache/phoenix/blob/00ee9415a95668c34e95b43003354fc898f6b4ea/phoenix-core/src/main/java/org/apache/phoenix/compile/ProjectionCompiler.java",
+                "patch": "@@ -78,12 +78,12 @@\n import org.apache.phoenix.schema.PDatum;\n import org.apache.phoenix.schema.PName;\n import org.apache.phoenix.schema.PTable;\n-import org.apache.phoenix.schema.TableNotFoundException;\n import org.apache.phoenix.schema.PTable.IndexType;\n import org.apache.phoenix.schema.PTable.ViewType;\n import org.apache.phoenix.schema.PTableKey;\n import org.apache.phoenix.schema.PTableType;\n import org.apache.phoenix.schema.RowKeySchema;\n+import org.apache.phoenix.schema.TableNotFoundException;\n import org.apache.phoenix.schema.TableRef;\n import org.apache.phoenix.schema.ValueBitSet;\n import org.apache.phoenix.schema.tuple.Tuple;\n@@ -323,7 +323,7 @@ private static Expression coerceIfNecessary(int index, List<? extends PDatum> ta\n                 if (expression.getDataType() != null && !expression.getDataType().isCastableTo(targetType)) {\n                     throw new ArgumentTypeMismatchException(targetType, expression.getDataType(), \"column: \" + targetColumn);\n                 }\n-                expression = CoerceExpression.create(expression, targetType);\n+                expression = CoerceExpression.create(expression, targetType, targetColumn.getSortOrder(), targetColumn.getMaxLength());\n             }\n         }\n         return expression;",
+                "changes": 4
+            },
+            {
+                "status": "modified",
+                "additions": 7,
+                "raw_url": "https://github.com/apache/phoenix/raw/00ee9415a95668c34e95b43003354fc898f6b4ea/phoenix-core/src/main/java/org/apache/phoenix/expression/CoerceExpression.java",
+                "contents_url": "https://api.github.com/repos/apache/phoenix/contents/phoenix-core/src/main/java/org/apache/phoenix/expression/CoerceExpression.java?ref=00ee9415a95668c34e95b43003354fc898f6b4ea",
+                "filename": "phoenix-core/src/main/java/org/apache/phoenix/expression/CoerceExpression.java",
+                "deletions": 1,
+                "sha": "c31cb0a4df1cabbe1fdf7ae7aa27efd2d446771b",
+                "blob_url": "https://github.com/apache/phoenix/blob/00ee9415a95668c34e95b43003354fc898f6b4ea/phoenix-core/src/main/java/org/apache/phoenix/expression/CoerceExpression.java",
+                "patch": "@@ -50,8 +50,14 @@ public static Expression create(Expression expression, PDataType toType) throws\n         return new CoerceExpression(expression, toType);\n     }\n     \n+    public static Expression create(Expression expression, PDataType toType, SortOrder toSortOrder, Integer maxLength) throws SQLException {\n+        return create(expression, toType, toSortOrder, maxLength, true);\n+    }\n+    \n     public static Expression create(Expression expression, PDataType toType, SortOrder toSortOrder, Integer maxLength, boolean rowKeyOrderOptimizable) throws SQLException {\n-        if (toType == expression.getDataType() && toSortOrder == expression.getSortOrder()) {\n+        if (    toType == expression.getDataType() && \n+                toSortOrder == expression.getSortOrder() && \n+                (maxLength == null || maxLength.equals(expression.getMaxLength()))   ) {\n             return expression;\n         }\n         return new CoerceExpression(expression, toType, toSortOrder, maxLength, rowKeyOrderOptimizable);",
+                "changes": 8
+            }
+        ],
+        "unit_tests": [
+            "CoerceExpressionTest.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "phoenix-core/src/test/java/org/apache/phoenix/expression/CoerceExpressionTest.java",
+        "buggy_files": [
+            "phoenix-core/src/main/java/org/apache/phoenix/expression/CoerceExpression.java"
+        ],
+        "fixed": true
+    }
+]

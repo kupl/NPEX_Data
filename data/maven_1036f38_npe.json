@@ -1,0 +1,65 @@
+[
+    {
+        "repo": "maven",
+        "commit": "https://github.com/apache/maven/commit/1036f38593229d0c816b16225e5ffd4b6ef81939",
+        "bug_id": "maven_1036f38",
+        "message": "[MNG-4858] correct NullPointerException if goal name is malformed\n\n\ngit-svn-id: https://svn.apache.org/repos/asf/maven/maven-3/trunk@1005860 13f79535-47bb-0310-9956-ffa450edef68",
+        "parent": "https://github.com/apache/maven/commit/5fee94bc6997b29d767a27d667ef9a9f19ff498d",
+        "patched_files": [
+            "MojoDescriptorCreator.java",
+            "MojoNotFoundException.java",
+            "LifecycleExecutor.java"
+        ],
+        "file": [
+            {
+                "status": "modified",
+                "additions": 17,
+                "raw_url": "https://github.com/apache/maven/raw/1036f38593229d0c816b16225e5ffd4b6ef81939/maven-core/src/main/java/org/apache/maven/lifecycle/internal/MojoDescriptorCreator.java",
+                "contents_url": "https://api.github.com/repos/apache/maven/contents/maven-core/src/main/java/org/apache/maven/lifecycle/internal/MojoDescriptorCreator.java?ref=1036f38593229d0c816b16225e5ffd4b6ef81939",
+                "filename": "maven-core/src/main/java/org/apache/maven/lifecycle/internal/MojoDescriptorCreator.java",
+                "deletions": 3,
+                "sha": "98440038cf18521ddd73776efbdf1f2ba6398979",
+                "blob_url": "https://github.com/apache/maven/blob/1036f38593229d0c816b16225e5ffd4b6ef81939/maven-core/src/main/java/org/apache/maven/lifecycle/internal/MojoDescriptorCreator.java",
+                "patch": "@@ -153,7 +153,7 @@ public MojoDescriptor getMojoDescriptor( String task, MavenSession session, Mave\n \n         int numTokens = tok.countTokens();\n \n-        if ( numTokens == 4 )\n+        if ( numTokens >= 4 )\n         {\n             // We have everything that we need\n             //\n@@ -170,6 +170,11 @@ public MojoDescriptor getMojoDescriptor( String task, MavenSession session, Mave\n             plugin.setVersion( tok.nextToken() );\n             goal = tok.nextToken();\n \n+            // This won't be valid, but it constructs something easy to read in the error message\n+            while ( tok.hasMoreTokens() )\n+            {\n+                goal += \":\" + tok.nextToken();\n+            }\n         }\n         else if ( numTokens == 3 )\n         {\n@@ -187,14 +192,23 @@ else if ( numTokens == 3 )\n             plugin.setArtifactId( tok.nextToken() );\n             goal = tok.nextToken();\n         }\n-        else if ( numTokens == 2 )\n+        else if ( numTokens <= 2 )\n         {\n             // We have a prefix and goal\n             //\n             // idea:idea\n             //\n             String prefix = tok.nextToken();\n-            goal = tok.nextToken();\n+\n+            if ( numTokens == 2 )\n+            {\n+                goal = tok.nextToken();\n+            }\n+            else\n+            {\n+                // goal was missing - pass through to MojoNotFoundException\n+                goal = \"\";\n+            }\n \n             // This is the case where someone has executed a single goal from the command line\n             // of the form:",
+                "changes": 20
+            },
+            {
+                "status": "modified",
+                "additions": 27,
+                "raw_url": "https://github.com/apache/maven/raw/1036f38593229d0c816b16225e5ffd4b6ef81939/maven-core/src/test/java/org/apache/maven/lifecycle/LifecycleExecutorTest.java",
+                "contents_url": "https://api.github.com/repos/apache/maven/contents/maven-core/src/test/java/org/apache/maven/lifecycle/LifecycleExecutorTest.java?ref=1036f38593229d0c816b16225e5ffd4b6ef81939",
+                "filename": "maven-core/src/test/java/org/apache/maven/lifecycle/LifecycleExecutorTest.java",
+                "deletions": 0,
+                "sha": "22459bc2d403bfd2295d4723f8c73c248f3434bc",
+                "blob_url": "https://github.com/apache/maven/blob/1036f38593229d0c816b16225e5ffd4b6ef81939/maven-core/src/test/java/org/apache/maven/lifecycle/LifecycleExecutorTest.java",
+                "patch": "@@ -27,6 +27,7 @@\n import org.apache.maven.lifecycle.internal.TaskSegment;\n import org.apache.maven.model.Plugin;\n import org.apache.maven.plugin.MojoExecution;\n+import org.apache.maven.plugin.MojoNotFoundException;\n import org.apache.maven.plugin.descriptor.MojoDescriptor;\n import org.codehaus.plexus.component.annotations.Requirement;\n import org.codehaus.plexus.util.xml.Xpp3Dom;\n@@ -310,6 +311,32 @@ MavenExecutionPlan calculateExecutionPlan( MavenSession session, String... tasks\n                                                                         mergedSegment.getTasks() );\n     }\n \n+    public void testInvalidGoalName()\n+        throws Exception\n+    {\n+        File pom = getProject( \"project-basic\" );\n+        MavenSession session = createMavenSession( pom );\n+        try\n+        {\n+            getExecutions( calculateExecutionPlan( session, \"resources:\" ) );\n+            fail( \"expected a MojoNotFoundException\" );\n+        }\n+        catch ( MojoNotFoundException e )\n+        {\n+            assertEquals( \"\", e.getGoal() );\n+        }\n+\n+        try\n+        {\n+            getExecutions( calculateExecutionPlan( session, \"org.apache.maven.plugins:maven-resources-plugin:0.1:resources:toomany\" ) );\n+            fail( \"expected a MojoNotFoundException\" );\n+        }\n+        catch ( MojoNotFoundException e )\n+        {\n+            assertEquals( \"resources:toomany\", e.getGoal() );\n+        }\n+    }\n+\n \n     public void testPluginPrefixRetrieval()\n         throws Exception",
+                "changes": 27
+            },
+            {
+                "status": "modified",
+                "additions": 1,
+                "raw_url": "https://github.com/apache/maven/raw/1036f38593229d0c816b16225e5ffd4b6ef81939/maven-plugin-api/src/main/java/org/apache/maven/plugin/MojoNotFoundException.java",
+                "contents_url": "https://api.github.com/repos/apache/maven/contents/maven-plugin-api/src/main/java/org/apache/maven/plugin/MojoNotFoundException.java?ref=1036f38593229d0c816b16225e5ffd4b6ef81939",
+                "filename": "maven-plugin-api/src/main/java/org/apache/maven/plugin/MojoNotFoundException.java",
+                "deletions": 1,
+                "sha": "ab4568c0811cc17c5be4e27f8fc3db62d6373f68",
+                "blob_url": "https://github.com/apache/maven/blob/1036f38593229d0c816b16225e5ffd4b6ef81939/maven-plugin-api/src/main/java/org/apache/maven/plugin/MojoNotFoundException.java",
+                "patch": "@@ -54,7 +54,7 @@ private static String toMessage( String goal, PluginDescriptor pluginDescriptor\n     {\n         StringBuilder buffer = new StringBuilder( 256 );\n \n-        buffer.append( \"Could not find goal \" ).append( goal );\n+        buffer.append( \"Could not find goal '\" ).append( goal ).append( \"'\" );\n \n         if ( pluginDescriptor != null )\n         {",
+                "changes": 2
+            }
+        ],
+        "unit_tests": [
+            "LifecycleExecutorTest.java"
+        ]
+    },
+    {
+        "buggy": false,
+        "test_file": "maven-core/src/test/java/org/apache/maven/lifecycle/LifecycleExecutorTest.java",
+        "buggy_files": [
+            "maven-core/src/main/java/org/apache/maven/lifecycle/internal/MojoDescriptorCreator.java",
+            "maven-plugin-api/src/main/java/org/apache/maven/plugin/MojoNotFoundException.java",
+            "maven-core/src/main/java/org/apache/maven/lifecycle/LifecycleExecutor.java"
+        ],
+        "fixed": true
+    }
+]
