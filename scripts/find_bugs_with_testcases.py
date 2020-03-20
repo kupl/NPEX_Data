@@ -106,6 +106,7 @@ def do_commit(commit, output):
 
     #3. Check if unit-tests exist for each commit
     patched, unit_tests = find_unit_tests(commit)
+    os.chdir('..')
     if unit_tests:
         logfile.writelines("%s: has unit-test \n" % bug_id)
         commit['bug_id'] = bug_id
@@ -113,9 +114,9 @@ def do_commit(commit, output):
         commit['unit_tests'] = unit_tests
         output[bug_id] = commit
     else:
+        EasyProcess("rm -rf %s" % commit_id[:6]).call()
         logfile.writelines("%s: has no unit-tests\n" % bug_id)
     logfile.flush()
-    os.chdir('..')
 
 def is_done(repo):
     try:

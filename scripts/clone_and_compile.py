@@ -72,7 +72,7 @@ def unittest(commit, testFilename, non_testing_files):
     logger.info("test command: %s" % (test_cmd))
     logger.handlers[0].flush()
     
-    test_fixed_ret = EasyProcess(test_cmd).call()
+    test_fixed_ret = EasyProcess(test_cmd).call(timeout=600)
     ret['fixed'] = True if test_fixed_ret.return_code is 0 else False
 
     #b) Is buggy code incorrect w.r.t. test-cases?
@@ -83,7 +83,7 @@ def unittest(commit, testFilename, non_testing_files):
     logger.handlers[0].flush()
     checkout_ret = EasyProcess(checkout_cmd).call()
 
-    test_buggy_ret = EasyProcess(test_cmd).call()
+    test_buggy_ret = EasyProcess(test_cmd).call(timeout=600)
     ret['buggy'] = True if test_buggy_ret.return_code is 0 else False
 
     #TODO: parse error message of test_ret.stderr / .stdout
@@ -213,8 +213,12 @@ if __name__ == '__main__':
         repos = [repo]
 
     for repo in repos:
+        print(repo)
         with open("data/%s_test.json" % repo, 'r') as repo_data_file:
-            repo_json = json.loads(repo_data_file.read())
+            jsonstr = repo_data_file.read()
+            if jsonstr == '{}' or jsonstr == '':
+                continue
+            repo_json = json.loads(jsonstr)
         
         if len(repo_json.keys()) is 0:
             continue
