@@ -30,9 +30,16 @@ def execute(cmd : str, dir):
     logfile.write(err_msg)
     logfile.flush()
 
-def get_compile_command():
+def get_compile_command(project=None):
     if os.path.isfile('pom.xml'):
-        return 'mvn clean install -DskipTests'
+        if project is None:
+            return 'mvn clean install -DskipTests' 
+        else:
+            ### To compile only partial projects, we need to compile whole projects at first.
+            execute ("mvn clean install -DskipTests", '.')
+            # Must compile with "clean", otherwise infer would not capture it.
+            # -amd is more sound, but it takes more time 
+            return 'mvn clean install -DskipTests --pl %s' % project
     else:
         return "javac main.java" # for test
 
@@ -67,13 +74,14 @@ def apply_patch_and_generate_feature (original_dir, patch, key_features=None):
     patch_dir = patch["patch_dir"]
     original_filepath = patch["path_to_apply"]
     patch_filepath = "%s/patch.java" % patch_dir
+    project = original_filepath.split('/')[0] 
 
     #1. Apply patch to program (i.e., cp patch.java ...)
     execute ("cp %s %s.backup" % (original_filepath, patch_filepath), original_dir) # backup
     execute ("cp %s %s" % (patch_filepath, original_filepath), original_dir)
-    
+
     #2. Capture patched program & Generate features
-    execute ("infer capture --java-version %d -- %s" % (JAVA_VERSION, get_compile_command()), original_dir)
+    execute ("infer capture --java-version %d -- %s" % (JAVA_VERSION, get_compile_command(project)), original_dir)
     if key_features is None:
         execute ("infer npex --error-report %s/npe.json" % patch_dir, original_dir)
     else:
@@ -84,14 +92,14 @@ def apply_patch_and_generate_feature (original_dir, patch, key_features=None):
 
 
 
-def generate_feature (original_json: Dict, patch: Dict):
+def generate_feature (repo: str, commit_id: str, patch: Dict):
     # Assume: orignal program is buggy version with updated testcases
-    repo, commit_id = original_json["repo"], original_json["commit_id"] # 6-digit
     original_dir = "%s/benchmarks/%s/%s" % (ROOT_DIR, repo, commit_id)
     patch_dir = "%s/learning_data/%s/%s" % (ROOT_DIR, repo, commit_id)
+    project = read_json_from_file("%s/original_npe.json" % patch_dir)["filepath"].split('/')[0]
     os.chdir (original_dir)
     if patch is None:
-        execute ("infer capture --java-version %d -- %s" % (JAVA_VERSION, get_compile_command()), original_dir)
+        execute ("infer capture --java-version %d -- %s" % (JAVA_VERSION, get_compile_command(project)), original_dir)
         execute ("infer npex --error-report %s/%s" % (patch_dir, "original_npe.json"), original_dir) 
     else:
         apply_patch_and_generate_feature (original_dir, patch)
@@ -150,22 +158,38 @@ def find_embedding (data: List):
 
     return key_features
 
+def setup_benchmark(project_dir):
+    os.chdir(project_dir)
+    [repo, commit_id] = project_dir.split('/')[-2:]
+    bug_data_filepath = "%s/data/%s_%s_npe.json" % (ROOT_DIR, repo, commit_id)
+    if not (os.path.isfile (bug_data_filepath)):
+        return
+    bug_data = read_json_from_file (bug_data_filepath)
+    buggy_files = bug_data[1]["buggy_files"]
+    parent_commit = bug_data[0]["parent"].split('/')[-1]
+    checkout_cmd = "git checkout %s -- %s" % (parent_commit, ' '.join(buggy_files))
+
+    execute(checkout_cmd, project_dir)
+
+
 def data_from_DB ():
     err_info_dirs = glob.glob("%s/learning_data/*/*" % ROOT_DIR)
     ret = [] 
 
     #TODO: parallelize
-    for err_info_dir in err_info_dirs:
-        original = read_json_from_file ("%s/original.json" % err_info_dir)
-        original["Features"] = generate_feature (original, None)
+    for err_info_dir in filter(lambda dir: os.path.isfile("%s/original_npe.json" % dir), err_info_dirs): 
+        [repo, commit_id] = err_info_dir.split("/")[-2:]
+        print("Doing %s_%s ..." % (repo, commit_id))
+        setup_benchmark("%s/benchmarks/%s/%s" % (ROOT_DIR, repo, commit_id))
+        original_features = generate_feature (repo, commit_id, None)
 
         #TODO: add devel patch 
         for patch_dir in [ dir for dir in glob.glob("%s/*" % err_info_dir) if os.path.isdir(dir)]:
             patch = read_json_from_file ("%s/patch.json" % patch_dir)
             patch["patch_dir"] = patch_dir
-            patch["Features"] = generate_feature (original, patch)
-            patch["OriginalFeatures"] = original["Features"] 
-            patch["Id"] = "%s_%s_%s" % (original["repo"], original["commit_id"], patch["patch_file"])
+            patch["Features"] = generate_feature (repo, commit_id, patch)
+            patch["OriginalFeatures"] = original_features
+            patch["Id"] = "%s_%s_%s" % (repo, commit_id, os.path.basename(patch_dir)) 
 
             ret.append(patch)
     return ret
