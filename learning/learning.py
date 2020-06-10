@@ -30,16 +30,18 @@ def execute(cmd : str, dir):
     logfile.write(err_msg)
     logfile.flush()
 
-def get_compile_command(project=None):
-    if os.path.isfile('pom.xml'):
+def get_compile_command(cwd, project=None):
+    if os.path.isfile(f'{cwd}/pom.xml'):
         if project is None:
             return 'mvn clean install -DskipTests' 
         else:
             ### To compile only partial projects, we need to compile whole projects at first.
-            execute ("mvn clean install -DskipTests", '.')
             # Must compile with "clean", otherwise infer would not capture it.
             # -amd is more sound, but it takes more time 
-            return 'mvn clean install -DskipTests --pl %s' % project
+            
+            #execute ("mvn clean install -DskipTests", '.')
+            #return 'mvn clean install -DskipTests --pl %s' % project
+            return 'mvn clean install -DskipTests' 
     else:
         return "javac main.java" # for test
 
@@ -70,9 +72,17 @@ def learning_classifier (data : List[Dict], model):
     model.fit(input_data, labels) 
     return model
 
+def get_original_filepath(patch):
+    if "path_to_apply" in patch:
+        return patch["path_to_apply"]
+    elif "original_filepath" in patch:
+        return patch["original_filepath"]
+    else:
+        raise Exception ("Original filepath is not given")
+
 def apply_patch_and_generate_feature (original_dir, patch, key_features=None):
     patch_dir = patch["patch_dir"]
-    original_filepath = patch["path_to_apply"]
+    original_filepath = get_original_filepath(patch)
     patch_filepath = "%s/patch.java" % patch_dir
     project = original_filepath.split('/')[0] 
 
@@ -81,11 +91,11 @@ def apply_patch_and_generate_feature (original_dir, patch, key_features=None):
     execute ("cp %s %s" % (patch_filepath, original_filepath), original_dir)
 
     #2. Capture patched program & Generate features
-    execute ("infer capture --java-version %d -- %s" % (JAVA_VERSION, get_compile_command(project)), original_dir)
+    execute ("infer capture --java-version %d -- %s" % (JAVA_VERSION, get_compile_command(original_dir, project)), original_dir)
     if key_features is None:
-        execute ("infer npex --error-report %s/npe.json" % patch_dir, original_dir)
+        execute ("infer npex --defuse-only --error-report %s/npe.json" % patch_dir, original_dir)
     else:
-        execute ("infer npex --error-report %s/npe.json --key-features %s" % (patch_dir, key_features), original_dir)
+        execute ("infer npex --defuse-only --error-report %s/npe.json --key-features %s" % (patch_dir, key_features), original_dir)
     
     #3. Backup origianl file
     execute ("mv %s.backup %s" % (patch_filepath, original_filepath), original_dir) # apply backup
@@ -95,16 +105,33 @@ def apply_patch_and_generate_feature (original_dir, patch, key_features=None):
 def generate_feature (repo: str, commit_id: str, patch: Dict):
     # Assume: orignal program is buggy version with updated testcases
     original_dir = "%s/benchmarks/%s/%s" % (ROOT_DIR, repo, commit_id)
-    patch_dir = "%s/learning_data/%s/%s" % (ROOT_DIR, repo, commit_id)
-    project = read_json_from_file("%s/original_npe.json" % patch_dir)["filepath"].split('/')[0]
+    data_dir = "%s/learning_data/%s/%s" % (ROOT_DIR, repo, commit_id)
+    project = read_json_from_file("%s/original_npe.json" % data_dir)["filepath"].split('/')[0]
     os.chdir (original_dir)
-    if patch is None:
-        execute ("infer capture --java-version %d -- %s" % (JAVA_VERSION, get_compile_command(project)), original_dir)
-        execute ("infer npex --error-report %s/%s" % (patch_dir, "original_npe.json"), original_dir) 
-    else:
-        apply_patch_and_generate_feature (original_dir, patch)
+    
+    original_marshal_path = "%s/infer-out/.rawdata.marshalled" % original_dir
 
-    return read_json_from_file ("infer-out/generated_features.json")
+    if patch is None:
+        data_marshal_path = "%s/.rawdata.marshalled" % data_dir
+        if os.path.isfile ("%s" % data_marshal_path):
+            print("   - Found marshalled data")
+            execute ("cp %s %s" % (data_marshal_path, original_marshal_path), ROOT_DIR)
+            execute ("infer npex", original_dir) 
+        else: 
+            execute ("infer capture --java-version %d -- %s" % (JAVA_VERSION, get_compile_command(original_dir, project)), original_dir)
+            execute ("infer npex --defuse-only --error-report %s/%s" % (data_dir, "original_npe.json"), original_dir) 
+        execute ("mv %s %s" % (original_marshal_path, data_marshal_path), ROOT_DIR)
+    else:
+        data_marshal_path = "%s/.rawdata.marshalled" % patch["patch_dir"] 
+        if os.path.isfile ("%s" % data_marshal_path):
+            print("   - Found marshalled data")
+            execute ("cp %s %s" % (data_marshal_path, original_marshal_path), ROOT_DIR)
+            execute ("infer npex", original_dir) 
+        else:
+            apply_patch_and_generate_feature (original_dir, patch)
+        execute ("mv %s %s" % (original_marshal_path, data_marshal_path), ROOT_DIR)
+
+    return read_json_from_file ("%s/infer-out/generated_features.json" % original_dir)
 
 def objective_function (embedded_data):
     # Label: BinaryVector(str) -> (Correct PatchID List, Incorrect PatchID List)
@@ -172,24 +199,34 @@ def setup_benchmark(project_dir):
     execute(checkout_cmd, project_dir)
 
 
-def data_from_DB ():
-    err_info_dirs = glob.glob("%s/learning_data/*/*" % ROOT_DIR)
+def data_from_DB (delete_marshal):
+    err_info_dirs = list(filter(lambda dir: os.path.isfile("%s/original_npe.json" % dir), \
+         glob.glob("%s/learning_data/*/*" % ROOT_DIR)))
     ret = [] 
 
-    #TODO: parallelize
-    for err_info_dir in filter(lambda dir: os.path.isfile("%s/original_npe.json" % dir), err_info_dirs): 
+    print("Learning Data Found")
+    pprint.pprint (err_info_dirs)
+    for err_info_dir in err_info_dirs: 
         [repo, commit_id] = err_info_dir.split("/")[-2:]
         print("Doing %s_%s ..." % (repo, commit_id))
         setup_benchmark("%s/benchmarks/%s/%s" % (ROOT_DIR, repo, commit_id))
         original_features = generate_feature (repo, commit_id, None)
 
+        if delete_marshal and os.path.isfile("%s/.rawdata.marshalled" % err_info_dir):
+            os.remove("%s/.rawdata.marshalled" % err_info_dir)
+
         #TODO: add devel patch 
         for patch_dir in [ dir for dir in glob.glob("%s/*" % err_info_dir) if os.path.isdir(dir)]:
+            print(" - patch %s ..." % os.path.basename(patch_dir))
             patch = read_json_from_file ("%s/patch.json" % patch_dir)
             patch["patch_dir"] = patch_dir
-            patch["Features"] = generate_feature (repo, commit_id, patch)
             patch["OriginalFeatures"] = original_features
             patch["Id"] = "%s_%s_%s" % (repo, commit_id, os.path.basename(patch_dir)) 
+            
+            if delete_marshal and os.path.isfile("%s/.rawdata.marshalled" % patch_dir):
+                os.remove("%s/.rawdata.marshalled" % patch_dir)
+            
+            patch["Features"] = generate_feature (repo, commit_id, patch)
 
             ret.append(patch)
     return ret
@@ -210,12 +247,14 @@ def scoring (learning_data, model):
     return learning_data
 
 if __name__ == '__main__':
-##  Data for testing
-    data = data_from_DB()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--delete-marshal", type=bool, default=False, help="delete existing marshalled data")
+    args = parser.parse_args()
+    
+    data = data_from_DB(args.delete_marshal)
     key_features = find_embedding(data)
     learning_data = [embed_data (patch, key_features) for patch in data]
     model = learning_classifier (learning_data, model) 
     save_model_to_file (model, model_filename)
     scoring (learning_data, model)
-    #saver filter 
 
