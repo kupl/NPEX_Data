@@ -93,9 +93,9 @@ def apply_patch_and_generate_feature (original_dir, patch, key_features=None):
     #2. Capture patched program & Generate features
     execute ("infer capture --java-version %d -- %s" % (JAVA_VERSION, get_compile_command(original_dir, project)), original_dir)
     if key_features is None:
-        execute ("infer npex --defuse-only --error-report %s/npe.json" % patch_dir, original_dir)
+        execute ("infer npex --defuse-only --error-report %s/npe.json --patch-json %s/patch.json" % (patch_dir, patch_dir), original_dir)
     else:
-        execute ("infer npex --defuse-only --error-report %s/npe.json --key-features %s" % (patch_dir, key_features), original_dir)
+        execute ("infer npex --defuse-only --error-report %s/npe.json --patch-json %s/patch.json --key-features %s" % (patch_dir, patch_dir, key_features), original_dir)
     
     #3. Backup origianl file
     execute ("mv %s.backup %s" % (patch_filepath, original_filepath), original_dir) # apply backup
@@ -138,7 +138,7 @@ def objective_function (embedded_data):
     label = defaultdict(lambda: ([], []))
     for patch in embedded_data:
         patch_id = str(patch["Id"])
-        patch_vector = str(patch["Encoding"])
+        patch_vector = str([int(x == True) for x in patch["Encoding"]])
         (correct_patches, incorrect_patches) = label[patch_vector]
         if patch["correctness"] is 1:
             label[patch_vector] = (correct_patches + [patch_id], incorrect_patches)
@@ -209,11 +209,17 @@ def data_from_DB (delete_marshal):
     for err_info_dir in err_info_dirs: 
         [repo, commit_id] = err_info_dir.split("/")[-2:]
         print("Doing %s_%s ..." % (repo, commit_id))
-        setup_benchmark("%s/benchmarks/%s/%s" % (ROOT_DIR, repo, commit_id))
-        original_features = generate_feature (repo, commit_id, None)
+
+        original_dir = "%s/benchmarks/%s/%s" % (ROOT_DIR, repo, commit_id)
+        setup_benchmark(original_dir)
 
         if delete_marshal and os.path.isfile("%s/.rawdata.marshalled" % err_info_dir):
             os.remove("%s/.rawdata.marshalled" % err_info_dir)
+                
+        if delete_marshal and os.path.isfile("%s/infer-out/.rawdata.marshalled" % original_dir):
+            os.remove("%s/infer-out/.rawdata.marshalled" % err_info_dir)
+        
+        original_features = generate_feature (repo, commit_id, None)
 
         #TODO: add devel patch 
         for patch_dir in [ dir for dir in glob.glob("%s/*" % err_info_dir) if os.path.isdir(dir)]:

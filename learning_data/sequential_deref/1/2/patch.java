@@ -48,7 +48,7 @@ class Main {
   {
     X x = new X();
     A a = x.null_src();
-    if (a == null) {
+    if (a != null) {
     B b = a.f();
     C c = b.g();
     D d = c.h();
