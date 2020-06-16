@@ -10,6 +10,10 @@ import time
 import argparse
 from collections import defaultdict 
 import pprint
+from multiprocessing import Process
+from multiprocessing import Pool
+import shutil
+import copy
 
 ROOT_DIR = os.getcwd() # NPEX_Data/.
 model = tree.DecisionTreeRegressor()
@@ -27,13 +31,15 @@ def execute(cmd : str, dir):
     ret = EasyProcess(cmd).call()
     err_msg = "=== Execute %s ===\n  * return_code : %d\n  * stdout : %s\n  * stderr : %s\n  * dir : %s\n" \
             % (cmd, ret.return_code, ret.stdout, ret.stderr, dir)
-    logfile.write(err_msg)
-    logfile.flush()
+    if ret.return_code is not 0:
+        logfile.write(err_msg)
+        logfile.flush()
+    return ret
 
 def get_compile_command(cwd, project=None):
     if os.path.isfile(f'{cwd}/pom.xml'):
         if project is None:
-            return 'mvn clean install -DskipTests' 
+            return 'mvn clean install -DskipTests -Drat.skip=true' 
         else:
             ### To compile only partial projects, we need to compile whole projects at first.
             # Must compile with "clean", otherwise infer would not capture it.
@@ -41,7 +47,7 @@ def get_compile_command(cwd, project=None):
             
             #execute ("mvn clean install -DskipTests", '.')
             #return 'mvn clean install -DskipTests --pl %s' % project
-            return 'mvn clean install -DskipTests' 
+            return 'mvn clean install -DskipTests -Drat.skip=true' 
     else:
         return "javac main.java" # for test
 
@@ -57,7 +63,11 @@ def read_json_from_file(json_filename: str):
     json_file = open(json_filename, 'r')
     json_str = json_file.read()
     return json.loads(json_str)
-   
+
+def save_dict_to_jsonfile(json_filename: str, dict: Dict):
+    json_file = open(json_filename, 'w')
+    json_file.write(json.dumps(dict, indent=4))
+
 def save_model_to_file(model, model_filename: str):
     model_file = open(model_filename, 'wb')
     pickle.dump(model, model_file)
@@ -72,72 +82,11 @@ def learning_classifier (data : List[Dict], model):
     model.fit(input_data, labels) 
     return model
 
-def get_original_filepath(patch):
-    if "path_to_apply" in patch:
-        return patch["path_to_apply"]
-    elif "original_filepath" in patch:
-        return patch["original_filepath"]
-    else:
-        raise Exception ("Original filepath is not given")
-
-def apply_patch_and_generate_feature (original_dir, patch, key_features=None):
-    patch_dir = patch["patch_dir"]
-    original_filepath = get_original_filepath(patch)
-    patch_filepath = "%s/patch.java" % patch_dir
-    project = original_filepath.split('/')[0] 
-
-    #1. Apply patch to program (i.e., cp patch.java ...)
-    execute ("cp %s %s.backup" % (original_filepath, patch_filepath), original_dir) # backup
-    execute ("cp %s %s" % (patch_filepath, original_filepath), original_dir)
-
-    #2. Capture patched program & Generate features
-    execute ("infer capture --java-version %d -- %s" % (JAVA_VERSION, get_compile_command(original_dir, project)), original_dir)
-    if key_features is None:
-        execute ("infer npex --defuse-only --error-report %s/npe.json --patch-json %s/patch.json" % (patch_dir, patch_dir), original_dir)
-    else:
-        execute ("infer npex --defuse-only --error-report %s/npe.json --patch-json %s/patch.json --key-features %s" % (patch_dir, patch_dir, key_features), original_dir)
-    
-    #3. Backup origianl file
-    execute ("mv %s.backup %s" % (patch_filepath, original_filepath), original_dir) # apply backup
-
-
-
-def generate_feature (repo: str, commit_id: str, patch: Dict):
-    # Assume: orignal program is buggy version with updated testcases
-    original_dir = "%s/benchmarks/%s/%s" % (ROOT_DIR, repo, commit_id)
-    data_dir = "%s/learning_data/%s/%s" % (ROOT_DIR, repo, commit_id)
-    project = read_json_from_file("%s/original_npe.json" % data_dir)["filepath"].split('/')[0]
-    os.chdir (original_dir)
-    
-    original_marshal_path = "%s/infer-out/.rawdata.marshalled" % original_dir
-
-    if patch is None:
-        data_marshal_path = "%s/.rawdata.marshalled" % data_dir
-        if os.path.isfile ("%s" % data_marshal_path):
-            print("   - Found marshalled data")
-            execute ("cp %s %s" % (data_marshal_path, original_marshal_path), ROOT_DIR)
-            execute ("infer npex", original_dir) 
-        else: 
-            execute ("infer capture --java-version %d -- %s" % (JAVA_VERSION, get_compile_command(original_dir, project)), original_dir)
-            execute ("infer npex --defuse-only --error-report %s/%s" % (data_dir, "original_npe.json"), original_dir) 
-        execute ("mv %s %s" % (original_marshal_path, data_marshal_path), ROOT_DIR)
-    else:
-        data_marshal_path = "%s/.rawdata.marshalled" % patch["patch_dir"] 
-        if os.path.isfile ("%s" % data_marshal_path):
-            print("   - Found marshalled data")
-            execute ("cp %s %s" % (data_marshal_path, original_marshal_path), ROOT_DIR)
-            execute ("infer npex", original_dir) 
-        else:
-            apply_patch_and_generate_feature (original_dir, patch)
-        execute ("mv %s %s" % (original_marshal_path, data_marshal_path), ROOT_DIR)
-
-    return read_json_from_file ("%s/infer-out/generated_features.json" % original_dir)
-
 def objective_function (embedded_data):
     # Label: BinaryVector(str) -> (Correct PatchID List, Incorrect PatchID List)
     label = defaultdict(lambda: ([], []))
     for patch in embedded_data:
-        patch_id = str(patch["Id"])
+        patch_id = str(patch["id"])
         patch_vector = str([int(x == True) for x in patch["Encoding"]])
         (correct_patches, incorrect_patches) = label[patch_vector]
         if patch["correctness"] is 1:
@@ -198,45 +147,6 @@ def setup_benchmark(project_dir):
 
     execute(checkout_cmd, project_dir)
 
-
-def data_from_DB (delete_marshal):
-    err_info_dirs = list(filter(lambda dir: os.path.isfile("%s/original_npe.json" % dir), \
-         glob.glob("%s/learning_data/*/*" % ROOT_DIR)))
-    ret = [] 
-
-    print("Learning Data Found")
-    pprint.pprint (err_info_dirs)
-    for err_info_dir in err_info_dirs: 
-        [repo, commit_id] = err_info_dir.split("/")[-2:]
-        print("Doing %s_%s ..." % (repo, commit_id))
-
-        original_dir = "%s/benchmarks/%s/%s" % (ROOT_DIR, repo, commit_id)
-        setup_benchmark(original_dir)
-
-        if delete_marshal and os.path.isfile("%s/.rawdata.marshalled" % err_info_dir):
-            os.remove("%s/.rawdata.marshalled" % err_info_dir)
-                
-        if delete_marshal and os.path.isfile("%s/infer-out/.rawdata.marshalled" % original_dir):
-            os.remove("%s/infer-out/.rawdata.marshalled" % err_info_dir)
-        
-        original_features = generate_feature (repo, commit_id, None)
-
-        #TODO: add devel patch 
-        for patch_dir in [ dir for dir in glob.glob("%s/*" % err_info_dir) if os.path.isdir(dir)]:
-            print(" - patch %s ..." % os.path.basename(patch_dir))
-            patch = read_json_from_file ("%s/patch.json" % patch_dir)
-            patch["patch_dir"] = patch_dir
-            patch["OriginalFeatures"] = original_features
-            patch["Id"] = "%s_%s_%s" % (repo, commit_id, os.path.basename(patch_dir)) 
-            
-            if delete_marshal and os.path.isfile("%s/.rawdata.marshalled" % patch_dir):
-                os.remove("%s/.rawdata.marshalled" % patch_dir)
-            
-            patch["Features"] = generate_feature (repo, commit_id, patch)
-
-            ret.append(patch)
-    return ret
-
 def scoring (learning_data, model):
     score = 0
     score2 = 0
@@ -248,19 +158,188 @@ def scoring (learning_data, model):
         if learning_data[i]["score"] > 0.5:
             score = score + 1
 
-    print ("Score on learning data : %f" % float(score/len(learning_data)))
-    print ("Score2 on learning data : %f" % score2/len(learning_data))
+    print ("Score (classification) on learning data : %f" % float(score/len(learning_data)))
+    print ("Score (confidence)     on learning data : %f" % float(score2/len(learning_data)))
     return learning_data
+
+def compile_and_capture (data: Dict):
+    original_dir = data["original_dir"]
+    data_dir = data["data_dir"]
+
+    os.chdir (original_dir)
+
+    ret = None
+    execute ("git clean -df", original_dir)
+    if os.path.isdir ("infer-out"):
+        shutil.rmtree("infer-out")
+
+    if "original_filepath" in data:
+        original_filepath = data["original_filepath"]           # relative filepath from project root 
+        patch_filepath = "%s/patch.java" % data_dir    # absolute filepath
+
+        # Apply patch to program (i.e., cp patch.java ...)
+        execute ("cp %s %s.backup" % (original_filepath, patch_filepath), original_dir) # backup
+        execute ("cp %s %s" % (patch_filepath, original_filepath), original_dir)
+        
+        ret = execute ("infer capture --java-version %d -- %s" % (JAVA_VERSION, get_compile_command(original_dir)), original_dir)
+        
+        # Backup origianl file
+        execute ("mv %s.backup %s" % (patch_filepath, original_filepath), original_dir) # apply backup
+        execute ("mv %s/infer-out %s" % (original_dir, data_dir), original_dir) # apply backup
+    else:
+        ret = execute ("infer capture --java-version %d -- %s" % (JAVA_VERSION, get_compile_command(original_dir)), original_dir)
+        execute ("mv %s/infer-out %s" % (original_dir, data_dir), original_dir) # apply backup
+    
+    return ret
+
+
+def capture (data: Dict): 
+    original_dir = data["original_dir"] # benchmarks/repo/commit 
+    err_info_dir = data["data_dir"]     # learning_data/repo/commit
+    repo = data["repo"]
+    commit_id = data["commit_id"]
+    
+    original_id = f"{repo}_{commit_id}"
+    original_data = {**data, "id": original_id}
+
+    setup_benchmark(original_dir)
+    
+    if os.path.isdir("%s/infer-out" % err_info_dir):
+        shutil.rmtree("%s/infer-out" % err_info_dir)
+    print(f" - compiling original {original_id}")
+
+    try:
+        original_data["captured"] = True if compile_and_capture(data).return_code is 0 else False
+    except Exception:
+        print ("Unexpected Error:", sys.exc_info()[0])
+        original_data["captured"] = False 
+    save_dict_to_jsonfile(f"{err_info_dir}/data.json", original_data)
+
+    if original_data["captured"] is False:
+        print(f"   - could not captured {original_id}")
+        return
+    #else: 
+    #    print(f" - successfully captured {repo}{commit_id}")
+
+    for patch_dir in [ dir for dir in glob.glob("%s/*" % err_info_dir) \
+        if os.path.isdir(dir) and os.path.basename(dir) != "infer-out" and os.path.isfile(f"{dir}/patch.json")]:
+        patch_json = read_json_from_file ("%s/patch.json" % patch_dir)
+        patch_id = "%s_%s_%s" % (repo, commit_id, os.path.basename(patch_dir)) 
+        patch = {**patch_json, **data, "data_dir": patch_dir, "id": patch_id}
+        print(f" - compiling patch {patch_id}")
+        
+        if os.path.isdir("%s/infer-out" % patch_dir):
+            shutil.rmtree("%s/infer-out" % patch_dir)
+
+        try:
+            patch["captured"] = True if compile_and_capture(patch).return_code is 0 else False 
+        except Exception:
+            patch["captured"] = False
+        save_dict_to_jsonfile(f"{patch_dir}/data.json", patch)
+
+        if patch["captured"] is False:
+            print(f"   - could not captured {patch_id}")
+        #else:
+        #    print(f" - successfully captured {patch_id}")
+
+def data_from_DB (repo_list):
+    err_info_dirs = []
+    print(repo_list)
+    if repo_list is None:
+        err_info_dirs = glob.glob("%s/learning_data/*/*" % ROOT_DIR)
+    else:
+        for repo in repo_list:
+            err_info_dirs = err_info_dirs + glob.glob (f"{ROOT_DIR}/learning_data/{repo}/*")
+
+    err_info_dirs = list(filter(lambda dir: os.path.isfile("%s/npe.json" % dir), err_info_dirs))
+
+    ret = [] 
+
+    print("Learning Data Found")
+    pprint.pprint (err_info_dirs)
+    for err_info_dir in err_info_dirs: 
+        [repo, commit_id] = err_info_dir.split("/")[-2:]
+        original_dir = f"{ROOT_DIR}/benchmarks/{repo}/{commit_id}"
+        
+        data = {"repo": repo, "commit_id": commit_id, "original_dir": original_dir, "data_dir": err_info_dir} 
+
+        ret.append(data)
+    return ret
+
+def generate_marshal(patch: Dict):
+    patch_dir = patch["data_dir"]
+    patch_id = patch["id"]
+    print(f" - generate marshalled data for {patch_id}")
+    if os.path.isfile ("%s/infer-out/.rawdata.marshalled" % patch_dir):
+        os.remove ("%s/infer-out/.rawdata.marshalled" % patch_dir)
+    
+    ret = execute ("infer npex --key-features %s/empty_features" % ROOT_DIR, patch_dir)
+    patch["marshalled"] = True if ret.return_code is 0 else False
+    save_dict_to_jsonfile(f"{patch_dir}/data.json", patch)
+    if patch['marshalled'] is False:
+        pass
+    #    print ("   - Failed to generate marshalled data")
+    else:
+        print (f"   - Successfully generate marshalled data for {patch_id}")
+
+def extract_feature(patch: Dict):
+    patch_dir = patch["data_dir"]
+    patch_id = patch["id"]
+    print(" - extract features for %s" % patch["id"])
+    
+    execute ("infer npex", patch_dir)
+    if os.path.isfile (f"{patch_dir}/infer-out/generated_features.json"):
+        patch["Features"] = read_json_from_file (f"{patch_dir}/infer-out/generated_features.json")
+        print(f"   - Successfully extract features for {patch_id}")
+    else:
+        print(f"   - Failed to extract features for {patch_id}")
+    save_dict_to_jsonfile(f"{patch_dir}/data.json", patch)
+
+def get_patches(field: str):
+    json_paths = \
+        glob.glob(f"{ROOT_DIR}/learning_data/*/*/data.json") + \
+        glob.glob(f"{ROOT_DIR}/learning_data/*/*/*/data.json")  
+
+    json_list = [read_json_from_file(json_path) for json_path in json_paths]
+    return [data for data in json_list if data[field] is True]
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("--delete-marshal", type=bool, default=False, help="delete existing marshalled data")
+    parser.add_argument("--capture", type=bool, default=False, help="compile and capture benchmarks")
+    parser.add_argument("--generate_marshal", type=bool, default=False, help="generate marshalling data")
+    parser.add_argument("--extract_feature", type=bool, default=False, help="extract features")
+    parser.add_argument("--learning", type=bool, default=False, help="learning encoding and model")
+    parser.add_argument("--n_cpus", type=int, default=1, help="number of cpus")
+    parser.add_argument("--repo_list", type=str, nargs='+', help="list of repositories to learn")
     args = parser.parse_args()
-    
-    data = data_from_DB(args.delete_marshal)
-    key_features = find_embedding(data)
-    learning_data = [embed_data (patch, key_features) for patch in data]
-    model = learning_classifier (learning_data, model) 
-    save_model_to_file (model, model_filename)
-    scoring (learning_data, model)
 
+    data_list = data_from_DB(args.repo_list)
+    
+    p = Pool(args.n_cpus)
+    
+    if args.capture:
+        p.map(capture, data_list)            
+
+    elif args.generate_marshal:
+        patches = get_patches("captured")
+        p.map(generate_marshal, patches)
+
+    elif args.extract_feature:
+        patches = get_patches("marshalled")
+        p.map(extract_feature, patches)
+
+    elif args.learning:
+        patches = [patch for patch in get_patches("marshalled") if "Features" in patch and os.path.isfile("%s/../data.json" % patch["data_dir"])]
+        for patch in patches: 
+            print (" - learning data %s" % patch["id"]) 
+            patch_dir = patch["data_dir"]
+            patch["OriginalFeatures"] = read_json_from_file (f"{patch_dir}/../data.json")["Features"]
+        key_features = find_embedding(patches)
+        learning_data = [embed_data (patch, key_features) for patch in patches] 
+        model = learning_classifier (learning_data, model) 
+        save_model_to_file (model, model_filename)
+        scoring (learning_data, model)
+    else:
+        print ("no argument given")
+
+    
