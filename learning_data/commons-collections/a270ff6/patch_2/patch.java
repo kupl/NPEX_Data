@@ -2402,7 +2402,7 @@ abstract class AbstractPatriciaTrie<K, V> extends AbstractBitwiseTrie<K, V> {
                 // If the subtree's bitIndex is less than the
                 // length of our prefix, it's the last item
                 // in the prefix tree.
-                if (lengthInBits >= (subtree == null? : 0 : subtree.bitIndex)) {
+                if (lengthInBits >= (subtree == null? 0 : subtree.bitIndex)) {
                     lastOne = true;
                 }
             }
