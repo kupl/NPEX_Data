@@ -1,301 +1,299 @@
 {
     "shiro_24c6437": {
-        "bug_id": "shiro_24c6437",
+        "repo": "shiro",
+        "message": "Throw exception when request/response isn't set on WebUtils so that you get a nice error instead of a NPE.\n\ngit-svn-id: https://svn.apache.org/repos/asf/incubator/jsecurity/trunk@711068 13f79535-47bb-0310-9956-ffa450edef68",
         "commit": "https://github.com/apache/shiro/commit/24c6437570cab1a3239d88566fb4918f3c8377d6",
+        "parent": "https://github.com/apache/shiro/commit/e33e5039e69720d99bab61c53c1ea327929e0e4b",
+        "bug_id": "shiro_24c6437",
         "file": [
             {
-                "additions": 4,
-                "blob_url": "https://github.com/apache/shiro/blob/24c6437570cab1a3239d88566fb4918f3c8377d6/src/org/jsecurity/web/WebRememberMeManager.java",
-                "changes": 4,
-                "contents_url": "https://api.github.com/repos/apache/shiro/contents/src/org/jsecurity/web/WebRememberMeManager.java?ref=24c6437570cab1a3239d88566fb4918f3c8377d6",
-                "deletions": 0,
-                "filename": "src/org/jsecurity/web/WebRememberMeManager.java",
-                "patch": "@@ -18,6 +18,8 @@\n  */\n package org.jsecurity.web;\n \n+import org.apache.commons.logging.Log;\n+import org.apache.commons.logging.LogFactory;\n import org.jsecurity.codec.Base64;\n import org.jsecurity.subject.AbstractRememberMeManager;\n import org.jsecurity.web.attr.CookieAttribute;\n@@ -58,6 +60,8 @@\n      */\n     public static final String DEFAULT_REMEMBER_ME_COOKIE_NAME = \"rememberMe\";\n \n+    private static final Log log = LogFactory.getLog(WebRememberMeManager.class);\n+\n     protected WebAttribute<String> identityAttribute = null;\n \n     public WebRememberMeManager() {",
-                "raw_url": "https://github.com/apache/shiro/raw/24c6437570cab1a3239d88566fb4918f3c8377d6/src/org/jsecurity/web/WebRememberMeManager.java",
                 "sha": "b6af3ddef49aedfe3cc4b63e1c64bae2341a7a8d",
-                "status": "modified"
+                "filename": "src/org/jsecurity/web/WebRememberMeManager.java",
+                "blob_url": "https://github.com/apache/shiro/blob/24c6437570cab1a3239d88566fb4918f3c8377d6/src/org/jsecurity/web/WebRememberMeManager.java",
+                "raw_url": "https://github.com/apache/shiro/raw/24c6437570cab1a3239d88566fb4918f3c8377d6/src/org/jsecurity/web/WebRememberMeManager.java",
+                "status": "modified",
+                "changes": 4,
+                "additions": 4,
+                "contents_url": "https://api.github.com/repos/apache/shiro/contents/src/org/jsecurity/web/WebRememberMeManager.java?ref=24c6437570cab1a3239d88566fb4918f3c8377d6",
+                "patch": "@@ -18,6 +18,8 @@\n  */\n package org.jsecurity.web;\n \n+import org.apache.commons.logging.Log;\n+import org.apache.commons.logging.LogFactory;\n import org.jsecurity.codec.Base64;\n import org.jsecurity.subject.AbstractRememberMeManager;\n import org.jsecurity.web.attr.CookieAttribute;\n@@ -58,6 +60,8 @@\n      */\n     public static final String DEFAULT_REMEMBER_ME_COOKIE_NAME = \"rememberMe\";\n \n+    private static final Log log = LogFactory.getLog(WebRememberMeManager.class);\n+\n     protected WebAttribute<String> identityAttribute = null;\n \n     public WebRememberMeManager() {",
+                "deletions": 0
             },
             {
-                "additions": 23,
-                "blob_url": "https://github.com/apache/shiro/blob/24c6437570cab1a3239d88566fb4918f3c8377d6/src/org/jsecurity/web/WebUtils.java",
-                "changes": 27,
-                "contents_url": "https://api.github.com/repos/apache/shiro/contents/src/org/jsecurity/web/WebUtils.java?ref=24c6437570cab1a3239d88566fb4918f3c8377d6",
-                "deletions": 4,
-                "filename": "src/org/jsecurity/web/WebUtils.java",
-                "patch": "@@ -53,6 +53,15 @@\n \n     private static final Log log = LogFactory.getLog(WebUtils.class);\n \n+\n+    /**\n+     * Message displayed when a servlet request or response is not bound to the current thread context.\n+     */\n+    private static final String NOT_BOUND_ERROR_MESSAGE =\n+            \"Make sure WebUtils.bind() is being called. (typically called by JSecurityFilter)  \" +\n+            \"This could also happen when running integration tests that don't properly call WebUtils.bind().\";\n+\n+\n     public static final String SERVLET_REQUEST_KEY = ServletRequest.class.getName() + \"_JSECURITY_THREAD_CONTEXT_KEY\";\n     public static final String SERVLET_RESPONSE_KEY = ServletResponse.class.getName() + \"_JSECURITY_THREAD_CONTEXT_KEY\";\n \n@@ -300,10 +309,15 @@ public static void unbindInetAddressFromThread() {\n      * This method only returns the bound value if it exists - it does not remove it\n      * from the thread.  To remove it, one must call {@link #unbindServletRequest() unbindServletRequest} instead.\n      *\n-     * @return the ServletRequest bound to the thread, or <tt>null</tt> if there isn't one bound.\n+     * @return the ServletRequest bound to the thread.  Never returns null.\n+     * @throws IllegalStateException if no servlet request is bound in the thread context.\n      */\n     public static ServletRequest getServletRequest() {\n-        return (ServletRequest) ThreadContext.get(SERVLET_REQUEST_KEY);\n+        ServletRequest request = (ServletRequest) ThreadContext.get(SERVLET_REQUEST_KEY);\n+        if( request == null ) {\n+            throw new IllegalStateException( \"No ServletRequest found in ThreadContext. \" + NOT_BOUND_ERROR_MESSAGE );\n+        }        \n+        return request;\n     }\n \n     /**\n@@ -353,10 +367,15 @@ public static ServletRequest unbindServletRequest() {\n      * This method only returns the bound value if it exists - it does not remove it\n      * from the thread.  To remove it, one must call {@link #unbindServletResponse() unbindServletResponse} instead.\n      *\n-     * @return the ServletResponse bound to the thread, or <tt>null</tt> if there isn't one bound.\n+     * @return the ServletResponse bound to the thread.  Never returns null.\n+     * @throws IllegalStateException if no servlet response is bound in the thread context.\n      */\n     public static ServletResponse getServletResponse() {\n-        return (ServletResponse) ThreadContext.get(SERVLET_RESPONSE_KEY);\n+        ServletResponse response = (ServletResponse) ThreadContext.get(SERVLET_RESPONSE_KEY);\n+        if( response == null ) {\n+            throw new IllegalStateException( \"No ServletResponse found in ThreadContext. \" + NOT_BOUND_ERROR_MESSAGE );\n+        }\n+        return response;\n     }\n \n     /**",
-                "raw_url": "https://github.com/apache/shiro/raw/24c6437570cab1a3239d88566fb4918f3c8377d6/src/org/jsecurity/web/WebUtils.java",
                 "sha": "a9b01ca46c0302a379bcae2a8e892bc9a0791367",
-                "status": "modified"
+                "filename": "src/org/jsecurity/web/WebUtils.java",
+                "blob_url": "https://github.com/apache/shiro/blob/24c6437570cab1a3239d88566fb4918f3c8377d6/src/org/jsecurity/web/WebUtils.java",
+                "raw_url": "https://github.com/apache/shiro/raw/24c6437570cab1a3239d88566fb4918f3c8377d6/src/org/jsecurity/web/WebUtils.java",
+                "status": "modified",
+                "changes": 27,
+                "additions": 23,
+                "contents_url": "https://api.github.com/repos/apache/shiro/contents/src/org/jsecurity/web/WebUtils.java?ref=24c6437570cab1a3239d88566fb4918f3c8377d6",
+                "patch": "@@ -53,6 +53,15 @@\n \n     private static final Log log = LogFactory.getLog(WebUtils.class);\n \n+\n+    /**\n+     * Message displayed when a servlet request or response is not bound to the current thread context.\n+     */\n+    private static final String NOT_BOUND_ERROR_MESSAGE =\n+            \"Make sure WebUtils.bind() is being called. (typically called by JSecurityFilter)  \" +\n+            \"This could also happen when running integration tests that don't properly call WebUtils.bind().\";\n+\n+\n     public static final String SERVLET_REQUEST_KEY = ServletRequest.class.getName() + \"_JSECURITY_THREAD_CONTEXT_KEY\";\n     public static final String SERVLET_RESPONSE_KEY = ServletResponse.class.getName() + \"_JSECURITY_THREAD_CONTEXT_KEY\";\n \n@@ -300,10 +309,15 @@ public static void unbindInetAddressFromThread() {\n      * This method only returns the bound value if it exists - it does not remove it\n      * from the thread.  To remove it, one must call {@link #unbindServletRequest() unbindServletRequest} instead.\n      *\n-     * @return the ServletRequest bound to the thread, or <tt>null</tt> if there isn't one bound.\n+     * @return the ServletRequest bound to the thread.  Never returns null.\n+     * @throws IllegalStateException if no servlet request is bound in the thread context.\n      */\n     public static ServletRequest getServletRequest() {\n-        return (ServletRequest) ThreadContext.get(SERVLET_REQUEST_KEY);\n+        ServletRequest request = (ServletRequest) ThreadContext.get(SERVLET_REQUEST_KEY);\n+        if( request == null ) {\n+            throw new IllegalStateException( \"No ServletRequest found in ThreadContext. \" + NOT_BOUND_ERROR_MESSAGE );\n+        }        \n+        return request;\n     }\n \n     /**\n@@ -353,10 +367,15 @@ public static ServletRequest unbindServletRequest() {\n      * This method only returns the bound value if it exists - it does not remove it\n      * from the thread.  To remove it, one must call {@link #unbindServletResponse() unbindServletResponse} instead.\n      *\n-     * @return the ServletResponse bound to the thread, or <tt>null</tt> if there isn't one bound.\n+     * @return the ServletResponse bound to the thread.  Never returns null.\n+     * @throws IllegalStateException if no servlet response is bound in the thread context.\n      */\n     public static ServletResponse getServletResponse() {\n-        return (ServletResponse) ThreadContext.get(SERVLET_RESPONSE_KEY);\n+        ServletResponse response = (ServletResponse) ThreadContext.get(SERVLET_RESPONSE_KEY);\n+        if( response == null ) {\n+            throw new IllegalStateException( \"No ServletResponse found in ThreadContext. \" + NOT_BOUND_ERROR_MESSAGE );\n+        }\n+        return response;\n     }\n \n     /**",
+                "deletions": 4
             }
         ],
-        "message": "Throw exception when request/response isn't set on WebUtils so that you get a nice error instead of a NPE.\n\ngit-svn-id: https://svn.apache.org/repos/asf/incubator/jsecurity/trunk@711068 13f79535-47bb-0310-9956-ffa450edef68",
-        "parent": "https://github.com/apache/shiro/commit/e33e5039e69720d99bab61c53c1ea327929e0e4b",
         "patched_files": [
             "WebRememberMeManager.java"
         ],
-        "repo": "shiro",
         "unit_tests": [
             "WebRememberMeManagerTest.java"
         ]
     },
-    "shiro_3ca513f": {
-        "bug_id": "shiro_3ca513f",
-        "commit": "https://github.com/apache/shiro/commit/3ca513f1f2f0472251b73c16c1507034a7028b24",
-        "file": [
-            {
-                "additions": 6,
-                "blob_url": "https://github.com/apache/shiro/blob/3ca513f1f2f0472251b73c16c1507034a7028b24/core/src/main/java/org/apache/shiro/aop/DefaultAnnotationResolver.java",
-                "changes": 7,
-                "contents_url": "https://api.github.com/repos/apache/shiro/contents/core/src/main/java/org/apache/shiro/aop/DefaultAnnotationResolver.java?ref=3ca513f1f2f0472251b73c16c1507034a7028b24",
-                "deletions": 1,
-                "filename": "core/src/main/java/org/apache/shiro/aop/DefaultAnnotationResolver.java",
-                "patch": "@@ -59,6 +59,11 @@ public Annotation getAnnotation(MethodInvocation mi, Class<? extends Annotation>\n \r\n         }\r\n         Annotation annotation = m.getAnnotation(clazz);\r\n-        return annotation == null ? mi.getThis().getClass().getAnnotation(clazz) : annotation;\r\n+        if (annotation == null ) {\r\n+            Object miThis = mi.getThis();\r\n+            //SHIRO-473 - miThis could be null for static methods, just return null\r\n+            annotation = miThis != null ? miThis.getClass().getAnnotation(clazz) : null;\r\n+        }\r\n+        return annotation;\r\n     }\r\n }\r",
-                "raw_url": "https://github.com/apache/shiro/raw/3ca513f1f2f0472251b73c16c1507034a7028b24/core/src/main/java/org/apache/shiro/aop/DefaultAnnotationResolver.java",
-                "sha": "d7fd4aec7a22e9c0196009b28b98d94f28fb2a3b",
-                "status": "modified"
-            },
-            {
-                "additions": 10,
-                "blob_url": "https://github.com/apache/shiro/blob/3ca513f1f2f0472251b73c16c1507034a7028b24/core/src/test/java/org/apache/shiro/aop/AnnotationResolverTest.java",
-                "changes": 10,
-                "contents_url": "https://api.github.com/repos/apache/shiro/contents/core/src/test/java/org/apache/shiro/aop/AnnotationResolverTest.java?ref=3ca513f1f2f0472251b73c16c1507034a7028b24",
-                "deletions": 0,
-                "filename": "core/src/test/java/org/apache/shiro/aop/AnnotationResolverTest.java",
-                "patch": "@@ -60,5 +60,15 @@ public void testAnnotationFoundFromMethod() throws SecurityException, NoSuchMeth\n         replay(methodInvocation);\r\n \tassertNotNull(annotationResolver.getAnnotation(methodInvocation, RequiresUser.class));\r\n     }\r\n+\r\n+    @Test\r\n+    public void testNullMethodInvocation() throws SecurityException, NoSuchMethodException {\r\n+        MethodInvocation methodInvocation = createMock(MethodInvocation.class);\r\n+        Method method = MyFixture.class.getDeclaredMethod(\"operateThis\");\r\n+        expect(methodInvocation.getMethod()).andReturn(method);\r\n+        expect(methodInvocation.getThis()).andReturn(null);\r\n+        replay(methodInvocation);\r\n+        assertNull(annotationResolver.getAnnotation(methodInvocation, RequiresUser.class));\r\n+    }\r\n }\r\n \r",
-                "raw_url": "https://github.com/apache/shiro/raw/3ca513f1f2f0472251b73c16c1507034a7028b24/core/src/test/java/org/apache/shiro/aop/AnnotationResolverTest.java",
-                "sha": "1b2916c5e48b95b8db702462295afa49f11e443a",
-                "status": "modified"
-            }
-        ],
-        "message": "SHIRO-473 Fix NPE thrown from DefaultAnnotationResolver.getAnnotation",
-        "parent": "https://github.com/apache/shiro/commit/08a860f5ac0fcf9c64309981bdac6325a3360876",
-        "patched_files": [
-            "DefaultAnnotationResolver.java",
-            "AnnotationResolver.java"
-        ],
-        "repo": "shiro",
-        "unit_tests": [
-            "AnnotationResolverTest.java"
-        ]
-    },
     "shiro_8b4324c": {
-        "bug_id": "shiro_8b4324c",
+        "repo": "shiro",
+        "message": "JSEC-122 - fixed NPE\n\ngit-svn-id: https://svn.apache.org/repos/asf/incubator/jsecurity/trunk@711065 13f79535-47bb-0310-9956-ffa450edef68",
         "commit": "https://github.com/apache/shiro/commit/8b4324cb359375f8b5b9538a7b5021a39c9d0873",
+        "parent": "https://github.com/apache/shiro/commit/8e2b39e9c73a8215520688017acd77cbe2f47dbc",
+        "bug_id": "shiro_8b4324c",
         "file": [
             {
-                "additions": 19,
-                "blob_url": "https://github.com/apache/shiro/blob/8b4324cb359375f8b5b9538a7b5021a39c9d0873/src/org/jsecurity/authc/SimpleAuthenticationInfo.java",
-                "changes": 33,
-                "contents_url": "https://api.github.com/repos/apache/shiro/contents/src/org/jsecurity/authc/SimpleAuthenticationInfo.java?ref=8b4324cb359375f8b5b9538a7b5021a39c9d0873",
-                "deletions": 14,
-                "filename": "src/org/jsecurity/authc/SimpleAuthenticationInfo.java",
-                "patch": "@@ -70,38 +70,43 @@ public void setCredentials(Object credentials) {\n \n     @SuppressWarnings(\"unchecked\")\n     public void merge(AuthenticationInfo info) {\n-        if (info == null || info.getPrincipals() == null) {\n+        if (info == null || info.getPrincipals() == null || info.getPrincipals().isEmpty()) {\n             return;\n         }\n \n         if (this.principals == null) {\n-            this.principals = new SimplePrincipalCollection();\n-        }\n-\n-        if (this.principals instanceof MutablePrincipalCollection) {\n-            ((MutablePrincipalCollection) this.principals).addAll(info.getPrincipals());\n+            this.principals = info.getPrincipals();\n         } else {\n-            throw new IllegalStateException(\"Attempt to merge authentication info, but PrincipalCollection is not an \" +\n-                    \"instance of MutablePrincipalCollection.\");\n+            if (this.principals instanceof MutablePrincipalCollection) {\n+                ((MutablePrincipalCollection) this.principals).addAll(info.getPrincipals());\n+            } else {\n+                this.principals = new SimplePrincipalCollection(this.principals);\n+            }\n         }\n \n         Object thisCredentials = getCredentials();\n         Object otherCredentials = info.getCredentials();\n \n+        if (otherCredentials == null) {\n+            return;\n+        }\n+\n+        if (thisCredentials == null) {\n+            this.credentials = otherCredentials;\n+            return;\n+        }\n+\n         if (!(thisCredentials instanceof Collection)) {\n             Set newSet = new HashSet();\n-            if (thisCredentials != null) {\n-                newSet.add(thisCredentials);\n-                setCredentials(newSet);\n-            }\n+            newSet.add(thisCredentials);\n+            setCredentials(newSet);\n         }\n \n         // At this point, the credentials should be a collection\n         Collection credentialCollection = (Collection) getCredentials();\n         if (otherCredentials instanceof Collection) {\n             credentialCollection.addAll((Collection) otherCredentials);\n-\n-        } else if (otherCredentials != null) {\n+        } else {\n             credentialCollection.add(otherCredentials);\n         }\n     }",
-                "raw_url": "https://github.com/apache/shiro/raw/8b4324cb359375f8b5b9538a7b5021a39c9d0873/src/org/jsecurity/authc/SimpleAuthenticationInfo.java",
                 "sha": "0a442cb52c518edbafc83db955f2bc25c859beed",
-                "status": "modified"
+                "filename": "src/org/jsecurity/authc/SimpleAuthenticationInfo.java",
+                "blob_url": "https://github.com/apache/shiro/blob/8b4324cb359375f8b5b9538a7b5021a39c9d0873/src/org/jsecurity/authc/SimpleAuthenticationInfo.java",
+                "raw_url": "https://github.com/apache/shiro/raw/8b4324cb359375f8b5b9538a7b5021a39c9d0873/src/org/jsecurity/authc/SimpleAuthenticationInfo.java",
+                "status": "modified",
+                "changes": 33,
+                "additions": 19,
+                "contents_url": "https://api.github.com/repos/apache/shiro/contents/src/org/jsecurity/authc/SimpleAuthenticationInfo.java?ref=8b4324cb359375f8b5b9538a7b5021a39c9d0873",
+                "patch": "@@ -70,38 +70,43 @@ public void setCredentials(Object credentials) {\n \n     @SuppressWarnings(\"unchecked\")\n     public void merge(AuthenticationInfo info) {\n-        if (info == null || info.getPrincipals() == null) {\n+        if (info == null || info.getPrincipals() == null || info.getPrincipals().isEmpty()) {\n             return;\n         }\n \n         if (this.principals == null) {\n-            this.principals = new SimplePrincipalCollection();\n-        }\n-\n-        if (this.principals instanceof MutablePrincipalCollection) {\n-            ((MutablePrincipalCollection) this.principals).addAll(info.getPrincipals());\n+            this.principals = info.getPrincipals();\n         } else {\n-            throw new IllegalStateException(\"Attempt to merge authentication info, but PrincipalCollection is not an \" +\n-                    \"instance of MutablePrincipalCollection.\");\n+            if (this.principals instanceof MutablePrincipalCollection) {\n+                ((MutablePrincipalCollection) this.principals).addAll(info.getPrincipals());\n+            } else {\n+                this.principals = new SimplePrincipalCollection(this.principals);\n+            }\n         }\n \n         Object thisCredentials = getCredentials();\n         Object otherCredentials = info.getCredentials();\n \n+        if (otherCredentials == null) {\n+            return;\n+        }\n+\n+        if (thisCredentials == null) {\n+            this.credentials = otherCredentials;\n+            return;\n+        }\n+\n         if (!(thisCredentials instanceof Collection)) {\n             Set newSet = new HashSet();\n-            if (thisCredentials != null) {\n-                newSet.add(thisCredentials);\n-                setCredentials(newSet);\n-            }\n+            newSet.add(thisCredentials);\n+            setCredentials(newSet);\n         }\n \n         // At this point, the credentials should be a collection\n         Collection credentialCollection = (Collection) getCredentials();\n         if (otherCredentials instanceof Collection) {\n             credentialCollection.addAll((Collection) otherCredentials);\n-\n-        } else if (otherCredentials != null) {\n+        } else {\n             credentialCollection.add(otherCredentials);\n         }\n     }",
+                "deletions": 14
             },
             {
-                "additions": 45,
-                "blob_url": "https://github.com/apache/shiro/blob/8b4324cb359375f8b5b9538a7b5021a39c9d0873/test/org/jsecurity/authc/SimpleAuthenticationInfoTest.java",
-                "changes": 45,
-                "contents_url": "https://api.github.com/repos/apache/shiro/contents/test/org/jsecurity/authc/SimpleAuthenticationInfoTest.java?ref=8b4324cb359375f8b5b9538a7b5021a39c9d0873",
-                "deletions": 0,
-                "filename": "test/org/jsecurity/authc/SimpleAuthenticationInfoTest.java",
-                "patch": "@@ -0,0 +1,45 @@\n+/*\r\n+ * Licensed to the Apache Software Foundation (ASF) under one\r\n+ * or more contributor license agreements.  See the NOTICE file\r\n+ * distributed with this work for additional information\r\n+ * regarding copyright ownership.  The ASF licenses this file\r\n+ * to you under the Apache License, Version 2.0 (the\r\n+ * \"License\"); you may not use this file except in compliance\r\n+ * with the License.  You may obtain a copy of the License at\r\n+ *\r\n+ *     http://www.apache.org/licenses/LICENSE-2.0\r\n+ *\r\n+ * Unless required by applicable law or agreed to in writing,\r\n+ * software distributed under the License is distributed on an\r\n+ * \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\r\n+ * KIND, either express or implied.  See the License for the\r\n+ * specific language governing permissions and limitations\r\n+ * under the License.\r\n+ */\r\n+package org.jsecurity.authc;\r\n+\r\n+import org.junit.Test;\r\n+\r\n+/**\r\n+ * @author Les Hazlewood\r\n+ * @since 0.9\r\n+ */\r\n+public class SimpleAuthenticationInfoTest {\r\n+\r\n+    @Test\r\n+    public void testMergeWithEmptyInstances() {\r\n+        SimpleAuthenticationInfo aggregate = new SimpleAuthenticationInfo();\r\n+        SimpleAuthenticationInfo local = new SimpleAuthenticationInfo();\r\n+        aggregate.merge(local);\r\n+    }\r\n+\r\n+    /**\r\n+     * Verifies fix for JSEC-122\r\n+     */\r\n+    @Test\r\n+    public void testMergeWithAggregateNullCredentials() {\r\n+        SimpleAuthenticationInfo aggregate = new SimpleAuthenticationInfo();\r\n+        SimpleAuthenticationInfo local = new SimpleAuthenticationInfo(\"username\", \"password\", \"testRealm\");\r\n+        aggregate.merge(local);\r\n+    }\r\n+}\r",
-                "raw_url": "https://github.com/apache/shiro/raw/8b4324cb359375f8b5b9538a7b5021a39c9d0873/test/org/jsecurity/authc/SimpleAuthenticationInfoTest.java",
                 "sha": "2d449c80dbf52face34d4af5ae7c4fabe3427c3e",
-                "status": "added"
+                "filename": "test/org/jsecurity/authc/SimpleAuthenticationInfoTest.java",
+                "blob_url": "https://github.com/apache/shiro/blob/8b4324cb359375f8b5b9538a7b5021a39c9d0873/test/org/jsecurity/authc/SimpleAuthenticationInfoTest.java",
+                "raw_url": "https://github.com/apache/shiro/raw/8b4324cb359375f8b5b9538a7b5021a39c9d0873/test/org/jsecurity/authc/SimpleAuthenticationInfoTest.java",
+                "status": "added",
+                "changes": 45,
+                "additions": 45,
+                "contents_url": "https://api.github.com/repos/apache/shiro/contents/test/org/jsecurity/authc/SimpleAuthenticationInfoTest.java?ref=8b4324cb359375f8b5b9538a7b5021a39c9d0873",
+                "patch": "@@ -0,0 +1,45 @@\n+/*\r\n+ * Licensed to the Apache Software Foundation (ASF) under one\r\n+ * or more contributor license agreements.  See the NOTICE file\r\n+ * distributed with this work for additional information\r\n+ * regarding copyright ownership.  The ASF licenses this file\r\n+ * to you under the Apache License, Version 2.0 (the\r\n+ * \"License\"); you may not use this file except in compliance\r\n+ * with the License.  You may obtain a copy of the License at\r\n+ *\r\n+ *     http://www.apache.org/licenses/LICENSE-2.0\r\n+ *\r\n+ * Unless required by applicable law or agreed to in writing,\r\n+ * software distributed under the License is distributed on an\r\n+ * \"AS IS\" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY\r\n+ * KIND, either express or implied.  See the License for the\r\n+ * specific language governing permissions and limitations\r\n+ * under the License.\r\n+ */\r\n+package org.jsecurity.authc;\r\n+\r\n+import org.junit.Test;\r\n+\r\n+/**\r\n+ * @author Les Hazlewood\r\n+ * @since 0.9\r\n+ */\r\n+public class SimpleAuthenticationInfoTest {\r\n+\r\n+    @Test\r\n+    public void testMergeWithEmptyInstances() {\r\n+        SimpleAuthenticationInfo aggregate = new SimpleAuthenticationInfo();\r\n+        SimpleAuthenticationInfo local = new SimpleAuthenticationInfo();\r\n+        aggregate.merge(local);\r\n+    }\r\n+\r\n+    /**\r\n+     * Verifies fix for JSEC-122\r\n+     */\r\n+    @Test\r\n+    public void testMergeWithAggregateNullCredentials() {\r\n+        SimpleAuthenticationInfo aggregate = new SimpleAuthenticationInfo();\r\n+        SimpleAuthenticationInfo local = new SimpleAuthenticationInfo(\"username\", \"password\", \"testRealm\");\r\n+        aggregate.merge(local);\r\n+    }\r\n+}\r",
+                "deletions": 0
             }
         ],
-        "message": "JSEC-122 - fixed NPE\n\ngit-svn-id: https://svn.apache.org/repos/asf/incubator/jsecurity/trunk@711065 13f79535-47bb-0310-9956-ffa450edef68",
-        "parent": "https://github.com/apache/shiro/commit/8e2b39e9c73a8215520688017acd77cbe2f47dbc",
         "patched_files": [
             "SimpleAuthenticationInfo.java"
         ],
-        "repo": "shiro",
         "unit_tests": [
             "SimpleAuthenticationInfoTest.java"
         ]
     },
-    "shiro_9d2908e": {
-        "bug_id": "shiro_9d2908e",
-        "commit": "https://github.com/apache/shiro/commit/9d2908e656456e43485ff89600e8ec3b42d4d354",
-        "file": [
-            {
-                "additions": 5,
-                "blob_url": "https://github.com/apache/shiro/blob/9d2908e656456e43485ff89600e8ec3b42d4d354/core/src/main/java/org/apache/shiro/realm/AuthorizingRealm.java",
-                "changes": 7,
-                "contents_url": "https://api.github.com/repos/apache/shiro/contents/core/src/main/java/org/apache/shiro/realm/AuthorizingRealm.java?ref=9d2908e656456e43485ff89600e8ec3b42d4d354",
-                "deletions": 2,
-                "filename": "core/src/main/java/org/apache/shiro/realm/AuthorizingRealm.java",
-                "patch": "@@ -26,6 +26,7 @@\n import org.apache.shiro.subject.PrincipalCollection;\n import org.apache.shiro.util.CollectionUtils;\n import org.apache.shiro.util.Initializable;\n+import org.apache.shiro.util.StringUtils;\n import org.slf4j.Logger;\n import org.slf4j.LoggerFactory;\n \n@@ -431,8 +432,10 @@ protected void clearCachedAuthorizationInfo(PrincipalCollection principals) {\n         if (resolver != null && !CollectionUtils.isEmpty(stringPerms)) {\n             perms = new LinkedHashSet<Permission>(stringPerms.size());\n             for (String strPermission : stringPerms) {\n-                Permission permission = resolver.resolvePermission(strPermission);\n-                perms.add(permission);\n+                if (StringUtils.clean(strPermission) != null) {\n+                    Permission permission = resolver.resolvePermission(strPermission);\n+                    perms.add(permission);\n+                }\n             }\n         }\n         return perms;",
-                "raw_url": "https://github.com/apache/shiro/raw/9d2908e656456e43485ff89600e8ec3b42d4d354/core/src/main/java/org/apache/shiro/realm/AuthorizingRealm.java",
-                "sha": "8f69a2495a363d14bd15af374abf59a3e5cd931a",
-                "status": "modified"
-            },
-            {
-                "additions": 52,
-                "blob_url": "https://github.com/apache/shiro/blob/9d2908e656456e43485ff89600e8ec3b42d4d354/core/src/test/java/org/apache/shiro/realm/AuthorizingRealmTest.java",
-                "changes": 56,
-                "contents_url": "https://api.github.com/repos/apache/shiro/contents/core/src/test/java/org/apache/shiro/realm/AuthorizingRealmTest.java?ref=9d2908e656456e43485ff89600e8ec3b42d4d354",
-                "deletions": 4,
-                "filename": "core/src/test/java/org/apache/shiro/realm/AuthorizingRealmTest.java",
-                "patch": "@@ -18,23 +18,37 @@\n  */\n package org.apache.shiro.realm;\n \n-import org.apache.shiro.authc.*;\n+import java.security.Principal;\n+import java.util.ArrayList;\n+import java.util.Collection;\n+import java.util.HashSet;\n+import java.util.List;\n+import java.util.Set;\n+import org.apache.shiro.authc.AuthenticationException;\n+import org.apache.shiro.authc.AuthenticationInfo;\n+import org.apache.shiro.authc.AuthenticationToken;\n+import org.apache.shiro.authc.SimpleAccount;\n+import org.apache.shiro.authc.SimpleAuthenticationInfo;\n+import org.apache.shiro.authc.UsernamePasswordToken;\n import org.apache.shiro.authc.credential.AllowAllCredentialsMatcher;\n import org.apache.shiro.authz.AuthorizationInfo;\n import org.apache.shiro.authz.Permission;\n import org.apache.shiro.authz.SimpleAuthorizationInfo;\n import org.apache.shiro.authz.UnauthorizedException;\n import org.apache.shiro.authz.permission.RolePermissionResolver;\n import org.apache.shiro.authz.permission.WildcardPermission;\n+import org.apache.shiro.authz.permission.WildcardPermissionResolver;\n import org.apache.shiro.subject.PrincipalCollection;\n import org.apache.shiro.subject.SimplePrincipalCollection;\n import org.junit.After;\n-import static org.junit.Assert.*;\n import org.junit.Before;\n import org.junit.Test;\n \n-import java.security.Principal;\n-import java.util.*;\n+import static org.junit.Assert.assertEquals;\n+import static org.junit.Assert.assertFalse;\n+import static org.junit.Assert.assertNotNull;\n+import static org.junit.Assert.assertTrue;\n+import static org.junit.Assert.fail;\n \n \n /**\n@@ -214,6 +228,40 @@ public void testRealmWithRolePermissionResolver()\n         assertTrue( realm.isPermitted( pCollection, \"other:bar:foo\" ) );\n     }\n \n+    @Test\n+    public void testRealmWithEmptyOrNullPermissions() {\n+        Principal principal = new UsernamePrincipal(\"rolePermResolver\");\n+        PrincipalCollection pCollection = new SimplePrincipalCollection(principal, \"testRealmWithRolePermissionResolver\");\n+\n+        AuthorizingRealm realm = new AllowAllRealm();\n+        realm.setRolePermissionResolver( new RolePermissionResolver()\n+        {\n+            public Collection<Permission> resolvePermissionsInRole( String roleString )\n+            {\n+                Collection<Permission> permissions = new HashSet<Permission>();\n+                if( roleString.equals( ROLE ))\n+                {\n+                    permissions.add( new WildcardPermission( ROLE + \":perm1\" ) );\n+                    permissions.add( new WildcardPermission( ROLE + \":perm2\" ) );\n+                    permissions.add( new WildcardPermission( ROLE + \": \" ) );\n+                    permissions.add( new WildcardPermission( ROLE + \":\\t\" ) );\n+                    permissions.add( new WildcardPermission( \"other:*:foo\" ) );\n+                }\n+                return permissions;\n+            }\n+        });\n+\n+        realm.setPermissionResolver(new WildcardPermissionResolver());\n+        SimpleAuthorizationInfo authorizationInfo = (SimpleAuthorizationInfo) realm.getAuthorizationInfo(pCollection);\n+        assertNotNull(authorizationInfo);\n+        authorizationInfo.addStringPermission(\"\");\n+        authorizationInfo.addStringPermission(\" \");\n+        authorizationInfo.addStringPermission(\"\\t\");\n+        authorizationInfo.addStringPermission(null);\n+        Collection<Permission> permissions = realm.getPermissions(authorizationInfo);\n+        assertEquals(permissions.size(), 4);\n+    }\n+\n     private void assertArrayEquals(boolean[] expected, boolean[] actual) {\n         if (expected.length != actual.length) {\n             fail(\"Expected array of length [\" + expected.length + \"] but received array of length [\" + actual.length + \"]\");",
-                "raw_url": "https://github.com/apache/shiro/raw/9d2908e656456e43485ff89600e8ec3b42d4d354/core/src/test/java/org/apache/shiro/realm/AuthorizingRealmTest.java",
-                "sha": "c78d66919f4c0cabeb825a8d661529b510d70694",
-                "status": "modified"
-            }
-        ],
-        "message": "Merge pull request #132 from fpapon/SHIRO-685\n\n[SHIRO-685]\u00a0Potential NullPointerException if PermissionResolver retu\u2026",
-        "parent": "https://github.com/apache/shiro/commit/483b9587f3379a4e341f75967a86ebba37e678c8",
-        "patched_files": [
-            "AuthorizingRealm.java"
-        ],
-        "repo": "shiro",
-        "unit_tests": [
-            "AuthorizingRealmTest.java"
-        ]
-    },
     "shiro_c6fb056": {
-        "bug_id": "shiro_c6fb056",
+        "repo": "shiro",
+        "message": "Fixed NPE and classpath dependency for sample app\n\ngit-svn-id: https://svn.apache.org/repos/asf/incubator/jsecurity/trunk@710923 13f79535-47bb-0310-9956-ffa450edef68",
         "commit": "https://github.com/apache/shiro/commit/c6fb056edc840bda4fb3a3bf219de87439b2b3d6",
+        "parent": "https://github.com/apache/shiro/commit/7cd6d467881a10461e3cbdfaf50a54207b0458e6",
+        "bug_id": "shiro_c6fb056",
         "file": [
             {
-                "additions": 1,
-                "blob_url": "https://github.com/apache/shiro/blob/c6fb056edc840bda4fb3a3bf219de87439b2b3d6/ivy.xml",
-                "changes": 1,
-                "contents_url": "https://api.github.com/repos/apache/shiro/contents/ivy.xml?ref=c6fb056edc840bda4fb3a3bf219de87439b2b3d6",
-                "deletions": 0,
-                "filename": "ivy.xml",
-                "patch": "@@ -33,6 +33,7 @@\n         <dependency org=\"net.sourceforge.retroweaver\" name=\"retroweaver\" rev=\"2.0.5\" conf=\"compile\"/>\n         <dependency org=\"net.sourceforge.retroweaver\" name=\"retroweaver-rt\" rev=\"2.0.5\" conf=\"compile\"/>        \n         <dependency org=\"net.sf.ehcache\" name=\"ehcache\" rev=\"1.4.1\" transitive=\"false\" conf=\"compile,samples\"/>\n+        <dependency org=\"backport-util-concurrent\" name=\"backport-util-concurrent\" rev=\"3.1\" transitive=\"false\" conf=\"samples\"/>\n         <dependency org=\"quartz\" name=\"quartz\" rev=\"1.5.2\" transitive=\"false\" conf=\"compile\"/>\n         <dependency org=\"org.springframework\" name=\"spring\" rev=\"2.5.1\" transitive=\"false\" conf=\"compile,samples\"/>\n         <dependency org=\"org.springframework\" name=\"spring-webmvc\" rev=\"2.5.1\" transitive=\"false\" conf=\"samples\"/>",
-                "raw_url": "https://github.com/apache/shiro/raw/c6fb056edc840bda4fb3a3bf219de87439b2b3d6/ivy.xml",
                 "sha": "5f13b556c342b510fc628a0882eb88cda3906569",
-                "status": "modified"
-            },
-            {
-                "additions": 2,
-                "blob_url": "https://github.com/apache/shiro/blob/c6fb056edc840bda4fb3a3bf219de87439b2b3d6/samples/quickstart/WEB-INF/web.xml",
-                "changes": 4,
-                "contents_url": "https://api.github.com/repos/apache/shiro/contents/samples/quickstart/WEB-INF/web.xml?ref=c6fb056edc840bda4fb3a3bf219de87439b2b3d6",
-                "deletions": 2,
-                "filename": "samples/quickstart/WEB-INF/web.xml",
-                "patch": "@@ -8,7 +8,7 @@\n     <filter>\n         <filter-name>JSecurityFilter</filter-name>\n         <filter-class>org.jsecurity.web.servlet.JSecurityFilter</filter-class>\n-        <init-param><param-name>config</param-name><param-value>\n+        <!-- <init-param><param-name>config</param-name><param-value>\n \n             # The JSecurityFilter configuration is very powerful and flexible, while still remaining succinct.\n             # Please read the comprehensive example, with full comments and explanations, in the JavaDoc:\n@@ -21,7 +21,7 @@\n             [urls]\n             /account/** = authc\n             /remoting/** = authc, roles[b2bClient], perms[remote:invoke:\"lan,wan\"]\n-        </param-value></init-param>\n+        </param-value></init-param> -->\n     </filter>\n \n     <filter-mapping>",
-                "raw_url": "https://github.com/apache/shiro/raw/c6fb056edc840bda4fb3a3bf219de87439b2b3d6/samples/quickstart/WEB-INF/web.xml",
-                "sha": "733c9e32b1f28bbeab91d765b2c5c677545599b6",
-                "status": "modified"
-            },
-            {
-                "additions": 17,
-                "blob_url": "https://github.com/apache/shiro/blob/c6fb056edc840bda4fb3a3bf219de87439b2b3d6/src/org/jsecurity/config/ReflectionBuilder.java",
-                "changes": 32,
-                "contents_url": "https://api.github.com/repos/apache/shiro/contents/src/org/jsecurity/config/ReflectionBuilder.java?ref=c6fb056edc840bda4fb3a3bf219de87439b2b3d6",
-                "deletions": 15,
-                "filename": "src/org/jsecurity/config/ReflectionBuilder.java",
-                "patch": "@@ -27,18 +27,20 @@\n import java.util.Scanner;\r\n \r\n /**\r\n- * @since 0.9\r\n  * @author Les Hazlewood\r\n+ * @since 0.9\r\n  */\r\n public class ReflectionBuilder {\r\n \r\n     protected transient final Log log = LogFactory.getLog(getClass());\r\n \r\n-    protected Map<String,Object> objects = new LinkedHashMap<String,Object>();\r\n+    protected Map<String, Object> objects;\r\n \r\n-    public ReflectionBuilder(){}\r\n+    public ReflectionBuilder() {\r\n+        setObjects(new LinkedHashMap<String, Object>());\r\n+    }\r\n \r\n-    public ReflectionBuilder( Map<String,Object> defaults ) {\r\n+    public ReflectionBuilder(Map<String, Object> defaults) {\r\n         setObjects(defaults);\r\n     }\r\n \r\n@@ -50,7 +52,7 @@ public void setObjects(Map<String, Object> objects) {\n         this.objects = objects;\r\n     }\r\n \r\n-    private static String[] splitKeyValue( String line ) {\r\n+    private static String[] splitKeyValue(String line) {\r\n         try {\r\n             return StringUtils.splitKeyValue(line);\r\n         } catch (ParseException e) {\r\n@@ -93,12 +95,11 @@ public void setObjects(Map<String, Object> objects) {\n         return objects;\r\n     }\r\n \r\n-    public Map<String,Object> buildObjects( Map<String,String> kvPairs ) {\r\n-        if ( kvPairs == null || kvPairs.isEmpty() ) {\r\n-            return null;\r\n-        }\r\n-        for( Map.Entry<String,String> entry : kvPairs.entrySet() ) {\r\n-            applyProperty(entry.getKey(), entry.getValue(), objects );\r\n+    public Map<String, Object> buildObjects(Map<String, String> kvPairs) {\r\n+        if (kvPairs != null && !kvPairs.isEmpty()) {\r\n+            for (Map.Entry<String, String> entry : kvPairs.entrySet()) {\r\n+                applyProperty(entry.getKey(), entry.getValue(), objects);\r\n+            }\r\n         }\r\n \r\n         return objects;\r\n@@ -152,12 +153,13 @@ public void applyProperty(Object object, String propertyName, String value) {\n         } catch (Exception e) {\r\n             //perhaps the value was a reference to an object already defined:\r\n \r\n-            Object o = ( objects != null && !objects.isEmpty() ? objects.get(value) : null );\r\n-            if ( o != null ) {\r\n+            Object o = (objects != null && !objects.isEmpty() ? objects.get(value) : null);\r\n+            if (o != null) {\r\n                 try {\r\n-                    BeanUtils.setProperty(object, propertyName, o );\r\n+                    BeanUtils.setProperty(object, propertyName, o);\r\n                     return;\r\n-                } catch (Exception ignored) {}\r\n+                } catch (Exception ignored) {\r\n+                }\r\n             }\r\n \r\n             String msg = \"Unable to set property [\" + propertyName + \"] with value [\" + value + \"]\";\r",
-                "raw_url": "https://github.com/apache/shiro/raw/c6fb056edc840bda4fb3a3bf219de87439b2b3d6/src/org/jsecurity/config/ReflectionBuilder.java",
-                "sha": "238cfe867500fefc96a4599048fc3597287ff4e3",
-                "status": "modified"
-            },
-            {
+                "filename": "ivy.xml",
+                "blob_url": "https://github.com/apache/shiro/blob/c6fb056edc840bda4fb3a3bf219de87439b2b3d6/ivy.xml",
+                "raw_url": "https://github.com/apache/shiro/raw/c6fb056edc840bda4fb3a3bf219de87439b2b3d6/ivy.xml",
+                "status": "modified",
+                "changes": 1,
                 "additions": 1,
-                "blob_url": "https://github.com/apache/shiro/blob/c6fb056edc840bda4fb3a3bf219de87439b2b3d6/src/org/jsecurity/crypto/hash/AbstractHash.java",
-                "changes": 2,
-                "contents_url": "https://api.github.com/repos/apache/shiro/contents/src/org/jsecurity/crypto/hash/AbstractHash.java?ref=c6fb056edc840bda4fb3a3bf219de87439b2b3d6",
-                "deletions": 1,
-                "filename": "src/org/jsecurity/crypto/hash/AbstractHash.java",
-                "patch": "@@ -32,7 +32,7 @@\n  * can be useful.\n  * \n  * <p>This class and its subclasses support hashing with additional capabilities of salting and multiple iterations via\n- * overloaded constructors</tt>.\n+ * overloaded constructors</p>.\n  *\n  * @author Les Hazlewood\n  * @since 0.9",
-                "raw_url": "https://github.com/apache/shiro/raw/c6fb056edc840bda4fb3a3bf219de87439b2b3d6/src/org/jsecurity/crypto/hash/AbstractHash.java",
-                "sha": "8b80a4c188b287a7767792b92f68e0b676b3ded8",
-                "status": "modified"
+                "contents_url": "https://api.github.com/repos/apache/shiro/contents/ivy.xml?ref=c6fb056edc840bda4fb3a3bf219de87439b2b3d6",
+                "patch": "@@ -33,6 +33,7 @@\n         <dependency org=\"net.sourceforge.retroweaver\" name=\"retroweaver\" rev=\"2.0.5\" conf=\"compile\"/>\n         <dependency org=\"net.sourceforge.retroweaver\" name=\"retroweaver-rt\" rev=\"2.0.5\" conf=\"compile\"/>        \n         <dependency org=\"net.sf.ehcache\" name=\"ehcache\" rev=\"1.4.1\" transitive=\"false\" conf=\"compile,samples\"/>\n+        <dependency org=\"backport-util-concurrent\" name=\"backport-util-concurrent\" rev=\"3.1\" transitive=\"false\" conf=\"samples\"/>\n         <dependency org=\"quartz\" name=\"quartz\" rev=\"1.5.2\" transitive=\"false\" conf=\"compile\"/>\n         <dependency org=\"org.springframework\" name=\"spring\" rev=\"2.5.1\" transitive=\"false\" conf=\"compile,samples\"/>\n         <dependency org=\"org.springframework\" name=\"spring-webmvc\" rev=\"2.5.1\" transitive=\"false\" conf=\"samples\"/>",
+                "deletions": 0
             },
             {
-                "additions": 8,
-                "blob_url": "https://github.com/apache/shiro/blob/c6fb056edc840bda4fb3a3bf219de87439b2b3d6/src/org/jsecurity/io/IniResource.java",
-                "changes": 14,
-                "contents_url": "https://api.github.com/repos/apache/shiro/contents/src/org/jsecurity/io/IniResource.java?ref=c6fb056edc840bda4fb3a3bf219de87439b2b3d6",
-                "deletions": 6,
-                "filename": "src/org/jsecurity/io/IniResource.java",
-                "patch": "@@ -38,26 +38,28 @@\n \r\n     protected Map<String, Map<String,String>> sections = new LinkedHashMap<String, Map<String,String>>();\r\n \r\n-    public IniResource(){}\r\n+    public IniResource(){\r\n+    }\r\n \r\n     public IniResource(String configBodyOrResourcePath) {\r\n-        super(configBodyOrResourcePath);\r\n+        load(configBodyOrResourcePath);\r\n     }\r\n \r\n     public IniResource(String configBodyOrResourcePath, String charsetName) {\r\n-        super(configBodyOrResourcePath, charsetName);\r\n+        setCharsetName(charsetName);\r\n+        load( configBodyOrResourcePath );\r\n     }\r\n \r\n     public IniResource(InputStream is) {\r\n-        super(is);\r\n+        load(is);\r\n     }\r\n \r\n     public IniResource(Reader r) {\r\n-        super(r);\r\n+        load(r);\r\n     }\r\n \r\n     public IniResource(Scanner s) {\r\n-        super(s);\r\n+        load(s);\r\n     }\r\n \r\n     public Map<String, Map<String, String>> getSections() {\r",
-                "raw_url": "https://github.com/apache/shiro/raw/c6fb056edc840bda4fb3a3bf219de87439b2b3d6/src/org/jsecurity/io/IniResource.java",
-                "sha": "7af2bc89d8260fc0e6c408d0a36d0c5d807d8f9d",
-                "status": "modified"
-            },
-            {
-                "additions": 2,
-                "blob_url": "https://github.com/apache/shiro/blob/c6fb056edc840bda4fb3a3bf219de87439b2b3d6/src/org/jsecurity/io/TextResource.java",
+                "sha": "733c9e32b1f28bbeab91d765b2c5c677545599b6",
+                "filename": "samples/quickstart/WEB-INF/web.xml",
+                "blob_url": "https://github.com/apache/shiro/blob/c6fb056edc840bda4fb3a3bf219de87439b2b3d6/samples/quickstart/WEB-INF/web.xml",
+                "raw_url": "https://github.com/apache/shiro/raw/c6fb056edc840bda4fb3a3bf219de87439b2b3d6/samples/quickstart/WEB-INF/web.xml",
+                "status": "modified",
                 "changes": 4,
-                "contents_url": "https://api.github.com/repos/apache/shiro/contents/src/org/jsecurity/io/TextResource.java?ref=c6fb056edc840bda4fb3a3bf219de87439b2b3d6",
-                "deletions": 2,
-                "filename": "src/org/jsecurity/io/TextResource.java",
-                "patch": "@@ -64,8 +64,8 @@ public void load( String configBodyOrResourcePath ) {\n         try {\r\n             super.load(configBodyOrResourcePath);\r\n         } catch ( Exception e ) {\r\n-            if ( log.isDebugEnabled() ) {\r\n-                log.debug( \"Unable to load text resource from the string argument.  Attempting to use the string \" +\r\n+            if ( log.isTraceEnabled() ) {\r\n+                log.trace( \"Unable to load text resource from the string argument.  Attempting to use the string \" +\r\n                         \"argument as the text resource itself...\", e );\r\n             }\r\n             StringReader sr = new StringReader(configBodyOrResourcePath);\r",
-                "raw_url": "https://github.com/apache/shiro/raw/c6fb056edc840bda4fb3a3bf219de87439b2b3d6/src/org/jsecurity/io/TextResource.java",
-                "sha": "cf7ca1ca590f13b3d1edb578aa93f7270cd6a400",
-                "status": "modified"
+                "additions": 2,
+                "contents_url": "https://api.github.com/repos/apache/shiro/contents/samples/quickstart/WEB-INF/web.xml?ref=c6fb056edc840bda4fb3a3bf219de87439b2b3d6",
+                "patch": "@@ -8,7 +8,7 @@\n     <filter>\n         <filter-name>JSecurityFilter</filter-name>\n         <filter-class>org.jsecurity.web.servlet.JSecurityFilter</filter-class>\n-        <init-param><param-name>config</param-name><param-value>\n+        <!-- <init-param><param-name>config</param-name><param-value>\n \n             # The JSecurityFilter configuration is very powerful and flexible, while still remaining succinct.\n             # Please read the comprehensive example, with full comments and explanations, in the JavaDoc:\n@@ -21,7 +21,7 @@\n             [urls]\n             /account/** = authc\n             /remoting/** = authc, roles[b2bClient], perms[remote:invoke:\"lan,wan\"]\n-        </param-value></init-param>\n+        </param-value></init-param> -->\n     </filter>\n \n     <filter-mapping>",
+                "deletions": 2
             },
             {
-                "additions": 10,
-                "blob_url": "https://github.com/apache/shiro/blob/c6fb056edc840bda4fb3a3bf219de87439b2b3d6/test/org/jsecurity/web/servlet/JSecurityFilterTest.java",
-                "changes": 15,
-                "contents_url": "https://api.github.com/repos/apache/shiro/contents/test/org/jsecurity/web/servlet/JSecurityFilterTest.java?ref=c6fb056edc840bda4fb3a3bf219de87439b2b3d6",
-                "deletions": 5,
-                "filename": "test/org/jsecurity/web/servlet/JSecurityFilterTest.java",
-                "patch": "@@ -17,7 +17,6 @@\n \n import static org.easymock.EasyMock.*;\n import org.jsecurity.mgt.SecurityManager;\n-import org.junit.Before;\n import org.junit.Test;\n \n import javax.servlet.FilterConfig;\n@@ -33,16 +32,14 @@\n     private FilterConfig mockFilterConfig;\n     private ServletContext mockServletContext;\n \n-    @Before\n-    public void setUp() throws Exception {\n+    protected void setUp(String config) {\n         mockFilterConfig = createMock(FilterConfig.class);\n         mockServletContext = createMock(ServletContext.class);\n \n         expect(mockFilterConfig.getServletContext()).andReturn(mockServletContext);\n         expect(mockFilterConfig.getInitParameter(JSecurityFilter.CONFIG_CLASS_NAME_INIT_PARAM_NAME)).andReturn(null).once();\n-        expect(mockFilterConfig.getInitParameter(JSecurityFilter.CONFIG_INIT_PARAM_NAME)).andReturn(null).once();\n+        expect(mockFilterConfig.getInitParameter(JSecurityFilter.CONFIG_INIT_PARAM_NAME)).andReturn(config).once();\n \n-        //expect(mockServletContext.getAttribute(SecurityManagerListener.SECURITY_MANAGER_CONTEXT_KEY)).andReturn(null).atLeastOnce();\n         mockServletContext.setAttribute(eq(SecurityManagerListener.SECURITY_MANAGER_CONTEXT_KEY),isA(SecurityManager.class));\n     }\n \n@@ -74,6 +71,14 @@ protected void replayAndVerify() throws Exception {\n \n     @Test\n     public void testDefaultConfig() throws Exception {\n+        setUp(null);\n+        replayAndVerify();\n+    }\n+\n+    @Test\n+    public void testSimpleConfig() throws Exception {\n+        setUp(\"[interceptors]\\n\" +\n+                \"authc.successUrl = /index.jsp\");\n         replayAndVerify();\n     }\n }",
-                "raw_url": "https://github.com/apache/shiro/raw/c6fb056edc840bda4fb3a3bf219de87439b2b3d6/test/org/jsecurity/web/servlet/JSecurityFilterTest.java",
+                "sha": "238cfe867500fefc96a4599048fc3597287ff4e3",
+                "filename": "src/org/jsecurity/config/ReflectionBuilder.java",
+                "blob_url": "https://github.com/apache/shiro/blob/c6fb056edc840bda4fb3a3bf219de87439b2b3d6/src/org/jsecurity/config/ReflectionBuilder.java",
+                "raw_url": "https://github.com/apache/shiro/raw/c6fb056edc840bda4fb3a3bf219de87439b2b3d6/src/org/jsecurity/config/ReflectionBuilder.java",
+                "status": "modified",
+                "changes": 32,
+                "additions": 17,
+                "contents_url": "https://api.github.com/repos/apache/shiro/contents/src/org/jsecurity/config/ReflectionBuilder.java?ref=c6fb056edc840bda4fb3a3bf219de87439b2b3d6",
+                "patch": "@@ -27,18 +27,20 @@\n import java.util.Scanner;\r\n \r\n /**\r\n- * @since 0.9\r\n  * @author Les Hazlewood\r\n+ * @since 0.9\r\n  */\r\n public class ReflectionBuilder {\r\n \r\n     protected transient final Log log = LogFactory.getLog(getClass());\r\n \r\n-    protected Map<String,Object> objects = new LinkedHashMap<String,Object>();\r\n+    protected Map<String, Object> objects;\r\n \r\n-    public ReflectionBuilder(){}\r\n+    public ReflectionBuilder() {\r\n+        setObjects(new LinkedHashMap<String, Object>());\r\n+    }\r\n \r\n-    public ReflectionBuilder( Map<String,Object> defaults ) {\r\n+    public ReflectionBuilder(Map<String, Object> defaults) {\r\n         setObjects(defaults);\r\n     }\r\n \r\n@@ -50,7 +52,7 @@ public void setObjects(Map<String, Object> objects) {\n         this.objects = objects;\r\n     }\r\n \r\n-    private static String[] splitKeyValue( String line ) {\r\n+    private static String[] splitKeyValue(String line) {\r\n         try {\r\n             return StringUtils.splitKeyValue(line);\r\n         } catch (ParseException e) {\r\n@@ -93,12 +95,11 @@ public void setObjects(Map<String, Object> objects) {\n         return objects;\r\n     }\r\n \r\n-    public Map<String,Object> buildObjects( Map<String,String> kvPairs ) {\r\n-        if ( kvPairs == null || kvPairs.isEmpty() ) {\r\n-            return null;\r\n-        }\r\n-        for( Map.Entry<String,String> entry : kvPairs.entrySet() ) {\r\n-            applyProperty(entry.getKey(), entry.getValue(), objects );\r\n+    public Map<String, Object> buildObjects(Map<String, String> kvPairs) {\r\n+        if (kvPairs != null && !kvPairs.isEmpty()) {\r\n+            for (Map.Entry<String, String> entry : kvPairs.entrySet()) {\r\n+                applyProperty(entry.getKey(), entry.getValue(), objects);\r\n+            }\r\n         }\r\n \r\n         return objects;\r\n@@ -152,12 +153,13 @@ public void applyProperty(Object object, String propertyName, String value) {\n         } catch (Exception e) {\r\n             //perhaps the value was a reference to an object already defined:\r\n \r\n-            Object o = ( objects != null && !objects.isEmpty() ? objects.get(value) : null );\r\n-            if ( o != null ) {\r\n+            Object o = (objects != null && !objects.isEmpty() ? objects.get(value) : null);\r\n+            if (o != null) {\r\n                 try {\r\n-                    BeanUtils.setProperty(object, propertyName, o );\r\n+                    BeanUtils.setProperty(object, propertyName, o);\r\n                     return;\r\n-                } catch (Exception ignored) {}\r\n+                } catch (Exception ignored) {\r\n+                }\r\n             }\r\n \r\n             String msg = \"Unable to set property [\" + propertyName + \"] with value [\" + value + \"]\";\r",
+                "deletions": 15
+            },
+            {
+                "sha": "8b80a4c188b287a7767792b92f68e0b676b3ded8",
+                "filename": "src/org/jsecurity/crypto/hash/AbstractHash.java",
+                "blob_url": "https://github.com/apache/shiro/blob/c6fb056edc840bda4fb3a3bf219de87439b2b3d6/src/org/jsecurity/crypto/hash/AbstractHash.java",
+                "raw_url": "https://github.com/apache/shiro/raw/c6fb056edc840bda4fb3a3bf219de87439b2b3d6/src/org/jsecurity/crypto/hash/AbstractHash.java",
+                "status": "modified",
+                "changes": 2,
+                "additions": 1,
+                "contents_url": "https://api.github.com/repos/apache/shiro/contents/src/org/jsecurity/crypto/hash/AbstractHash.java?ref=c6fb056edc840bda4fb3a3bf219de87439b2b3d6",
+                "patch": "@@ -32,7 +32,7 @@\n  * can be useful.\n  * \n  * <p>This class and its subclasses support hashing with additional capabilities of salting and multiple iterations via\n- * overloaded constructors</tt>.\n+ * overloaded constructors</p>.\n  *\n  * @author Les Hazlewood\n  * @since 0.9",
+                "deletions": 1
+            },
+            {
+                "sha": "7af2bc89d8260fc0e6c408d0a36d0c5d807d8f9d",
+                "filename": "src/org/jsecurity/io/IniResource.java",
+                "blob_url": "https://github.com/apache/shiro/blob/c6fb056edc840bda4fb3a3bf219de87439b2b3d6/src/org/jsecurity/io/IniResource.java",
+                "raw_url": "https://github.com/apache/shiro/raw/c6fb056edc840bda4fb3a3bf219de87439b2b3d6/src/org/jsecurity/io/IniResource.java",
+                "status": "modified",
+                "changes": 14,
+                "additions": 8,
+                "contents_url": "https://api.github.com/repos/apache/shiro/contents/src/org/jsecurity/io/IniResource.java?ref=c6fb056edc840bda4fb3a3bf219de87439b2b3d6",
+                "patch": "@@ -38,26 +38,28 @@\n \r\n     protected Map<String, Map<String,String>> sections = new LinkedHashMap<String, Map<String,String>>();\r\n \r\n-    public IniResource(){}\r\n+    public IniResource(){\r\n+    }\r\n \r\n     public IniResource(String configBodyOrResourcePath) {\r\n-        super(configBodyOrResourcePath);\r\n+        load(configBodyOrResourcePath);\r\n     }\r\n \r\n     public IniResource(String configBodyOrResourcePath, String charsetName) {\r\n-        super(configBodyOrResourcePath, charsetName);\r\n+        setCharsetName(charsetName);\r\n+        load( configBodyOrResourcePath );\r\n     }\r\n \r\n     public IniResource(InputStream is) {\r\n-        super(is);\r\n+        load(is);\r\n     }\r\n \r\n     public IniResource(Reader r) {\r\n-        super(r);\r\n+        load(r);\r\n     }\r\n \r\n     public IniResource(Scanner s) {\r\n-        super(s);\r\n+        load(s);\r\n     }\r\n \r\n     public Map<String, Map<String, String>> getSections() {\r",
+                "deletions": 6
+            },
+            {
+                "sha": "cf7ca1ca590f13b3d1edb578aa93f7270cd6a400",
+                "filename": "src/org/jsecurity/io/TextResource.java",
+                "blob_url": "https://github.com/apache/shiro/blob/c6fb056edc840bda4fb3a3bf219de87439b2b3d6/src/org/jsecurity/io/TextResource.java",
+                "raw_url": "https://github.com/apache/shiro/raw/c6fb056edc840bda4fb3a3bf219de87439b2b3d6/src/org/jsecurity/io/TextResource.java",
+                "status": "modified",
+                "changes": 4,
+                "additions": 2,
+                "contents_url": "https://api.github.com/repos/apache/shiro/contents/src/org/jsecurity/io/TextResource.java?ref=c6fb056edc840bda4fb3a3bf219de87439b2b3d6",
+                "patch": "@@ -64,8 +64,8 @@ public void load( String configBodyOrResourcePath ) {\n         try {\r\n             super.load(configBodyOrResourcePath);\r\n         } catch ( Exception e ) {\r\n-            if ( log.isDebugEnabled() ) {\r\n-                log.debug( \"Unable to load text resource from the string argument.  Attempting to use the string \" +\r\n+            if ( log.isTraceEnabled() ) {\r\n+                log.trace( \"Unable to load text resource from the string argument.  Attempting to use the string \" +\r\n                         \"argument as the text resource itself...\", e );\r\n             }\r\n             StringReader sr = new StringReader(configBodyOrResourcePath);\r",
+                "deletions": 2
+            },
+            {
                 "sha": "869968fa862a9f4b2a376f58b8c5a6b5d91fd911",
-                "status": "modified"
+                "filename": "test/org/jsecurity/web/servlet/JSecurityFilterTest.java",
+                "blob_url": "https://github.com/apache/shiro/blob/c6fb056edc840bda4fb3a3bf219de87439b2b3d6/test/org/jsecurity/web/servlet/JSecurityFilterTest.java",
+                "raw_url": "https://github.com/apache/shiro/raw/c6fb056edc840bda4fb3a3bf219de87439b2b3d6/test/org/jsecurity/web/servlet/JSecurityFilterTest.java",
+                "status": "modified",
+                "changes": 15,
+                "additions": 10,
+                "contents_url": "https://api.github.com/repos/apache/shiro/contents/test/org/jsecurity/web/servlet/JSecurityFilterTest.java?ref=c6fb056edc840bda4fb3a3bf219de87439b2b3d6",
+                "patch": "@@ -17,7 +17,6 @@\n \n import static org.easymock.EasyMock.*;\n import org.jsecurity.mgt.SecurityManager;\n-import org.junit.Before;\n import org.junit.Test;\n \n import javax.servlet.FilterConfig;\n@@ -33,16 +32,14 @@\n     private FilterConfig mockFilterConfig;\n     private ServletContext mockServletContext;\n \n-    @Before\n-    public void setUp() throws Exception {\n+    protected void setUp(String config) {\n         mockFilterConfig = createMock(FilterConfig.class);\n         mockServletContext = createMock(ServletContext.class);\n \n         expect(mockFilterConfig.getServletContext()).andReturn(mockServletContext);\n         expect(mockFilterConfig.getInitParameter(JSecurityFilter.CONFIG_CLASS_NAME_INIT_PARAM_NAME)).andReturn(null).once();\n-        expect(mockFilterConfig.getInitParameter(JSecurityFilter.CONFIG_INIT_PARAM_NAME)).andReturn(null).once();\n+        expect(mockFilterConfig.getInitParameter(JSecurityFilter.CONFIG_INIT_PARAM_NAME)).andReturn(config).once();\n \n-        //expect(mockServletContext.getAttribute(SecurityManagerListener.SECURITY_MANAGER_CONTEXT_KEY)).andReturn(null).atLeastOnce();\n         mockServletContext.setAttribute(eq(SecurityManagerListener.SECURITY_MANAGER_CONTEXT_KEY),isA(SecurityManager.class));\n     }\n \n@@ -74,6 +71,14 @@ protected void replayAndVerify() throws Exception {\n \n     @Test\n     public void testDefaultConfig() throws Exception {\n+        setUp(null);\n+        replayAndVerify();\n+    }\n+\n+    @Test\n+    public void testSimpleConfig() throws Exception {\n+        setUp(\"[interceptors]\\n\" +\n+                \"authc.successUrl = /index.jsp\");\n         replayAndVerify();\n     }\n }",
+                "deletions": 5
             }
         ],
-        "message": "Fixed NPE and classpath dependency for sample app\n\ngit-svn-id: https://svn.apache.org/repos/asf/incubator/jsecurity/trunk@710923 13f79535-47bb-0310-9956-ffa450edef68",
-        "parent": "https://github.com/apache/shiro/commit/7cd6d467881a10461e3cbdfaf50a54207b0458e6",
         "patched_files": [
-            "AbstractHash.java",
-            "ivy.xml",
-            "TextResource.java",
-            "web.xml",
-            "IniResource.java",
             "ReflectionBuilder.java",
-            "JSecurityFilter.java"
+            "AbstractHash.java",
+            "TextResource.java",
+            "JSecurityFilter.java",
+            "IniResource.java"
         ],
-        "repo": "shiro",
         "unit_tests": [
             "JSecurityFilterTest.java"
         ]
     },
-    "shiro_d7d33bf": {
-        "bug_id": "shiro_d7d33bf",
-        "commit": "https://github.com/apache/shiro/commit/d7d33bfbd0a1d3f41b288d1ae8bf8f6fefe35022",
+    "shiro_3ca513f": {
+        "repo": "shiro",
+        "message": "SHIRO-473 Fix NPE thrown from DefaultAnnotationResolver.getAnnotation",
+        "commit": "https://github.com/apache/shiro/commit/3ca513f1f2f0472251b73c16c1507034a7028b24",
+        "parent": "https://github.com/apache/shiro/commit/08a860f5ac0fcf9c64309981bdac6325a3360876",
+        "bug_id": "shiro_3ca513f",
         "file": [
             {
-                "additions": 5,
-                "blob_url": "https://github.com/apache/shiro/blob/d7d33bfbd0a1d3f41b288d1ae8bf8f6fefe35022/core/src/main/java/org/apache/shiro/realm/AuthorizingRealm.java",
+                "sha": "d7fd4aec7a22e9c0196009b28b98d94f28fb2a3b",
+                "filename": "core/src/main/java/org/apache/shiro/aop/DefaultAnnotationResolver.java",
+                "blob_url": "https://github.com/apache/shiro/blob/3ca513f1f2f0472251b73c16c1507034a7028b24/core/src/main/java/org/apache/shiro/aop/DefaultAnnotationResolver.java",
+                "raw_url": "https://github.com/apache/shiro/raw/3ca513f1f2f0472251b73c16c1507034a7028b24/core/src/main/java/org/apache/shiro/aop/DefaultAnnotationResolver.java",
+                "status": "modified",
                 "changes": 7,
-                "contents_url": "https://api.github.com/repos/apache/shiro/contents/core/src/main/java/org/apache/shiro/realm/AuthorizingRealm.java?ref=d7d33bfbd0a1d3f41b288d1ae8bf8f6fefe35022",
-                "deletions": 2,
-                "filename": "core/src/main/java/org/apache/shiro/realm/AuthorizingRealm.java",
-                "patch": "@@ -26,6 +26,7 @@\n import org.apache.shiro.subject.PrincipalCollection;\n import org.apache.shiro.util.CollectionUtils;\n import org.apache.shiro.util.Initializable;\n+import org.apache.shiro.util.StringUtils;\n import org.slf4j.Logger;\n import org.slf4j.LoggerFactory;\n \n@@ -431,8 +432,10 @@ protected void clearCachedAuthorizationInfo(PrincipalCollection principals) {\n         if (resolver != null && !CollectionUtils.isEmpty(stringPerms)) {\n             perms = new LinkedHashSet<Permission>(stringPerms.size());\n             for (String strPermission : stringPerms) {\n-                Permission permission = resolver.resolvePermission(strPermission);\n-                perms.add(permission);\n+                if (StringUtils.clean(strPermission) != null) {\n+                    Permission permission = resolver.resolvePermission(strPermission);\n+                    perms.add(permission);\n+                }\n             }\n         }\n         return perms;",
-                "raw_url": "https://github.com/apache/shiro/raw/d7d33bfbd0a1d3f41b288d1ae8bf8f6fefe35022/core/src/main/java/org/apache/shiro/realm/AuthorizingRealm.java",
-                "sha": "8f69a2495a363d14bd15af374abf59a3e5cd931a",
-                "status": "modified"
+                "additions": 6,
+                "contents_url": "https://api.github.com/repos/apache/shiro/contents/core/src/main/java/org/apache/shiro/aop/DefaultAnnotationResolver.java?ref=3ca513f1f2f0472251b73c16c1507034a7028b24",
+                "patch": "@@ -59,6 +59,11 @@ public Annotation getAnnotation(MethodInvocation mi, Class<? extends Annotation>\n \r\n         }\r\n         Annotation annotation = m.getAnnotation(clazz);\r\n-        return annotation == null ? mi.getThis().getClass().getAnnotation(clazz) : annotation;\r\n+        if (annotation == null ) {\r\n+            Object miThis = mi.getThis();\r\n+            //SHIRO-473 - miThis could be null for static methods, just return null\r\n+            annotation = miThis != null ? miThis.getClass().getAnnotation(clazz) : null;\r\n+        }\r\n+        return annotation;\r\n     }\r\n }\r",
+                "deletions": 1
             },
             {
-                "additions": 52,
-                "blob_url": "https://github.com/apache/shiro/blob/d7d33bfbd0a1d3f41b288d1ae8bf8f6fefe35022/core/src/test/java/org/apache/shiro/realm/AuthorizingRealmTest.java",
-                "changes": 56,
-                "contents_url": "https://api.github.com/repos/apache/shiro/contents/core/src/test/java/org/apache/shiro/realm/AuthorizingRealmTest.java?ref=d7d33bfbd0a1d3f41b288d1ae8bf8f6fefe35022",
-                "deletions": 4,
-                "filename": "core/src/test/java/org/apache/shiro/realm/AuthorizingRealmTest.java",
-                "patch": "@@ -18,23 +18,37 @@\n  */\n package org.apache.shiro.realm;\n \n-import org.apache.shiro.authc.*;\n+import java.security.Principal;\n+import java.util.ArrayList;\n+import java.util.Collection;\n+import java.util.HashSet;\n+import java.util.List;\n+import java.util.Set;\n+import org.apache.shiro.authc.AuthenticationException;\n+import org.apache.shiro.authc.AuthenticationInfo;\n+import org.apache.shiro.authc.AuthenticationToken;\n+import org.apache.shiro.authc.SimpleAccount;\n+import org.apache.shiro.authc.SimpleAuthenticationInfo;\n+import org.apache.shiro.authc.UsernamePasswordToken;\n import org.apache.shiro.authc.credential.AllowAllCredentialsMatcher;\n import org.apache.shiro.authz.AuthorizationInfo;\n import org.apache.shiro.authz.Permission;\n import org.apache.shiro.authz.SimpleAuthorizationInfo;\n import org.apache.shiro.authz.UnauthorizedException;\n import org.apache.shiro.authz.permission.RolePermissionResolver;\n import org.apache.shiro.authz.permission.WildcardPermission;\n+import org.apache.shiro.authz.permission.WildcardPermissionResolver;\n import org.apache.shiro.subject.PrincipalCollection;\n import org.apache.shiro.subject.SimplePrincipalCollection;\n import org.junit.After;\n-import static org.junit.Assert.*;\n import org.junit.Before;\n import org.junit.Test;\n \n-import java.security.Principal;\n-import java.util.*;\n+import static org.junit.Assert.assertEquals;\n+import static org.junit.Assert.assertFalse;\n+import static org.junit.Assert.assertNotNull;\n+import static org.junit.Assert.assertTrue;\n+import static org.junit.Assert.fail;\n \n \n /**\n@@ -214,6 +228,40 @@ public void testRealmWithRolePermissionResolver()\n         assertTrue( realm.isPermitted( pCollection, \"other:bar:foo\" ) );\n     }\n \n+    @Test\n+    public void testRealmWithEmptyOrNullPermissions() {\n+        Principal principal = new UsernamePrincipal(\"rolePermResolver\");\n+        PrincipalCollection pCollection = new SimplePrincipalCollection(principal, \"testRealmWithRolePermissionResolver\");\n+\n+        AuthorizingRealm realm = new AllowAllRealm();\n+        realm.setRolePermissionResolver( new RolePermissionResolver()\n+        {\n+            public Collection<Permission> resolvePermissionsInRole( String roleString )\n+            {\n+                Collection<Permission> permissions = new HashSet<Permission>();\n+                if( roleString.equals( ROLE ))\n+                {\n+                    permissions.add( new WildcardPermission( ROLE + \":perm1\" ) );\n+                    permissions.add( new WildcardPermission( ROLE + \":perm2\" ) );\n+                    permissions.add( new WildcardPermission( ROLE + \": \" ) );\n+                    permissions.add( new WildcardPermission( ROLE + \":\\t\" ) );\n+                    permissions.add( new WildcardPermission( \"other:*:foo\" ) );\n+                }\n+                return permissions;\n+            }\n+        });\n+\n+        realm.setPermissionResolver(new WildcardPermissionResolver());\n+        SimpleAuthorizationInfo authorizationInfo = (SimpleAuthorizationInfo) realm.getAuthorizationInfo(pCollection);\n+        assertNotNull(authorizationInfo);\n+        authorizationInfo.addStringPermission(\"\");\n+        authorizationInfo.addStringPermission(\" \");\n+        authorizationInfo.addStringPermission(\"\\t\");\n+        authorizationInfo.addStringPermission(null);\n+        Collection<Permission> permissions = realm.getPermissions(authorizationInfo);\n+        assertEquals(permissions.size(), 4);\n+    }\n+\n     private void assertArrayEquals(boolean[] expected, boolean[] actual) {\n         if (expected.length != actual.length) {\n             fail(\"Expected array of length [\" + expected.length + \"] but received array of length [\" + actual.length + \"]\");",
-                "raw_url": "https://github.com/apache/shiro/raw/d7d33bfbd0a1d3f41b288d1ae8bf8f6fefe35022/core/src/test/java/org/apache/shiro/realm/AuthorizingRealmTest.java",
-                "sha": "c78d66919f4c0cabeb825a8d661529b510d70694",
-                "status": "modified"
+                "sha": "1b2916c5e48b95b8db702462295afa49f11e443a",
+                "filename": "core/src/test/java/org/apache/shiro/aop/AnnotationResolverTest.java",
+                "blob_url": "https://github.com/apache/shiro/blob/3ca513f1f2f0472251b73c16c1507034a7028b24/core/src/test/java/org/apache/shiro/aop/AnnotationResolverTest.java",
+                "raw_url": "https://github.com/apache/shiro/raw/3ca513f1f2f0472251b73c16c1507034a7028b24/core/src/test/java/org/apache/shiro/aop/AnnotationResolverTest.java",
+                "status": "modified",
+                "changes": 10,
+                "additions": 10,
+                "contents_url": "https://api.github.com/repos/apache/shiro/contents/core/src/test/java/org/apache/shiro/aop/AnnotationResolverTest.java?ref=3ca513f1f2f0472251b73c16c1507034a7028b24",
+                "patch": "@@ -60,5 +60,15 @@ public void testAnnotationFoundFromMethod() throws SecurityException, NoSuchMeth\n         replay(methodInvocation);\r\n \tassertNotNull(annotationResolver.getAnnotation(methodInvocation, RequiresUser.class));\r\n     }\r\n+\r\n+    @Test\r\n+    public void testNullMethodInvocation() throws SecurityException, NoSuchMethodException {\r\n+        MethodInvocation methodInvocation = createMock(MethodInvocation.class);\r\n+        Method method = MyFixture.class.getDeclaredMethod(\"operateThis\");\r\n+        expect(methodInvocation.getMethod()).andReturn(method);\r\n+        expect(methodInvocation.getThis()).andReturn(null);\r\n+        replay(methodInvocation);\r\n+        assertNull(annotationResolver.getAnnotation(methodInvocation, RequiresUser.class));\r\n+    }\r\n }\r\n \r",
+                "deletions": 0
             }
         ],
+        "patched_files": [
+            "AnnotationResolver.java",
+            "DefaultAnnotationResolver.java"
+        ],
+        "unit_tests": [
+            "AnnotationResolverTest.java"
+        ]
+    },
+    "shiro_d7d33bf": {
+        "repo": "shiro",
         "message": "[SHIRO-685]\u00a0Potential NullPointerException if PermissionResolver return null/empty string",
+        "commit": "https://github.com/apache/shiro/commit/d7d33bfbd0a1d3f41b288d1ae8bf8f6fefe35022",
         "parent": "https://github.com/apache/shiro/commit/6891aaf74e0b61296e4c47439bf333ada7b0032e",
+        "bug_id": "shiro_d7d33bf",
+        "file": [
+            {
+                "sha": "8f69a2495a363d14bd15af374abf59a3e5cd931a",
+                "filename": "core/src/main/java/org/apache/shiro/realm/AuthorizingRealm.java",
+                "blob_url": "https://github.com/apache/shiro/blob/d7d33bfbd0a1d3f41b288d1ae8bf8f6fefe35022/core/src/main/java/org/apache/shiro/realm/AuthorizingRealm.java",
+                "raw_url": "https://github.com/apache/shiro/raw/d7d33bfbd0a1d3f41b288d1ae8bf8f6fefe35022/core/src/main/java/org/apache/shiro/realm/AuthorizingRealm.java",
+                "status": "modified",
+                "changes": 7,
+                "additions": 5,
+                "contents_url": "https://api.github.com/repos/apache/shiro/contents/core/src/main/java/org/apache/shiro/realm/AuthorizingRealm.java?ref=d7d33bfbd0a1d3f41b288d1ae8bf8f6fefe35022",
+                "patch": "@@ -26,6 +26,7 @@\n import org.apache.shiro.subject.PrincipalCollection;\n import org.apache.shiro.util.CollectionUtils;\n import org.apache.shiro.util.Initializable;\n+import org.apache.shiro.util.StringUtils;\n import org.slf4j.Logger;\n import org.slf4j.LoggerFactory;\n \n@@ -431,8 +432,10 @@ protected void clearCachedAuthorizationInfo(PrincipalCollection principals) {\n         if (resolver != null && !CollectionUtils.isEmpty(stringPerms)) {\n             perms = new LinkedHashSet<Permission>(stringPerms.size());\n             for (String strPermission : stringPerms) {\n-                Permission permission = resolver.resolvePermission(strPermission);\n-                perms.add(permission);\n+                if (StringUtils.clean(strPermission) != null) {\n+                    Permission permission = resolver.resolvePermission(strPermission);\n+                    perms.add(permission);\n+                }\n             }\n         }\n         return perms;",
+                "deletions": 2
+            },
+            {
+                "sha": "c78d66919f4c0cabeb825a8d661529b510d70694",
+                "filename": "core/src/test/java/org/apache/shiro/realm/AuthorizingRealmTest.java",
+                "blob_url": "https://github.com/apache/shiro/blob/d7d33bfbd0a1d3f41b288d1ae8bf8f6fefe35022/core/src/test/java/org/apache/shiro/realm/AuthorizingRealmTest.java",
+                "raw_url": "https://github.com/apache/shiro/raw/d7d33bfbd0a1d3f41b288d1ae8bf8f6fefe35022/core/src/test/java/org/apache/shiro/realm/AuthorizingRealmTest.java",
+                "status": "modified",
+                "changes": 56,
+                "additions": 52,
+                "contents_url": "https://api.github.com/repos/apache/shiro/contents/core/src/test/java/org/apache/shiro/realm/AuthorizingRealmTest.java?ref=d7d33bfbd0a1d3f41b288d1ae8bf8f6fefe35022",
+                "patch": "@@ -18,23 +18,37 @@\n  */\n package org.apache.shiro.realm;\n \n-import org.apache.shiro.authc.*;\n+import java.security.Principal;\n+import java.util.ArrayList;\n+import java.util.Collection;\n+import java.util.HashSet;\n+import java.util.List;\n+import java.util.Set;\n+import org.apache.shiro.authc.AuthenticationException;\n+import org.apache.shiro.authc.AuthenticationInfo;\n+import org.apache.shiro.authc.AuthenticationToken;\n+import org.apache.shiro.authc.SimpleAccount;\n+import org.apache.shiro.authc.SimpleAuthenticationInfo;\n+import org.apache.shiro.authc.UsernamePasswordToken;\n import org.apache.shiro.authc.credential.AllowAllCredentialsMatcher;\n import org.apache.shiro.authz.AuthorizationInfo;\n import org.apache.shiro.authz.Permission;\n import org.apache.shiro.authz.SimpleAuthorizationInfo;\n import org.apache.shiro.authz.UnauthorizedException;\n import org.apache.shiro.authz.permission.RolePermissionResolver;\n import org.apache.shiro.authz.permission.WildcardPermission;\n+import org.apache.shiro.authz.permission.WildcardPermissionResolver;\n import org.apache.shiro.subject.PrincipalCollection;\n import org.apache.shiro.subject.SimplePrincipalCollection;\n import org.junit.After;\n-import static org.junit.Assert.*;\n import org.junit.Before;\n import org.junit.Test;\n \n-import java.security.Principal;\n-import java.util.*;\n+import static org.junit.Assert.assertEquals;\n+import static org.junit.Assert.assertFalse;\n+import static org.junit.Assert.assertNotNull;\n+import static org.junit.Assert.assertTrue;\n+import static org.junit.Assert.fail;\n \n \n /**\n@@ -214,6 +228,40 @@ public void testRealmWithRolePermissionResolver()\n         assertTrue( realm.isPermitted( pCollection, \"other:bar:foo\" ) );\n     }\n \n+    @Test\n+    public void testRealmWithEmptyOrNullPermissions() {\n+        Principal principal = new UsernamePrincipal(\"rolePermResolver\");\n+        PrincipalCollection pCollection = new SimplePrincipalCollection(principal, \"testRealmWithRolePermissionResolver\");\n+\n+        AuthorizingRealm realm = new AllowAllRealm();\n+        realm.setRolePermissionResolver( new RolePermissionResolver()\n+        {\n+            public Collection<Permission> resolvePermissionsInRole( String roleString )\n+            {\n+                Collection<Permission> permissions = new HashSet<Permission>();\n+                if( roleString.equals( ROLE ))\n+                {\n+                    permissions.add( new WildcardPermission( ROLE + \":perm1\" ) );\n+                    permissions.add( new WildcardPermission( ROLE + \":perm2\" ) );\n+                    permissions.add( new WildcardPermission( ROLE + \": \" ) );\n+                    permissions.add( new WildcardPermission( ROLE + \":\\t\" ) );\n+                    permissions.add( new WildcardPermission( \"other:*:foo\" ) );\n+                }\n+                return permissions;\n+            }\n+        });\n+\n+        realm.setPermissionResolver(new WildcardPermissionResolver());\n+        SimpleAuthorizationInfo authorizationInfo = (SimpleAuthorizationInfo) realm.getAuthorizationInfo(pCollection);\n+        assertNotNull(authorizationInfo);\n+        authorizationInfo.addStringPermission(\"\");\n+        authorizationInfo.addStringPermission(\" \");\n+        authorizationInfo.addStringPermission(\"\\t\");\n+        authorizationInfo.addStringPermission(null);\n+        Collection<Permission> permissions = realm.getPermissions(authorizationInfo);\n+        assertEquals(permissions.size(), 4);\n+    }\n+\n     private void assertArrayEquals(boolean[] expected, boolean[] actual) {\n         if (expected.length != actual.length) {\n             fail(\"Expected array of length [\" + expected.length + \"] but received array of length [\" + actual.length + \"]\");",
+                "deletions": 4
+            }
+        ],
         "patched_files": [
             "AuthorizingRealm.java"
         ],
+        "unit_tests": [
+            "AuthorizingRealmTest.java"
+        ]
+    },
+    "shiro_9d2908e": {
         "repo": "shiro",
+        "message": "Merge pull request #132 from fpapon/SHIRO-685\n\n[SHIRO-685]\u00a0Potential NullPointerException if PermissionResolver retu\u2026",
+        "commit": "https://github.com/apache/shiro/commit/9d2908e656456e43485ff89600e8ec3b42d4d354",
+        "parent": "https://github.com/apache/shiro/commit/483b9587f3379a4e341f75967a86ebba37e678c8",
+        "bug_id": "shiro_9d2908e",
+        "file": [
+            {
+                "sha": "8f69a2495a363d14bd15af374abf59a3e5cd931a",
+                "filename": "core/src/main/java/org/apache/shiro/realm/AuthorizingRealm.java",
+                "blob_url": "https://github.com/apache/shiro/blob/9d2908e656456e43485ff89600e8ec3b42d4d354/core/src/main/java/org/apache/shiro/realm/AuthorizingRealm.java",
+                "raw_url": "https://github.com/apache/shiro/raw/9d2908e656456e43485ff89600e8ec3b42d4d354/core/src/main/java/org/apache/shiro/realm/AuthorizingRealm.java",
+                "status": "modified",
+                "changes": 7,
+                "additions": 5,
+                "contents_url": "https://api.github.com/repos/apache/shiro/contents/core/src/main/java/org/apache/shiro/realm/AuthorizingRealm.java?ref=9d2908e656456e43485ff89600e8ec3b42d4d354",
+                "patch": "@@ -26,6 +26,7 @@\n import org.apache.shiro.subject.PrincipalCollection;\n import org.apache.shiro.util.CollectionUtils;\n import org.apache.shiro.util.Initializable;\n+import org.apache.shiro.util.StringUtils;\n import org.slf4j.Logger;\n import org.slf4j.LoggerFactory;\n \n@@ -431,8 +432,10 @@ protected void clearCachedAuthorizationInfo(PrincipalCollection principals) {\n         if (resolver != null && !CollectionUtils.isEmpty(stringPerms)) {\n             perms = new LinkedHashSet<Permission>(stringPerms.size());\n             for (String strPermission : stringPerms) {\n-                Permission permission = resolver.resolvePermission(strPermission);\n-                perms.add(permission);\n+                if (StringUtils.clean(strPermission) != null) {\n+                    Permission permission = resolver.resolvePermission(strPermission);\n+                    perms.add(permission);\n+                }\n             }\n         }\n         return perms;",
+                "deletions": 2
+            },
+            {
+                "sha": "c78d66919f4c0cabeb825a8d661529b510d70694",
+                "filename": "core/src/test/java/org/apache/shiro/realm/AuthorizingRealmTest.java",
+                "blob_url": "https://github.com/apache/shiro/blob/9d2908e656456e43485ff89600e8ec3b42d4d354/core/src/test/java/org/apache/shiro/realm/AuthorizingRealmTest.java",
+                "raw_url": "https://github.com/apache/shiro/raw/9d2908e656456e43485ff89600e8ec3b42d4d354/core/src/test/java/org/apache/shiro/realm/AuthorizingRealmTest.java",
+                "status": "modified",
+                "changes": 56,
+                "additions": 52,
+                "contents_url": "https://api.github.com/repos/apache/shiro/contents/core/src/test/java/org/apache/shiro/realm/AuthorizingRealmTest.java?ref=9d2908e656456e43485ff89600e8ec3b42d4d354",
+                "patch": "@@ -18,23 +18,37 @@\n  */\n package org.apache.shiro.realm;\n \n-import org.apache.shiro.authc.*;\n+import java.security.Principal;\n+import java.util.ArrayList;\n+import java.util.Collection;\n+import java.util.HashSet;\n+import java.util.List;\n+import java.util.Set;\n+import org.apache.shiro.authc.AuthenticationException;\n+import org.apache.shiro.authc.AuthenticationInfo;\n+import org.apache.shiro.authc.AuthenticationToken;\n+import org.apache.shiro.authc.SimpleAccount;\n+import org.apache.shiro.authc.SimpleAuthenticationInfo;\n+import org.apache.shiro.authc.UsernamePasswordToken;\n import org.apache.shiro.authc.credential.AllowAllCredentialsMatcher;\n import org.apache.shiro.authz.AuthorizationInfo;\n import org.apache.shiro.authz.Permission;\n import org.apache.shiro.authz.SimpleAuthorizationInfo;\n import org.apache.shiro.authz.UnauthorizedException;\n import org.apache.shiro.authz.permission.RolePermissionResolver;\n import org.apache.shiro.authz.permission.WildcardPermission;\n+import org.apache.shiro.authz.permission.WildcardPermissionResolver;\n import org.apache.shiro.subject.PrincipalCollection;\n import org.apache.shiro.subject.SimplePrincipalCollection;\n import org.junit.After;\n-import static org.junit.Assert.*;\n import org.junit.Before;\n import org.junit.Test;\n \n-import java.security.Principal;\n-import java.util.*;\n+import static org.junit.Assert.assertEquals;\n+import static org.junit.Assert.assertFalse;\n+import static org.junit.Assert.assertNotNull;\n+import static org.junit.Assert.assertTrue;\n+import static org.junit.Assert.fail;\n \n \n /**\n@@ -214,6 +228,40 @@ public void testRealmWithRolePermissionResolver()\n         assertTrue( realm.isPermitted( pCollection, \"other:bar:foo\" ) );\n     }\n \n+    @Test\n+    public void testRealmWithEmptyOrNullPermissions() {\n+        Principal principal = new UsernamePrincipal(\"rolePermResolver\");\n+        PrincipalCollection pCollection = new SimplePrincipalCollection(principal, \"testRealmWithRolePermissionResolver\");\n+\n+        AuthorizingRealm realm = new AllowAllRealm();\n+        realm.setRolePermissionResolver( new RolePermissionResolver()\n+        {\n+            public Collection<Permission> resolvePermissionsInRole( String roleString )\n+            {\n+                Collection<Permission> permissions = new HashSet<Permission>();\n+                if( roleString.equals( ROLE ))\n+                {\n+                    permissions.add( new WildcardPermission( ROLE + \":perm1\" ) );\n+                    permissions.add( new WildcardPermission( ROLE + \":perm2\" ) );\n+                    permissions.add( new WildcardPermission( ROLE + \": \" ) );\n+                    permissions.add( new WildcardPermission( ROLE + \":\\t\" ) );\n+                    permissions.add( new WildcardPermission( \"other:*:foo\" ) );\n+                }\n+                return permissions;\n+            }\n+        });\n+\n+        realm.setPermissionResolver(new WildcardPermissionResolver());\n+        SimpleAuthorizationInfo authorizationInfo = (SimpleAuthorizationInfo) realm.getAuthorizationInfo(pCollection);\n+        assertNotNull(authorizationInfo);\n+        authorizationInfo.addStringPermission(\"\");\n+        authorizationInfo.addStringPermission(\" \");\n+        authorizationInfo.addStringPermission(\"\\t\");\n+        authorizationInfo.addStringPermission(null);\n+        Collection<Permission> permissions = realm.getPermissions(authorizationInfo);\n+        assertEquals(permissions.size(), 4);\n+    }\n+\n     private void assertArrayEquals(boolean[] expected, boolean[] actual) {\n         if (expected.length != actual.length) {\n             fail(\"Expected array of length [\" + expected.length + \"] but received array of length [\" + actual.length + \"]\");",
+                "deletions": 4
+            }
+        ],
+        "patched_files": [
+            "AuthorizingRealm.java"
+        ],
         "unit_tests": [
             "AuthorizingRealmTest.java"
         ]
