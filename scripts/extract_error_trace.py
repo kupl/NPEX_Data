@@ -1,8 +1,8 @@
 # /usr/bin/python3.8
 from dataclasses import asdict, dataclass
-from os import pipe
 from subprocess import PIPE
 from typing import List
+import sys
 import re
 import json
 import os
@@ -31,6 +31,15 @@ class TraceEntry:
             return TraceEntry(m.group('tag'), m.group('filepath'), int(m.group('lineno')), m.group('desc'))
         else:
             return None
+
+    @classmethod
+    def generate_trace_json(cls, trace_lines, dir=os.getcwd(), name='trace.json'):
+        trace = [
+            asdict(entry) for ln in trace_lines if (entry := TraceEntry.parse_from_line(ln))
+        ]
+        os.makedirs(dir, exist_ok=True)
+        with open(f'{dir}/{name}', 'w') as f:
+            f.write(json.dumps(trace, indent=4))
 
 
 @dataclass
@@ -77,13 +86,7 @@ class Bug:
         output = subprocess.run(cmd_test, shell=True, stdout=PIPE,
                                 cwd=self.root).stdout.decode("utf8").split("\n")
 
-        trace = [
-            asdict(entry) for ln in output if (entry := TraceEntry.parse_from_line(ln))
-        ]
-
-        os.makedirs(dir := f"{self.root}/traces", exist_ok=True)
-        with open(f"{dir}/trace.json", "w") as f:
-            f.write(json.dumps(trace, indent=4))
+        TraceEntry.generate_trace_json(output, self.root)
 
 
 def do(meta_json_path, bug_project_path):
@@ -92,3 +95,8 @@ def do(meta_json_path, bug_project_path):
         bug.generate_trace()
     finally:
         bug.clean_dir()
+
+
+if __name__ == '__main__':
+    with open(sys.argv[1], 'r') as f:
+        TraceEntry.generate_trace_json(f.readlines())
