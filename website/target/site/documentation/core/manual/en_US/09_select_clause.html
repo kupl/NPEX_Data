@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=">
+<meta name="generator" content="Asciidoctor 1.5.6.1">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Select clause</title>
+<link rel="stylesheet" href="css/blazebit.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.5.0/css/font-awesome.min.css">
+<link rel="stylesheet" href="prettify/prettify.min.css">
+<script src="prettify/prettify.min.js"></script>
+<script src="prettify/lang-ext.js"></script>
+<script>document.addEventListener('DOMContentLoaded', prettyPrint)</script>
+<link rel="shortcut icon" href="images/favicon.png">
+</head>
+<body class="book toc2 toc-left">
+
+<div class="brand">
+    <a class="vendor" href="https://blazebit.com">
+        <strong>Blazebit.com</strong>
+    </a>
+    <a class="logo" href="https://persistence.blazebit.com">
+        <strong>blaze-persistence</strong>
+    </a>
+</div>
+<br/>
+
+<div id="header">
+<div id="toc" class="toc2">
+<div id="toctitle">Table of Contents</div>
+<ul class="sectlevel1">
+<li><a href="#select-clause">Select clause</a>
+<ul class="sectlevel2">
+<li><a href="#distinct-support">Distinct support</a></li>
+<li><a href="#tuple-select">Tuple select</a></li>
+<li><a href="#anchor_select_case_when">Case expressions</a></li>
+<li><a href="#subqueries">Subqueries</a></li>
+<li><a href="#select-new-support">Select new support</a></li>
+<li><a href="#object-builder">Object builder</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</div>
+<div id="content">
+<div class="sect1">
+<h2 id="select-clause"><a class="anchor" href="#select-clause"></a>Select clause</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>The <code>SELECT</code> clause can be used to specify projections that should be returned by a query.
+{projectname} completely aligns with JPQL regarding the support of the <code>SELECT</code> clause,
+except for constructor expressions. The reason for this is</p>
+</div>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p>Since select items are defined separately, there is no easy syntax that could be supported</p>
+</li>
+<li>
+<p>Classes that users would like to use, might not be available on the classpath</p>
+</li>
+<li>
+<p>The use of a fully qualified class name and pass elements by position makes the query hard to read</p>
+</li>
+</ol>
+</div>
+<div class="paragraph">
+<p>Instead of constructor expressions, {projectname} introduces the concept of an <a href="{core_jdoc}/persistence/ObjectBuilder.html"><code>ObjectBuilder</code></a>
+which, as you will see in the <a href="#select-new-support">Select new support</a> and <a href="#object-builder">Object builder</a> chapters, are a lot mightier.</p>
+</div>
+<div class="paragraph">
+<p>Note that by default most types of queries have a default select clause that fits most of the needs.</p>
+</div>
+<div class="dlist">
+<dl>
+<dt class="hdlist1">Query with single root</dt>
+<dd>
+<p>Such queries have the alias of the root as default select item which has the effect that entities of the query root type are selected.</p>
+</dd>
+<dt class="hdlist1">Subquery in <code>EXISTS</code></dt>
+<dd>
+<p>Uses the scalar value <code>1</code> as default select item.</p>
+</dd>
+</dl>
+</div>
+<div class="paragraph">
+<p>The defaults are replaced by the first call to one of the <a href="{core_jdoc}/persistence/SelectBuilder.html#select(java.lang.String)"><code>select()</code></a> variants.</p>
+</div>
+<div class="sect2">
+<h3 id="distinct-support"><a class="anchor" href="#distinct-support"></a>Distinct support</h3>
+<div class="paragraph">
+<p>Distinct can be applied on any query by calling <a href="{core_jdoc}/persistence/DistinctBuilder.html#distinct()"><code>distinct()</code></a>.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Tuple&gt; cb = cbf.create(em, Tuple.class)
+    .from(Cat.class)
+    .distinct()
+    .select("age");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT DISTINCT cat.age
+FROM Cat cat</pre>
+</div>
+</div>
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-note" title="Note"></i>
+</td>
+<td class="content">
+Currently it is not possible to do a distinct when using the <a href="{core_jdoc}/persistence/PaginatedCriteriaBuilder.html"><code>PaginatedCriteriaBuilder</code></a> API.
+</td>
+</tr>
+</table>
+</div>
+<div class="paragraph">
+<p>In addition to that, all aggregate functions as defined per JPQL support aggregating distinct values.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Tuple&gt; cb = cbf.create(em, Tuple.class)
+    .from(Cat.class)
+    .select("COUNT(DISTINCT age)");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT COUNT(DISTINCT cat.age)
+FROM Cat cat</pre>
+</div>
+</div>
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-note" title="Note"></i>
+</td>
+<td class="content">
+This even works with embedded ids with Hibernate on DBMS that don&#8217;t support a distinct count for tuple. Also see <a href="https://hibernate.atlassian.net/browse/HHH-11042">HHH-11042</a>
+</td>
+</tr>
+</table>
+</div>
+</div>
+<div class="sect2">
+<h3 id="tuple-select"><a class="anchor" href="#tuple-select"></a>Tuple select</h3>
+<div class="paragraph">
+<p>When selecting multiple expressions, you can decide between the query return types <code>Object[]</code> and <code>javax.persistence.Tuple</code>.</p>
+</div>
+<div class="admonitionblock warning">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-warning" title="Warning"></i>
+</td>
+<td class="content">
+Some persistence providers might return the object directly when having just a single select item, even if you pass <code>Object[]</code>. This will not happen when using <code>javax.persistence.Tuple</code> as query return type.
+</td>
+</tr>
+</table>
+</div>
+<div class="paragraph">
+<p>You can define aliases for select items and access the tuple elements by name or by a 0-based index.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Tuple&gt; cb = cbf.create(em, Tuple.class)
+    .from(Cat.class)
+    .select("name", "catName")
+    .select("age", "catAge");
+Tuple firstTuple = cb.getResultList().get(0);
+// Access tuple element by alias
+String name = firstTuple.get("catName", String.class);
+// Access tuple element by index
+Long age = firstTuple.get(1, Long.class);</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT cat.name, cat.age
+FROM Cat cat</pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="anchor_select_case_when"><a class="anchor" href="#anchor_select_case_when"></a>Case expressions</h3>
+<div class="paragraph">
+<p>The builder API for <code>CASE WHEN</code> in the <code>SELECT</code> clause is the same as for <a href="#case-when-expression-builder">predicate builders</a> except for different entry points.
+All entry methods take an optional select alias too.</p>
+</div>
+<div class="paragraph">
+<p>Although there is an API for constructing <code>CASE WHEN</code> expressions, you can also just make use of them in a normal expression of
+<a href="{core_jdoc}/persistence/SelectBuilder.html#select(java.lang.String)"><code>select()</code></a></p>
+</div>
+<div class="sect3">
+<h4 id="searched-case-expression-simple-case"><a class="anchor" href="#searched-case-expression-simple-case"></a>Searched case expression (simple case)</h4>
+<div class="paragraph">
+<p>Simple case expressions can be done with <a href="{core_jdoc}/persistence/SelectBuilder.html#selectSimpleCase(java.lang.String)"><code>selectSimpleCase()</code></a>
+and support matching a case expression by equality with an expression for every <code>WHEN</code> branch.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Tuple&gt; cb = cbf.create(em, Tuple.class)
+    .from(Cat.class, "cat")
+    .selectSimpleCase("SUBSTRING(cat.name, 1, 2)")
+        .when("'Dr'", "'Doctor'")
+        .when("'Mr'", "'Mister'")
+        .otherwise("'Unknown'")
+    .select("cat.age");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT
+    CASE SUBSTRING(cat.name, 1, 2)
+          WHEN 'Dr.' THEN 'Doctor'
+          WHEN 'Mr.' THEN 'Mister'
+          ELSE 'Unknown'
+    END,
+    cat.age
+FROM Cat cat</pre>
+</div>
+</div>
+</div>
+<div class="sect3">
+<h4 id="conditional-case-expression"><a class="anchor" href="#conditional-case-expression"></a>Conditional case expression</h4>
+<div class="paragraph">
+<p>The more general form of a <code>CASE WHEN</code> supports arbitrary conditions in the <code>WHEN</code> part.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Tuple&gt; cb = cbf.create(em, Tuple.class)
+    .from(Cat.class)
+    .selectCase()
+        .when("cat.name").isNull()
+            .then(1)
+        .when("LENGTH(cat.name)").gt(10)
+            .then(2)
+        .otherwise(3)
+    .select("cat.age");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT
+    CASE
+          WHEN cat.name IS NULL THEN :param_1
+          WHEN LENGTH(cat.name) &gt; 10 THEN :param_2
+          ELSE :param_3
+    END,
+    cat.age
+FROM Cat cat</pre>
+</div>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="subqueries"><a class="anchor" href="#subqueries"></a>Subqueries</h3>
+<div class="paragraph">
+<p>Although the JPA spec does mandate support for subqueries in the <code>SELECT</code> clause, every major JPA provider <a href="{core_jdoc}/persistence/SelectBuilder.html#selectSubquery()">supports it</a>,
+which is why {projectname} also allows it. A subquery is the only type of expression that has to be created through the builder API, all other expressions can be created by passing the expression as string.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Tuple&gt; cb = cbf.create(em, Tuple.class)
+    .from(Cat.class, "cat")
+    .selectSubquery()
+        .from(Cat.class, "subCat")
+        .select("COUNT(*)")
+        .where("subCat.age").gtExpression("cat.age")
+    .end();</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT
+    (
+        SELECT COUNT(*)
+        FROM Cat subCat
+        WHERE subCa.age &gt; cat.age
+    )
+FROM Cat cat</pre>
+</div>
+</div>
+<div class="sect3">
+<h4 id="anchor_select_subqueries"><a class="anchor" href="#anchor_select_subqueries"></a>Wrapping expression</h4>
+<div class="paragraph">
+<p>Sometimes you might want to have more complex expressions that contain one or multiple subqueries. For such cases there are variants that accept</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>a single subquery through <a href="{core_jdoc}/persistence/SelectBuilder.html#selectSubquery(java.lang.String,%20java.lang.String)"><code>selectSubquery(String, String)</code></a></p>
+</li>
+<li>
+<p>multiple subqueries through <a href="{core_jdoc}/persistence/SelectBuilder.html#selectSubqueries(java.lang.String)"><code>selectSubqueries(String)</code></a></p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>The single subquery variant requires a temporary alias for the subquery and an expression containing it. Every occurrence of the so called <code>subqueryAlias</code> will be replaced logically by the subquery itself.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Tuple&gt; cb = cbf.create(em, Tuple.class)
+    .from(Cat.class, "cat")
+    .selectSubquery("mySubqueryAlias", "1 + mySubqueryAlias")
+        .from(Cat.class, "subCat")
+        .select("COUNT(*)")
+        .where("subCat.age").gtExpression("cat.age")
+    .end();</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT
+    1 + (
+        SELECT COUNT(*)
+        FROM Cat subCat
+        WHERE subCa.age &gt; cat.age
+    )
+FROM Cat cat</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>As you can see, the subquery alias <code>mySubqueryAlias</code> in the expression <code>1 + mySubqueryAlias</code> has been replaced by the subquery.</p>
+</div>
+<div class="paragraph">
+<p>The multiple subquery variant is very similar, except that you first have to define the expression i.e. <code>1 + mySubqueryAlias1 + mySubqueryAlias2</code> and then,
+subsequently define for each alias the respective subquery.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Tuple&gt; cb = cbf.create(em, Tuple.class)
+    .from(Cat.class, "cat")
+    .selectSubqueries("1 + mySubqueryAlias1 + mySubqueryAlias2")
+        .with("mySubqueryAlias1")
+            .from(Cat.class, "subCat")
+            .select("COUNT(*)")
+            .where("subCat.age").gtExpression("cat.age")
+        .end()
+        .with("mySubqueryAlias2")
+            .from(Cat.class, "subCat")
+            .select("COUNT(*)")
+            .where("subCat.age").ltExpression("cat.age")
+        .end()
+    .end();</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT
+    1 + (
+        SELECT COUNT(*)
+        FROM Cat subCat
+        WHERE subCa.age &gt; cat.age
+    ) + (
+         SELECT COUNT(*)
+         FROM Cat subCat
+         WHERE subCa.age &lt; cat.age
+     )
+FROM Cat cat</pre>
+</div>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="select-new-support"><a class="anchor" href="#select-new-support"></a>Select new support</h3>
+<div class="paragraph">
+<p>Like already explained in the <a href="#select-clause">beginning</a>, constructor expressions are supported differently in {projectname}.
+Instead of having to use the fully qualified class name in the query, {projectname} offers a concept called <a href="#object-builder">Object builder</a>.
+On top of that API, it implements features similar to the constructor expression of JPQL.</p>
+</div>
+<div class="paragraph">
+<p>The <a href="{core_jdoc}/persistence/FullQueryBuilder.html#selectNew(java.lang.reflect.Constructor)"><code>selectNew(Constructor)</code></a> variant is probably the one that comes closest
+to the constructor expression. That method allows to pass in a constructor object which will be used to construct objects when building the result list.
+The argument types of the constructor must match the types of the select items.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">class CatModel {
+
+    public CatModel(String name, Long age) {
+        //...
+    }
+}</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;CatModel&gt; cb = cbf.create(em, Tuple.class)  <i class="conum" data-value="1"></i><b>(1)</b>
+    .from(Cat.class, "cat")
+    .selectNew(CatModel.class.getConstructor(String.class, Long.class))  <i class="conum" data-value="2"></i><b>(2)</b>
+        .with("cat.name")
+        .with("cat.age")
+    .end();</pre>
+</div>
+</div>
+<div class="colist arabic">
+<table>
+<tr>
+<td><i class="conum" data-value="1"></i><b>1</b></td>
+<td>Query type is <code>Tuple</code></td>
+</tr>
+<tr>
+<td><i class="conum" data-value="2"></i><b>2</b></td>
+<td>Query type changed to <code>CatModel</code></td>
+</tr>
+</table>
+</div>
+<div class="paragraph">
+<p>See how the query type changed because of the call to <code>selectNew()</code>?
+The JPQL contains no information about the constructor, just the scalar selects.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT cat.name, cat.age
+FROM Cat cat</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Having to explicitly declare the parameter types for retrieving the constructor is not very convenient. That&#8217;s why there is the variant which accepts the <code>Class</code> instead.
+That way the constructor selection is deferred to the runtime and is done based on the tuple elements types. The selection is done once based on the types of the first tuple.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;CatModel&gt; cb = cbf.create(em, Tuple.class)
+    .from(Cat.class, "cat")
+    .selectNew(CatModel.class)
+        .with("cat.name")
+        .with("cat.age")
+    .end();</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Not only looks like the one from before, but also does the same. It&#8217;s just less code that is required.
+The only difference is the point in time where errors can happen. By choosing an explicit constructor at query building time,
+errors like non-accessible or non-existing constructors can show up earlier. By using the <code>Class</code> approach, errors would only show up when processing the query results.
+This behavior might change in the future i.e. due to improvements we might be able to determine the constructor already at query building time. Such a behavior could then of course be disabled if required.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="object-builder"><a class="anchor" href="#object-builder"></a>Object builder</h3>
+<div class="paragraph">
+<p>As mentioned before, the <code>selectNew()</code> approaches with <code>Class</code> and <code>Constructor</code> both build on top of the more general approach of <code>ObjectBuilder</code>.
+An <a href="{core_jdoc}/persistence/ObjectBuilder.html"><code>ObjectBuilder</code></a> instance can be provided to a <a href="{core_jdoc}/persistence/CriteriaBuilder.html"><code>CriteriaBuilder</code></a>
+and <a href="{core_jdoc}/persistence/PaginatedCriteriaBuilder.html"><code>PaginatedCriteriaBuilder</code></a> via <a href="{core_jdoc}/persistence/FullQueryBuilder.html#selectNew(com.blazebit.persistence.ObjectBuilder)"><code>selectNew(ObjectBuilder)</code></a>.</p>
+</div>
+<div class="paragraph">
+<p>It is responsible for</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>providing the JPQL expressions for select items</p>
+</li>
+<li>
+<p>build objects of the target type from an object array representing the tuple for the select items</p>
+</li>
+<li>
+<p>reduce the result list or simply return it</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>The following example should illustrate the functionality</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;CatModel&gt; cb = cbf.create(em, Tuple.class)
+    .from(Cat.class, "cat")
+    .selectNew(new ObjectBuilder&lt;CatModel&gt;() {
+
+        @Override
+        public &lt;X extends SelectBuilder&lt;X&gt;&gt; void applySelects(X queryBuilder) {
+            queryBuilder
+                .select("name")
+                .select("age");
+        }
+
+        @Override
+        public CatModel build(Object[] tuple) {
+            return new CatModel(
+                (String) tuple[0],
+                (Long)   tuple[1]
+            );
+        }
+
+        @Override
+        public List&lt;CatModel&gt; buildList(List&lt;CatModel&gt; list) {
+            return list;
+        }
+    });</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Looks like boilerplate for this simple query?</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT cat.name, cat.age
+FROM Cat cat</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>You are right, but keep in mind, this isn&#8217;t an API that a simple user should directly implement.
+This API allows to keep the select item providing and consuming parts together, but decouple it from the actual query.
+You can have one <code>ObjectBuilder</code> for multiple queries of the same query root.</p>
+</div>
+<div class="paragraph">
+<p>In real life applications it is often required to have some sort of <em>view model</em> i.e. a model specifically for the UI.
+Without an API that allows to decouple the projection from the rest, you would</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>Duplicate querying code and adapt only necessary projection parts</p>
+</li>
+<li>
+<p>Implement dynamic queries through string concatenation and essentially implement a custom query builder</p>
+</li>
+<li>
+<p>Stick with using just the entity model and try to cope with limitations and problems</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>The <code>ObjectBuilder</code> API helps you in all these regards</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>No need to copy querying code, only need to make use of object builders and depending on the needs, use a different builder</p>
+</li>
+<li>
+<p>{projectname} already is a dynamic query builder API and strictly works with the JPA metamodel to catch errors early</p>
+</li>
+<li>
+<p>As long as you stick to using basic values lazy loading won&#8217;t bite you</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Although this simple example doesn&#8217;t do anything fancy in <code>buildList()</code>, you could do anything in there</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>Build nested structures</p>
+</li>
+<li>
+<p>Filter/Sort objects</p>
+</li>
+<li>
+<p>Query other data stores</p>
+</li>
+<li>
+<p>etc.</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>The best example for a consumer of this API is the <a href="{entity_view_doc}">entity-view</a> module which makes use of the <code>ObjectBuilder</code> interface to implement efficient projection.</p>
+</div>
+<div class="admonitionblock tip">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-tip" title="Tip"></i>
+</td>
+<td class="content">
+Before you start building a sophisticated <code>ObjectBuilder</code>, take a look at <a href="{entity_view_doc}">entity views</a> to see if it fits your needs.
+</td>
+</tr>
+</table>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div id="footer">
+<div id="footer-text">
+Last updated 2020-08-05 16:46:14 KST
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=">
+<meta name="generator" content="Asciidoctor 1.5.6.1">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Filter and Sorter API</title>
+<link rel="stylesheet" href="css/blazebit.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.5.0/css/font-awesome.min.css">
+<link rel="stylesheet" href="prettify/prettify.min.css">
+<script src="prettify/prettify.min.js"></script>
+<script src="prettify/lang-ext.js"></script>
+<script>document.addEventListener('DOMContentLoaded', prettyPrint)</script>
+<link rel="shortcut icon" href="images/favicon.png">
+</head>
+<body class="book toc2 toc-left">
+
+<div class="brand">
+    <a class="vendor" href="https://blazebit.com">
+        <strong>Blazebit.com</strong>
+    </a>
+    <a class="logo" href="https://persistence.blazebit.com">
+        <strong>blaze-persistence</strong>
+    </a>
+</div>
+<br/>
+
+<div id="header">
+<div id="toc" class="toc2">
+<div id="toctitle">Table of Contents</div>
+<ul class="sectlevel1">
+<li><a href="#filter-and-sorter-api">Filter and Sorter API</a>
+<ul class="sectlevel2">
+<li><a href="#filter-api">Filter API</a></li>
+<li><a href="#sorter-api">Sorter API</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</div>
+<div id="content">
+<div class="sect1">
+<h2 id="filter-and-sorter-api"><a class="anchor" href="#filter-and-sorter-api"></a>Filter and Sorter API</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>Apart from mapping projections, {projectname} entity views also provides support for filtering and sorting on attribute-level.
+Implementing the filtering and sorting based on attributes allows to completely encapsulate the entity model behind an entity view.
+The structure of an entity view is driven by the consumer and basing the filtering and sorting aspects on that very same structure is only natural for a consumer.</p>
+</div>
+<div class="paragraph">
+<p>The filter and sorter API is provided via <code>com.blazebit.persistence.view.EntityViewSetting</code> and allows filtering and sorting to be applied to entity views dynamically.
+<em>Dynamic</em> in this context means that the filters and sorters can be added/enabled without the need to explicitly modify the entity view type itself
+or the criteria builder which the entity view is based on.</p>
+</div>
+<div id="filter-sorter-introductory-example" class="paragraph">
+<p>Let&#8217;s consider the following data access method for an example</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">&lt;V, C extends CriteriaBuilder&lt;V&gt;&gt; getHungryCats(EntityViewSetting&lt;V, C&gt; settings) { ... }</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>It implements the basic business logic of how to obtain all hungry cats via a <code>CriteriaBuilder</code> from the database. The method supports
+entity views to allow fetching only the fields which are needed for a concrete use cases. For example when displaying the
+cats in a dropdown, their names might be sufficient but when displaying them in a table it might be desirable to include more details.</p>
+</div>
+<div class="paragraph">
+<p>Likewise, one might want to retrieve the cats sorted by name or by age depending on the use case. Having to
+introduce 2 new methods for this purpose would be painful:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">&lt;V, C extends CriteriaBuilder&lt;V&gt;&gt; getHungryCatsSortedByName(EntityViewSetting&lt;V, C&gt; settings);
+
+&lt;V, C extends CriteriaBuilder&lt;V&gt;&gt; getHungryCatsSortedByAge(EntityViewSetting&lt;V, C&gt; settings);</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The above approach does not even account for different sort orders so in reality we might rather go for
+parameterizing the original method which is painful nevertheless:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">&lt;V, C extends CriteriaBuilder&lt;V&gt;&gt; getHungryCats(EntityViewSetting&lt;V, C&gt; settings, String sortField, String sortOrder);</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Instead it is possible to apply the sorting to the <code>EntityViewSetting</code> instance that is passed to
+your data access layer:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">settings.addAttributeSorter("name", com.blazebit.persistence.view.Sorters.ascending());
+dataAccess.getHungryCats(settings);</pre>
+</div>
+</div>
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-note" title="Note"></i>
+</td>
+<td class="content">
+All attribute names specified using the filter or sorter API refer to the entity view attribute names rather than entity attribute names.
+</td>
+</tr>
+</table>
+</div>
+<div class="sect2">
+<h3 id="filter-api"><a class="anchor" href="#filter-api"></a>Filter API</h3>
+<div class="paragraph">
+<p>The filter API allows to enable and parameterize a filter for entity view attributes.</p>
+</div>
+<div class="paragraph">
+<p>Entity view filters are defined by annotating respective entity view attributes with <a href="{entity_view_jdoc}/persistence/view/AttributeFilter.html"><code>@AttributeFilter</code></a>
+or <a href="{entity_view_jdoc}/persistence/view/AttributeFilters.html"><code>@AttributeFilters</code></a> for multiple named filters.</p>
+</div>
+<div class="paragraph">
+<p>In the annotation you can supply an optional filter name and a filter provider class which needs to extend
+<a href="{entity_view_jdoc}/persistence/view/AttributeFilterProvider.html"><code>AttributeFilterProvider</code></a>. An attribute filter&#8217;s name must be unique for the
+attribute it is annotated on. The attribute filter without a filter name is the <em>default filter</em>. Only a single default attribute filter per attribute is allowed.</p>
+</div>
+<div class="paragraph">
+<p>Example:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">@EntityView(Cat.class)
+public interface CatView {
+    @IdMapping
+    Integer getId();
+
+    @AttributeFilters({
+        AttributeFilter(ContainsIgnoreCaseFilter.class),
+        AttributeFilter(name = "containsCaseSensitive", value = ContainsFilter.class)
+    })
+    String getName();
+}</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Default attribute filters are enabled by calling <a href="{entity_view_jdoc}/persistence/view/EntityViewSetting.html#addAttributeFilter(java.lang.String,%20java.lang.Object)"><code>addAttributeFilter(String attributeName, Object filterValue)</code></a>
+whereas named filters require calling <a href="{entity_view_jdoc}/persistence/view/EntityViewSetting.html#addAttributeFilter(java.lang.String,%20java.lang.String,%20java.lang.Object)"><code>addAttributeFilter(String attributeName, String filterName, Object filterValue)</code></a>.</p>
+</div>
+<div class="paragraph">
+<p>The supplied object values are used by the filter provider to append the appropriate restrictions to the query builder.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">EntityViewSetting&lt;CatView, CriteriaBuilder&lt;CatView&gt;&gt; setting = EntityViewSetting.create(CatView.class);
+setting.addAttributeFilter("name", "kitty"); <i class="conum" data-value="1"></i><b>(1)</b>
+setting.addAttributeFilter("name", "containsCaseSensitive", "kitty"); <i class="conum" data-value="2"></i><b>(2)</b></pre>
+</div>
+</div>
+<div class="colist arabic">
+<table>
+<tr>
+<td><i class="conum" data-value="1"></i><b>1</b></td>
+<td>Enables the default filter <code>ContainsIgnoreCaseFilter</code>, so e.g. 'KITTY' matches</td>
+</tr>
+<tr>
+<td><i class="conum" data-value="2"></i><b>2</b></td>
+<td>Enables the named filter <code>ContainsFilter</code>, so e.g. 'KITTY' doesn&#8217;t match</td>
+</tr>
+</table>
+</div>
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-note" title="Note"></i>
+</td>
+<td class="content">
+At most one attribute filter can be enabled per attribute.
+</td>
+</tr>
+</table>
+</div>
+<div class="paragraph">
+<p>{projectname} provides a number of built-in filter providers in the <code>com.blazebit.persistence.view.filter</code> package:</p>
+</div>
+<table class="tableblock frame-all grid-all spread">
+<colgroup>
+<col style="width: 50%;">
+<col style="width: 50%;">
+</colgroup>
+<thead>
+<tr>
+<th class="tableblock halign-left valign-top">Built-in filters</th>
+<th class="tableblock halign-left valign-top">Supported filter value types</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">GreaterOrEqualFilter</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Number, Date</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">LessOrEqualFilter</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Number, Date</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">GreaterThanFilter</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Number, Date</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">LessThanFilter</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Number, Date</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">EqualFilter</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Any</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">StartsWithFilter</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">String</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">EndsWithFilter</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">String</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">ContainsFilter</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">String</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">StartsWithIgnoreCaseFilter</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">String</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">EndsWithIgnoreCaseFilter</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">String</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">ContainsIgnoreCaseFilter</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">String</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">NullFilter</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Boolean - <code>true</code> includes NULLs, <code>false</code> excludes NULLs</p></td>
+</tr>
+</tbody>
+</table>
+<div class="paragraph">
+<p>It is also possible to filter by subview attributes. The following example illustrates this:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">@EntityView(Cat.class)
+public interface CatView {
+    @IdMapping
+    Integer getId();
+
+    ChildCatView getChild();
+}
+
+@EntityView(Cat.class)
+public interface ChildCatView {
+    @IdMapping
+    Integer getId();
+
+    @AttributeFilter(LessOrEqualFilter.class)
+    Integer getAge();
+}
+
+CriteriaBuilderFactory cbf = ...;
+EntityViewManager evm = ...;
+EntityViewSetting&lt;CatView, CriteriaBuilder&lt;CatView&gt;&gt; setting = EntityViewSetting.create(CatView.class);
+// by adding this filter, only cats with a child of age &lt;= 10 will be selected
+setting.addAttributeFilter("child.age", "10");</pre>
+</div>
+</div>
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-note" title="Note"></i>
+</td>
+<td class="content">
+Currently there is no support for collection filters like "has at least one" semantics. This is
+<a href="https://github.com/Blazebit/blaze-persistence/issues/109">planned</a> for a future version. When applying an attribute filter
+on a collection attribute or a subview attribute contained in a collection, the collection&#8217;s elements will currently be filtered.
+In the meantime, collection filters can be implemented by creating a custom attribute filter, applying restrictions directly on the entity view&#8217;s base query or by using a view filter.
+</td>
+</tr>
+</table>
+</div>
+<div class="sect3">
+<h4 id="view-filters"><a class="anchor" href="#view-filters"></a>View filters</h4>
+<div class="paragraph">
+<p>View filters allow filtering based on attributes of the view-backing entity as opposed to attribute filters which
+relate to entity view attributes.</p>
+</div>
+<div class="paragraph">
+<p>For example, the following entity view uses a view filter to filter by the <code>age</code> entity attribute of the
+<code>Cat</code> entity without this attribute being mapped in the entity view.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">@EntityView(Cat.class)
+@ViewFilter(name = "ageFilter", value = AgeFilterProvider.class)
+public interface CatView {
+    @IdMapping
+    Integer getId();
+
+    String getName();
+
+    class AgeFilterProvider implements ViewFilterProvider {
+        @Override
+        public &lt;T extends WhereBuilder&lt;T&gt;&gt; T apply(T whereBuilder) {
+            return whereBuilder.where("age").gt(2L);
+        }
+    }
+}</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>View filters need to be activated via the <code>EntityViewSetting</code>:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">setting.addViewFilter("ageFilter");</pre>
+</div>
+</div>
+</div>
+<div class="sect3">
+<h4 id="custom-filters"><a class="anchor" href="#custom-filters"></a>Custom filters</h4>
+<div class="paragraph">
+<p>If the built-in filters do not satisfy your requirements you are free to implement custom attribute filters by
+extending <a href="{entity_view_jdoc}/persistence/view/AttributeFilterProvider.html"><code>AttributeFilterProvider</code></a> with either one constructor accepting</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p><code>Class&lt;?&gt;</code> - The attribute type</p>
+</li>
+<li>
+<p><code>Object</code> - The filter value</p>
+</li>
+<li>
+<p><code>Class&lt;?&gt;</code> and <code>Object</code> - The attribute type and the filter value</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>Have a look at how a range filter could be implemented:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">public class MyCustomFilter extends com.blazebit.persistence.view.AttributeFilterProvider {
+
+    private final Range range;
+
+    public EndsWithFilterImpl(Object value) {
+        this.value = (Range) value;
+    }
+
+    protected &lt;T&gt; T apply(RestrictionBuilder&lt;T&gt; restrictionBuilder) {
+        return restrictionBuilder.between(range.lower).and(range.upper);
+    }
+
+    public static class Range {
+        private final Number lower;
+        private final Number upper;
+
+        public Range(Number lower, Number upper) {
+            this.lower = lower;
+            this.upper = upper;
+        }
+    }
+}</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The filter implementation only uses the filter value in the constructor and assumes it to be of the <code>Range</code> type.
+By accepting the attribute type, a string to object conversion for the filter value can be implemented.</p>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="sorter-api"><a class="anchor" href="#sorter-api"></a>Sorter API</h3>
+<div class="paragraph">
+<p>The sorter API allows to sort entity views by their attributes.
+A sorter can be applied for an attribute by invoking <a href="{entity_view_jdoc}/persistence/view/EntityViewSetting.html#addAttributeSorter(java.lang.String,%20com.blazebit.persistence.view.Sorter)"><code>addAttributeSorter(String attributeName, Sorter sorter)</code></a></p>
+</div>
+<div class="paragraph">
+<p>For an example of how to use the sorter API refer to the <a href="#filter-sorter-introductory-example">introductory example</a>.</p>
+</div>
+<div class="paragraph">
+<p>{projectname} provides default sorters via the static methods in the <a href="{entity_view_jdoc}/persistence/view/Sorters.html"><code>Sorters</code></a> class.
+These methods allow to easily create any combination of ascending/descending and nulls-first/nulls-last sorter.</p>
+</div>
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-note" title="Note"></i>
+</td>
+<td class="content">
+At most one attribute sorter can be enabled per attribute.
+</td>
+</tr>
+</table>
+</div>
+<div class="admonitionblock caution">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-caution" title="Caution"></i>
+</td>
+<td class="content">
+Sorting by subquery attributes (see ??) is problematic for some DBs.
+</td>
+</tr>
+</table>
+</div>
+<div class="admonitionblock caution">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-caution" title="Caution"></i>
+</td>
+<td class="content">
+Currently, sorting by correlated attribute mappings (see ??) is also not fully supported.
+</td>
+</tr>
+</table>
+</div>
+<div class="sect3">
+<h4 id="custom-sorter"><a class="anchor" href="#custom-sorter"></a>Custom sorter</h4>
+<div class="paragraph">
+<p>If the built-in sorters do not satisfy your requirements you are free to create a custom sorter by
+implementing the <a href="{entity_view_jdoc}/persistence/view/Sorter.html"><code>Sorter</code></a> interface.</p>
+</div>
+<div class="paragraph">
+<p>An example for a custom sorter might be a case insensitive sorter</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">public class MySorter implements com.blazebit.persistence.view.Sorter {
+
+    private final Sorter sorter;
+
+    private MySorter(Sorter sorter) {
+        this.sorter = sorter;
+    }
+
+    public static Sorter asc() {
+        return new MySorter(Sorters.ascending());
+    }
+
+    public static Sorter desc() {
+        return new MySorter(Sorters.descending());
+    }
+
+    public &lt;T extends OrderByBuilder&lt;T&gt;&gt; T apply(T sortable, String expression) {
+        return sorter.apply(sortable, "UPPER(" + expression + ")");
+    }
+}</pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div id="footer">
+<div id="footer-text">
+Last updated 2020-08-05 16:46:14 KST
+</div>
+</div>
+</body>
+</html>

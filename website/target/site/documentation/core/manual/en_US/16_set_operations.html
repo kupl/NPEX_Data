@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=">
+<meta name="generator" content="Asciidoctor 1.5.6.1">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Set operations</title>
+<link rel="stylesheet" href="css/blazebit.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.5.0/css/font-awesome.min.css">
+<link rel="stylesheet" href="prettify/prettify.min.css">
+<script src="prettify/prettify.min.js"></script>
+<script src="prettify/lang-ext.js"></script>
+<script>document.addEventListener('DOMContentLoaded', prettyPrint)</script>
+<link rel="shortcut icon" href="images/favicon.png">
+</head>
+<body class="book toc2 toc-left">
+
+<div class="brand">
+    <a class="vendor" href="https://blazebit.com">
+        <strong>Blazebit.com</strong>
+    </a>
+    <a class="logo" href="https://persistence.blazebit.com">
+        <strong>blaze-persistence</strong>
+    </a>
+</div>
+<br/>
+
+<div id="header">
+<div id="toc" class="toc2">
+<div id="toctitle">Table of Contents</div>
+<ul class="sectlevel1">
+<li><a href="#set-operations">Set operations</a>
+<ul class="sectlevel2">
+<li><a href="#normal-set-operations">Normal set operations</a></li>
+<li><a href="#anchor-set-operations-right-nesting">Right nested set operations</a></li>
+<li><a href="#left-nested-set-operations">Left nested set operations</a></li>
+<li><a href="#empty-nested-set-operations">Empty nested set operations</a></li>
+<li><a href="#ordering-and-limiting-with-set-operations">Ordering and limiting with set operations</a></li>
+<li><a href="#anchor-set-dbms-compatibility">DBMS compatibility</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</div>
+<div id="content">
+<div class="sect1">
+<h2 id="set-operations"><a class="anchor" href="#set-operations"></a>Set operations</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>A set operation connects result lists of queries. The most well-known set operations are <code>UNION</code> and <code>UNION ALL</code> which merge the result lists of two queries.
+Apart from that, there is an operation that produces the commonalities of two result lists i.e. the intersection and an operation that subtracts commonalities i.e. minus/except.</p>
+</div>
+<div class="paragraph">
+<p>All operations require that the connected queries must have the same number of select items with the same data types.</p>
+</div>
+<div class="admonitionblock warning">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-warning" title="Warning"></i>
+</td>
+<td class="content">
+This feature is currently only supported with Hibernate!
+</td>
+</tr>
+</table>
+</div>
+<div class="paragraph">
+<p>The SQL standard defines the following set operations for connecting two queries <em>query1</em> and <em>query2</em> which is also what {projectname} adopts</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p><code>UNION</code> - Merges results from <em>query1</em> and <em>query2</em> but filters out duplicates.</p>
+</li>
+<li>
+<p><code>UNION ALL</code> - Merges results from <em>query1</em> and <em>query2</em> <strong>without</strong> filtering duplicates.</p>
+</li>
+<li>
+<p><code>INTERSECT</code> - Creates a result based on distinct elements that appear in both <em>query1</em> and <em>query2</em></p>
+</li>
+<li>
+<p><code>INTERSECT ALL</code> - Creates a result based on all elements that appear in both <em>query1</em> and <em>query2</em> i.e. not filtering out duplicates</p>
+</li>
+<li>
+<p><code>EXCEPT</code> - Creates a result based on distinct elements of <em>query1</em> that don&#8217;t appear in <em>query2</em></p>
+</li>
+<li>
+<p><code>EXCEPT ALL</code> - Creates a result based on all elements of <em>query1</em> that don&#8217;t appear in <em>query2</em></p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>These set operations are not only useful for scalar queries, but can also be used when querying for entities.</p>
+</div>
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-note" title="Note"></i>
+</td>
+<td class="content">
+There are some limitations to using set operations with <a href="#polymorphism">polymorphic queries</a>.
+</td>
+</tr>
+</table>
+</div>
+<div class="sect2">
+<h3 id="normal-set-operations"><a class="anchor" href="#normal-set-operations"></a>Normal set operations</h3>
+<div class="paragraph">
+<p>A set operation ends the source query builder and starts a new query builder. This new builder then has to be explicitly ended.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">FinalSetOperationCriteriaBuilder&lt;Cat&gt; cb = <i class="conum" data-value="1"></i><b>(1)</b>
+    cbf.create(em, Cat.class)
+        .from(Cat.class, "cat")
+        .where("name").eq("Billy")
+    .unionAll() <i class="conum" data-value="2"></i><b>(2)</b>
+        .from(Cat.class, "cat")
+        .where("name").eq("Johnny")
+    .endSet(); <i class="conum" data-value="3"></i><b>(3)</b></pre>
+</div>
+</div>
+<div class="colist arabic">
+<table>
+<tr>
+<td><i class="conum" data-value="1"></i><b>1</b></td>
+<td>The query builder has a different type, since it represents the builder for the set operation query</td>
+</tr>
+<tr>
+<td><i class="conum" data-value="2"></i><b>2</b></td>
+<td>Use any set operation here</td>
+</tr>
+<tr>
+<td><i class="conum" data-value="3"></i><b>3</b></td>
+<td>You must end the set operation explicitly</td>
+</tr>
+</table>
+</div>
+<div class="paragraph">
+<p>The call to <a href="{core_jdoc}/persistence/SetOperationBuilder.html#unionAll()"><code>unionAll()</code></a> ends the previous query builder making any operations on it fail with an exception.
+Finally <a href="{core_jdoc}/persistence/BaseOngoingSetOperationBuilder.html#endSet()"><code>endSet()</code></a> ends the last query builder.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT cat FROM Cat cat WHERE cat.name = :param_1
+UNION ALL
+SELECT cat FROM Cat cat WHERE cat.name = :param_2</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>You can chain as many queries with set operations with the following methods</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p><a href="{core_jdoc}/persistence/SetOperationBuilder.html#union()"><code>union()</code></a> - <code>query1 UNION query2</code></p>
+</li>
+<li>
+<p><a href="{core_jdoc}/persistence/SetOperationBuilder.html#unionAll()"><code>unionAll()</code></a> - <code>query1 UNION ALL query2</code></p>
+</li>
+<li>
+<p><a href="{core_jdoc}/persistence/SetOperationBuilder.html#intersect()"><code>intersect()</code></a> - <code>query1 INTERSECT query2</code></p>
+</li>
+<li>
+<p><a href="{core_jdoc}/persistence/SetOperationBuilder.html#intersectAll()"><code>intersectAll()</code></a> - <code>query1 INTERSECT ALL query2</code></p>
+</li>
+<li>
+<p><a href="{core_jdoc}/persistence/SetOperationBuilder.html#except()"><code>except()</code></a> - <code>query1 EXCEPT query2</code></p>
+</li>
+<li>
+<p><a href="{core_jdoc}/persistence/SetOperationBuilder.html#exceptAll()"><code>exceptAll()</code></a> - <code>query1 EXCEPT ALL query2</code></p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>All operations have the same precedence i.e. they are executed from left to right.
+The only way to order the operations is by grouping them with <em>parenthesis</em> as shown in the next <a href="#anchor-set-operations-right-nesting">chapter</a>.</p>
+</div>
+<div class="paragraph">
+<p>You can also make use of set operations in CTEs like the following example shows.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">@CTE    // from com.blazebit.persistence
+@Entity // from javax.persistence
+public class MyCte {
+
+    private Long id;
+
+    @Id // from javax.persistence
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+}</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Cat&gt; cb =
+    cbf.create(em, Cat.class)
+        .with(MyCte.class)
+                .from(Cat.class, "cat1")
+                .bind("id").select("cat1.id")
+                .where("name").eq("Billy")
+            .unionAll()
+                .from(Cat.class, "cat2")
+                .bind("id").select("cat2.id")
+                .where("name").eq("Johnny")
+            .unionAll()
+                .from(Cat.class, "cat3")
+                .bind("id").select("cat3.id")
+                .where("name").eq("Franky")
+            .endSet() <i class="conum" data-value="1"></i><b>(1)</b>
+        .end()
+        .from(Cat.class, "cat")
+        .where("id").in()
+            .from(MyCte.class, "myCte")
+            .select("myCte.id")
+        .end();</pre>
+</div>
+</div>
+<div class="colist arabic">
+<table>
+<tr>
+<td><i class="conum" data-value="1"></i><b>1</b></td>
+<td>The <a href="{core_jdoc}/persistence/BaseFinalSetOperationBuilder.html">result of <code>endSet()</code></a> allows to apply sorting and limiting</td>
+</tr>
+</table>
+</div>
+<div class="paragraph">
+<p>The API is the same, and produces the expected query.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">WITH MyCte(id) AS (
+    SELECT cat1.id FROM Cat cat1 WHERE cat1.name = :param_1
+    UNION ALL
+    SELECT cat2.id FROM Cat cat2 WHERE cat2.name = :param_2
+    UNION ALL
+    SELECT cat3.id FROM Cat cat3 WHERE cat3.name = :param_3
+)
+SELECT cat FROM Cat cat WHERE cat.id IN (
+    SELECT myCte.id FROM MyCte myCte
+)</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Finally, there is also support for set operations within subqueries.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Cat&gt; cb =
+    cbf.create(em, Cat.class)
+        .from(Cat.class, "cat")
+        .where("id").in()
+                .from(Cat.class, "cat1")
+                .select("cat1.id")
+                .where("name").eq("Billy")
+            .unionAll()
+                .from(Cat.class, "cat2")
+                .select("cat2.id")
+                .where("name").eq("Johnny")
+            .unionAll()
+                .from(Cat.class, "cat3")
+                .select("cat3.id")
+                .where("name").eq("Franky")
+            .endSet()
+        .end();</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT cat FROM Cat cat WHERE cat.id IN (
+    FUNCTION(
+        'SET_UNION_ALL',
+        (SELECT cat1.id FROM Cat cat1 WHERE cat1.name = :param_1),
+        (SELECT cat2.id FROM Cat cat2 WHERE cat2.name = :param_2),
+        (SELECT cat3.id FROM Cat cat3 WHERE cat3.name = :param_3)
+    )
+)</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>As you can see, this is rendered differently. It makes use of custom <a href="#jpql-functions">JPQL functions</a> that could even be directly executed by the JPA provider.
+This is possible because {projectname} registers the <a href="#jpql-functions">JPQL functions</a> for the entire persistence unit. These functions produce the necessary SQL
+in-place which is more efficient than a complete SQL replacement. The following set operation functions are registered by default:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p><a href="#set-union-function"><code>SET_UNION</code></a></p>
+</li>
+<li>
+<p><a href="#set-union-all-function"><code>SET_UNION_ALL</code></a></p>
+</li>
+<li>
+<p><a href="#set-intersect-function"><code>SET_INTERSECT</code></a></p>
+</li>
+<li>
+<p><a href="#set-intersect-all-function"><code>SET_INTERSECT_ALL</code></a></p>
+</li>
+<li>
+<p><a href="#set-except-function"><code>SET_EXCEPT</code></a></p>
+</li>
+<li>
+<p><a href="#set-except-all-function"><code>SET_EXCEPT_ALL</code></a></p>
+</li>
+</ul>
+</div>
+</div>
+<div class="sect2">
+<h3 id="anchor-set-operations-right-nesting"><a class="anchor" href="#anchor-set-operations-right-nesting"></a>Right nested set operations</h3>
+<div class="paragraph">
+<p>In order to support grouping of set operations, {projectname} has a special API for grouping the left and right hand sides of set operations.
+Normally in SQL, the grouping can be achieved by using parenthesis which you can see in the <em>logical query</em>. Unfortunately it is not so easy to provide support
+for such a grouping in a builder API which is why there are special methods for starting and connecting such a group with set operations.
+Applying a set operation on such a parenthesis is possible with one of the <code>startXXX()</code> methods:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p><a href="{core_jdoc}/persistence/SetOperationBuilder.html#startUnion()"><code>startUnion()</code></a> - <code>query1 UNION (&#8230;&#8203;)</code></p>
+</li>
+<li>
+<p><a href="{core_jdoc}/persistence/SetOperationBuilder.html#startUnionAll()"><code>startUnionAll()</code></a> - <code>query1 UNION ALL (&#8230;&#8203;)</code></p>
+</li>
+<li>
+<p><a href="{core_jdoc}/persistence/SetOperationBuilder.html#startIntersect()"><code>startIntersect()</code></a> - <code>query1 INTERSECT (&#8230;&#8203;)</code></p>
+</li>
+<li>
+<p><a href="{core_jdoc}/persistence/SetOperationBuilder.html#startIntersectAll()"><code>startIntersectAll()</code></a> - <code>query1 INTERSECT ALL (&#8230;&#8203;)</code></p>
+</li>
+<li>
+<p><a href="{core_jdoc}/persistence/SetOperationBuilder.html#startExcept()"><code>startExcept()</code></a> - <code>query1 EXCEPT (&#8230;&#8203;)</code></p>
+</li>
+<li>
+<p><a href="{core_jdoc}/persistence/SetOperationBuilder.html#startExceptAll()"><code>startExceptAll()</code></a> - <code>query1 EXCEPT ALL (&#8230;&#8203;)</code></p>
+</li>
+</ul>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">FinalSetOperationCriteriaBuilder&lt;Cat&gt; cb =
+    cbf.create(em, Cat.class)
+            .from(Cat.class, "cat")
+            .where("name").eq("Billy")
+        .startUnionAll()
+                .from(Cat.class, "cat")
+                .where("name").eq("Johnny")
+            .union()
+                .from(Cat.class, "cat")
+                .where("name").eq("Franky")
+        .endSet() <i class="conum" data-value="1"></i><b>(1)</b>
+    .endSet(); <i class="conum" data-value="2"></i><b>(2)</b></pre>
+</div>
+</div>
+<div class="colist arabic">
+<table>
+<tr>
+<td><i class="conum" data-value="1"></i><b>1</b></td>
+<td>Ends the nested set operation group started by <a href="{core_jdoc}/persistence/SetOperationBuilder.html#startUnionAll()"><code>startUnionAll()</code></a></td>
+</tr>
+<tr>
+<td><i class="conum" data-value="2"></i><b>2</b></td>
+<td>The second <code>endSet()</code> might feel weird, but is actually necessary to end the implicitly started set operation on the main query</td>
+</tr>
+</table>
+</div>
+<div class="paragraph">
+<p>You can imagine any <code>startXXX()</code> being the opening parenthesis that must be ended with a <code>endSet()</code> representing the closing parenthesis.
+Since you could apply other set operations on that <em>group</em>, you are required to signal that you are done with the builder by calling <code>endSet()</code>.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT cat FROM Cat cat WHERE cat.name = :param_1
+UNION ALL
+(
+    SELECT cat FROM Cat cat WHERE cat.name = :param_2
+    UNION
+    SELECT cat FROM Cat cat WHERE cat.name = :param_3
+)</pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="left-nested-set-operations"><a class="anchor" href="#left-nested-set-operations"></a>Left nested set operations</h3>
+<div class="paragraph">
+<p>Similarly you can also have a left nested group for set operations.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">FinalSetOperationCriteriaBuilder&lt;Cat&gt; cb =
+    cbf.startSet(em, Cat.class) <i class="conum" data-value="1"></i><b>(1)</b>
+            .from(Cat.class, "cat")
+            .where("name").eq("Billy")
+        .unionAll()
+            .from(Cat.class, "cat")
+            .where("name").eq("Johnny")
+        .endSet()
+    .union()
+        .from(Cat.class, "cat")
+        .where("name").eq("Franky")
+    .endSet();</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">(
+    SELECT cat FROM Cat cat WHERE cat.name = :param_1
+    UNION ALL
+    SELECT cat FROM Cat cat WHERE cat.name = :param_2
+)
+UNION
+SELECT cat FROM Cat cat WHERE cat.name = :param_3</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The left nesting is started by <a href="{core_jdoc}/persistence/CriteriaBuilderFactory.html#startSet(javax.persistence.EntityManager,%20java.lang.Class)"><code>startSet()</code></a> which
+more or less represents the <em>open parenthesis</em>. The parenthesis is then closed by calling <code>endSet()</code>.</p>
+</div>
+<div class="paragraph">
+<p>At the beginning of every <em>nesting group</em>, you can start as many left nestings as you want by calling <a href="{core_jdoc}/persistence/StartOngoingSetOperationBuilder.html#startSet()"><code>startSet()</code></a>
+and doing so intuitively always results in an <em>open parenthesis</em> that has to be closed by a <code>endSet()</code>.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="empty-nested-set-operations"><a class="anchor" href="#empty-nested-set-operations"></a>Empty nested set operations</h3>
+<div class="paragraph">
+<p>As a convenience, {projectname} allows to have <em>empty</em> nested set operation groups like the following.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">FinalSetOperationCriteriaBuilder&lt;Cat&gt; cb =
+    cbf.startSet(em, Cat.class)
+    .endSet()
+    .union()
+        .from(Cat.class, "cat")
+        .where("name").eq("Franky")
+    .endSet();</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Contrary to what you might think, this is allowed and results in the following query.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT cat FROM Cat cat WHERE cat.name = :param_1</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>This is done to make it possible to pass the result of <code>startSet()</code> to consumers which may or may not add set operands.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="ordering-and-limiting-with-set-operations"><a class="anchor" href="#ordering-and-limiting-with-set-operations"></a>Ordering and limiting with set operations</h3>
+<div class="paragraph">
+<p>Since set operations might change the order of elements in the overall result, they also allow to define an <code>ORDER BY</code> clause for the result of a set operation group.</p>
+</div>
+<div class="paragraph">
+<p>The order by elements are resolved against the first set operand. This means that you can only order by select aliases of the first query in the set operation.
+If the order by element does not refer to a select alias, it is implicitly resolved against the query root like in the following example.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">FinalSetOperationCriteriaBuilder&lt;Cat&gt; cb =
+    cbf.create(em, Cat.class)
+        .from(Cat.class, "cat")
+        .where("name").eq("Billy")
+    .unionAll()
+        .from(Cat.class, "cat")
+        .where("name").eq("Johnny")
+    .endSet()
+    .orderByAsc("name")
+    .setFirstResult(1)
+    .setMaxResults(1);</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT cat FROM Cat cat WHERE cat.name = :param_1
+UNION ALL
+SELECT cat FROM Cat cat WHERE cat.name = :param_2
+ORDER BY name ASC NULLS LAST
+LIMIT 1 OFFSET 1</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Apart from the ordering by name, this query will also skip the first element and <em>limit</em> the elements to be returned to one.</p>
+</div>
+<div class="admonitionblock warning">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-warning" title="Warning"></i>
+</td>
+<td class="content">
+Note that <code>LIMIT</code> and <code>OFFSET</code> operate on the scalar results and not on entity elements. A collection joins might result in multiple elements per entity.
+</td>
+</tr>
+</table>
+</div>
+<div class="paragraph">
+<p>Ordering and limiting is also possible for nested set operation groups and can be realized by invoking the <a href="{core_jdoc}/persistence/OngoingSetOperationCriteriaBuilder.html#endSetWith()"><code>endSetWith()</code></a> operation.
+Calling <code>endSetWith()</code> is necessary to end the current query builder i.e. switch the context to the whole set operation group.
+After applying ordering and limiting the set operation group has to be closed with <a href="{core_jdoc}/persistence/BaseOngoingFinalSetOperationBuilder.html#endSet()"><code>endSet()</code></a>.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">FinalSetOperationCriteriaBuilder&lt;Cat&gt; cb =
+    cbf.startSet(em, Cat.class) <i class="conum" data-value="1"></i><b>(1)</b>
+            .from(Cat.class, "cat")
+            .where("name").eq("Billy")
+        .unionAll()
+            .from(Cat.class, "cat")
+            .where("name").eq("Johnny")
+        .endSetWith()
+            .orderByAsc("name")
+            .setMaxResults(1)
+        .endSet()
+    .union()
+        .from(Cat.class, "cat")
+        .where("name").eq("Franky")
+    .endSet();</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">(
+    SELECT cat FROM Cat cat WHERE cat.name = :param_1
+    UNION ALL
+    SELECT cat FROM Cat cat WHERE cat.name = :param_2
+    ORDER BY name
+    LIMIT 1
+)
+UNION
+SELECT cat FROM Cat cat WHERE cat.name = :param_3</pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="anchor-set-dbms-compatibility"><a class="anchor" href="#anchor-set-dbms-compatibility"></a>DBMS compatibility</h3>
+<div class="paragraph">
+<p>Currently there is no emulation implemented for databases that do not support set operations natively.
+One type of emulation that is implemented however is for the non-distinct variants <code>INTERSECT ALL</code> and <code>EXCEPT ALL</code> in case the distinct variant is supported.
+The emulation for the non-distinct variants is implemented by adding the <code>ROW_NUMBER</code> to an operand which is removed afterwards.</p>
+</div>
+<div class="paragraph">
+<p>The DBMS support for set operations is quite good.</p>
+</div>
+<table class="tableblock frame-all grid-all spread">
+<colgroup>
+<col style="width: 14.2857%;">
+<col style="width: 14.2857%;">
+<col style="width: 14.2857%;">
+<col style="width: 14.2857%;">
+<col style="width: 14.2857%;">
+<col style="width: 14.2857%;">
+<col style="width: 14.2858%;">
+</colgroup>
+<thead>
+<tr>
+<th class="tableblock halign-left valign-top"><strong>DBMS</strong></th>
+<th class="tableblock halign-left valign-top">UNION ALL</th>
+<th class="tableblock halign-left valign-top">UNION</th>
+<th class="tableblock halign-left valign-top">INTERSECT ALL</th>
+<th class="tableblock halign-left valign-top">INTERSECT</th>
+<th class="tableblock halign-left valign-top">EXCEPT ALL</th>
+<th class="tableblock halign-left valign-top">EXCEPT</th>
+</tr>
+</thead>
+<tfoot>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">DB2</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+</tr>
+</tfoot>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">PostgreSQL</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">MySQL</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">no <sup>1</sup></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">no <sup>1</sup></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">no <sup>1</sup></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">no <sup>1</sup></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">H2</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">no <sup>2</sup></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">no <sup>2</sup></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Oracle</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes <sup>3</sup></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes <sup>3</sup></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">SQL Server</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes <sup>3</sup></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes <sup>3</sup></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+</tr>
+</tbody>
+</table>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p>MySQL only supports the <code>UNION</code> and <code>UNION ALL</code> operator</p>
+</li>
+<li>
+<p>For implementing the <code>ALL</code> variant, a row number for a grouping is required i.e. <code>ROW_NUMER() OVER()</code> which isn&#8217;t supported by H2</p>
+</li>
+<li>
+<p>Emulated via <code>ROW_NUMBER</code></p>
+</li>
+</ol>
+</div>
+<div class="paragraph">
+<p>Except for H2 the operations can also be used in almost any context.</p>
+</div>
+<table class="tableblock frame-all grid-all spread">
+<colgroup>
+<col style="width: 33.3333%;">
+<col style="width: 33.3333%;">
+<col style="width: 33.3334%;">
+</colgroup>
+<thead>
+<tr>
+<th class="tableblock halign-left valign-top"><strong>DBMS</strong></th>
+<th class="tableblock halign-left valign-top">Use in CTE</th>
+<th class="tableblock halign-left valign-top">In Subquery with LIMIT</th>
+</tr>
+</thead>
+<tfoot>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">DB2</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+</tr>
+</tfoot>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">PostgreSQL</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">MySQL</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">no</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">H2</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">no <sup>1</sup></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">no</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Oracle</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">SQL Server</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">yes</p></td>
+</tr>
+</tbody>
+</table>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p>Since CTEs are pretty much experimental in H2, you might encounter problems like with parameters</p>
+</li>
+</ol>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div id="footer">
+<div id="footer-text">
+Last updated 2020-08-05 16:46:14 KST
+</div>
+</div>
+</body>
+</html>
