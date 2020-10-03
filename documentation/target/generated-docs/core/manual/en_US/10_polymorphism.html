@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=">
+<meta name="generator" content="Asciidoctor 1.5.6.1">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Polymorphism</title>
+<link rel="stylesheet" href="css/blazebit.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.5.0/css/font-awesome.min.css">
+<link rel="stylesheet" href="prettify/prettify.min.css">
+<script src="prettify/prettify.min.js"></script>
+<script src="prettify/lang-ext.js"></script>
+<script>document.addEventListener('DOMContentLoaded', prettyPrint)</script>
+<link rel="shortcut icon" href="images/favicon.png">
+</head>
+<body class="book toc2 toc-left">
+
+<div class="brand">
+    <a class="vendor" href="https://blazebit.com">
+        <strong>Blazebit.com</strong>
+    </a>
+    <a class="logo" href="https://persistence.blazebit.com">
+        <strong>blaze-persistence</strong>
+    </a>
+</div>
+<br/>
+
+<div id="header">
+<div id="toc" class="toc2">
+<div id="toctitle">Table of Contents</div>
+<ul class="sectlevel1">
+<li><a href="#polymorphism">Polymorphism</a>
+<ul class="sectlevel2">
+<li><a href="#polymorphism-treat-limitations">Limitations</a></li>
+<li><a href="#subtype-property-access">Subtype property access</a></li>
+<li><a href="#subtype-relation-join">Subtype relation join</a></li>
+<li><a href="#querying-non-managed-types">Querying non-managed types</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</div>
+<div id="content">
+<div class="sect1">
+<h2 id="polymorphism"><a class="anchor" href="#polymorphism"></a>Polymorphism</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>In JPA, every query is by default polymorphic. This means that whenever a <code>FROM</code> clause element might have subtypes, all subtypes are queried.
+The JPA spec only requires providers to support polymorphic querying for entity types, but some providers allow querying also for non-managed types like interfaces.
+Querying an interface is like querying all entities that implement that particular interface.</p>
+</div>
+<div class="paragraph">
+<p>JPA 2.1 introduced the <code>TREAT</code> operator to downcast a polymorphic <code>FROM</code> clause element to a subtype so that properties of that subtype can be accessed.
+Some JPA providers implemented support for an implicit or automatic downcast, but that doesn&#8217;t always work as expected, which is why {projectname} only supports explicit downcasts via the <code>TREAT</code> operator.</p>
+</div>
+<div class="paragraph">
+<p>Unfortunately the <code>TREAT</code> operator implementations of the JPA providers often do the wrong thing. This is due to the JPA spec not being explicit enough about the expected behavior and apparently the TCK not testing enough use cases.
+{projectname} tries hard to workaround the problems where possible so that you can make use of the <code>TREAT</code> operator without worrying too much.
+Regardless of what the JPA spec says, {projectname} allows the use of the <code>TREAT</code> operator in any clause, although you should note that some providers have limitations.</p>
+</div>
+<div class="sect2">
+<h3 id="polymorphism-treat-limitations"><a class="anchor" href="#polymorphism-treat-limitations"></a>Limitations</h3>
+<div class="paragraph">
+<p>Apart from Hibernate, all JPA providers have severe limitations regarding the <code>TREAT</code> operator support.
+The only way to reliably workaround these limitations is to introduce separate joins for the desired subtypes.
+{projectname} currently does not implement a transparent translation to the described workaround, but may soon do.
+Also see <a href="https://github.com/Blazebit/blaze-persistence/issues/123">#123</a> for more information.</p>
+</div>
+<div class="sect3">
+<h4 id="polymorphism-treat-limitations-hibernate"><a class="anchor" href="#polymorphism-treat-limitations-hibernate"></a>Hibernate</h4>
+<div class="paragraph">
+<p>Hibernate itself does not support the treat operator very well but instead has support for implicit/automatic downcasting which is very powerful.
+{projectname} <em>emulates</em> the <code>TREAT</code> operator on top of Hibernate by applying type constraints to surrounding predicates or wrapping in <code>CASE</code> statements.</p>
+</div>
+<div class="paragraph">
+<p>The only problems that might arise are related to Hibernate bugs.</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>multiple joins to associations that use the <em>table per class</em> inheritance strategy will result in ambiguous SQL</p>
+</li>
+<li>
+<p>treat joining relations with a type that uses the <em>table per class</em> inheritance strategy will not work because of ambiguous SQL</p>
+</li>
+<li>
+<p>subquery correlations that use inverse mappings only work as of Hibernate 5</p>
+</li>
+<li>
+<p>map key associations can only be de-referenced as of Hibernate 5.2.8</p>
+</li>
+<li>
+<p>determining the type of a map key in a subquery doesn&#8217;t work</p>
+</li>
+<li>
+<p>multiple inner treat joins of an association with a type that uses the <em>single table</em> inheritance strategy, results in <em>type constraint sharing</em></p>
+</li>
+</ul>
+</div>
+</div>
+<div class="sect3">
+<h4 id="polymorphism-treat-limitations-eclipselink"><a class="anchor" href="#polymorphism-treat-limitations-eclipselink"></a>EclipseLink</h4>
+<div class="paragraph">
+<p>EclipseLink unfortunately does not support implicit or automatic downcasting and it&#8217;s implementation of the <code>TREAT</code> operator is partly broken.
+{projectname} tries to help as good as possible by throwing exceptions for usages that are known to be broken but mostly renders through the uses of the <code>TREAT</code> operator.</p>
+</div>
+<div class="paragraph">
+<p>The following limitations and problems are known</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>no support for <code>TREAT</code> in subquery correlations</p>
+</li>
+<li>
+<p>no support for <code>TREAT</code> of join alias in a join path i.e. <code>JOIN TREAT(alias AS Subtype).property</code> is not possible</p>
+</li>
+<li>
+<p>no support for <code>TREAT</code> of join alias in a treat join path i.e. <code>JOIN TREAT(TREAT(alias AS Subtype).property AS Subtype)</code> is not possible</p>
+</li>
+<li>
+<p>the <code>TREAT</code> operator is not supported with the <em>table per class</em> inheritance strategy</p>
+</li>
+<li>
+<p>any use of the <code>TREAT</code> operator will result in global filter being applied <em>breaking</em> left treat join semantics</p>
+</li>
+<li>
+<p>using the <code>TREAT</code> operator on associations of type <code>Map</code> is not supported</p>
+</li>
+<li>
+<p>using the <code>TREAT</code> operator to downcast a join alias from an outer query is not supported</p>
+</li>
+</ul>
+</div>
+</div>
+<div class="sect3">
+<h4 id="polymorphism-treat-limitations-datanucleus"><a class="anchor" href="#polymorphism-treat-limitations-datanucleus"></a>DataNucleus</h4>
+<div class="paragraph">
+<p>DataNucleus unfortunately does not support the <code>TREAT</code> operator in any meaningful way. It has limited support for implicit/automatic downcasting in join paths.
+{projectname} tries to help as good as possible by throwing exceptions for usages that are known to be broken but mostly renders through the uses of the <code>TREAT</code> operator.</p>
+</div>
+<div class="paragraph">
+<p>The following limitations and problems are known</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>no support for <code>TREAT</code> in subquery correlations</p>
+</li>
+<li>
+<p>no support for <code>TREAT</code> of join alias in a treat join path i.e. <code>JOIN TREAT(TREAT(alias AS Subtype).property AS Subtype)</code> is not possible</p>
+</li>
+<li>
+<p>the <code>TREAT</code> operator is not supported with the <em>joined</em> inheritance strategy</p>
+</li>
+<li>
+<p>any use of the <code>TREAT</code> operator will result in global filter being applied <em>breaking</em> left treat join semantics</p>
+</li>
+<li>
+<p>many more issues</p>
+</li>
+</ul>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="subtype-property-access"><a class="anchor" href="#subtype-property-access"></a>Subtype property access</h3>
+<div class="paragraph">
+<p>Every join alias and property of an alias can be polymorphic and therefore the <code>TREAT</code> operator can be applied to the expression.
+Since every <code>FROM</code> element in JPA is polymorphic by default, the <code>TREAT</code> operator merely gives access to the subtype properties.
+When the operator is used in an <em>expression context</em> like in a select item, the expression will return <code>NULL</code> if the treated element is not of the desired subtype.
+Similarly the use of the operator in a <em>conditional context</em> like in a WHERE predicate, will make the <em>parent predicate</em> evaluate to false if the treated element is not of the desired subtype.</p>
+</div>
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-note" title="Note"></i>
+</td>
+<td class="content">
+Every use of a <code>TREAT</code> operator has to be followed up by a de-reference i.e. <code>TREAT(alias AS Subtype)</code> is illegal, but <code>TREAT(alias AS Subtype).property</code> is legal.
+</td>
+</tr>
+</table>
+</div>
+<div class="paragraph">
+<p>Consider the following simple model</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">@Entity
+class Animal {
+    @Id
+    Long id;
+    String name;
+}
+
+@Entity
+class Cat extends Animal {
+    String kittyName;
+}
+
+@Entity
+class Dog extends Animal {
+    String doggyName;
+}</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>For simplicity this uses <em>single table inheritance strategy</em> but applies to all strategies. Consider the following test data.</p>
+</div>
+<table class="tableblock frame-all grid-all spread">
+<caption class="title">Table 1. Animal</caption>
+<colgroup>
+<col style="width: 20%;">
+<col style="width: 20%;">
+<col style="width: 20%;">
+<col style="width: 20%;">
+<col style="width: 20%;">
+</colgroup>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">id</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">dtype</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">name</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">kittyName</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">doggyName</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">1</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Cat</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">A</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">A</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">NULL</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">2</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Dog</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">B</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">NULL</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">B</p></td>
+</tr>
+</tbody>
+</table>
+<div class="paragraph">
+<p>A query for animals and optionally selecting the <code>kittyName</code> would roughly look like this</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Tuple&gt; cb = cbf.create(em, Tuple.class)
+    .from(Animal.class, "a")
+    .select("name")
+    .select("TREAT(a AS Cat).kittyName");</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The resulting query might look like the following, but might differ depending on the actual support of the JPA provider.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT
+    a.name,
+    CASE WHEN TYPE(a) = Cat THEN a.kittyName END
+FROM Animal a</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The result list will contain <strong>2 tuples</strong>.</p>
+</div>
+<div class="paragraph">
+<p>Querying for a specific name i.e. using the <code>kittyName</code> in the <code>WHERE</code> clause like</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Tuple&gt; cb = cbf.create(em, Tuple.class)
+    .from(Animal.class, "a")
+    .select("name")
+    .where("TREAT(a AS Cat).kittyName").eq("A");</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>will actually filter the result set by adding a type restriction predicate to the <em>parent predicate</em></p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT
+    a.name
+FROM Animal a
+WHERE TYPE(a) = Cat AND a.kittyName = :param_0</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The part about the parent predicate is very important. The JPA spec didn&#8217;t test for this which is why most JPA implementations got this wrong.
+When the <code>TREAT</code> operator is for example used within an <em>OR</em> predicate, {projectname} will handle this correctly.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Tuple&gt; cb = cbf.create(em, Tuple.class)
+    .from(Animal.class, "a")
+    .select("name")
+    .whereOr()
+        .where("TREAT(a AS Cat).kittyName").eq("A")
+        .where("a.name").eq("B")
+    .endOr();</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>This will correctly render to</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT
+    a.name
+FROM Animal a
+WHERE (TYPE(a) = Cat AND a.kittyName = :param_0)
+   OR a.name = :param_1</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>which will return as expected <strong>2 tuples</strong>, the cat and the dog.</p>
+</div>
+<div class="paragraph">
+<p>If {projectname} were rendering the <code>TREAT</code> operator through to the JPA provider as is, most JPA implementations will behave as if the following query was written</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT
+    a.name
+FROM Animal a
+WHERE TYPE(a) = Cat AND (
+    a.kittyName = :param_0
+ OR a.name = :param_1
+)</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>This will filter out the dog thus resulting in only <strong>1 tuple</strong> in the result list which is mostly undesired.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="subtype-relation-join"><a class="anchor" href="#subtype-relation-join"></a>Subtype relation join</h3>
+<div class="paragraph">
+<p>Apart from accessing the properties of subtypes, JPA also specifies the use of the <code>TREAT</code> operator in a join path which allows to restrict the <em>join scope</em> and cast to specific subtypes.
+A treat join is just like a normal join, except that it additionally uses a predicate like <code>TYPE(alias) = Subtype</code> in the <code>ON</code> clause condition and hints the runtime to restrict the joined tables.</p>
+</div>
+<div class="paragraph">
+<p>Consider the following simple model</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">@Entity
+class Person {
+    @Id
+    Long id;
+    String name;
+    @ManyToOne
+    Animal favoritePet;
+}
+
+@Entity
+class Animal {
+    @Id
+    Long id;
+    String name;
+}
+
+@Entity
+class Cat extends Animal {
+    String kittyName;
+}
+
+@Entity
+class Dog extends Animal {
+    String doggyName;
+}</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>For simplicity this uses <em>single table inheritance strategy</em> but applies to all strategies. Consider the following test data.</p>
+</div>
+<table class="tableblock frame-all grid-all spread">
+<caption class="title">Table 2. Person</caption>
+<colgroup>
+<col style="width: 33.3333%;">
+<col style="width: 33.3333%;">
+<col style="width: 33.3334%;">
+</colgroup>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">id</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">name</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">favoritePet</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">1</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">P1</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">1</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">2</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">P2</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">NULL</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">3</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">P3</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">2</p></td>
+</tr>
+</tbody>
+</table>
+<table class="tableblock frame-all grid-all spread">
+<caption class="title">Table 3. Animal</caption>
+<colgroup>
+<col style="width: 20%;">
+<col style="width: 20%;">
+<col style="width: 20%;">
+<col style="width: 20%;">
+<col style="width: 20%;">
+</colgroup>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">id</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">dtype</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">name</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">kittyName</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">doggyName</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">1</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Cat</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">A</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">A</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">NULL</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock">2</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Dog</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">B</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">NULL</p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">B</p></td>
+</tr>
+</tbody>
+</table>
+<div class="paragraph">
+<p>A query for cat people would roughly look like this</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Tuple&gt; cb = cbf.create(em, Tuple.class)
+    .from(Person.class, "p")
+    .select("p.name")
+    .select("c.name")
+    .innerJoin("TREAT(p.favoritePet AS Cat)", "c");</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The resulting query might look like the following, but might differ depending on the actual support of the JPA provider.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT p.name, c.name
+FROM Person p
+JOIN TREAT(p.favoritePet AS Cat) c</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The result list will contain <strong>1 tuple</strong>, that is the cat person&#8217;s name and the name of the cat.</p>
+</div>
+<div class="paragraph">
+<p>When doing a left treat join, all people are retained.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Tuple&gt; cb = cbf.create(em, Tuple.class)
+    .from(Person.class, "p")
+    .select("p.name")
+    .select("c.name")
+    .leftJoin("TREAT(p.favoritePet AS Cat)", "c");</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The resulting query might look like the following, but again might differ depending on the actual support of the JPA provider.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT p.name, c.name
+FROM Person p
+LEFT JOIN TREAT(p.favoritePet AS Cat) c</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The result list will contain <strong>3 tuples</strong>. Note that only the tuple of the cat person <strong>P1</strong> will have a non-null name for the <code>favoritePet</code>.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="querying-non-managed-types"><a class="anchor" href="#querying-non-managed-types"></a>Querying non-managed types</h3>
+<div class="paragraph">
+<p>Currently there is no direct support for this type of querying, but this will change soon. Also see <a href="https://github.com/Blazebit/blaze-persistence/issues/204">#204</a></p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div id="footer">
+<div id="footer-text">
+Last updated 2020-08-04 13:32:35 KST
+</div>
+</div>
+</body>
+</html>

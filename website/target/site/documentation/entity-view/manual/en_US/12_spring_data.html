@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=">
+<meta name="generator" content="Asciidoctor 1.5.6.1">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spring Data integration</title>
+<link rel="stylesheet" href="css/blazebit.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.5.0/css/font-awesome.min.css">
+<link rel="stylesheet" href="prettify/prettify.min.css">
+<script src="prettify/prettify.min.js"></script>
+<script src="prettify/lang-ext.js"></script>
+<script>document.addEventListener('DOMContentLoaded', prettyPrint)</script>
+<link rel="shortcut icon" href="images/favicon.png">
+</head>
+<body class="book toc2 toc-left">
+
+<div class="brand">
+    <a class="vendor" href="https://blazebit.com">
+        <strong>Blazebit.com</strong>
+    </a>
+    <a class="logo" href="https://persistence.blazebit.com">
+        <strong>blaze-persistence</strong>
+    </a>
+</div>
+<br/>
+
+<div id="header">
+<div id="toc" class="toc2">
+<div id="toctitle">Table of Contents</div>
+<ul class="sectlevel1">
+<li><a href="#spring-data-integration">Spring Data integration</a>
+<ul class="sectlevel2">
+<li><a href="#spring-data-setup">Setup</a></li>
+<li><a href="#spring-data-features">Features</a></li>
+<li><a href="#spring-data-rest-integration">Spring Data Rest integration</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</div>
+<div id="content">
+<div class="sect1">
+<h2 id="spring-data-integration"><a class="anchor" href="#spring-data-integration"></a>Spring Data integration</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>Apart from a plain Spring integration which is handy for configuring and providing an <code>EntityViewManager</code> for injection,
+there is also a Spring Data integration module which tries to make using entity views with Spring Data as convenient as using entities.</p>
+</div>
+<div class="sect2">
+<h3 id="spring-data-setup"><a class="anchor" href="#spring-data-setup"></a>Setup</h3>
+<div class="paragraph">
+<p>To setup the project for Spring Data you have to add dependencies as described in the <a href="#getting-started-setup">[getting-started-setup]</a> section
+and make beans available for <code>CriteriaBuilderFactory</code> and <code>EntityViewManager</code> instances as laid out in the <a href="#anchor-environment-spring">Spring environment</a> section.</p>
+</div>
+<div class="paragraph">
+<p>In short, the following Maven dependencies are required</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint xml lang-xml">&lt;dependency&gt;
+    &lt;groupId&gt;com.blazebit&lt;/groupId&gt;
+    &lt;artifactId&gt;blaze-persistence-integration-spring-data-2.x&lt;/artifactId&gt;
+    &lt;version&gt;${blaze-persistence.version}&lt;/version&gt;
+    &lt;scope&gt;compile&lt;/scope&gt;
+&lt;/dependency&gt;
+&lt;dependency&gt;
+    &lt;groupId&gt;com.blazebit&lt;/groupId&gt;
+    &lt;artifactId&gt;blaze-persistence-integration-hibernate-5.2&lt;/artifactId&gt;
+    &lt;version&gt;${blaze-persistence.version}&lt;/version&gt;
+    &lt;scope&gt;runtime&lt;/scope&gt;
+&lt;/dependency&gt;</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>If you still work with Spring Data 1.x you will have to use a different integration as Spring Data 2.x changed quite a bit.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint xml lang-xml">&lt;dependency&gt;
+    &lt;groupId&gt;com.blazebit&lt;/groupId&gt;
+    &lt;artifactId&gt;blaze-persistence-integration-spring-data-1.x&lt;/artifactId&gt;
+    &lt;version&gt;${blaze-persistence.version}&lt;/version&gt;
+    &lt;scope&gt;compile&lt;/scope&gt;
+&lt;/dependency&gt;</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The dependencies for other JPA providers or other versions can be found in the <a href="{core_doc}#maven-setup">core module setup section</a>.</p>
+</div>
+<div class="paragraph">
+<p>A possible bean configuration for the required beans <code>CriteriaBuilderFactory</code> and <code>EntityViewManager</code> in short might look like this.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">@Configuration
+public class BlazePersistenceConfiguration {
+
+    @PersistenceUnit
+    private EntityManagerFactory entityManagerFactory;
+
+    @Bean
+    @Scope(ConfigurableBeanFactory.SCOPE_SINGLETON)
+    @Lazy(false)
+    public CriteriaBuilderFactory createCriteriaBuilderFactory() {
+        CriteriaBuilderConfiguration config = Criteria.getDefault();
+        // do some configuration
+        return config.createCriteriaBuilderFactory(entityManagerFactory);
+    }
+}</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">@Configuration
+public class BlazePersistenceConfiguration {
+
+    @Bean
+    @Scope(ConfigurableBeanFactory.SCOPE_SINGLETON)
+    @Lazy(false)
+    // inject the criteria builder factory which will be used along with the entity view manager
+    public EntityViewManager createEntityViewManager(CriteriaBuilderFactory cbf, EntityViewConfiguration entityViewConfiguration) {
+        return entityViewConfiguration.createEntityViewManager(cbf);
+    }
+}</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>When enabling JPA repositories, make sure you configure <code>BlazePersistenceRepositoryFactoryBean</code> as <em>repositoryFactoryBeanClass</em>.
+Optionally specify a custom basePackage for repository class scanning and a custom entityManagerFactoryRef.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">@EnableJpaRepositories(repositoryFactoryBeanClass = BlazePersistenceRepositoryFactoryBean.class)</pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="spring-data-features"><a class="anchor" href="#spring-data-features"></a>Features</h3>
+<div class="paragraph">
+<p>The integration comes with a convenience base interface <code>com.blazebit.persistence.spring.data.repository.EntityViewRepository</code>
+that you can use for your repository definitions.</p>
+</div>
+<div class="paragraph">
+<p>Assume we have the following entity view:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">@EntityView(Cat.class)
+public interface SimpleCatView {
+
+    @IdMapping
+    public getId();
+
+    String getName();
+
+    @Mapping("LOWER(name)")
+    String getLowerCaseName();
+
+    Integer getAge();
+}</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>A very simple repository might look like this:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">@Transactional(readOnly = true)
+public interface SimpleCatViewRepository extends EntityViewRepository&lt;SimpleCatView, Long&gt; {
+
+    List&lt;SimpleCatView&gt; findByLowerCaseName(String lowerCaseName);
+}</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Since we use EntityViewRepository as a base interface we inherit the most commonly used repository methods.
+You can now use this repository as any other Spring Data repository:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">@Controller
+public class MyCatController {
+
+    @Autowired
+    private SimpleCatViewRepository simpleCatViewRepository;
+
+    public Iterable&lt;SimpleCatView&gt; getCatDataForDisplay() {
+        return simpleCatViewRepository.findAll();
+    }
+
+    public SimpleCatView findCatByName(String name) {
+        return simpleCatViewRepository.findByLowerCaseName(name.toLowerCase());
+    }
+}</pre>
+</div>
+</div>
+<div class="paragraph">
+<p><a href="https://docs.spring.io/spring-data/jpa/docs/current/reference/html/#specifications">Spring Data Specifications</a> can be used without restrictions. There is also the convenience base interface <code>com.blazebit.persistence.spring.data.repository.EntityViewSpecificationExecutor</code> that can be extended from.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">@Transactional(readOnly = true)
+public interface SimpleCatViewRepository extends EntityViewRepository&lt;SimpleCatView, Long&gt;, EntityViewSpecificationExecutor&lt;SimpleCatView, Cat&gt; {
+}
+
+@Controller
+public class MyCatController {
+
+    @Autowired
+    private SimpleCatViewRepository simpleCatViewRepository;
+
+    public Iterable&lt;SimpleCatView&gt; getCatDataForDisplay(final int minAge) {
+        return simpleCatViewRepository.findAll(new Specification&lt;Cat&gt;() {
+            @Override
+            public Predicate toPredicate(Root&lt;Cat&gt; root, CriteriaQuery&lt;?&gt; criteriaQuery, CriteriaBuilder criteriaBuilder) {
+                return criteriaBuilder.ge(root.&lt;Integer&gt;get("age"), minAge);
+            }
+        });
+    }</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The integration handles ad-hoc uses of <a href="https://docs.spring.io/spring-data/jpa/docs/current/reference/html/#jpa.entity-graph"><code>@EntityGraph</code></a> by adapting the query generation through call of <a href="{core_jdoc}/persistence/CriteriaBuilder.html#fetch(java.lang.String&#8230;&#8203;)"><code>CriteriaBuilder.fetch()</code></a> rather than passing the entity graphs as hints.</p>
+</div>
+<div class="paragraph">
+<p>Another notable feature the integration provides is the support for the return type <code>KeysetAwarePage</code> as a replacement for <code>Page</code>.
+By using <code>KeysetAwarePage</code> the keyset pagination feature is enabled for the repository method.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">@Transactional(readOnly = true)
+public interface KeysetAwareCatViewRepository extends Repository&lt;Cat, Long&gt; {
+
+    KeysetAwarePage&lt;SimpleCatView&gt; findAll(Pageable pageable);
+}</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Note that the <code>Pageable</code> should be an instance of <code>KeysetPageable</code> if keyset pagination should be used. A <code>KeysetPageable</code> can be retrieved through the <code>KeysetAwarePage</code> or manually
+by constructing a <code>KeysetPageRequest</code>. Note that constructing a <code>KeysetPageRequest</code> or actually the contained <code>KeysetPage</code> manually is not recommended. When working with Spring MVC,
+the Spring Data Rest integration might come in handy. For stateful server side frameworks, it&#8217;s best to put the <code>KeysetAwarePage</code> into a session like storage
+to be able to use the <code>previousOrFirst()</code> and <code>next()</code> methods for retrieving <code>KeysetPageable</code> objects.</p>
+</div>
+<div class="paragraph">
+<p>All other Spring Data repository features like restrictions, pagination, slices and ordering are supported as usual.
+Please consult the Spring Data documentation for further information.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="spring-data-rest-integration"><a class="anchor" href="#spring-data-rest-integration"></a>Spring Data Rest integration</h3>
+<div class="paragraph">
+<p>The Spring Data Rest integration offers similar pagination features for keyset pagination to what Spring Data already offers for normal pagination.
+First, a keyset pagination enabled repository is needed.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">@Transactional(readOnly = true)
+public interface KeysetAwareCatViewRepository extends Repository&lt;Cat, Long&gt; {
+
+    KeysetAwarePage&lt;SimpleCatView&gt; findAll(Pageable pageable);
+}</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>A controller can then use this repository like the following:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">@Controller
+public class MyCatController {
+
+    @Autowired
+    private KeysetAwareCatViewRepository simpleCatViewRepository;
+
+    @RequestMapping(path = "/cats", method = RequestMethod.GET)
+    public Page&lt;SimpleCatView&gt; getCats(@KeysetConfig(Cat.class) KeysetPageable pageable) {
+        return simpleCatViewRepository.findAll(pageable);
+    }</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Note that {projectname} imposes some very important requirements that have to be fulfilled</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>There must always be a sort specification</p>
+</li>
+<li>
+<p>The last sort specification must be the entity identifier</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>For the keyset pagination to kick in, the client has to <em>remember</em> the values by which the sorting is done of the first and the last element of the result.
+The values then need to be passed to the next request as JSON encoded query parameters. The values of the first element should use the parameter <code>lowest</code> and the last element the parameter <code>highest</code>.</p>
+</div>
+<div class="paragraph">
+<p>The following will illustrate how this works.</p>
+</div>
+<div class="paragraph">
+<p>First, the client makes an initial request.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint">GET /cats?page=0&amp;size=3&amp;sort=id,desc
+{
+    content: [
+        { id: 10, name: 'Felix', age: 10 },
+        { id: 9, name: 'Robin', age: 4 },
+        { id: 8, name: 'Billy', age: 7 }
+    ]
+}</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>It&#8217;s the responsibility of the client to remember the attributes by which it sorts of the first and last element.
+In this case, <code>{id: 10}</code> will be remembered as <code>lowest</code> and <code>{id: 8}</code> as <code>highest</code>. The client also has to remember the page and size which was used to request this data.
+When the client then wants to switch to the next page, it has to pass <code>lowest</code> and <code>highest</code> as parameters as well as <code>prevPage</code> representing the page that was used before.</p>
+</div>
+<div class="paragraph">
+<p>Note that the following is just an example for illustration. Stringified JSON objects in JavaScript should be encoded view <code>encodeURI()</code> before being used as query parameter.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint">GET /cats?page=1&amp;size=3&amp;sort=id,desc&amp;prevPage=0&amp;lowest={id:10}&amp;highest={id:8}
+{
+    content: [
+        { id: 7, name: 'Kitty', age: 1 },
+        { id: 6, name: 'Bob', age: 8 },
+        { id: 5, name: 'Frank', age: 14 }
+    ]
+}</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>This will make use of keyset pagination as can be seen by looking at the generated JPQL or SQL query.</p>
+</div>
+<div class="paragraph">
+<p>Note that the client should <em>drop</em> or <em>forget</em> the <code>lowest</code>, <code>highest</code> and <code>prevPage</code> values when</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>the page size changes</p>
+</li>
+<li>
+<p>the sorting changes</p>
+</li>
+<li>
+<p>the filtering changes</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>For a full AngularJS example see the following <a href="https://github.com/Blazebit/blaze-persistence/blob/master/examples/spring-data-rest/src/main/resources/static/app.js">example project</a>.</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div id="footer">
+<div id="footer-text">
+Last updated 2020-08-04 13:32:35 KST
+</div>
+</div>
+</body>
+</html>

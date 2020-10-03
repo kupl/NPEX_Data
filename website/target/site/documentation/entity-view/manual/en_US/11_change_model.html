@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=">
+<meta name="generator" content="Asciidoctor 1.5.6.1">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Updatable Entity View Change Model</title>
+<link rel="stylesheet" href="css/blazebit.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.5.0/css/font-awesome.min.css">
+<link rel="stylesheet" href="prettify/prettify.min.css">
+<script src="prettify/prettify.min.js"></script>
+<script src="prettify/lang-ext.js"></script>
+<script>document.addEventListener('DOMContentLoaded', prettyPrint)</script>
+<link rel="shortcut icon" href="images/favicon.png">
+</head>
+<body class="book toc2 toc-left">
+
+<div class="brand">
+    <a class="vendor" href="https://blazebit.com">
+        <strong>Blazebit.com</strong>
+    </a>
+    <a class="logo" href="https://persistence.blazebit.com">
+        <strong>blaze-persistence</strong>
+    </a>
+</div>
+<br/>
+
+<div id="header">
+<div id="toc" class="toc2">
+<div id="toctitle">Table of Contents</div>
+<ul class="sectlevel1">
+<li><a href="#updatable-entity-view-change-model-api">Updatable Entity View Change Model</a>
+<ul class="sectlevel2">
+<li><a href="#updatable-entity-view-change-model-api-overview">Change Model API overview</a></li>
+<li><a href="#updatable-entity-view-change-model-tx-support">Transaction support</a></li>
+<li><a href="#updatable-entity-view-change-model-type-support">User type support</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</div>
+<div id="content">
+<div class="sect1">
+<h2 id="updatable-entity-view-change-model-api"><a class="anchor" href="#updatable-entity-view-change-model-api"></a>Updatable Entity View Change Model</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>Updatable entity views are not only better write model DTOs, but also allow to retrieving logical changes via the ChangeModel API.
+Using updatable entity views allows the persistence model to be efficiently updated, but the <em>cost</em> for doing that is hiding the persistent/initial state from the user.
+Oftentimes part of the persistent/initial state is compared with values that are about to be written to <em>detect</em> logical changes.
+Since updatable entity views handle the persistent state behind the scenes, such a manual comparison isn&#8217;t possible. Thanks to the ChangeModel API it is unnecessary.</p>
+</div>
+<div class="paragraph">
+<p>The ChangeModel API entry point is
+<a href="{entity_view_jdoc}/persistence/view/EntityViewManager.html#getChangeModel(java.lang.Object)"><code>EntityViewManager.getChangeModel(Object view)</code></a>
+and returns the change model for a given updatable entity view.
+A change model instance provides access to the initial and current state of an object and the <code>ChangeKind</code> of a change model.
+Singular change models also give access to the change models of the respective attributes of an entity view type.
+Plural change models additionally give access to the added, removed and mutated element change models.
+A map change model also allows to distinguish between element and key change models.</p>
+</div>
+<div class="sect2">
+<h3 id="updatable-entity-view-change-model-api-overview"><a class="anchor" href="#updatable-entity-view-change-model-api-overview"></a>Change Model API overview</h3>
+<div class="paragraph">
+<p>To detect if a model or one of it&#8217;s child models is dirty, one can use the <a href="{entity_view_jdoc}/persistence/view/change/ChangeModel.html#isDirty()"><code>ChangeModel.isDirty()</code></a> method.
+The actual change models of dirty elements within a <code>SingularChangeModel</code> can be retrieved via <a href="{entity_view_jdoc}/persistence/view/change/SingularChangeModel.html#getDirtyChanges()"><code>SingularChangeModel.getDirtyChanges()</code></a>.
+Only attributes of the queried object are reported as change models i.e. only a single level.</p>
+</div>
+<div class="paragraph">
+<p>The singular change models allow access to the attributes change models either via attribute path or via the metamodel attribute objects by using one of the overloaded
+<a href="{entity_view_jdoc}/persistence/view/change/SingularChangeModel.html#get(java.lang.String)"><code>SingularChangeModel.get(String attributePath)</code></a> methods.
+The term <em>path</em> implicates a nested attribute access is possible, which is the case, but beware that accessing attributes of collection elements will result in an exception
+unless the <a href="{entity_view_jdoc}/persistence/view/change/SingularChangeModel.html#getAll(java.lang.String)"><code>SingularChangeModel.getAll(String attributePath)</code></a> variant is used
+which returns a list of change models instead of a single one.</p>
+</div>
+<div class="paragraph">
+<p>Another notable feature the singular change model provides is the checking for dirtyness of a specific attribute path. Instead of materializing every change model
+along the path, the <a href="{entity_view_jdoc}/persistence/view/change/SingularChangeModel.html#isDirty(java.lang.String)"><code>SingularChangeModel.isDirty(String attributePath)</code></a> method
+only reports the dirtyness of the object accessible through the given attribute path.
+A variant of this method <a href="{entity_view_jdoc}/persistence/view/change/SingularChangeModel.html#isChanged(java.lang.String)"><code>SingularChangeModel.isChanged(String attributePath)</code></a>
+will return early if one of the parent attributes was updated i.e. the identity was changed.</p>
+</div>
+<div class="paragraph">
+<p>The plural change model is similar in the respect that it provides analogous methods that simply return a list of change models instead of a single one.
+It also allows to access the change models of the added, removed or mutated elements separately.
+To access all dirty changes similar to what is possible with <code>SingularChangeModel#getDirtyChanges()</code>, plural change models provide the method
+<a href="{entity_view_jdoc}/persistence/view/change/PluralChangeModel.html#getElementChanges()"><code>PluralChangeModel.getElementChanges()</code></a> for doing the same.</p>
+</div>
+<div class="paragraph">
+<p>The map change model additionally allows to differentiate between changes to key objects and element objects. It offers methods to access the key changes
+as well as the overall object changes with analogously named methods <code>getAddedObjects()</code>, <code>getAddedKeys()</code> etc.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="updatable-entity-view-change-model-tx-support"><a class="anchor" href="#updatable-entity-view-change-model-tx-support"></a>Transaction support</h3>
+<div class="paragraph">
+<p>The change model implementation gains it&#8217;s insights by inspecting the dirty tracking information of the actual objects.
+Since a transaction commit will flush dirty changes i.e. the dirtyness is resetted, change model objects won&#8217;t report any dirty changes after a commit.
+If information about the change models should be retained after a transaction commit, it must be serialized with a custom mechanism.
+When a rollback occurs, the dirtyness is restored to be able to commit again after doing further changes which also means that change models will work as expected.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="updatable-entity-view-change-model-type-support"><a class="anchor" href="#updatable-entity-view-change-model-type-support"></a>User type support</h3>
+<div class="paragraph">
+<p>The Change Model API builds on top of the <code>BasicUserType</code> foundation and it is thus essential to have a correct implementation for the type.</p>
+</div>
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-note" title="Note"></i>
+</td>
+<td class="content">
+Unknown types are considered mutable which has the effect, that objects of that type are always considered dirty. Provide a <code>deepClone</code> implementation or mark the type as immutable to avoid this.
+</td>
+</tr>
+</table>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div id="footer">
+<div id="footer-text">
+Last updated 2020-08-04 13:32:35 KST
+</div>
+</div>
+</body>
+</html>

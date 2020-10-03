@@ -1,0 +1,1369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=">
+<meta name="generator" content="Asciidoctor 1.5.6.1">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Expressions</title>
+<link rel="stylesheet" href="css/blazebit.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.5.0/css/font-awesome.min.css">
+<link rel="stylesheet" href="prettify/prettify.min.css">
+<script src="prettify/prettify.min.js"></script>
+<script src="prettify/lang-ext.js"></script>
+<script>document.addEventListener('DOMContentLoaded', prettyPrint)</script>
+<link rel="shortcut icon" href="images/favicon.png">
+</head>
+<body class="book toc2 toc-left">
+
+<div class="brand">
+    <a class="vendor" href="https://blazebit.com">
+        <strong>Blazebit.com</strong>
+    </a>
+    <a class="logo" href="https://persistence.blazebit.com">
+        <strong>blaze-persistence</strong>
+    </a>
+</div>
+<br/>
+
+<div id="header">
+<div id="toc" class="toc2">
+<div id="toctitle">Table of Contents</div>
+<ul class="sectlevel1">
+<li><a href="#expressions">Expressions</a>
+<ul class="sectlevel2">
+<li><a href="#identification-variables">Identification variables</a></li>
+<li><a href="#path-expressions">Path expressions</a></li>
+<li><a href="#array-expressions">Array expressions</a></li>
+<li><a href="#treat-expressions">Treat expressions</a></li>
+<li><a href="#qualified-expressions">Qualified expressions</a></li>
+<li><a href="#parameter-and-literal-expressions">Parameter and Literal expressions</a></li>
+<li><a href="#arithmetic-expressions">Arithmetic expressions</a></li>
+<li><a href="#function-expressions">Function expressions</a></li>
+<li><a href="#subquery-expressions">Subquery expressions</a></li>
+<li><a href="#nullif-expressions">Nullif expressions</a></li>
+<li><a href="#coalesce-expressions">Coalesce expressions</a></li>
+<li><a href="#case-expressions">Case expressions</a></li>
+<li><a href="#predicate-expressions">Predicate expressions</a></li>
+<li><a href="#relational-comparison-predicate">Relational comparison predicate</a></li>
+<li><a href="#nullness-predicate">Nullness predicate</a></li>
+<li><a href="#like-predicate">Like predicate</a></li>
+<li><a href="#between-predicate">Between predicate</a></li>
+<li><a href="#in-predicate">In predicate</a></li>
+<li><a href="#exists-predicate">Exists predicate</a></li>
+<li><a href="#empty-predicate">Empty predicate</a></li>
+<li><a href="#member-of-predicate">Member-of predicate</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</div>
+<div id="content">
+<div class="sect1">
+<h2 id="expressions"><a class="anchor" href="#expressions"></a>Expressions</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>{projectname} supports almost all expressions that are also valid JPQL expressions and in addition to that also has some extensions.
+Keywords are case insensitive and optional parenthesis are ignored i.e. not reflected in the expression tree model.
+Expression optimizations like double invert signum and double negation simplifications can be configured via a <a href="#expression_optimization">configuration property</a> and are enabled by default.</p>
+</div>
+<div class="paragraph">
+<p>Almost all APIs of {projectname} accept expressions as strings. A few like <code>setWhereExpression(String)</code>, <code>setHavingExpression(String)</code>, <code>setOnExpression(String)</code> require predicates as strings as they replace the whole predicate.
+Predicates are a subtype of expressions that produce a boolean value. Until <a href="https://github.com/Blazebit/blaze-persistence/issues/340">#340</a> is resolved, it is necessary to wrap predicates in a <code>CASE WHEN</code> expression for producing boolean values for a <code>SELECT</code> clause.</p>
+</div>
+<div class="sect2">
+<h3 id="identification-variables"><a class="anchor" href="#identification-variables"></a>Identification variables</h3>
+<div class="paragraph">
+<p>Identification variables are aliases of <code>FROM</code> clause elements. Since <code>FROM</code> clause aliases and <code>SELECT</code> aliases have to be unique,
+you can use <code>SELECT</code> aliases just like <code>FROM</code> clause aliases. The only exception to this are <code>ON</code> clauses of <code>FROM</code> clause elements.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="path-expressions"><a class="anchor" href="#path-expressions"></a>Path expressions</h3>
+<div class="paragraph">
+<p>Path expressions use the navigation operator <code>.</code> to navigate to properties of an object. A path expression has the form of <code>identificationVariable.attribute</code>
+where <code>attribute</code> is the name of an attribute which is part of the type of <code>identificationVariable</code>. Path expressions can also use multiple navigation operators like <code>identificationVariable.association.attribute</code>
+where <code>association</code> is an object typed attribute. In general, the use of a navigation operator will result in a <a href="#model-awareness">model aware join</a> of the attributes.
+In some cases the join will be omitted</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>The attribute is not joinable i.e. it has a basic type like <code>String</code>, <code>Integer</code></p>
+</li>
+<li>
+<p>The attribute has a managed type and is used in a predicate</p>
+</li>
+<li>
+<p>The path is a single valued id expression and the JPA provider supports that. A single valued id expression is given when</p>
+</li>
+<li>
+<p>The expression has the form <code>identificationVariable.association.id</code></p>
+</li>
+<li>
+<p>The <code>association</code> is an attribute with an entity type</p>
+</li>
+<li>
+<p>The <code>id</code> is the identifier of the association&#8217;s entity type</p>
+</li>
+<li>
+<p>The column for the identifier is physically located in the table that is backing the type of <code>identificationVariable</code></p>
+</li>
+</ul>
+</div>
+</div>
+<div class="sect2">
+<h3 id="array-expressions"><a class="anchor" href="#array-expressions"></a>Array expressions</h3>
+<div class="paragraph">
+<p>The array expression syntax is an extension to the JPQL grammar that allows to refer to a specific element of a collection.
+Currently this is limited to associations mapped as <code>java.util.Map</code> and indexed <code>java.util.List</code> i.e. lists that use <code>@OrderColumn</code>.</p>
+</div>
+<div class="paragraph">
+<p>A normal path expression like <code>identificationVariable.collection.name</code> will create an unconditional join for the attribute <code>collection</code> i.e. it refers to all collection elements.
+An array expression like <code>identificationVariable.collection[:someParam].name</code> on the other hand joins the attribute <code>collection</code> with a <code>ON</code> clause condition <code>KEY(collection) = :someParam</code>
+if the collection is a <code>java.util.Map</code> and <code>INDEX(collection) = :someParam</code> if it is a <code>java.util.List</code>. So an array expression refers to a single collection element.</p>
+</div>
+<div class="paragraph">
+<p>Since array expressions by default use the join type <code>LEFT</code>, the expression result is either the value for the specific element or <code>NULL</code> if no collection element for the key or index exists.
+The array expression syntax can be used anywhere within a path expression. Even multiple uses like this are ok <code>identificationVariable.collection1[:param1].association.collection2[:param2].attribute</code></p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="treat-expressions"><a class="anchor" href="#treat-expressions"></a>Treat expressions</h3>
+<div class="paragraph">
+<p>Every expression in JPQL has a static type that can be determined through the metamodel. Since associations can refer to polymorphic types, it might be necessary to downcast identification variables or path expressions.
+JPA 2.1 introduced the concept of a <code>TREAT</code> expression to actually downcast to a specific subtype. {projectname} follows the strict rules of JPQL regarding static type resolving and thus requires the use of <code>TREAT</code> when accessing subtype properties.
+A <code>TREAT</code> expression can be used in any clause and the result of such an expression is either the <em>casted</em> object or <code>NULL</code> if the object is not an instance of the requested type.
+If <code>TREAT</code> is used as part of a predicate and an object is not of the requested type, the predicate will evaluate to <code>FALSE</code>.</p>
+</div>
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-note" title="Note"></i>
+</td>
+<td class="content">
+The use of <code>TREAT</code> will not necessarily result in a filter for that subtype.
+</td>
+</tr>
+</table>
+</div>
+</div>
+<div class="sect2">
+<h3 id="qualified-expressions"><a class="anchor" href="#qualified-expressions"></a>Qualified expressions</h3>
+<div class="paragraph">
+<p>JPQL has the concept of qualified expressions for collections which is also supported in {projectname}.
+By default, a join for a collection or an expression using an attribute referring to a collection type, will have the collection value as type.
+For allowing access to the key of a <code>java.util.Map</code> or the index of an indexed <code>java.util.List</code>, JPQL has a notion of qualification expressions.</p>
+</div>
+<div class="sect3">
+<h4 id="value"><a class="anchor" href="#value"></a>VALUE</h4>
+<div class="paragraph">
+<p>The <code>VALUE</code> qualification expression is used to refer to the value of a collection explicitly. Since an identification variable by default has this type, the use of <code>VALUE</code> can always be omitted.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="key"><a class="anchor" href="#key"></a>KEY</h4>
+<div class="paragraph">
+<p>The <code>KEY</code> qualification expression is used to refer to the key of a <code>java.util.Map</code>. If the key type is an entity type, it can be further navigated on.</p>
+</div>
+<div class="paragraph">
+<p>WARN: Further navigation might not be supported by all JPA providers.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="entry"><a class="anchor" href="#entry"></a>ENTRY</h4>
+<div class="paragraph">
+<p>The <code>ENTRY</code> qualification expression is used to construct <code>java.util.Map.Entry</code> instances for an identification variable that refers to a collection of the type <code>java.util.Map</code>.</p>
+</div>
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-note" title="Note"></i>
+</td>
+<td class="content">
+This qualification expression can only be used in the select clause.
+</td>
+</tr>
+</table>
+</div>
+</div>
+<div class="sect3">
+<h4 id="index"><a class="anchor" href="#index"></a>INDEX</h4>
+<div class="paragraph">
+<p>The <code>INDEX</code> qualification expression is used to refer to the index of a an indexed <code>java.util.List</code> i.e. mapping that uses <code>@OrderColumn</code>.</p>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="parameter-and-literal-expressions"><a class="anchor" href="#parameter-and-literal-expressions"></a>Parameter and Literal expressions</h3>
+<div class="paragraph">
+<p>{projectname} only supports named parameters i.e. the <code>:parameterName</code> notation. There are multiple reasons for not supporting positional parameters but the main one being,
+that positional parameters were never needed by the authors of {projectname} in any of their projects.
+Values can used in a query either through a parameter expression or by rendering it as literal expression. The syntaxes for literals depend on the data type of the value
+and roughly align with the syntax of EclipseLink and Hibernate.</p>
+</div>
+<div class="paragraph">
+<p>Next to the normal literals, {projectname} also has support for a <code>NULL</code> literal. Behind the scenes it renders as <code>NULLIF(1,1)</code>.</p>
+</div>
+<div class="sect3">
+<h4 id="string-literals"><a class="anchor" href="#string-literals"></a>String literals</h4>
+<div class="paragraph">
+<p>Just like in JPQL, the values for literals of string types are enclosed in single quotes. To escape a single quote within the value, a single quote is prefixed.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Cat&gt; cb = cbf.create(em, Cat.class)
+    .whereOr()
+        .where("owner.name").like().expression("'Billy'").noEscape()
+        .where("name").like().expression("'Billy''s cat'").noEscape()
+    .endOr();</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT cat
+FROM Cat cat
+LEFT JOIN cat.owner owner_1
+WHERE owner_1.name LIKE 'Billy'
+   OR cat.name LIKE 'Billy''s cat'</pre>
+</div>
+</div>
+</div>
+<div class="sect3">
+<h4 id="numeric-literals"><a class="anchor" href="#numeric-literals"></a>Numeric literals</h4>
+<div class="paragraph">
+<p>By default, an integer literal has the type <code>int</code> or <code>Integer</code> and a decimal literal has the type <code>double</code> or <code>Double</code>. If you need other types, you can use the type suffixes.</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p><code>L</code> for <code>long</code> or <code>Long</code> i.e. <code>1L</code></p>
+</li>
+<li>
+<p><code>F</code> for <code>float</code> or <code>Float</code> i.e. <code>1.1F</code></p>
+</li>
+<li>
+<p><code>D</code> for <code>double</code> or <code>Double</code> i.e. <code>0D</code></p>
+</li>
+<li>
+<p><code>BI</code> for <code>bigint</code> or <code>BigInteger</code> i.e. <code>1BI</code></p>
+</li>
+<li>
+<p><code>BD</code> for <code>decimal</code> or <code>BigDecimal</code> i.e. <code>0BD</code></p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>There are no literal suffixes for the types <code>byte</code> and <code>short</code>.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="boolean-literals"><a class="anchor" href="#boolean-literals"></a>Boolean literals</h4>
+<div class="paragraph">
+<p>Boolean literals <code>TRUE</code> and <code>FALSE</code> are case insensitive and can appear as expression directly or as predicate.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="date-time-literals"><a class="anchor" href="#date-time-literals"></a>Date &amp; Time literals</h4>
+<div class="paragraph">
+<p>Date &amp; Time literals work with the JDBC escape syntax just like in JPQL.</p>
+</div>
+<div class="paragraph">
+<p>Date literal::`{d 'yyyy-mm-dd'}`
+Time literal::`{t 'hh:mm:ss'}`
+Timestamp literal::`{ts 'yyyy-mm-dd hh:mm:ss(.millis)?'}` with optional milliseconds</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="entity-type-literals"><a class="anchor" href="#entity-type-literals"></a>Entity type literals</h4>
+<div class="paragraph">
+<p>Whenever you compare against a <code>TYPE()</code> expression, you can use entity type literals.
+An entity type literal is either the <em>entity name</em> or the fully qualified class name of the entity.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Cat&gt; cb = cbf.create(em, Cat.class)
+    .where("TYPE(owner)").eqExpression("Student");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT cat
+FROM Cat cat
+LEFT JOIN cat.owner owner_1
+WHERE TYPE(owner_1) = Student</pre>
+</div>
+</div>
+</div>
+<div class="sect3">
+<h4 id="enum-literals"><a class="anchor" href="#enum-literals"></a>Enum literals</h4>
+<div class="paragraph">
+<p>An enum literal can be used by writing the fully qualified class name of the enum followed by the enum key.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Cat&gt; cb = cbf.create(em, Cat.class)
+    .where("cat.status").eqExpression("org.mypackage.Status.ALIVE");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT cat
+FROM Cat cat
+WHERE TYPE(cat.status) = org.mypackage.Status.ALIVE</pre>
+</div>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="arithmetic-expressions"><a class="anchor" href="#arithmetic-expressions"></a>Arithmetic expressions</h3>
+<div class="paragraph">
+<p>Arithmetic operators (<code>+</code>, <code>-</code>, <code>*</code>, <code>/</code>) are available on numeric types.
+The type rules follow the JPQL rules which roughly say that if any operand in an arithmetic expression is of type &#8230;&#8203;
+* <code>Double</code>, then the result is of type <code>Double</code>
+* <code>Float</code>, then the result is of type <code>Float</code>
+* <code>BigDecimal</code>, then the result is of type <code>BigDecimal</code>
+* <code>BigInteger</code>, then the result is of type <code>BigInteger</code>
+* <code>Long</code>, then the result is of type <code>Long</code></p>
+</div>
+<div class="paragraph">
+<p>In all other cases, the result is of the type <code>Integer</code>.
+The only exception to all of these rules is the division operator <code>/</code> for which the result type is undefined.</p>
+</div>
+<div class="paragraph">
+<p>The operators can&#8217;t be used for date arithmetic. Instead the <em>date diff functions</em> have to be used.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="function-expressions"><a class="anchor" href="#function-expressions"></a>Function expressions</h3>
+<div class="paragraph">
+<p>{projectname} decided to only allow the standard JPQL and some extension functions to be used directly with the function call syntax <code>FUNCTION_NAME ( (args)* )</code>.
+Non-standard functions have to be used via the <code>FUNCTION ( function_name (, args)* )</code> syntax that got introduced in JPA 2.1.</p>
+</div>
+<div class="sect3">
+<h4 id="string-functions"><a class="anchor" href="#string-functions"></a>String functions</h4>
+<div class="paragraph">
+<p>Functions that return a result of type string.</p>
+</div>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>CONCAT ( string1, string2 (, args)* )</code></dt>
+<dd>
+<p>Concatenates the arguments to one string. Contrary to JPQL, this function allows varargs.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;String&gt; cb = cbf.create(em, String.class)
+    .from(Cat.class, "cat")
+    .select("CONCAT(cat.name, ' the cat')");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT CONCAT(cat.name, ' the cat')
+FROM Cat cat</pre>
+</div>
+</div>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>SUBSTRING ( string, start (, length)? )</code></dt>
+<dd>
+<p>Returns the subsequence of the first argument beginning at <code>start</code> which is 1-based. The length is optional.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;String&gt; cb = cbf.create(em, String.class)
+    .from(Cat.class, "cat")
+    .select("SUBSTRING(cat.name, 1, 2)");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT SUBSTRING(cat.name, 1, 2)
+FROM Cat cat</pre>
+</div>
+</div>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>TRIM ( ( (LEADING | TRAILING | BOTH)? trimChar? FROM)? string )</code></dt>
+<dd>
+<p>Trims a character from the string. By default the <em>whitespace character</em> is trimmed from <em>BOTH</em> sides.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;String&gt; cb = cbf.create(em, String.class)
+    .from(Cat.class, "cat")
+    .select("TRIM(BOTH ' ' FROM cat.name)");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT TRIM(BOTH ' ' FROM cat.name)
+FROM Cat cat</pre>
+</div>
+</div>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>LOWER ( string )</code></dt>
+<dd>
+<p>Returns the string in all lower case form.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;String&gt; cb = cbf.create(em, String.class)
+    .from(Cat.class, "cat")
+    .select("LOWER(cat.name)");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT LOWER(cat.name)
+FROM Cat cat</pre>
+</div>
+</div>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>UPPER ( string )</code></dt>
+<dd>
+<p>Returns the string in all upper case form.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;String&gt; cb = cbf.create(em, String.class)
+    .from(Cat.class, "cat")
+    .select("UPPER(cat.name)");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT UPPER(cat.name)
+FROM Cat cat</pre>
+</div>
+</div>
+</div>
+<div class="sect3">
+<h4 id="numeric-functions"><a class="anchor" href="#numeric-functions"></a>Numeric functions</h4>
+<div class="paragraph">
+<p>Functions that return a numeric result.</p>
+</div>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>LENGTH ( string )</code></dt>
+<dd>
+<p>Returns the length of the string.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Integer&gt; cb = cbf.create(em, Integer.class)
+    .from(Cat.class, "cat")
+    .select("LENGTH(cat.name)");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT LENGTH(cat.name)
+FROM Cat cat</pre>
+</div>
+</div>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>LOCATE ( string1, string2, start? )</code></dt>
+<dd>
+<p>Returns the first position of <code>string2</code> within <code>string1</code> from left to right, starting at <code>start</code>. By default starts at the beginning.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Integer&gt; cb = cbf.create(em, Integer.class)
+    .from(Cat.class, "cat")
+    .select("LOCATE(cat.name, ' ')");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT LOCATE(cat.name, ' ')
+FROM Cat cat</pre>
+</div>
+</div>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>ABS ( numeric )</code></dt>
+<dd>
+<p>Returns the absolute value of the numeric value.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Integer&gt; cb = cbf.create(em, Integer.class)
+    .from(Cat.class, "cat")
+    .select("ABS(cat.age / 3)");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT ABS(cat.age / 3)
+FROM Cat cat</pre>
+</div>
+</div>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>SQRT ( numeric )</code></dt>
+<dd>
+<p>Returns the square root of the numeric value.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Double&gt; cb = cbf.create(em, Double.class)
+    .from(Cat.class, "cat")
+    .select("SQRT(cat.age)");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT SQRT(cat.age)
+FROM Cat cat</pre>
+</div>
+</div>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>MOD ( numeric1, numeric2 )</code></dt>
+<dd>
+<p>Returns the remainder for the division <code>numeric1 / numeric2</code>.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Integer&gt; cb = cbf.create(em, Integer.class)
+    .from(Cat.class, "cat")
+    .select("MOD(cat.age, 3)");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT MOD(cat.age, 3)
+FROM Cat cat</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The functions <code>SIZE</code> and <code>INDEX</code> also return numeric values but are described in <a href="#collection-functions">Collection functions</a></p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="date-time-functions"><a class="anchor" href="#date-time-functions"></a>Date &amp; Time functions</h4>
+<div class="paragraph">
+<p>Functions that return a result with a date or time type.</p>
+</div>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>CURRENT_DATE</code></dt>
+<dd>
+<p>Returns the databases current date.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;java.sql.Date&gt; cb = cbf.create(em, java.sql.Date.class)
+    .from(Cat.class, "cat")
+    .select("CURRENT_DATE");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT CURRENT_DATE
+FROM Cat cat</pre>
+</div>
+</div>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>CURRENT_TIME</code></dt>
+<dd>
+<p>Returns the databases current time.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;java.sql.Time&gt; cb = cbf.create(em, java.sql.Time.class)
+    .from(Cat.class, "cat")
+    .select("CURRENT_TIME");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT CURRENT_TIME
+FROM Cat cat</pre>
+</div>
+</div>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>CURRENT_TIMESTAMP</code></dt>
+<dd>
+<p>Returns the databases current timestamp.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;java.sql.Timestamp&gt; cb = cbf.create(em, java.sql.Timestamp.class)
+    .from(Cat.class, "cat")
+    .select("CURRENT_TIMESTAMP");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT CURRENT_TIME
+FROM Cat cat</pre>
+</div>
+</div>
+</div>
+<div class="sect3">
+<h4 id="collection-functions"><a class="anchor" href="#collection-functions"></a>Collection functions</h4>
+<div class="paragraph">
+<p>Functions that operate on collection mappings.</p>
+</div>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>INDEX ( collection_join_alias )</code></dt>
+<dd>
+<p>Returns the index of a collection element. The collection must be a <code>java.util.List</code> and have a <code>@OrderColumn</code>.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Integer&gt; cb = cbf.create(em, Integer.class)
+    .from(Cat.class, "cat")
+    .select("INDEX(cat.favouriteKittens)");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT INDEX(favouriteKittens_1)
+FROM Cat cat
+LEFT JOIN cat.favouriteKittens favouriteKittens_1</pre>
+</div>
+</div>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>KEY ( collection_join_alias )</code></dt>
+<dd>
+<p>Returns the key of a collection element. The collection must be a <code>java.util.Map</code>.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;AddressType&gt; cb = cbf.create(em, AddressType.class)
+    .from(Person.class, "p")
+    .select("KEY(p.addresses)");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT KEY(addresses_1)
+FROM Person p
+LEFT JOIN p.addresses addresses_1</pre>
+</div>
+</div>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>SIZE ( collection_path )</code></dt>
+<dd>
+<p>Returns the size of a collection.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Long&gt; cb = cbf.create(em, Long.class)
+    .from(Cat.class, "cat")
+    .select("SIZE(cat.favouriteKittens)");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT COUNT(KEY(favouriteKittens_1))
+FROM Cat cat
+LEFT JOIN cat.favouriteKittens favouriteKittens_1
+GROUP BY cat.id</pre>
+</div>
+</div>
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-note" title="Note"></i>
+</td>
+<td class="content">
+The implementation for <code>SIZE</code> is highly optimized and tries to avoid subqueries to improve performance. It <strong>does not</strong> delegate to the <code>SIZE</code> implementation of the JPA provider.
+</td>
+</tr>
+</table>
+</div>
+<div class="paragraph">
+<p>For more information go to the <a href="#SIZE function">[SIZE function]</a> chapter.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="aggregate-functions"><a class="anchor" href="#aggregate-functions"></a>Aggregate functions</h4>
+<div class="paragraph">
+<p>{projectname} supports all aggregates as defined by JPQL and some non-standard aggregates. On top of that, it also has support for defining custom aggregate functions.
+For further information on custom aggregates take a look at the <a href="#Custom JPQL functions">[Custom JPQL functions]</a> chapter.</p>
+</div>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>COUNT ( DISTINCT? arg )</code></dt>
+<dd>
+<p>Returns the number of elements that are not null as <code>Long</code>.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Long&gt; cb = cbf.create(em, Long.class)
+    .from(Cat.class, "cat")
+    .leftJoin("cat.favouriteKittens", "fav")
+    .select("COUNT(KEY(fav))");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT COUNT(KEY(fav))
+FROM Cat cat
+LEFT JOIN cat.favouriteKittens fav</pre>
+</div>
+</div>
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-note" title="Note"></i>
+</td>
+<td class="content">
+{projectname} has a custom implementation for <code>COUNT(DISTINCT)</code> to support counting tuples even when the JPA provider and/or DBMS do not support it natively.
+</td>
+</tr>
+</table>
+</div>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>COUNT ( * )</code></dt>
+<dd>
+<p>Returns the number of elements as <code>Long</code>.</p>
+</dd>
+</dl>
+</div>
+<div class="paragraph">
+<p>WARN: This is a non-standard function that is not specified by JPQL but supported by all major JPA providers.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Long&gt; cb = cbf.create(em, Long.class)
+    .from(Cat.class, "cat")
+    .leftJoin("cat.favouriteKittens", "fav")
+    .select("COUNT(*)");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT COUNT(*)
+FROM Cat cat
+LEFT JOIN cat.favouriteKittens fav</pre>
+</div>
+</div>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>AVG ( DISTINCT? numeric )</code></dt>
+<dd>
+<p>Returns the average numeric value as <code>Double</code>.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Double&gt; cb = cbf.create(em, Double.class)
+    .from(Cat.class, "cat")
+    .select("AVG(cat.age)");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT AVG(cat.age)
+FROM Cat cat</pre>
+</div>
+</div>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>MAX ( arg )</code></dt>
+<dd>
+<p>Returns the maximum element.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Double&gt; cb = cbf.create(em, Double.class)
+    .from(Cat.class, "cat")
+    .select("MAX(cat.age)");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT MAX(cat.age)
+FROM Cat cat</pre>
+</div>
+</div>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>MIN ( arg )</code></dt>
+<dd>
+<p>Returns the minimum element.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Double&gt; cb = cbf.create(em, Double.class)
+    .from(Cat.class, "cat")
+    .select("MIN(cat.age)");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT MIN(cat.age)
+FROM Cat cat</pre>
+</div>
+</div>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>SUM ( numeric )</code></dt>
+<dd>
+<p>Returns the sum of all elements. Integral argument types have the result type <code>Long</code>, except for <code>BigInteger</code> which has the result type <code>BigInteger</code>. Decimal argument types have the result type <code>Double</code>, except for <code>BigDecimal</code> which has the result type <code>BigDecimal</code>.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Long&gt; cb = cbf.create(em, Long.class)
+    .from(Cat.class, "cat")
+    .select("SUM(cat.age)");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT SUM(cat.age)
+FROM Cat cat</pre>
+</div>
+</div>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>FUNCTION ( 'GROUP_CONCAT' (, 'DISTINCT' )? , string (, 'SEPARATOR', separatorString)? (, 'ORDER BY', ( orderByExpr, ( 'ASC' | 'DESC' ) )+ ) )</code></dt>
+<dd>
+<p>Concatenates elements to a single string connected with the <code>separatorString</code> in the requested order.</p>
+</dd>
+</dl>
+</div>
+<div class="paragraph">
+<p>WARN: This is a non-standard function that might not be supported on all DBMS. See <a href="#group_concat-function">JPQL functions</a> for further information.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;String&gt; cb = cbf.create(em, String.class)
+    .from(Cat.class, "cat")
+    .select("FUNCTION('GROUP_CONCAT', cat.name, 'SEPARATOR', ' - ', 'ORDER BY', cat.name, 'ASC')");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT FUNCTION('GROUP_CONCAT', cat.name, 'SEPARATOR', ' - ', 'ORDER BY', cat.name, 'ASC')
+FROM Cat cat</pre>
+</div>
+</div>
+</div>
+<div class="sect3">
+<h4 id="cast-and-treat-functions"><a class="anchor" href="#cast-and-treat-functions"></a>Cast and treat functions</h4>
+<div class="paragraph">
+<p>The cast functions offered by {projectname} allow to do an SQL cast. The following data types are supported</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p><code>Boolean</code> - <code>CAST_BOOLEAN</code></p>
+</li>
+<li>
+<p><code>Byte</code> - <code>CAST_BYTE</code></p>
+</li>
+<li>
+<p><code>Short</code> - <code>CAST_SHORT</code></p>
+</li>
+<li>
+<p><code>Integer</code> - <code>CAST_INTEGER</code></p>
+</li>
+<li>
+<p><code>Long</code> - <code>CAST_LONG</code></p>
+</li>
+<li>
+<p><code>Float</code> - <code>CAST_FLOAT</code></p>
+</li>
+<li>
+<p><code>Double</code> - <code>CAST_DOUBLE</code></p>
+</li>
+<li>
+<p><code>Character</code> - <code>CAST_CHARACTER</code></p>
+</li>
+<li>
+<p><code>String</code> - <code>CAST_STRING</code></p>
+</li>
+<li>
+<p><code>BigInteger</code> - <code>CAST_BIGINTEGER</code></p>
+</li>
+<li>
+<p><code>BigDecimal</code> - <code>CAST_BIGDECIMAL</code></p>
+</li>
+<li>
+<p><code>java.sql.Time</code> - <code>CAST_TIME</code></p>
+</li>
+<li>
+<p><code>java.sql.Date</code> - <code>CAST_DATE</code></p>
+</li>
+<li>
+<p><code>java.sql.Timestamp</code> - <code>CAST_TIMESTAMP</code></p>
+</li>
+<li>
+<p><code>java.util.Calendar</code> - <code>CAST_CALENDAR</code></p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>The SQL type for a java type can be customized in the <a href="#customize-dbms-dialect">DBMS dialect</a> globally. If you need to cast to other types, you need to <a href="#custom-jpql-functions">create a custom function</a>.</p>
+</div>
+<div class="paragraph">
+<p>Although JPQL is strictly typed, it might not always be possible to determine an appropriate type for an expression.
+For such cases {projectname} created various <code>TREAT_</code> functions that allow to give a subexpression an explicit type within the JPQL expression.
+Normally, users shouldn&#8217;t get in touch with this directly. It is currently used internally to implement the <a href="#values-clause"><code>VALUES</code> clause</a> and is only mentioned for completeness.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="function-function"><a class="anchor" href="#function-function"></a>Function function</h4>
+<div class="paragraph">
+<p>As of JPA 2.1 it is possible to invoke non-standard functions via the <code>FUNCTION ( function_name (, args)* )</code>. {projectname} not only has support for that,
+but prefers this syntax for non-standard functions over a proprietary syntax. The reason for that is mainly that the JPQL rendered by {projectname} stays directly executable, even if proprietary functions are used.</p>
+</div>
+<div class="paragraph">
+<p>By default, all non-standard functions of the JPA provider are imported. This means that you can make use of functions provided by the JPA provider with the <code>FUNCTION ( function_name (, args)* )</code> syntax
+and it will get rendered into the JPA provider specific way of invoking such functions automatically.</p>
+</div>
+<div class="paragraph">
+<p>A list of functions provided by {projectname} and information on how to implement a custom function can be found in the <a href="#JPQL functions">[JPQL functions]</a> chapter.</p>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="subquery-expressions"><a class="anchor" href="#subquery-expressions"></a>Subquery expressions</h3>
+<div class="paragraph">
+<p>Since subqueries aren&#8217;t supported to be written as a whole but only through a builder API, {projectname} offers a special API to construct complex expressions that contain subqueries.
+The API was explained for <a href="#anchor_predicate_builder_subqueries">predicates</a> and <a href="#anchor_select_subqueries">select expressions</a> already.
+The general idea is that you introduce aliases for subqueries in a complex expression that later get replaced with the actual subquery in the expression tree.</p>
+</div>
+<div class="paragraph">
+<p>Within subqueries, {projectname} supports a function called <code>OUTER()</code> which can be used to refer to attributes of the parent query&#8217;s root.
+By using <code>OUTER</code> you can avoid introducing the query root alias of the outer query into the subquery directly.</p>
+</div>
+<div class="paragraph">
+<p>For further information on <code>OUTER</code> take a look into the <a href="#outer-function">JPQL functions</a> chapter.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="nullif-expressions"><a class="anchor" href="#nullif-expressions"></a>Nullif expressions</h3>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>NULLIF ( arg1, arg2 )</code></dt>
+<dd>
+<p>Returns <code>NULL</code> if <code>arg1</code> and <code>arg2</code> are equal.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;String&gt; cb = cbf.create(em, String.class)
+    .from(Cat.class, "cat")
+    .select("NULLIF(cat.name, cat.owner.name)");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT NULLIF(cat.name, owner_1.name)
+FROM Cat cat
+LEFT JOIN cat.owner owner_1</pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="coalesce-expressions"><a class="anchor" href="#coalesce-expressions"></a>Coalesce expressions</h3>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>COALESCE ( arg1, arg2 (, args)* )</code></dt>
+<dd>
+<p>Returns the first non-<code>NULL</code> argument or <code>NULL</code> if all arguments are <code>NULL</code>.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;String&gt; cb = cbf.create(em, String.class)
+    .from(Cat.class, "cat")
+    .select("COALESCE(cat.name, cat.owner.name, 'default')");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT COALESCE(cat.name, owner_1.name, 'default')
+FROM Cat cat
+LEFT JOIN cat.owner owner_1</pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="case-expressions"><a class="anchor" href="#case-expressions"></a>Case expressions</h3>
+<div class="paragraph">
+<p>Although {projectname} already supports building <code>CASE WHEN</code> expressions via a builder API, it also supports an expression form.
+The API was explained for <a href="#anchor_select_case_when">predicates</a> and <a href="#anchor_predicate_builder_case_when">select expressions</a> already.</p>
+</div>
+<div class="sect3">
+<h4 id="simple-case-expressions"><a class="anchor" href="#simple-case-expressions"></a>Simple case expressions</h4>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>CASE operand (WHEN valueN THEN resultN)+ ELSE resultOther END</code></dt>
+<dd>
+<p>Tests if the <code>operand</code> equals one of <code>valueN</code> and if so, returns the respective <code>resultN</code>, otherwise returns <code>resultOther</code>.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;String&gt; cb = cbf.create(em, String.class)
+    .from(Cat.class, "cat")
+    .select("CASE cat.age WHEN 1 THEN 'Baby' ELSE 'Other' END");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT CASE cat.age WHEN 1 THEN 'Baby' ELSE 'Other' END
+FROM Cat cat</pre>
+</div>
+</div>
+</div>
+<div class="sect3">
+<h4 id="searched-case-expressions"><a class="anchor" href="#searched-case-expressions"></a>Searched case expressions</h4>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>CASE (WHEN conditionN THEN resultN)+ ELSE resultOther END</code></dt>
+<dd>
+<p>Tests if any <code>conditionN</code> evaluates to true and if so, returns the respective <code>resultN</code>, otherwise returns <code>resultOther</code>.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;String&gt; cb = cbf.create(em, String.class)
+    .from(Cat.class, "cat")
+    .select("CASE WHEN cat.age &lt; 2 THEN 'Baby' ELSE 'Other' END");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT CASE WHEN cat.age &lt; 2 THEN 'Baby' ELSE 'Other' END
+FROM Cat cat</pre>
+</div>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="predicate-expressions"><a class="anchor" href="#predicate-expressions"></a>Predicate expressions</h3>
+<div class="paragraph">
+<p>{projectname} supports constructing predicates via a builder API as has been shown in the <a href="#Predicate Builder">[Predicate Builder]</a> chapter,
+but sometimes it is necessary to define predicates as strings.
+It is necessary for <code>CASE WHEN</code> expressions or when wanting to replace a whole predicate via e.g. <code>setWhereExpression(String)</code>.</p>
+</div>
+<div class="paragraph">
+<p>Predicates can be connected with the logical operators <code>AND</code> and <code>OR</code> and form a compound predicate. Predicates can be grouped by using parenthesis and
+can be prefixed with the unary operator <code>NOT</code> for negating the predicate.
+All predicates except for null-aware predicates like e.g. <code>IS NULL</code> that compare against <code>NULL</code>, will result in <code>UNKNOWN</code> which is intuitively equal to <code>FALSE</code>.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="relational-comparison-predicate"><a class="anchor" href="#relational-comparison-predicate"></a>Relational comparison predicate</h3>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>expression1 ( = | &lt;&gt; | &gt; | &gt;= | &lt; | &#8656; | != ) ( expression2 | ( ( ALL | ANY | SOME ) subquery_alias ) )</code></dt>
+<dd>
+<p>Compares same typed operands with one of the operators <code>=</code>, <code>&lt;&gt;</code>, <code>&gt;</code>, <code>&gt;=</code>, <code>&lt;</code>, <code>&#8656;</code>. {projectname} also defines the <code>!=</code> as synonym for the <code>&lt;&gt;</code> operator.
+In addition to normal comparison, relational predicates can also have a quantifier to do comparisons against <code>ALL</code> or <code>ANY</code>/<code>SOME</code> elements of a set.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Cat&gt; cb = cbf.create(em, Cat.class)
+    .from(Cat.class, "cat")
+    .setWhereExpressionSubqueries("cat.age &lt; 2 AND LENGTH(cat.name) &gt;= ALL catNameLengths")
+        .with("catNameLengths")
+            .from(Cat.class, "subCat")
+            .select("LENGTH(subCat.name)")
+        .end()
+    .end();</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT cat
+FROM Cat cat
+WHERE cat.age &lt; 2
+  AND LENGTH(cat.name) &gt;= ALL (
+      SELECT LENGTH(subCat.name)
+      FROM Cat subCat
+  )</pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="nullness-predicate"><a class="anchor" href="#nullness-predicate"></a>Nullness predicate</h3>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>expression IS NOT? NULL</code></dt>
+<dd>
+<p>Evaluates whether a value is <code>NULL</code>.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Cat&gt; cb = cbf.create(em, Cat.class)
+    .from(Cat.class, "cat")
+    .setWhereExpression("cat.owner IS NOT NULL");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT cat
+FROM Cat cat
+WHERE cat.owner IS NOT NULL</pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="like-predicate"><a class="anchor" href="#like-predicate"></a>Like predicate</h3>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>string NOT? LIKE pattern (ESCAPE escape_character)?</code></dt>
+<dd>
+<p>Tests if <code>string</code> matches <code>pattern</code>. The <code>escape_character</code> can be used to escape usages of the single char wildcard <code>_</code> and multi-char wildcard <code>%</code> characters in <code>pattern</code>.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Cat&gt; cb = cbf.create(em, Cat.class)
+    .from(Cat.class, "cat")
+    .setWhereExpression("cat.name LIKE 'Mr.%'");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT cat
+FROM Cat cat
+WHERE cat.name LIKE 'Mr.%'</pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="between-predicate"><a class="anchor" href="#between-predicate"></a>Between predicate</h3>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>expression1 NOT? BETWEEN expression2 AND expression3</code></dt>
+<dd>
+<p>Between is a shorthand syntax for the tests <code>expression1 &gt;=</code> <code>expression2 AND expression1 &#8656; expression3</code>.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Cat&gt; cb = cbf.create(em, Cat.class)
+    .from(Cat.class, "cat")
+    .setWhereExpression("cat.age BETWEEN 1 AND 2");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT cat
+FROM Cat cat
+WHERE cat.age BETWEEN 1 AND 2</pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="in-predicate"><a class="anchor" href="#in-predicate"></a>In predicate</h3>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>expression1 NOT? IN ( subquery_alias | collection_parameter | ( '(' item1 (, itemN)* ')' ) )</code></dt>
+<dd>
+<p>The <code>IN</code> predicate checks if <code>expression1</code> is contained in any of the values on the right hand side i.e. <em>item1..itemN</em>.
+Items can be parameters or literals. If just one item is given, the IN predicate is rewritten to an <code>EQ</code> predicate and thus allows the single item to be any expression.</p>
+</dd>
+</dl>
+</div>
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-note" title="Note"></i>
+</td>
+<td class="content">
+When the collection value for <code>collection_parameter</code> is bound on the query builder of {projectname}, empty collections will work as expected. Behind the scenes the <code>IN</code> predicate is replace by a <code>TRUE</code> or <code>FALSE</code> predicate.
+</td>
+</tr>
+</table>
+</div>
+<div class="paragraph">
+<p>The <code>subquery_alias</code> is replaced with the subquery defined via the builder API as explained in the <a href="#anchor_predicate_builder_subqueries">predicates chapter</a> and the builder section for the <a href="#anchor_predicate_builder_in_predicate"><code>IN</code> predicate</a>.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Cat&gt; cb = cbf.create(em, Cat.class)
+    .from(Cat.class, "cat")
+    .setWhereExpression("cat.age IN (1L, 2L, 3L, :param)");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT cat
+FROM Cat cat
+WHERE cat.age IN (1L, 2L, 3L, :param)</pre>
+</div>
+</div>
+<div class="admonitionblock note">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-note" title="Note"></i>
+</td>
+<td class="content">
+Some JPA providers support a row-value constructor syntax which is not supported by {projectname}. Consider rewriting queries that use that syntax to the <code>EXISTS</code> equivalent.
+</td>
+</tr>
+</table>
+</div>
+</div>
+<div class="sect2">
+<h3 id="exists-predicate"><a class="anchor" href="#exists-predicate"></a>Exists predicate</h3>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>NOT? EXISTS subquery_alias</code></dt>
+<dd>
+<p>The <code>EXISTS</code> predicate checks if the subquery for <code>subquery_alias</code> has rows.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Cat&gt; cb = cbf.create(em, Cat.class)
+    .from(Cat.class, "cat")
+    .setWhereExpressionSubqueries("EXISTS subquery_alias")
+        .with("subquery_alias")
+            .from(Cat.class, "subCat")
+            .where("cat").notEqExpression("subCat")
+        .end()
+    .end();</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT cat
+FROM Cat cat
+WHERE EXISTS(
+    SELECT 1
+    FROM Cat subCat
+    WHERE cat &lt;&gt; subCat
+)</pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="empty-predicate"><a class="anchor" href="#empty-predicate"></a>Empty predicate</h3>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>collection_path IS NOT? EMPTY</code></dt>
+<dd>
+<p>The <code>IS EMPTY</code> predicate checks if the collection for an element as specified by <code>collection_path</code> is empty i.e. contains no elements.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Cat&gt; cb = cbf.create(em, Cat.class)
+    .from(Cat.class, "cat")
+    .setWhereExpression("cat.kittens IS EMPTY");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT cat
+FROM Cat cat
+WHERE cat.kittens IS EMPTY</pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="member-of-predicate"><a class="anchor" href="#member-of-predicate"></a>Member-of predicate</h3>
+<div class="dlist">
+<dl>
+<dt class="hdlist1"><code>expression NOT? MEMBER OF? collection_path</code></dt>
+<dd>
+<p>The <code>MEMBER OF</code> predicate checks if <code>expression</code> is an element of the collection as specified by <code>collection_path</code>.</p>
+</dd>
+</dl>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint javaext lang-javaext">CriteriaBuilder&lt;Cat&gt; cb = cbf.create(em, Cat.class)
+    .from(Cat.class, "cat")
+    .setWhereExpression("cat MEMBER OF cat.kittens");</pre>
+</div>
+</div>
+<div class="listingblock">
+<div class="content">
+    <pre class="prettyprint sqlext lang-sqlext">SELECT cat
+FROM Cat cat
+WHERE cat MEMBER OF cat.kittens</pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div id="footer">
+<div id="footer-text">
+Last updated 2020-08-04 13:32:35 KST
+</div>
+</div>
+</body>
+</html>
