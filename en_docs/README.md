@@ -1,13 +1,10 @@
-![logo](https://raw.github.com/code4craft/webmagic/master/asserts/logo.jpg)
-
+webmagic
+---
 [Readme in Chinese](https://github.com/code4craft/webmagic/tree/master/zh_docs)
-
-[User Manual (Chinese)](https://github.com/code4craft/webmagic/blob/master/user-manual.md)
-
 
 [![Build Status](https://travis-ci.org/code4craft/webmagic.png?branch=master)](https://travis-ci.org/code4craft/webmagic)
 
->A scalable crawler framework. It covers the whole lifecycle of crawler: downloading, url management, content extraction and persistent. It can simplify the development of a  specific crawler.
+>A scalable crawler framework. It covers the whole lifecycle of crawler: downloading, url management, content extraction and persistent. It can simply the development of a  specific crawler.
 
 ## Features:
 
@@ -17,9 +14,16 @@
 * Multi-thread and Distribution support.
 * Easy to be integrated.
 
+
 ## Install:
-  
-Add dependencies to your pom.xml:
+
+Clone the repo and build:
+
+	git clone https://github.com/code4craft/webmagic.git
+	cd webmagic
+	mvn clean install	  
+
+Add dependencies to your project:
 
 		<dependency>
             <groupId>us.codecraft</groupId>
@@ -38,7 +42,6 @@ Add dependencies to your pom.xml:
 
 Write a class implements PageProcessor：
 
-```java
     public class OschinaBlogPageProcesser implements PageProcessor {
 
         private Site site = Site.me().setDomain("my.oschina.net")
@@ -64,7 +67,6 @@ Write a class implements PageProcessor：
                  .pipeline(new ConsolePipeline()).run();
         }
     }
-```
 
 * `page.addTargetRequests(links)`
 	
@@ -72,7 +74,6 @@ Write a class implements PageProcessor：
     
 You can also use annotation way:
 
-```java
 	@TargetUrl("http://my.oschina.net/flashsword/blog/\\d+")
 	public class OschinaBlog {
 
@@ -91,7 +92,6 @@ You can also use annotation way:
 				new ConsolePageModelPipeline(), OschinaBlog.class).run();
 	    }
 	}
-```
 		
 ### Docs and samples:
 
@@ -124,6 +124,3 @@ To write webmagic, I refered to the projects below :
 	
 	[https://gitcafe.com/laiweiwei/Spiderman](https://gitcafe.com/laiweiwei/Spiderman)
 
-### Mail-list:
-
-[https://groups.google.com/forum/#!forum/webmagic-java](https://groups.google.com/forum/#!forum/webmagic-java)
