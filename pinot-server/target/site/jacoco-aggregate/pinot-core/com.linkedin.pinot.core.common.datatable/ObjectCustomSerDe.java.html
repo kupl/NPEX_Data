@@ -1,0 +1,385 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>ObjectCustomSerDe.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-server</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.common.datatable</a> &gt; <span class="el_source">ObjectCustomSerDe.java</span></div><h1>ObjectCustomSerDe.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.common.datatable;
+
+import com.clearspring.analytics.stream.cardinality.HyperLogLog;
+import com.linkedin.pinot.core.query.aggregation.function.customobject.AvgPair;
+import com.linkedin.pinot.core.query.aggregation.function.customobject.MinMaxRangePair;
+import com.linkedin.pinot.core.query.aggregation.function.customobject.QuantileDigest;
+import com.linkedin.pinot.core.segment.creator.impl.V1Constants;
+import it.unimi.dsi.fastutil.doubles.DoubleArrayList;
+import it.unimi.dsi.fastutil.ints.IntIterator;
+import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.Charset;
+import java.util.HashMap;
+import java.util.Map;
+import javax.annotation.Nonnull;
+
+
+/**
+ * The &lt;code&gt;ObjectCustomSerDe&lt;/code&gt; class provides utility methods to serialize/de-serialize objects.
+ */
+public class ObjectCustomSerDe {
+<span class="nc" id="L42">  private ObjectCustomSerDe() {</span>
+<span class="nc" id="L43">  }</span>
+
+<span class="fc" id="L45">  private static final Charset UTF_8 = Charset.forName(&quot;UTF-8&quot;);</span>
+
+  /**
+   * Given an object, serialize it into a byte array.
+   */
+  @SuppressWarnings(&quot;unchecked&quot;)
+  @Nonnull
+  public static byte[] serialize(@Nonnull Object object)
+      throws IOException {
+<span class="fc bfc" id="L54" title="All 2 branches covered.">    if (object instanceof String) {</span>
+<span class="fc" id="L55">      return ((String) object).getBytes(&quot;UTF-8&quot;);</span>
+<span class="fc bfc" id="L56" title="All 2 branches covered.">    } else if (object instanceof Long) {</span>
+<span class="fc" id="L57">      return serializeLong((Long) object);</span>
+<span class="fc bfc" id="L58" title="All 2 branches covered.">    } else if (object instanceof Double) {</span>
+<span class="fc" id="L59">      return serializeDouble((Double) object);</span>
+<span class="fc bfc" id="L60" title="All 2 branches covered.">    } else if (object instanceof DoubleArrayList) {</span>
+<span class="fc" id="L61">      return serializeDoubleArrayList((DoubleArrayList) object);</span>
+<span class="fc bfc" id="L62" title="All 2 branches covered.">    } else if (object instanceof AvgPair) {</span>
+<span class="fc" id="L63">      return ((AvgPair) object).toBytes();</span>
+<span class="fc bfc" id="L64" title="All 2 branches covered.">    } else if (object instanceof MinMaxRangePair) {</span>
+<span class="fc" id="L65">      return ((MinMaxRangePair) object).toBytes();</span>
+<span class="fc bfc" id="L66" title="All 2 branches covered.">    } else if (object instanceof HyperLogLog) {</span>
+<span class="fc" id="L67">      return ((HyperLogLog) object).getBytes();</span>
+<span class="fc bfc" id="L68" title="All 2 branches covered.">    } else if (object instanceof QuantileDigest) {</span>
+<span class="fc" id="L69">      return serializeQuantileDigest((QuantileDigest) object);</span>
+<span class="fc bfc" id="L70" title="All 2 branches covered.">    } else if (object instanceof HashMap) {</span>
+<span class="fc" id="L71">      return serializeHashMap((HashMap&lt;Object, Object&gt;) object);</span>
+<span class="pc bpc" id="L72" title="1 of 2 branches missed.">    } else if (object instanceof IntOpenHashSet) {</span>
+<span class="fc" id="L73">      return serializeIntOpenHashSet((IntOpenHashSet) object);</span>
+    } else {
+<span class="nc" id="L75">      throw new IllegalArgumentException(&quot;Illegal class for serialization: &quot; + object.getClass().getName());</span>
+    }
+  }
+
+  /**
+   * Given a byte array and the object type, de-serialize the byte array into an object.
+   */
+  @SuppressWarnings(&quot;unchecked&quot;)
+  @Nonnull
+  public static &lt;T&gt; T deserialize(@Nonnull byte[] bytes, @Nonnull ObjectType objectType)
+      throws IOException {
+<span class="pc bpc" id="L86" title="4 of 11 branches missed.">    switch (objectType) {</span>
+      case String:
+<span class="nc" id="L88">        return (T) new String(bytes, UTF_8);</span>
+      case Long:
+<span class="fc" id="L90">        return (T) new Long(ByteBuffer.wrap(bytes).getLong());</span>
+      case Double:
+<span class="fc" id="L92">        return (T) new Double(ByteBuffer.wrap(bytes).getDouble());</span>
+      case DoubleArrayList:
+<span class="fc" id="L94">        return (T) deserializeDoubleArray(bytes);</span>
+      case AvgPair:
+<span class="fc" id="L96">        return (T) AvgPair.fromBytes(bytes);</span>
+      case MinMaxRangePair:
+<span class="fc" id="L98">        return (T) MinMaxRangePair.fromBytes(bytes);</span>
+      case HyperLogLog:
+<span class="nc" id="L100">        return (T) HyperLogLog.Builder.build(bytes);</span>
+      case QuantileDigest:
+<span class="nc" id="L102">        return (T) deserializeQuantileDigest(bytes);</span>
+      case HashMap:
+<span class="fc" id="L104">        return (T) deserializeHashMap(bytes);</span>
+      case IntOpenHashSet:
+<span class="fc" id="L106">        return (T) deserializeIntOpenHashSet(bytes);</span>
+      default:
+<span class="nc" id="L108">        throw new IllegalArgumentException(&quot;Illegal object type for de-serialization: &quot; + objectType);</span>
+    }
+  }
+
+  /**
+   * Given a ByteBuffer and the object type, de-serialize the ByteBuffer into an object.
+   */
+  @SuppressWarnings(&quot;unchecked&quot;)
+  @Nonnull
+  public static &lt;T&gt; T deserialize(@Nonnull ByteBuffer byteBuffer, @Nonnull ObjectType objectType)
+      throws IOException {
+<span class="pc bpc" id="L119" title="1 of 11 branches missed.">    switch (objectType) {</span>
+      case String:
+<span class="fc" id="L121">        byte[] bytes = getBytesFromByteBuffer(byteBuffer);</span>
+<span class="fc" id="L122">        return (T) new String(bytes, UTF_8);</span>
+      case Long:
+<span class="fc" id="L124">        return (T) new Long(byteBuffer.getLong());</span>
+      case Double:
+<span class="fc" id="L126">        return (T) new Double(byteBuffer.getDouble());</span>
+      case DoubleArrayList:
+<span class="fc" id="L128">        return (T) deserializeDoubleArray(byteBuffer);</span>
+      case AvgPair:
+<span class="fc" id="L130">        return (T) AvgPair.fromByteBuffer(byteBuffer);</span>
+      case MinMaxRangePair:
+<span class="fc" id="L132">        return (T) MinMaxRangePair.fromByteBuffer(byteBuffer);</span>
+      case HyperLogLog:
+<span class="fc" id="L134">        bytes = getBytesFromByteBuffer(byteBuffer);</span>
+<span class="fc" id="L135">        return (T) HyperLogLog.Builder.build(bytes);</span>
+      case QuantileDigest:
+<span class="fc" id="L137">        bytes = getBytesFromByteBuffer(byteBuffer);</span>
+<span class="fc" id="L138">        return (T) deserializeQuantileDigest(bytes);</span>
+      case HashMap:
+<span class="fc" id="L140">        return (T) deserializeHashMap(byteBuffer);</span>
+      case IntOpenHashSet:
+<span class="fc" id="L142">        return (T) deserializeIntOpenHashSet(byteBuffer);</span>
+      default:
+<span class="nc" id="L144">        throw new IllegalArgumentException(&quot;Illegal object type for de-serialization: &quot; + objectType);</span>
+    }
+  }
+
+  /**
+   * Helper method to get a new byte[] from the given ByteBuffer.
+   *
+   * @param byteBuffer ByteBuffer for which to get the byte[] from.
+   * @return byte[] containing the contents of ByteBuffer.
+   */
+  private static byte[] getBytesFromByteBuffer(@Nonnull ByteBuffer byteBuffer) {
+<span class="fc" id="L155">    byte[] bytes = new byte[byteBuffer.limit()];</span>
+<span class="fc" id="L156">    byteBuffer.get(bytes);</span>
+<span class="fc" id="L157">    return bytes;</span>
+  }
+
+  /**
+   * Given an object, get its {@link ObjectType}.
+   */
+  @Nonnull
+  public static ObjectType getObjectType(Object object) {
+<span class="fc bfc" id="L165" title="All 2 branches covered.">    if (object instanceof String) {</span>
+<span class="fc" id="L166">      return ObjectType.String;</span>
+<span class="fc bfc" id="L167" title="All 2 branches covered.">    } else if (object instanceof Long) {</span>
+<span class="fc" id="L168">      return ObjectType.Long;</span>
+<span class="fc bfc" id="L169" title="All 2 branches covered.">    } else if (object instanceof Double) {</span>
+<span class="fc" id="L170">      return ObjectType.Double;</span>
+<span class="fc bfc" id="L171" title="All 2 branches covered.">    } else if (object instanceof DoubleArrayList) {</span>
+<span class="fc" id="L172">      return ObjectType.DoubleArrayList;</span>
+<span class="fc bfc" id="L173" title="All 2 branches covered.">    } else if (object instanceof AvgPair) {</span>
+<span class="fc" id="L174">      return ObjectType.AvgPair;</span>
+<span class="fc bfc" id="L175" title="All 2 branches covered.">    } else if (object instanceof MinMaxRangePair) {</span>
+<span class="fc" id="L176">      return ObjectType.MinMaxRangePair;</span>
+<span class="fc bfc" id="L177" title="All 2 branches covered.">    } else if (object instanceof HyperLogLog) {</span>
+<span class="fc" id="L178">      return ObjectType.HyperLogLog;</span>
+<span class="fc bfc" id="L179" title="All 2 branches covered.">    } else if (object instanceof QuantileDigest) {</span>
+<span class="fc" id="L180">      return ObjectType.QuantileDigest;</span>
+<span class="fc bfc" id="L181" title="All 2 branches covered.">    } else if (object instanceof HashMap) {</span>
+<span class="fc" id="L182">      return ObjectType.HashMap;</span>
+<span class="pc bpc" id="L183" title="1 of 2 branches missed.">    } else if (object instanceof IntOpenHashSet) {</span>
+<span class="fc" id="L184">      return ObjectType.IntOpenHashSet;</span>
+    } else {
+<span class="nc" id="L186">      throw new IllegalArgumentException(&quot;No object type matches class: &quot; + object.getClass().getName());</span>
+    }
+  }
+
+  /**
+   * Helper method to serialize a {@link Long}.
+   */
+  private static byte[] serializeLong(Long value) {
+<span class="fc" id="L194">    ByteBuffer byteBuffer = ByteBuffer.allocate(V1Constants.Numbers.LONG_SIZE);</span>
+<span class="fc" id="L195">    byteBuffer.putLong(value);</span>
+<span class="fc" id="L196">    return byteBuffer.array();</span>
+  }
+
+  /**
+   * Helper method to serialize a {@link Double}.
+   */
+  private static byte[] serializeDouble(Double value) {
+<span class="fc" id="L203">    ByteBuffer byteBuffer = ByteBuffer.allocate(V1Constants.Numbers.DOUBLE_SIZE);</span>
+<span class="fc" id="L204">    byteBuffer.putDouble(value);</span>
+<span class="fc" id="L205">    return byteBuffer.array();</span>
+  }
+
+  /**
+   * Helper method to serialize a {@link DoubleArrayList}.
+   */
+  private static byte[] serializeDoubleArrayList(DoubleArrayList doubleArray) {
+<span class="fc" id="L212">    int size = doubleArray.size();</span>
+<span class="fc" id="L213">    int byteBufferSize = V1Constants.Numbers.INTEGER_SIZE + (size * V1Constants.Numbers.DOUBLE_SIZE);</span>
+
+<span class="fc" id="L215">    ByteBuffer byteBuffer = ByteBuffer.allocate(byteBufferSize);</span>
+<span class="fc" id="L216">    byteBuffer.putInt(size);</span>
+<span class="fc" id="L217">    double[] elements = doubleArray.elements();</span>
+<span class="fc bfc" id="L218" title="All 2 branches covered.">    for (int i = 0; i &lt; size; i++) {</span>
+<span class="fc" id="L219">      byteBuffer.putDouble(elements[i]);</span>
+    }
+
+<span class="fc" id="L222">    return byteBuffer.array();</span>
+  }
+
+  /**
+   * Helper method to de-serialize a {@link DoubleArrayList}.
+   */
+  private static DoubleArrayList deserializeDoubleArray(byte[] bytes) {
+<span class="fc" id="L229">    return deserializeDoubleArray(ByteBuffer.wrap(bytes));</span>
+  }
+
+  private static DoubleArrayList deserializeDoubleArray(ByteBuffer byteBuffer) {
+<span class="fc" id="L233">    int size = byteBuffer.getInt();</span>
+<span class="fc" id="L234">    DoubleArrayList doubleArray = new DoubleArrayList(size);</span>
+<span class="fc bfc" id="L235" title="All 2 branches covered.">    for (int i = 0; i &lt; size; i++) {</span>
+<span class="fc" id="L236">      doubleArray.add(byteBuffer.getDouble());</span>
+    }
+
+<span class="fc" id="L239">    return doubleArray;</span>
+  }
+
+  /**
+   * Helper method to serialize a {@link HashMap}.
+   */
+  private static byte[] serializeHashMap(HashMap&lt;Object, Object&gt; map)
+      throws IOException {
+<span class="fc" id="L247">    ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();</span>
+<span class="fc" id="L248">    DataOutputStream dataOutputStream = new DataOutputStream(byteArrayOutputStream);</span>
+
+    // Write the size of the map.
+<span class="fc" id="L251">    dataOutputStream.writeInt(map.size());</span>
+
+    // Write the serialized key-value pairs.
+<span class="fc" id="L254">    boolean first = true;</span>
+<span class="fc bfc" id="L255" title="All 2 branches covered.">    for (Map.Entry&lt;Object, Object&gt; entry : map.entrySet()) {</span>
+
+      // Write the key and value type before writing the first key-value pair.
+<span class="fc bfc" id="L258" title="All 2 branches covered.">      if (first) {</span>
+<span class="fc" id="L259">        dataOutputStream.writeInt(getObjectType(entry.getKey()).getValue());</span>
+<span class="fc" id="L260">        dataOutputStream.writeInt(getObjectType(entry.getValue()).getValue());</span>
+<span class="fc" id="L261">        first = false;</span>
+      }
+
+<span class="fc" id="L264">      byte[] keyBytes = serialize(entry.getKey());</span>
+<span class="fc" id="L265">      dataOutputStream.writeInt(keyBytes.length);</span>
+<span class="fc" id="L266">      dataOutputStream.write(keyBytes);</span>
+
+<span class="fc" id="L268">      byte[] valueBytes = serialize(entry.getValue());</span>
+<span class="fc" id="L269">      dataOutputStream.writeInt(valueBytes.length);</span>
+<span class="fc" id="L270">      dataOutputStream.write(valueBytes);</span>
+<span class="fc" id="L271">    }</span>
+
+<span class="fc" id="L273">    return byteArrayOutputStream.toByteArray();</span>
+  }
+
+  /**
+   * Helper method to de-serialize a {@link HashMap} from a byte buffer.
+   */
+  private static HashMap&lt;Object, Object&gt; deserializeHashMap(ByteBuffer byteBuffer)
+      throws IOException {
+<span class="fc" id="L281">    int size = byteBuffer.getInt();</span>
+<span class="fc" id="L282">    HashMap&lt;Object, Object&gt; hashMap = new HashMap&lt;&gt;(size);</span>
+<span class="fc bfc" id="L283" title="All 2 branches covered.">    if (size == 0) {</span>
+<span class="fc" id="L284">      return hashMap;</span>
+    }
+
+<span class="fc" id="L287">    ObjectType keyType = ObjectType.getObjectType(byteBuffer.getInt());</span>
+<span class="fc" id="L288">    ObjectType valueType = ObjectType.getObjectType(byteBuffer.getInt());</span>
+
+<span class="fc bfc" id="L290" title="All 2 branches covered.">    for (int i = 0; i &lt; size; i++) {</span>
+<span class="fc" id="L291">      int keyNumBytes = byteBuffer.getInt();</span>
+<span class="fc" id="L292">      ByteBuffer slice = getByteBufferSlice(byteBuffer, keyNumBytes);</span>
+<span class="fc" id="L293">      Object key = deserialize(slice, keyType);</span>
+<span class="fc" id="L294">      byteBuffer.position(byteBuffer.position() + keyNumBytes);</span>
+
+<span class="fc" id="L296">      int valueNumBytes = byteBuffer.getInt();</span>
+<span class="fc" id="L297">      slice = getByteBufferSlice(byteBuffer, valueNumBytes);</span>
+<span class="fc" id="L298">      Object value = deserialize(slice, valueType);</span>
+<span class="fc" id="L299">      byteBuffer.position(byteBuffer.position() + valueNumBytes);</span>
+
+<span class="fc" id="L301">      hashMap.put(key, value);</span>
+    }
+<span class="fc" id="L303">    return hashMap;</span>
+  }
+
+  /**
+   * Helper method to slice out a ByteBuffer of given size from the original ByteBuffer.
+   *
+   * @param byteBuffer Original ByteBuffer.
+   * @param numBytes Number of bytes to slice out.
+   * @return New ByteBuffer containing a slice of the original ByteBuffer.
+   */
+  private static ByteBuffer getByteBufferSlice(ByteBuffer byteBuffer, int numBytes) {
+<span class="fc" id="L314">    ByteBuffer slice = byteBuffer.slice();</span>
+<span class="fc" id="L315">    slice.limit(numBytes);</span>
+<span class="fc" id="L316">    return slice;</span>
+  }
+
+  /**
+   * Helper method to de-serialize a {@link HashMap} from a byte[].
+   */
+  private static HashMap&lt;Object, Object&gt; deserializeHashMap(byte[] bytes)
+      throws IOException {
+<span class="fc" id="L324">    return deserializeHashMap(ByteBuffer.wrap(bytes));</span>
+  }
+
+  /**
+   * Helper method to serialize a {@link QuantileDigest}.
+   */
+  private static byte[] serializeQuantileDigest(QuantileDigest quantileDigest)
+      throws IOException {
+<span class="fc" id="L332">    ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();</span>
+<span class="fc" id="L333">    quantileDigest.serialize(new DataOutputStream(byteArrayOutputStream));</span>
+<span class="fc" id="L334">    return byteArrayOutputStream.toByteArray();</span>
+  }
+
+  /**
+   * Helper method to de-serialize a {@link QuantileDigest}.
+   */
+  private static QuantileDigest deserializeQuantileDigest(byte[] bytes)
+      throws IOException {
+<span class="fc" id="L342">    return QuantileDigest.deserialize(new DataInputStream(new ByteArrayInputStream(bytes)));</span>
+  }
+
+  /**
+   * Helper method to serialize an {@link IntOpenHashSet}.
+   */
+  private static byte[] serializeIntOpenHashSet(IntOpenHashSet intOpenHashSet)
+      throws IOException {
+<span class="fc" id="L350">    ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();</span>
+<span class="fc" id="L351">    DataOutputStream dataOutputStream = new DataOutputStream(byteArrayOutputStream);</span>
+
+    // Write the size of the set.
+<span class="fc" id="L354">    dataOutputStream.writeInt(intOpenHashSet.size());</span>
+
+<span class="fc" id="L356">    IntIterator intIterator = intOpenHashSet.iterator();</span>
+<span class="fc bfc" id="L357" title="All 2 branches covered.">    while (intIterator.hasNext()) {</span>
+<span class="fc" id="L358">      dataOutputStream.writeInt(intIterator.nextInt());</span>
+    }
+
+<span class="fc" id="L361">    return byteArrayOutputStream.toByteArray();</span>
+  }
+
+  /**
+   * Helper method to de-serialize an {@link IntOpenHashSet} from a ByteBuffer.
+   */
+  private static IntOpenHashSet deserializeIntOpenHashSet(ByteBuffer byteBuffer) {
+
+<span class="fc" id="L369">    int size = byteBuffer.getInt();</span>
+<span class="fc" id="L370">    IntOpenHashSet intOpenHashSet = new IntOpenHashSet(size);</span>
+<span class="fc bfc" id="L371" title="All 2 branches covered.">    for (int i = 0; i &lt; size; i++) {</span>
+<span class="fc" id="L372">      intOpenHashSet.add(byteBuffer.getInt());</span>
+    }
+
+<span class="fc" id="L375">    return intOpenHashSet;</span>
+  }
+
+  /**
+   * Helper method to de-serialize an {@link IntOpenHashSet} from a byte[].
+   */
+  private static IntOpenHashSet deserializeIntOpenHashSet(byte[] bytes) {
+<span class="fc" id="L382">    return deserializeIntOpenHashSet(ByteBuffer.wrap(bytes));</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

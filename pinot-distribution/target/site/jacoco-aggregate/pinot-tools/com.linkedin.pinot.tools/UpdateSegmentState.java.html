@@ -1,0 +1,206 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>UpdateSegmentState.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-tools</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.tools</a> &gt; <span class="el_source">UpdateSegmentState.java</span></div><h1>UpdateSegmentState.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.tools;
+
+import com.linkedin.pinot.common.config.TableConfig;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import org.apache.helix.PropertyPathConfig;
+import org.apache.helix.PropertyType;
+import org.apache.helix.ZNRecord;
+import org.apache.helix.manager.zk.ZKHelixAdmin;
+import org.apache.helix.manager.zk.ZNRecordSerializer;
+import org.apache.helix.model.IdealState;
+import org.apache.helix.store.zk.ZkHelixPropertyStore;
+import org.kohsuke.args4j.Option;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+public class UpdateSegmentState extends AbstractBaseCommand implements Command {
+<span class="nc" id="L34">  private static final Logger LOGGER = LoggerFactory.getLogger(UpdateSegmentState.class);</span>
+  private static final String CmdName = &quot;UpdateSegmentState&quot;;
+  private static final String fromState = &quot;OFFLINE&quot;;
+  private static final String toState = &quot;ONLINE&quot;;
+  static final String DEFAULT_ZK_ADDRESS = &quot;localhost:2181&quot;;
+  static final String DEFAULT_CLUSTER_NAME = &quot;PinotCluster&quot;;
+
+<span class="nc" id="L41">  @Option(name = &quot;-zkAddress&quot;, required = false, metaVar = &quot;&lt;http&gt;&quot;, usage = &quot;Http address of Zookeeper.&quot;)</span>
+  private String _zkAddress = DEFAULT_ZK_ADDRESS;
+
+<span class="nc" id="L44">  @Option(name = &quot;-clusterName&quot;, required = false, metaVar = &quot;&lt;String&gt;&quot;, usage = &quot;Pinot cluster name.&quot;)</span>
+  private String _clusterName = DEFAULT_CLUSTER_NAME;
+
+  @Option(name = &quot;-tenantName&quot;, required = false, metaVar = &quot;&lt;string&gt;&quot;, usage = &quot;Name of tenant.&quot;)
+  private String _tenantName;
+
+  @Option(name = &quot;-tableName&quot;, required = false, metaVar = &quot;&lt;string&gt;&quot;, usage = &quot;Name of the table (e.g. foo_table_OFFLINE).&quot;)
+  private String _tableName;
+
+<span class="nc" id="L53">  @Option(name = &quot;-fix&quot;, required = false, metaVar = &quot;&lt;boolean&gt;&quot;, usage = &quot;Update IDEALSTATE values (OFFLINE-&gt;ONLINE).&quot;)</span>
+  private boolean _fix = false;
+
+<span class="nc" id="L56">  @Option(name = &quot;-help&quot;, required = false, help = true, aliases={&quot;-h&quot;, &quot;--h&quot;, &quot;--help&quot;}, usage = &quot;Print this message.&quot;)</span>
+  private boolean _help = false;
+
+  public UpdateSegmentState() {
+<span class="nc" id="L60">    super();</span>
+<span class="nc" id="L61">  }</span>
+
+  @Override
+  public boolean getHelp() {
+<span class="nc" id="L65">    return _help;</span>
+  }
+
+  @Override
+  public String getName() {
+<span class="nc" id="L70">    return CmdName;</span>
+  }
+
+  @Override
+  public String toString() {
+<span class="nc" id="L75">    String retString = CmdName + &quot; -zkAddress &quot; + _zkAddress + &quot; -clusterName &quot; + _clusterName;</span>
+<span class="nc bnc" id="L76" title="All 2 branches missed.">    if (_tableName != null) {</span>
+<span class="nc" id="L77">      retString += &quot; -tableName &quot; + _tableName;</span>
+    } else {
+<span class="nc" id="L79">      retString += &quot; -tenanName &quot; + _tenantName;</span>
+    }
+<span class="nc bnc" id="L81" title="All 2 branches missed.">    if (_fix) {</span>
+<span class="nc" id="L82">      retString += &quot; -fix&quot;;</span>
+    }
+<span class="nc" id="L84">    return retString;</span>
+  }
+
+  @Override
+  public String description() {
+<span class="nc" id="L89">    return &quot;Audit the IDEALSTATE for the segments of a table (or all tables of a tenant). Optionally update segment state from OFFLINE to ONLINE&quot;;</span>
+  }
+
+  public UpdateSegmentState setZkAddress(String zkAddress) {
+<span class="nc" id="L93">    _zkAddress = zkAddress;</span>
+<span class="nc" id="L94">    return this;</span>
+  }
+
+  public UpdateSegmentState setClusterName(String clusterName) {
+<span class="nc" id="L98">    _clusterName = clusterName;</span>
+<span class="nc" id="L99">    return this;</span>
+  }
+
+  public UpdateSegmentState setTenantName(String tenantName) {
+<span class="nc" id="L103">    _tenantName = tenantName;</span>
+<span class="nc" id="L104">    return this;</span>
+  }
+
+  public UpdateSegmentState setTableName(String tableName) {
+<span class="nc" id="L108">    _tableName = tableName;</span>
+<span class="nc" id="L109">    return this;</span>
+  }
+
+  public UpdateSegmentState setOverwrite(boolean fix) {
+<span class="nc" id="L113">    _fix = fix;</span>
+<span class="nc" id="L114">    return this;</span>
+  }
+
+  private ZKHelixAdmin _helixAdmin;
+  private ZkHelixPropertyStore&lt;ZNRecord&gt; _propertyStore;
+
+
+  private void init() {
+<span class="nc" id="L122">    LOGGER.info(&quot;Trying to connect to &quot; + _zkAddress + &quot; cluster &quot; + _clusterName);</span>
+<span class="nc" id="L123">    _helixAdmin = new ZKHelixAdmin(_zkAddress);</span>
+<span class="nc" id="L124">    ZNRecordSerializer serializer = new ZNRecordSerializer();</span>
+<span class="nc" id="L125">    String path = PropertyPathConfig.getPath(PropertyType.PROPERTYSTORE, _clusterName);</span>
+<span class="nc" id="L126">    _propertyStore = new ZkHelixPropertyStore&lt;&gt;(_zkAddress, serializer, path);</span>
+<span class="nc" id="L127">  }</span>
+
+  public List&lt;String&gt; getAllTenantTables() throws Exception {
+<span class="nc" id="L130">    String tableConfigPath = &quot;/CONFIGS/TABLE&quot;;</span>
+<span class="nc" id="L131">    List&lt;ZNRecord&gt; tableConfigs = _propertyStore.getChildren(tableConfigPath, null, 0);</span>
+<span class="nc" id="L132">    List&lt;String&gt; tables = new ArrayList&lt;&gt;(128);</span>
+<span class="nc bnc" id="L133" title="All 2 branches missed.">    for (ZNRecord znRecord : tableConfigs) {</span>
+<span class="nc" id="L134">      TableConfig tableConfig = TableConfig.fromZnRecord(znRecord);</span>
+<span class="nc bnc" id="L135" title="All 2 branches missed.">      if (tableConfig.getTenantConfig().getServer().equals(_tenantName)) {</span>
+<span class="nc" id="L136">        tables.add(tableConfig.getTableName());</span>
+      }
+<span class="nc" id="L138">    }</span>
+<span class="nc" id="L139">    return tables;</span>
+  }
+
+  public void fixTableIdealState(String tableName) throws Exception {
+<span class="nc" id="L143">    IdealState idealState = _helixAdmin.getResourceIdealState(_clusterName, tableName);</span>
+<span class="nc bnc" id="L144" title="All 2 branches missed.">    if (idealState == null) {</span>
+<span class="nc" id="L145">      LOGGER.info(&quot;No IDEALSTATE found for table &quot; + tableName);</span>
+<span class="nc" id="L146">      return;</span>
+    }
+<span class="nc" id="L148">    Map&lt;String, Map&lt;String, String&gt;&gt; mapFieldsIS = idealState.getRecord().getMapFields();</span>
+<span class="nc" id="L149">    int nChanges = 0;</span>
+<span class="nc bnc" id="L150" title="All 2 branches missed.">    for (String segment : mapFieldsIS.keySet()) {</span>
+<span class="nc" id="L151">      Map&lt;String, String&gt; mapIS = mapFieldsIS.get(segment);</span>
+
+<span class="nc bnc" id="L153" title="All 2 branches missed.">      for (String server : mapIS.keySet()) {</span>
+<span class="nc" id="L154">        String state = mapIS.get(server);</span>
+<span class="nc bnc" id="L155" title="All 2 branches missed.">        if (state.equals(fromState)) {</span>
+<span class="nc bnc" id="L156" title="All 2 branches missed.">          if (_fix) {</span>
+<span class="nc" id="L157">            mapIS.put(server, toState);</span>
+          } else {
+<span class="nc" id="L159">            LOGGER.info(&quot;Table:&quot; + tableName + &quot;,Segment:&quot; + segment + &quot;,Server:&quot; + server + &quot;:&quot; + fromState);</span>
+          }
+<span class="nc" id="L161">          nChanges++;</span>
+        }
+<span class="nc" id="L163">      }</span>
+<span class="nc" id="L164">    }</span>
+<span class="nc bnc" id="L165" title="All 2 branches missed.">    if (nChanges == 0) {</span>
+<span class="nc" id="L166">      LOGGER.info(&quot;No segments detected in &quot; + fromState + &quot; state for table &quot; + tableName);</span>
+    } else {
+<span class="nc bnc" id="L168" title="All 2 branches missed.">      if (_fix) {</span>
+<span class="nc" id="L169">        LOGGER.info(&quot;Replacing IDEALSTATE for table &quot; + tableName + &quot; with &quot; + nChanges + &quot; changes&quot;);</span>
+<span class="nc" id="L170">        _helixAdmin.setResourceIdealState(_clusterName, tableName, idealState);</span>
+      } else {
+<span class="nc" id="L172">        LOGGER.info(&quot;Detected &quot; + nChanges + &quot; instances in &quot; + fromState + &quot; in table &quot; + tableName);</span>
+      }
+    }
+<span class="nc" id="L175">  }</span>
+
+  @Override
+  public boolean execute() throws Exception {
+<span class="nc bnc" id="L179" title="All 4 branches missed.">    if (_tableName == null &amp;&amp; _tenantName == null) {</span>
+<span class="nc" id="L180">      LOGGER.error(&quot;One of -tableName or -tenantName must be specified.&quot;);</span>
+<span class="nc" id="L181">      return false;</span>
+    }
+<span class="nc bnc" id="L183" title="All 4 branches missed.">    if (_tableName != null &amp;&amp; _tenantName != null) {</span>
+<span class="nc" id="L184">      LOGGER.error(&quot;Exactly one of -tenantName and -tableName be specified&quot;);</span>
+<span class="nc" id="L185">      return false;</span>
+    }
+<span class="nc" id="L187">    init();</span>
+
+<span class="nc bnc" id="L189" title="All 2 branches missed.">    if (_tenantName != null) {</span>
+      // Do this for all tenant tables
+<span class="nc" id="L191">      LOGGER.info(&quot;Working on all tables for tenant &quot; + _tenantName);</span>
+<span class="nc" id="L192">      List&lt;String&gt; tableNames = getAllTenantTables();</span>
+<span class="nc" id="L193">      LOGGER.info(&quot;Found &quot; + tableNames.size() + &quot; tables for tenant &quot; + _tenantName);</span>
+<span class="nc bnc" id="L194" title="All 2 branches missed.">      if (tableNames.size() &gt; 0) {</span>
+<span class="nc bnc" id="L195" title="All 2 branches missed.">        for (String tableName : tableNames) {</span>
+<span class="nc" id="L196">          fixTableIdealState(tableName);</span>
+<span class="nc" id="L197">        }</span>
+      }
+<span class="nc" id="L199">    } else {</span>
+<span class="nc" id="L200">      LOGGER.info(&quot;Working on table &quot; + _tableName);</span>
+<span class="nc" id="L201">      fixTableIdealState(_tableName);</span>
+    }
+<span class="nc" id="L203">    return true;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>PinotNumReplicaChanger.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-tools</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.tools</a> &gt; <span class="el_source">PinotNumReplicaChanger.java</span></div><h1>PinotNumReplicaChanger.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.linkedin.pinot.tools;
+
+import com.google.common.base.Function;
+import com.linkedin.pinot.common.config.TableConfig;
+import com.linkedin.pinot.common.config.TableNameBuilder;
+import com.linkedin.pinot.common.metadata.ZKMetadataProvider;
+import com.linkedin.pinot.common.utils.helix.HelixHelper;
+import com.linkedin.pinot.common.utils.retry.RetryPolicies;
+import java.util.Map;
+import java.util.Set;
+import javax.annotation.Nullable;
+import org.apache.helix.model.IdealState;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+public class PinotNumReplicaChanger extends PinotZKChanger {
+<span class="nc" id="L34">  private static final Logger LOGGER = LoggerFactory.getLogger(PinotNumReplicaChanger.class);</span>
+
+  private boolean dryRun;
+
+  public PinotNumReplicaChanger(String zkAddress, String clusterName, boolean dryRun) {
+<span class="nc" id="L39">    super(zkAddress, clusterName);</span>
+<span class="nc" id="L40">    this.dryRun = dryRun;</span>
+<span class="nc" id="L41">  }</span>
+
+  private static void usage() {
+<span class="nc" id="L44">    System.out.println(&quot;Usage: PinotNumReplicaChanger &lt;zkAddress&gt; &lt;clusterName&gt; &lt;tableName&gt; &lt;numReplicas&gt;&quot;);</span>
+<span class="nc" id="L45">    System.out.println(&quot;Example: localhost:2181 PinotCluster myTable_OFFLINE 5&quot;);</span>
+<span class="nc" id="L46">    System.exit(1);</span>
+<span class="nc" id="L47">  }</span>
+
+  public void changeNumReplicas(final String tableName)
+      throws Exception {
+    // Get the number of replicas in the tableconfig.
+<span class="nc" id="L52">    final String offlineTableName = TableNameBuilder.OFFLINE.tableNameWithType(tableName);</span>
+<span class="nc" id="L53">    final TableConfig offlineTableConfig = ZKMetadataProvider.getOfflineTableConfig(propertyStore, offlineTableName);</span>
+<span class="nc" id="L54">    final int newNumReplicas = Integer.parseInt(offlineTableConfig.getValidationConfig().getReplication());</span>
+
+    // Now get the idealstate, and get the number of replicas in it.
+<span class="nc" id="L57">    IdealState currentIdealState = helixAdmin.getResourceIdealState(clusterName, offlineTableName);</span>
+<span class="nc" id="L58">    int currentNumReplicas = Integer.parseInt(currentIdealState.getReplicas());</span>
+
+<span class="nc bnc" id="L60" title="All 2 branches missed.">    if (newNumReplicas &gt; currentNumReplicas) {</span>
+<span class="nc" id="L61">      LOGGER.info(&quot;Increasing replicas not yet supported&quot;);</span>
+<span class="nc bnc" id="L62" title="All 2 branches missed.">    } else if (newNumReplicas == currentNumReplicas) {</span>
+<span class="nc" id="L63">      LOGGER.info(&quot;Number of replicas ({}) match in table definition and Idealstate. Nothing to do for {}&quot;,</span>
+          newNumReplicas, offlineTableName);
+<span class="nc bnc" id="L65" title="All 2 branches missed.">    } else if (newNumReplicas &lt; currentNumReplicas) {</span>
+<span class="nc bnc" id="L66" title="All 2 branches missed.">      if (dryRun) {</span>
+<span class="nc" id="L67">        IdealState newIdealState = updateIdealState(currentIdealState, newNumReplicas);</span>
+<span class="nc" id="L68">        LOGGER.info(&quot;Final segment Assignment:&quot;);</span>
+<span class="nc" id="L69">        printSegmentAssignment(newIdealState.getRecord().getMapFields());</span>
+<span class="nc" id="L70">      } else {</span>
+<span class="nc" id="L71">        HelixHelper.updateIdealState(helixManager, offlineTableName, new Function&lt;IdealState, IdealState&gt;() {</span>
+          @Nullable
+          @Override
+          public IdealState apply(IdealState idealState) {
+<span class="nc" id="L75">            return updateIdealState(idealState, newNumReplicas);</span>
+          }
+        }, RetryPolicies.exponentialBackoffRetryPolicy(5, 500L, 2.0f));
+<span class="nc" id="L78">        waitForStable(offlineTableName);</span>
+<span class="nc" id="L79">        LOGGER.info(&quot;Successfully changed numReplicas to {} for table {}&quot;, newNumReplicas, offlineTableName);</span>
+<span class="nc" id="L80">        LOGGER.warn(&quot;*** You need to rebalance table {} ***&quot;, offlineTableName);</span>
+      }
+    }
+<span class="nc" id="L83">  }</span>
+
+  private IdealState updateIdealState(IdealState idealState, int newNumReplicas) {
+<span class="nc" id="L86">    idealState.setReplicas(Integer.toString(newNumReplicas));</span>
+<span class="nc" id="L87">    Set&lt;String&gt; segmentIds = idealState.getPartitionSet();</span>
+<span class="nc bnc" id="L88" title="All 2 branches missed.">    for (String segmentId : segmentIds) {</span>
+<span class="nc" id="L89">      Map&lt;String, String&gt; instanceStateMap = idealState.getInstanceStateMap(segmentId);</span>
+<span class="nc bnc" id="L90" title="All 2 branches missed.">      if (instanceStateMap.size() &gt; newNumReplicas) {</span>
+<span class="nc" id="L91">        Set&lt;String&gt; keys = instanceStateMap.keySet();</span>
+<span class="nc bnc" id="L92" title="All 2 branches missed.">        while (instanceStateMap.size() &gt; newNumReplicas) {</span>
+<span class="nc" id="L93">          instanceStateMap.remove(keys.iterator().next());</span>
+        }
+<span class="nc bnc" id="L95" title="All 2 branches missed.">      } else if (instanceStateMap.size() &lt; newNumReplicas) {</span>
+<span class="nc" id="L96">        throw new RuntimeException(&quot;Segment &quot; + segmentId + &quot; has &quot; + instanceStateMap.size() +</span>
+            &quot; replicas but want changed to &quot; + newNumReplicas);
+      }
+<span class="nc" id="L99">    }</span>
+<span class="nc" id="L100">    return idealState;</span>
+  }
+
+  public static void main(String[] args) throws Exception {
+<span class="nc" id="L104">    final boolean dryRun = true;</span>
+<span class="nc bnc" id="L105" title="All 2 branches missed.">    if (args.length != 3) {</span>
+<span class="nc" id="L106">      usage();</span>
+    }
+<span class="nc" id="L108">    final String zkAddress = args[0];</span>
+<span class="nc" id="L109">    final String clusterName = args[1];</span>
+<span class="nc" id="L110">    final String tableName = args[2];</span>
+
+<span class="nc" id="L112">    PinotNumReplicaChanger replicaChanger = new PinotNumReplicaChanger(zkAddress, clusterName, dryRun);</span>
+
+<span class="nc" id="L114">    replicaChanger.changeNumReplicas(tableName);</span>
+
+    if (dryRun) {
+<span class="nc" id="L117">      System.out.println(&quot;That was a dryrun&quot;);</span>
+    }
+
+<span class="nc" id="L120">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

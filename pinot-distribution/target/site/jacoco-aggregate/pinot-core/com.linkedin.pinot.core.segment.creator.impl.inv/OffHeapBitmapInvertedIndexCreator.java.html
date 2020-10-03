@@ -1,0 +1,255 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>OffHeapBitmapInvertedIndexCreator.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.segment.creator.impl.inv</a> &gt; <span class="el_source">OffHeapBitmapInvertedIndexCreator.java</span></div><h1>OffHeapBitmapInvertedIndexCreator.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.segment.creator.impl.inv;
+
+import com.google.common.base.Preconditions;
+import com.linkedin.pinot.common.data.FieldSpec;
+import com.linkedin.pinot.common.utils.MmapUtils;
+import com.linkedin.pinot.core.segment.creator.InvertedIndexCreator;
+import com.linkedin.pinot.core.segment.creator.impl.V1Constants;
+import java.io.BufferedOutputStream;
+import java.io.DataOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.IntBuffer;
+import java.nio.channels.FileChannel;
+import org.apache.commons.io.FileUtils;
+import org.roaringbitmap.buffer.MutableRoaringBitmap;
+
+
+/**
+ * Implementation of {@link InvertedIndexCreator} that uses off-heap memory.
+ * &lt;ul&gt;
+ *   High level idea:
+ *   &lt;li&gt;
+ *     We use 2 passes to create the inverted index.
+ *   &lt;/li&gt;
+ *   &lt;li&gt;
+ *     In the first pass (adding values phase), when addSV/addMV method is called, store the values (dictIds) into
+ *     value buffer (for multi-value column also store number of values for each docId into numValues buffer). We also
+ *     compute the posting list length for each value while processing values.
+ *   &lt;/li&gt;
+ *   &lt;li&gt;
+ *     We create inverted index in the second pass when seal method is called. By this time, all the values should
+ *     already been added. We first construct the posting list by going over the values in value buffer (for multi-value
+ *     column we also need numValues buffer to get the docId for each value).
+ *     &lt;p&gt;Once we have the posting list for each value (dictId), we simply go over the posting list and create the
+ *     bitmap for each value and serialize them into a file.
+ *   &lt;/li&gt;
+ *   &lt;li&gt;
+ *     When serializing bitmaps, we first create two files, one for bitmap offsets and one for serialized data. After
+ *     serializing all bitmaps, append the serialized data file to the offsets file to get the final inverted index
+ *     file.
+ *   &lt;/li&gt;
+ * &lt;/ul&gt;
+ */
+public final class OffHeapBitmapInvertedIndexCreator implements InvertedIndexCreator {
+  // Maximum number of values due to 2GB file size limit
+  public static final int MAX_NUM_VALUES = Integer.MAX_VALUE / V1Constants.Numbers.INTEGER_SIZE;
+
+  private final String _columnName;
+  private final boolean _singleValue;
+  private final int _cardinality;
+  private final int _numDocs;
+  private final int _numValues;
+  private final File _indexDir;
+  private final File _invertedIndexFile;
+
+  private ByteBuffer _valueByteBuffer;
+  private IntBuffer _valueIntBuffer;
+
+  // For multi-value column only
+  private int _valueBufferOffset;
+  private ByteBuffer _numValuesByteBuffer;
+  private IntBuffer _numValuesIntBuffer;
+
+  // Posting list related buffers
+  // Constructed in first pass
+  private ByteBuffer _postingListLengthByteBuffer;
+  private IntBuffer _postingListLengthIntBuffer;
+  // Constructed in second pass
+  private ByteBuffer _postingListValueByteBuffer;
+  private ByteBuffer _postingListCurrentOffsetByteBuffer;
+
+  public OffHeapBitmapInvertedIndexCreator(File indexDir, FieldSpec fieldSpec, int cardinality, int numDocs,
+<span class="fc" id="L91">      int numValues) {</span>
+<span class="fc" id="L92">    _columnName = fieldSpec.getName();</span>
+<span class="fc" id="L93">    _singleValue = fieldSpec.isSingleValueField();</span>
+<span class="fc" id="L94">    _cardinality = cardinality;</span>
+<span class="fc" id="L95">    _numDocs = numDocs;</span>
+<span class="fc bfc" id="L96" title="All 2 branches covered.">    if (_singleValue) {</span>
+<span class="pc bpc" id="L97" title="1 of 2 branches missed.">      Preconditions.checkArgument(numDocs &lt;= MAX_NUM_VALUES,</span>
+          &quot;For single-value column: %s, numDocs: %s is too large to create inverted index&quot;, _columnName, numDocs);
+<span class="fc" id="L99">      _numValues = numDocs;</span>
+    } else {
+<span class="pc bpc" id="L101" title="1 of 2 branches missed.">      Preconditions.checkArgument(numValues &lt;= MAX_NUM_VALUES,</span>
+          &quot;For multi-value column: %s, numValues: %s is too large to create inverted index&quot;, _columnName, numValues);
+<span class="fc" id="L103">      _numValues = numValues;</span>
+    }
+<span class="fc" id="L105">    _indexDir = indexDir;</span>
+<span class="fc" id="L106">    _invertedIndexFile = new File(indexDir, _columnName + V1Constants.Indexes.BITMAP_INVERTED_INDEX_FILE_EXTENSION);</span>
+
+    try {
+      // Create value buffer
+<span class="fc" id="L110">      _valueByteBuffer = MmapUtils.allocateDirectByteBuffer(_numValues * V1Constants.Numbers.INTEGER_SIZE, null,</span>
+          &quot;bitmap value buffer for: &quot; + _columnName);
+<span class="fc" id="L112">      _valueIntBuffer = _valueByteBuffer.asIntBuffer();</span>
+
+      // Create numValues buffer for multi-value column
+<span class="fc bfc" id="L115" title="All 2 branches covered.">      if (!_singleValue) {</span>
+<span class="fc" id="L116">        _numValuesByteBuffer = MmapUtils.allocateDirectByteBuffer(_numDocs * V1Constants.Numbers.INTEGER_SIZE, null,</span>
+            &quot;bitmap numValues buffer for: &quot; + _columnName);
+<span class="fc" id="L118">        _numValuesIntBuffer = _numValuesByteBuffer.asIntBuffer();</span>
+      }
+
+      // Create length buffer for posting list
+<span class="fc" id="L122">      _postingListLengthByteBuffer =</span>
+          MmapUtils.allocateDirectByteBuffer(_cardinality * V1Constants.Numbers.INTEGER_SIZE, null,
+              &quot;bitmap posting list length buffer for: &quot; + _columnName);
+<span class="fc" id="L125">      _postingListLengthIntBuffer = _postingListLengthByteBuffer.asIntBuffer();</span>
+<span class="nc" id="L126">    } catch (Exception e) {</span>
+<span class="nc" id="L127">      MmapUtils.unloadByteBuffer(_valueByteBuffer);</span>
+<span class="nc" id="L128">      MmapUtils.unloadByteBuffer(_numValuesByteBuffer);</span>
+<span class="nc" id="L129">      MmapUtils.unloadByteBuffer(_postingListLengthByteBuffer);</span>
+<span class="nc" id="L130">      throw e;</span>
+<span class="fc" id="L131">    }</span>
+<span class="fc" id="L132">  }</span>
+
+  @Override
+  public void addSV(int docId, int dictId) {
+<span class="fc" id="L136">    _valueIntBuffer.put(docId, dictId);</span>
+<span class="fc" id="L137">    _postingListLengthIntBuffer.put(dictId, _postingListLengthIntBuffer.get(dictId) + 1);</span>
+<span class="fc" id="L138">  }</span>
+
+  @Override
+  public void addMV(int docId, int[] dictIds) {
+<span class="fc" id="L142">    addMV(docId, dictIds, dictIds.length);</span>
+<span class="fc" id="L143">  }</span>
+
+  @Override
+  public void addMV(int docId, int[] dictIds, int numDictIds) {
+<span class="fc" id="L147">    _numValuesIntBuffer.put(docId, numDictIds);</span>
+<span class="fc bfc" id="L148" title="All 2 branches covered.">    for (int i = 0; i &lt; numDictIds; i++) {</span>
+<span class="fc" id="L149">      int dictId = dictIds[i];</span>
+<span class="fc" id="L150">      _valueIntBuffer.put(_valueBufferOffset++, dictId);</span>
+<span class="fc" id="L151">      _postingListLengthIntBuffer.put(dictId, _postingListLengthIntBuffer.get(dictId) + 1);</span>
+    }
+<span class="fc" id="L153">  }</span>
+
+  @Override
+  public void seal() throws IOException {
+    // Construct the posting list
+
+    // Create posting list value buffer
+<span class="fc" id="L160">    _postingListValueByteBuffer =</span>
+        MmapUtils.allocateDirectByteBuffer(_numValues * V1Constants.Numbers.INTEGER_SIZE, null,
+            &quot;bitmap posting list value buffer for: &quot; + _columnName);
+<span class="fc" id="L163">    IntBuffer postingListValueIntBuffer = _postingListValueByteBuffer.asIntBuffer();</span>
+
+    // Create posting list current offset buffer and initialize it using posting list length buffer
+<span class="fc" id="L166">    _postingListCurrentOffsetByteBuffer =</span>
+        MmapUtils.allocateDirectByteBuffer(_cardinality * V1Constants.Numbers.INTEGER_SIZE, null,
+            &quot;bitmap posting list current offset buffer for: &quot; + _columnName);
+<span class="fc" id="L169">    IntBuffer postingListCurrentOffsetIntBuffer = _postingListCurrentOffsetByteBuffer.asIntBuffer();</span>
+<span class="fc" id="L170">    int postingListStartOffset = 0;</span>
+<span class="fc bfc" id="L171" title="All 2 branches covered.">    for (int dictId = 0; dictId &lt; _cardinality; dictId++) {</span>
+<span class="fc" id="L172">      postingListCurrentOffsetIntBuffer.put(dictId, postingListStartOffset);</span>
+<span class="fc" id="L173">      postingListStartOffset += _postingListLengthIntBuffer.get(dictId);</span>
+    }
+
+    // Dump values into posting list
+<span class="fc bfc" id="L177" title="All 2 branches covered.">    if (_singleValue) {</span>
+<span class="fc bfc" id="L178" title="All 2 branches covered.">      for (int docId = 0; docId &lt; _numDocs; docId++) {</span>
+<span class="fc" id="L179">        int dictId = _valueIntBuffer.get(docId);</span>
+<span class="fc" id="L180">        int offset = postingListCurrentOffsetIntBuffer.get(dictId);</span>
+<span class="fc" id="L181">        postingListValueIntBuffer.put(offset++, docId);</span>
+<span class="fc" id="L182">        postingListCurrentOffsetIntBuffer.put(dictId, offset);</span>
+      }
+    } else {
+<span class="fc" id="L185">      int valueOffset = 0;</span>
+<span class="fc bfc" id="L186" title="All 2 branches covered.">      for (int docId = 0; docId &lt; _numDocs; docId++) {</span>
+<span class="fc" id="L187">        int numValues = _numValuesIntBuffer.get(docId);</span>
+<span class="fc bfc" id="L188" title="All 2 branches covered.">        for (int i = 0; i &lt; numValues; i++) {</span>
+<span class="fc" id="L189">          int dictId = _valueIntBuffer.get(valueOffset++);</span>
+<span class="fc" id="L190">          int offset = postingListCurrentOffsetIntBuffer.get(dictId);</span>
+<span class="fc" id="L191">          postingListValueIntBuffer.put(offset++, docId);</span>
+<span class="fc" id="L192">          postingListCurrentOffsetIntBuffer.put(dictId, offset);</span>
+        }
+      }
+      // Release numValues buffer
+<span class="fc" id="L196">      MmapUtils.unloadByteBuffer(_numValuesByteBuffer);</span>
+<span class="fc" id="L197">      _numValuesByteBuffer = null;</span>
+    }
+
+    // Release value buffer and posting list current offset buffer
+<span class="fc" id="L201">    MmapUtils.unloadByteBuffer(_valueByteBuffer);</span>
+<span class="fc" id="L202">    _valueByteBuffer = null;</span>
+<span class="fc" id="L203">    MmapUtils.unloadByteBuffer(_postingListCurrentOffsetByteBuffer);</span>
+<span class="fc" id="L204">    _postingListCurrentOffsetByteBuffer = null;</span>
+
+<span class="fc" id="L206">    File tempBitmapDataFile = new File(_indexDir, _invertedIndexFile.getName() + &quot;.tmp&quot;);</span>
+    try {
+      // First write offsets and serialized bitmaps into two files
+<span class="pc" id="L209">      try (DataOutputStream offsetOut = new DataOutputStream(</span>
+          new BufferedOutputStream(new FileOutputStream(_invertedIndexFile)));
+<span class="fc" id="L211">          DataOutputStream bitmapOut = new DataOutputStream(</span>
+              new BufferedOutputStream(new FileOutputStream(tempBitmapDataFile)))) {
+        // Write the offset for the first bitmap
+<span class="fc" id="L214">        int bitmapDataStartOffset = (_cardinality + 1) * V1Constants.Numbers.INTEGER_SIZE;</span>
+<span class="fc" id="L215">        offsetOut.writeInt(bitmapDataStartOffset);</span>
+
+        // Write offsets and serialized bitmaps
+<span class="fc" id="L218">        int postingListOffset = 0;</span>
+<span class="fc bfc" id="L219" title="All 2 branches covered.">        for (int dictId = 0; dictId &lt; _cardinality; dictId++) {</span>
+<span class="fc" id="L220">          MutableRoaringBitmap bitmap = new MutableRoaringBitmap();</span>
+<span class="fc" id="L221">          int postingListLength = _postingListLengthIntBuffer.get(dictId);</span>
+<span class="fc bfc" id="L222" title="All 2 branches covered.">          for (int i = 0; i &lt; postingListLength; i++) {</span>
+<span class="fc" id="L223">            bitmap.add(postingListValueIntBuffer.get(postingListOffset++));</span>
+          }
+<span class="fc" id="L225">          bitmapDataStartOffset += bitmap.serializedSizeInBytes();</span>
+<span class="fc" id="L226">          offsetOut.writeInt(bitmapDataStartOffset);</span>
+<span class="fc" id="L227">          bitmap.serialize(bitmapOut);</span>
+        }
+<span class="pc bpc" id="L229" title="12 of 16 branches missed.">      }</span>
+
+      // Append the bitmap data file to the inverted index file
+<span class="pc" id="L232">      try (FileChannel out = new FileOutputStream(_invertedIndexFile, true).getChannel();</span>
+<span class="fc" id="L233">          FileChannel in = new FileInputStream(tempBitmapDataFile).getChannel()) {</span>
+        // jfim: For some reason, it seems like the second argument of transferFrom is relative on Linux while it is
+        // an absolute position on MacOS X. As such, we reposition the stream to 0 on both platforms to make it an
+        // absolute position call.
+<span class="fc" id="L237">        out.position(0).transferFrom(in, out.size(), in.size());</span>
+<span class="pc bpc" id="L238" title="12 of 16 branches missed.">      }</span>
+<span class="nc" id="L239">    } catch (Exception e) {</span>
+<span class="nc" id="L240">      FileUtils.deleteQuietly(_invertedIndexFile);</span>
+<span class="nc" id="L241">      FileUtils.deleteQuietly(tempBitmapDataFile);</span>
+<span class="nc" id="L242">      throw e;</span>
+<span class="fc" id="L243">    }</span>
+<span class="fc" id="L244">  }</span>
+
+  @Override
+  public void close() {
+<span class="fc" id="L248">    MmapUtils.unloadByteBuffer(_valueByteBuffer);</span>
+<span class="fc" id="L249">    MmapUtils.unloadByteBuffer(_numValuesByteBuffer);</span>
+<span class="fc" id="L250">    MmapUtils.unloadByteBuffer(_postingListLengthByteBuffer);</span>
+<span class="fc" id="L251">    MmapUtils.unloadByteBuffer(_postingListValueByteBuffer);</span>
+<span class="fc" id="L252">    MmapUtils.unloadByteBuffer(_postingListCurrentOffsetByteBuffer);</span>
+<span class="fc" id="L253">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

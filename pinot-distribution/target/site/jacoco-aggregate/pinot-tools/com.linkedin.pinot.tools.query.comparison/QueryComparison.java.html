@@ -1,0 +1,587 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>QueryComparison.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-tools</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.tools.query.comparison</a> &gt; <span class="el_source">QueryComparison.java</span></div><h1>QueryComparison.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.tools.query.comparison;
+
+import com.linkedin.pinot.tools.scan.query.GroupByOperator;
+import com.linkedin.pinot.tools.scan.query.QueryResponse;
+import com.linkedin.pinot.tools.scan.query.ScanBasedQueryProcessor;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.InputStreamReader;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import org.codehaus.jackson.map.ObjectMapper;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+public class QueryComparison {
+<span class="nc" id="L38">  private static final Logger LOGGER = LoggerFactory.getLogger(QueryComparison.class);</span>
+  private static final double EPSILON = 0.00001;
+
+  private static final String SELECTION_RESULTS = &quot;selectionResults&quot;;
+  private static final String AGGREGATION_RESULTS = &quot;aggregationResults&quot;;
+  private static final String NUM_DOCS_SCANNED = &quot;numDocsScanned&quot;;
+  private static final String FUNCTION = &quot;function&quot;;
+  private static final String VALUE = &quot;value&quot;;
+  private static final String COLUMNS = &quot;columns&quot;;
+  private static final String RESULTS = &quot;results&quot;;
+  private static final String GROUP_BY_COLUMNS = &quot;groupByColumns&quot;;
+  private static final String GROUP_BY_RESULT = &quot;groupByResult&quot;;
+  private static final String GROUP = &quot;group&quot;;
+  private static final String TIME_USED_MS = &quot;timeUsedMs&quot;;
+  private static final String EXCEPTIONS = &quot;exceptions&quot;;
+<span class="nc" id="L53">  private static boolean _compareNumDocs = true;</span>
+
+  private File _segmentsDir;
+  private File _queryFile;
+  private File _resultFile;
+
+  private final QueryComparisonConfig _config;
+  private ClusterStarter _clusterStarter;
+
+<span class="nc" id="L62">  public QueryComparison(QueryComparisonConfig config) {</span>
+<span class="nc" id="L63">    _config = config;</span>
+<span class="nc" id="L64">    _queryFile = new File(config.getQueryFile());</span>
+
+<span class="nc bnc" id="L66" title="All 4 branches missed.">    if (!_queryFile.exists() || !_queryFile.isFile()) {</span>
+<span class="nc" id="L67">      LOGGER.error(&quot;Invalid query file: {}&quot;, _queryFile.getName());</span>
+<span class="nc" id="L68">      return;</span>
+    }
+
+<span class="nc" id="L71">    String segmentDir = config.getSegmentsDir();</span>
+<span class="nc" id="L72">    String results = config.getResultFile();</span>
+
+<span class="nc bnc" id="L74" title="All 4 branches missed.">    if (segmentDir == null &amp;&amp; results == null) {</span>
+<span class="nc" id="L75">      LOGGER.error(&quot;Neither segments directory nor expected results file specified&quot;);</span>
+<span class="nc" id="L76">      return;</span>
+    }
+
+<span class="nc bnc" id="L79" title="All 2 branches missed.">    _segmentsDir = (segmentDir != null) ? new File(segmentDir) : null;</span>
+<span class="nc bnc" id="L80" title="All 2 branches missed.">    _resultFile = (results != null) ? new File(results) : null;</span>
+
+<span class="nc bnc" id="L82" title="All 6 branches missed.">    if (_segmentsDir != null &amp;&amp; (!_segmentsDir.exists() || !_segmentsDir.isDirectory())) {</span>
+<span class="nc" id="L83">      LOGGER.error(&quot;Invalid segments directory: {}&quot;, _segmentsDir.getName());</span>
+<span class="nc" id="L84">      return;</span>
+    }
+
+<span class="nc bnc" id="L87" title="All 4 branches missed.">    if (_config.getPerfMode() &amp;&amp; (_config.getPerfUrl() == null)) {</span>
+<span class="nc" id="L88">      LOGGER.error(&quot;Must specify perf url in perf mode&quot;);</span>
+<span class="nc" id="L89">      return;</span>
+    }
+<span class="nc" id="L91">  }</span>
+
+  private void run()
+      throws Exception {
+<span class="nc" id="L95">    startCluster();</span>
+
+    // For function mode, compare response with the expected response.
+<span class="nc bnc" id="L98" title="All 2 branches missed.">    if (_config.getFunctionMode()) {</span>
+<span class="nc" id="L99">      runFunctionMode();</span>
+    }
+
+    // For perf mode, count the client side response time.
+<span class="nc bnc" id="L103" title="All 2 branches missed.">    if (_config.getPerfMode()) {</span>
+<span class="nc" id="L104">      runPerfMode();</span>
+    }
+<span class="nc" id="L106">  }</span>
+
+  private void runFunctionMode()
+      throws Exception {
+<span class="nc" id="L110">    BufferedReader resultReader = null;</span>
+<span class="nc" id="L111">    ScanBasedQueryProcessor scanBasedQueryProcessor = null;</span>
+
+<span class="nc" id="L113">    try (</span>
+<span class="nc" id="L114">        BufferedReader queryReader = new BufferedReader(new InputStreamReader(new FileInputStream(_queryFile), &quot;UTF8&quot;))</span>
+    ) {
+<span class="nc bnc" id="L116" title="All 2 branches missed.">      if (_resultFile == null) {</span>
+<span class="nc" id="L117">        scanBasedQueryProcessor = new ScanBasedQueryProcessor(_segmentsDir.getAbsolutePath());</span>
+      } else {
+<span class="nc" id="L119">        resultReader = new BufferedReader(new InputStreamReader(new FileInputStream(_resultFile), &quot;UTF8&quot;));</span>
+      }
+
+<span class="nc" id="L122">      int passed = 0;</span>
+<span class="nc" id="L123">      int total = 0;</span>
+      String query;
+<span class="nc bnc" id="L125" title="All 2 branches missed.">      while ((query = queryReader.readLine()) != null) {</span>
+<span class="nc bnc" id="L126" title="All 4 branches missed.">        if (query.isEmpty() || query.startsWith(&quot;#&quot;)) {</span>
+<span class="nc" id="L127">          continue;</span>
+        }
+
+<span class="nc" id="L130">        JSONObject expectedJson = null;</span>
+        try {
+<span class="nc bnc" id="L132" title="All 2 branches missed.">          if (resultReader != null) {</span>
+<span class="nc" id="L133">            expectedJson = new JSONObject(resultReader.readLine());</span>
+          } else {
+<span class="nc" id="L135">            QueryResponse expectedResponse = scanBasedQueryProcessor.processQuery(query);</span>
+<span class="nc" id="L136">            expectedJson = new JSONObject(new ObjectMapper().writeValueAsString(expectedResponse));</span>
+          }
+<span class="nc" id="L138">        } catch (Exception e) {</span>
+<span class="nc" id="L139">          LOGGER.error(&quot;Comparison FAILED: Id: {} Exception caught while getting expected response for query: '{}'&quot;,</span>
+              total, query, e);
+<span class="nc" id="L141">        }</span>
+
+<span class="nc" id="L143">        JSONObject actualJson = null;</span>
+<span class="nc bnc" id="L144" title="All 2 branches missed.">        if (expectedJson != null) {</span>
+          try {
+<span class="nc" id="L146">            actualJson = new JSONObject(_clusterStarter.query(query));</span>
+<span class="nc" id="L147">          } catch (Exception e) {</span>
+<span class="nc" id="L148">            LOGGER.error(&quot;Comparison FAILED: Id: {} Exception caught while running query: '{}'&quot;, total, query, e);</span>
+<span class="nc" id="L149">          }</span>
+        }
+
+<span class="nc bnc" id="L152" title="All 4 branches missed.">        if (expectedJson != null &amp;&amp; actualJson != null) {</span>
+          try {
+<span class="nc bnc" id="L154" title="All 2 branches missed.">            if (compare(actualJson, expectedJson)) {</span>
+<span class="nc" id="L155">              passed++;</span>
+<span class="nc" id="L156">              LOGGER.info(&quot;Comparison PASSED: Id: {} actual Time: {} ms expected Time: {} ms Docs Scanned: {}&quot;, total,</span>
+                  actualJson.get(TIME_USED_MS), expectedJson.get(TIME_USED_MS), actualJson.get(NUM_DOCS_SCANNED));
+<span class="nc" id="L158">              LOGGER.debug(&quot;actual Response: {}&quot;, actualJson);</span>
+<span class="nc" id="L159">              LOGGER.debug(&quot;expected Response: {}&quot;, expectedJson);</span>
+            } else {
+<span class="nc" id="L161">              LOGGER.error(&quot;Comparison FAILED: Id: {} query: {}&quot;, query);</span>
+<span class="nc" id="L162">              LOGGER.info(&quot;actual Response: {}&quot;, actualJson);</span>
+<span class="nc" id="L163">              LOGGER.info(&quot;expected Response: {}&quot;, expectedJson);</span>
+            }
+<span class="nc" id="L165">          } catch (Exception e) {</span>
+<span class="nc" id="L166">            LOGGER.error(&quot;Comparison FAILED: Id: {} Exception caught while comparing query: '{}' actual response: {}, expected response: {}&quot;,</span>
+                total, query, actualJson, expectedJson, e);
+<span class="nc" id="L168">          }</span>
+        }
+
+<span class="nc" id="L171">        total++;</span>
+<span class="nc" id="L172">      }</span>
+
+<span class="nc" id="L174">      LOGGER.info(&quot;Total {} out of {} queries passed.&quot;, passed, total);</span>
+<span class="nc bnc" id="L175" title="All 8 branches missed.">    } finally {</span>
+<span class="nc bnc" id="L176" title="All 4 branches missed.">      if (resultReader != null) {</span>
+<span class="nc" id="L177">        resultReader.close();</span>
+      }
+    }
+<span class="nc" id="L180">  }</span>
+
+  private void runPerfMode()
+      throws Exception {
+<span class="nc" id="L184">    try (</span>
+<span class="nc" id="L185">        BufferedReader queryReader = new BufferedReader(new InputStreamReader(new FileInputStream(_queryFile), &quot;UTF8&quot;))</span>
+    ) {
+      String query;
+<span class="nc bnc" id="L188" title="All 2 branches missed.">      while ((query = queryReader.readLine()) != null) {</span>
+<span class="nc bnc" id="L189" title="All 4 branches missed.">        if (query.isEmpty() || query.startsWith(&quot;#&quot;)) {</span>
+<span class="nc" id="L190">          continue;</span>
+        }
+
+<span class="nc" id="L193">        int clientTime = _clusterStarter.perfQuery(query);</span>
+<span class="nc" id="L194">        LOGGER.info(&quot;Client side response time: {} ms&quot;, clientTime);</span>
+<span class="nc" id="L195">      }</span>
+<span class="nc bnc" id="L196" title="All 8 branches missed.">    }</span>
+<span class="nc" id="L197">  }</span>
+
+  private void startCluster()
+      throws Exception {
+<span class="nc" id="L201">    _clusterStarter = new ClusterStarter(_config);</span>
+
+<span class="nc bnc" id="L203" title="All 2 branches missed.">    if (_config.getStartCluster()) {</span>
+<span class="nc" id="L204">      LOGGER.info(&quot;Bringing up Pinot Cluster&quot;);</span>
+<span class="nc" id="L205">      _clusterStarter.start();</span>
+<span class="nc" id="L206">      LOGGER.info(&quot;Pinot Cluster is now up&quot;);</span>
+    } else {
+<span class="nc" id="L208">      LOGGER.info(&quot;Skipping cluster setup as specified in the config file.&quot;);</span>
+    }
+<span class="nc" id="L210">  }</span>
+
+<span class="nc" id="L212">  public enum ComparisonStatus {</span>
+<span class="nc" id="L213">    PASSED,</span>
+<span class="nc" id="L214">    EMPTY,</span>
+<span class="nc" id="L215">    FAILED</span>
+  }
+
+  public static ComparisonStatus compareWithEmpty(JSONObject actualJson, JSONObject expectedJson)
+      throws JSONException {
+<span class="nc bnc" id="L220" title="All 2 branches missed.">    if (actualJson.getJSONArray(EXCEPTIONS).length() != 0) {</span>
+<span class="nc" id="L221">      return ComparisonStatus.FAILED;</span>
+    }
+
+    // If no records found, nothing to compare.
+<span class="nc bnc" id="L225" title="All 4 branches missed.">    if ((actualJson.getInt(NUM_DOCS_SCANNED) == 0) &amp;&amp; expectedJson.getInt(NUM_DOCS_SCANNED) == 0) {</span>
+<span class="nc" id="L226">      LOGGER.info(&quot;Empty results, nothing to compare.&quot;);</span>
+<span class="nc" id="L227">      return ComparisonStatus.EMPTY;</span>
+    }
+
+<span class="nc bnc" id="L230" title="All 2 branches missed.">    if (!compareSelection(actualJson, expectedJson)) {</span>
+<span class="nc" id="L231">      return ComparisonStatus.FAILED;</span>
+    }
+
+<span class="nc bnc" id="L234" title="All 2 branches missed.">    if (!compareAggregation(actualJson, expectedJson)) {</span>
+<span class="nc" id="L235">      return ComparisonStatus.FAILED;</span>
+    }
+
+<span class="nc" id="L238">    return ComparisonStatus.PASSED;</span>
+  }
+
+  public static boolean compare(JSONObject actualJson, JSONObject expectedJson)
+      throws JSONException {
+<span class="nc" id="L243">    ComparisonStatus comparisonStatus = compareWithEmpty(actualJson, expectedJson);</span>
+<span class="nc bnc" id="L244" title="All 2 branches missed.">    return !comparisonStatus.equals(ComparisonStatus.FAILED);</span>
+  }
+
+  /**
+   * Some clients (eg Star Tree) may have different num docs scanned, but produce the same result.
+   * This compare method will ignore comparing number of documents scanned.
+   * @param actualJson
+   * @param expectedJson
+   * @param compareNumDocs
+   * @return
+   */
+  public static boolean compare(JSONObject actualJson, JSONObject expectedJson, boolean compareNumDocs)
+      throws JSONException {
+<span class="nc" id="L257">    _compareNumDocs = compareNumDocs;</span>
+<span class="nc" id="L258">    return compare(actualJson, expectedJson);</span>
+  }
+
+  public static void setCompareNumDocs(boolean compareNumDocs) {
+<span class="nc" id="L262">    _compareNumDocs = compareNumDocs;</span>
+<span class="nc" id="L263">  }</span>
+
+  public static boolean compareAggregation(JSONObject actualJson, JSONObject expectedJson)
+      throws JSONException {
+<span class="nc bnc" id="L267" title="All 4 branches missed.">    if (!actualJson.has(AGGREGATION_RESULTS) &amp;&amp; !expectedJson.has(AGGREGATION_RESULTS)) {</span>
+<span class="nc" id="L268">      return true;</span>
+    }
+<span class="nc" id="L270">    JSONArray actualAggregation = actualJson.getJSONArray(AGGREGATION_RESULTS);</span>
+<span class="nc bnc" id="L271" title="All 2 branches missed.">    if (actualAggregation.length() == 0) {</span>
+<span class="nc bnc" id="L272" title="All 2 branches missed.">      return !expectedJson.has(AGGREGATION_RESULTS);</span>
+    }
+
+<span class="nc bnc" id="L275" title="All 4 branches missed.">    if (_compareNumDocs &amp;&amp; !compareNumDocsScanned(actualJson, expectedJson)) {</span>
+<span class="nc" id="L276">      return false;</span>
+    }
+
+<span class="nc bnc" id="L279" title="All 2 branches missed.">    if (actualAggregation.getJSONObject(0).has(GROUP_BY_RESULT)) {</span>
+<span class="nc" id="L280">      return compareAggregationGroupBy(actualJson, expectedJson);</span>
+    }
+
+<span class="nc" id="L283">    JSONArray expectedAggregation = expectedJson.getJSONArray(AGGREGATION_RESULTS);</span>
+<span class="nc" id="L284">    return compareAggregationArrays(actualAggregation, expectedAggregation);</span>
+  }
+
+  private static boolean compareAggregationArrays(JSONArray actualAggregation, JSONArray expectedAggregation)
+      throws JSONException {
+<span class="nc" id="L289">    Map&lt;String, Double&gt; map = new HashMap&lt;&gt;();</span>
+
+<span class="nc bnc" id="L291" title="All 2 branches missed.">    for (int i = 0; i &lt; expectedAggregation.length(); ++i) {</span>
+<span class="nc" id="L292">      JSONObject object = expectedAggregation.getJSONObject(i);</span>
+<span class="nc" id="L293">      map.put(object.getString(FUNCTION).toLowerCase(), Double.valueOf(object.getString(VALUE)));</span>
+    }
+
+<span class="nc bnc" id="L296" title="All 2 branches missed.">    for (int i = 0; i &lt; actualAggregation.length(); ++i) {</span>
+<span class="nc" id="L297">      JSONObject object = actualAggregation.getJSONObject(i);</span>
+<span class="nc" id="L298">      String function = object.getString(FUNCTION).toLowerCase();</span>
+<span class="nc" id="L299">      String valueString = object.getString(VALUE);</span>
+
+<span class="nc bnc" id="L301" title="All 2 branches missed.">      if (!isNumeric(valueString)) {</span>
+<span class="nc" id="L302">        LOGGER.warn(&quot;Found non-numeric value for aggregation ignoring Function: {} Value: {}&quot;, function, valueString);</span>
+<span class="nc" id="L303">        continue;</span>
+      }
+
+<span class="nc" id="L306">      Double value = Double.valueOf(valueString);</span>
+
+<span class="nc bnc" id="L308" title="All 2 branches missed.">      if (!map.containsKey(function)) {</span>
+<span class="nc" id="L309">        LOGGER.error(&quot;expected Response does not contain function {}&quot;, function);</span>
+<span class="nc" id="L310">        return false;</span>
+      }
+
+<span class="nc" id="L313">      Double expectedValue = map.get(function);</span>
+<span class="nc bnc" id="L314" title="All 2 branches missed.">      if (!fuzzyEqual(value, expectedValue)) {</span>
+<span class="nc" id="L315">        LOGGER.error(&quot;Aggregation value mismatch for function {}, {}, {}&quot;, function, value, expectedValue);</span>
+<span class="nc" id="L316">        return false;</span>
+      }
+    }
+
+<span class="nc" id="L320">    return true;</span>
+  }
+
+  private static boolean compareAggregationGroupBy(JSONObject actualJson, JSONObject expectedJson)
+      throws JSONException {
+<span class="nc" id="L325">    JSONArray actualGroupByResults = actualJson.getJSONArray(AGGREGATION_RESULTS);</span>
+<span class="nc" id="L326">    JSONArray expectedGroupByResults = expectedJson.getJSONArray(AGGREGATION_RESULTS);</span>
+
+<span class="nc" id="L328">    int numActualGroupBy = actualGroupByResults.length();</span>
+<span class="nc" id="L329">    int numExpectedGroupBy = expectedGroupByResults.length();</span>
+
+    // Build map based on function (function_column name) to match individual entries.
+<span class="nc" id="L332">    Map&lt;String, Integer&gt; functionMap = new HashMap&lt;&gt;();</span>
+<span class="nc bnc" id="L333" title="All 2 branches missed.">    for (int i = 0; i &lt; numExpectedGroupBy; ++i) {</span>
+<span class="nc" id="L334">      JSONObject expectedAggr = expectedGroupByResults.getJSONObject(i);</span>
+<span class="nc" id="L335">      String expectedFunction = expectedAggr.getString(FUNCTION).toLowerCase();</span>
+<span class="nc" id="L336">      functionMap.put(expectedFunction, i);</span>
+    }
+
+<span class="nc bnc" id="L339" title="All 2 branches missed.">    for (int i = 0; i &lt; numActualGroupBy; ++i) {</span>
+<span class="nc" id="L340">      JSONObject actualAggr = actualGroupByResults.getJSONObject(i);</span>
+<span class="nc" id="L341">      String actualFunction = actualAggr.getString(FUNCTION).toLowerCase();</span>
+
+<span class="nc bnc" id="L343" title="All 2 branches missed.">      if (!functionMap.containsKey(actualFunction)) {</span>
+<span class="nc" id="L344">        LOGGER.error(&quot;Missing group by function in expected response: {}&quot;, actualFunction);</span>
+<span class="nc" id="L345">        return false;</span>
+      }
+
+<span class="nc" id="L348">      JSONObject expectedAggr = expectedGroupByResults.getJSONObject(functionMap.get(actualFunction));</span>
+<span class="nc bnc" id="L349" title="All 2 branches missed.">      if (!compareGroupByColumns(actualAggr, expectedAggr)) {</span>
+<span class="nc" id="L350">        return false;</span>
+      }
+
+<span class="nc bnc" id="L353" title="All 2 branches missed.">      if (!compareAggregationValues(actualAggr, expectedAggr)) {</span>
+<span class="nc" id="L354">        return false;</span>
+      }
+    }
+<span class="nc" id="L357">    return true;</span>
+  }
+
+  private static List&lt;Object&gt; jsonArrayToList(JSONArray jsonArray)
+      throws JSONException {
+<span class="nc" id="L362">    List&lt;Object&gt; list = new ArrayList&lt;&gt;();</span>
+<span class="nc bnc" id="L363" title="All 2 branches missed.">    for (int i = 0; i &lt; jsonArray.length(); ++i) {</span>
+<span class="nc" id="L364">      list.add(jsonArray.get(i));</span>
+    }
+<span class="nc" id="L366">    return list;</span>
+  }
+
+  private static boolean compareAggregationValues(JSONObject actualAggr, JSONObject expectedAggr)
+      throws JSONException {
+<span class="nc" id="L371">    JSONArray actualResult = actualAggr.getJSONArray(GROUP_BY_RESULT);</span>
+<span class="nc" id="L372">    JSONArray expectedResult = expectedAggr.getJSONArray(GROUP_BY_RESULT);</span>
+
+<span class="nc" id="L374">    Map&lt;GroupByOperator, Double&gt; expectedMap = new HashMap&lt;&gt;();</span>
+<span class="nc bnc" id="L375" title="All 2 branches missed.">    for (int i = 0; i &lt; expectedResult.length(); ++i) {</span>
+<span class="nc" id="L376">      List&lt;Object&gt; group = jsonArrayToList(expectedResult.getJSONObject(i).getJSONArray(GROUP));</span>
+<span class="nc" id="L377">      GroupByOperator groupByOperator = new GroupByOperator(group);</span>
+<span class="nc" id="L378">      expectedMap.put(groupByOperator, expectedResult.getJSONObject(i).getDouble(VALUE));</span>
+    }
+
+<span class="nc bnc" id="L381" title="All 2 branches missed.">    for (int i = 0; i &lt; actualResult.length(); ++i) {</span>
+<span class="nc" id="L382">      List&lt;Object&gt; group = jsonArrayToList(actualResult.getJSONObject(i).getJSONArray(GROUP));</span>
+<span class="nc" id="L383">      GroupByOperator groupByOperator = new GroupByOperator(group);</span>
+
+<span class="nc" id="L385">      double actualValue = actualResult.getJSONObject(i).getDouble(VALUE);</span>
+<span class="nc bnc" id="L386" title="All 2 branches missed.">      if (!expectedMap.containsKey(groupByOperator)) {</span>
+<span class="nc" id="L387">        LOGGER.error(&quot;Missing group by value for group: {}&quot;, group);</span>
+<span class="nc" id="L388">        return false;</span>
+      }
+
+<span class="nc" id="L391">      double expectedValue = expectedMap.get(groupByOperator);</span>
+<span class="nc bnc" id="L392" title="All 2 branches missed.">      if (!fuzzyEqual(actualValue, expectedValue)) {</span>
+<span class="nc" id="L393">        LOGGER.error(&quot;Aggregation group by value mis-match: actual: {}, expected: {}&quot;, actualValue, expectedValue);</span>
+<span class="nc" id="L394">        return false;</span>
+      }
+    }
+
+<span class="nc" id="L398">    return true;</span>
+  }
+
+  private static boolean compareGroupByColumns(JSONObject actualAggr, JSONObject expectedAggr)
+      throws JSONException {
+<span class="nc" id="L403">    JSONArray actualCols = actualAggr.getJSONArray(GROUP_BY_COLUMNS);</span>
+<span class="nc" id="L404">    JSONArray expectedCols = expectedAggr.getJSONArray(GROUP_BY_COLUMNS);</span>
+
+<span class="nc bnc" id="L406" title="All 2 branches missed.">    if (!compareLists(actualCols, expectedCols, null)) {</span>
+<span class="nc" id="L407">      return false;</span>
+    }
+<span class="nc" id="L409">    return true;</span>
+  }
+
+  private static boolean compareSelection(JSONObject actualJson, JSONObject expectedJson)
+      throws JSONException {
+<span class="nc bnc" id="L414" title="All 4 branches missed.">    if (!actualJson.has(SELECTION_RESULTS) &amp;&amp; !expectedJson.has(SELECTION_RESULTS)) {</span>
+<span class="nc" id="L415">      return true;</span>
+    }
+
+    /* We cannot compare numDocsScanned in selection because when we just return part of the selection result (has a
+       low limit), this number can change over time. */
+
+<span class="nc" id="L421">    JSONObject actualSelection = actualJson.getJSONObject(SELECTION_RESULTS);</span>
+<span class="nc" id="L422">    JSONObject expectedSelection = expectedJson.getJSONObject(SELECTION_RESULTS);</span>
+<span class="nc" id="L423">    Map&lt;Integer, Integer&gt; expectedToActualColMap = new HashMap&lt;Integer, Integer&gt;(actualSelection.getJSONArray(COLUMNS).length());</span>
+
+<span class="nc bnc" id="L425" title="All 4 branches missed.">    return compareLists(actualSelection.getJSONArray(COLUMNS), expectedSelection.getJSONArray(COLUMNS),</span>
+        expectedToActualColMap) &amp;&amp; compareSelectionRows(actualSelection.getJSONArray(RESULTS),
+        expectedSelection.getJSONArray(RESULTS), expectedToActualColMap);
+  }
+
+  private static boolean compareSelectionRows(JSONArray actualRows, JSONArray expectedRows,
+      Map&lt;Integer, Integer&gt; expectedToActualColMap)
+      throws JSONException {
+<span class="nc" id="L433">    final int numActualRows = actualRows.length();</span>
+<span class="nc" id="L434">    final int numExpectedRows = expectedRows.length();</span>
+<span class="nc bnc" id="L435" title="All 2 branches missed.">    if (numActualRows &gt; numExpectedRows) {</span>
+<span class="nc" id="L436">      LOGGER.error(&quot;In selection, number of actual rows: {} more than expected rows: {}&quot;, numActualRows, numExpectedRows);</span>
+<span class="nc" id="L437">      return false;</span>
+    }
+<span class="nc" id="L439">    Map&lt;String, Integer&gt; expectedRowMap = new HashMap&lt;&gt;(numExpectedRows);</span>
+<span class="nc bnc" id="L440" title="All 2 branches missed.">    for (int i = 0; i &lt; numExpectedRows; i++) {</span>
+<span class="nc" id="L441">      String serialized = serializeRow(expectedRows.getJSONArray(i), expectedToActualColMap);</span>
+<span class="nc" id="L442">      Integer count = expectedRowMap.get(serialized);</span>
+<span class="nc bnc" id="L443" title="All 2 branches missed.">      if (count == null) {</span>
+<span class="nc" id="L444">        expectedRowMap.put(serialized, 1);</span>
+      } else {
+<span class="nc" id="L446">        expectedRowMap.put(serialized, count + 1);</span>
+      }
+    }
+
+<span class="nc bnc" id="L450" title="All 2 branches missed.">    for (int i = 0; i &lt; numActualRows; i++) {</span>
+<span class="nc" id="L451">      String serialized = serializeRow(actualRows.getJSONArray(i), null);</span>
+<span class="nc" id="L452">      Integer count = expectedRowMap.get(serialized);</span>
+<span class="nc bnc" id="L453" title="All 4 branches missed.">      if (count == null || count == 0) {</span>
+<span class="nc" id="L454">        LOGGER.error(&quot;Cannot find match for row {} in actual result&quot;, i);</span>
+<span class="nc" id="L455">        return false;</span>
+      }
+<span class="nc" id="L457">      expectedRowMap.put(serialized, count - 1);</span>
+    }
+<span class="nc" id="L459">    return true;</span>
+  }
+
+  private static String serializeRow(JSONArray row, Map&lt;Integer, Integer&gt; expectedToActualColMap) throws JSONException {
+<span class="nc" id="L463">    StringBuilder sb = new StringBuilder();</span>
+<span class="nc" id="L464">    final int numCols = row.length();</span>
+<span class="nc" id="L465">    sb.append(numCols).append('_');</span>
+<span class="nc bnc" id="L466" title="All 2 branches missed.">    for (int i = 0; i &lt; numCols; i++) {</span>
+      String toAppend;
+<span class="nc bnc" id="L468" title="All 2 branches missed.">      if (expectedToActualColMap == null) {</span>
+<span class="nc" id="L469">        toAppend = row.getString(i);</span>
+      } else {
+<span class="nc" id="L471">        toAppend = row.getString(expectedToActualColMap.get(i));</span>
+      }
+      // For number value, uniform the format and do fuzzy comparison
+      try {
+<span class="nc" id="L475">        double numValue = Double.parseDouble(toAppend);</span>
+<span class="nc" id="L476">        sb.append((int) (numValue * 100)).append('_');</span>
+<span class="nc" id="L477">      } catch (NumberFormatException e) {</span>
+<span class="nc" id="L478">        sb.append(toAppend).append('_');</span>
+<span class="nc" id="L479">      }</span>
+    }
+<span class="nc" id="L481">    return sb.toString();</span>
+  }
+
+  private static boolean isNumeric(String str) {
+<span class="nc bnc" id="L485" title="All 2 branches missed.">    if (str == null) {</span>
+<span class="nc" id="L486">      return false;</span>
+    }
+
+    try {
+<span class="nc" id="L490">      Double.parseDouble(str);</span>
+<span class="nc" id="L491">    } catch (NumberFormatException nfe) {</span>
+<span class="nc" id="L492">      return false;</span>
+<span class="nc" id="L493">    }</span>
+<span class="nc" id="L494">    return true;</span>
+  }
+
+  private static boolean compareLists(JSONArray actualList, JSONArray expectedList,
+      Map&lt;Integer, Integer&gt; expectedToActualColMap)
+      throws JSONException {
+<span class="nc" id="L500">    int actualSize = actualList.length();</span>
+<span class="nc" id="L501">    int expectedSize = expectedList.length();</span>
+
+<span class="nc bnc" id="L503" title="All 2 branches missed.">    if (actualSize != expectedSize) {</span>
+<span class="nc" id="L504">      LOGGER.error(&quot;Number of columns mis-match: actual: {} expected: {}&quot;, actualSize, expectedSize);</span>
+<span class="nc" id="L505">      return false;</span>
+    }
+
+<span class="nc bnc" id="L508" title="All 2 branches missed.">    if (expectedToActualColMap == null) {</span>
+<span class="nc bnc" id="L509" title="All 2 branches missed.">      for (int i = 0; i &lt; expectedList.length(); ++i) {</span>
+<span class="nc" id="L510">        String actualColumn = actualList.getString(i);</span>
+<span class="nc" id="L511">        String expectedColumn = expectedList.getString(i);</span>
+
+<span class="nc bnc" id="L513" title="All 2 branches missed.">        if (!actualColumn.equals(expectedColumn)) {</span>
+<span class="nc" id="L514">          LOGGER.error(&quot;Column name mis-match: actual: {} expected: {}&quot;, actualColumn, expectedColumn);</span>
+<span class="nc" id="L515">          return false;</span>
+        }
+      }
+    } else {
+<span class="nc bnc" id="L519" title="All 2 branches missed.">      for (int i = 0; i &lt; expectedList.length(); i++) {</span>
+<span class="nc" id="L520">        boolean found = false;</span>
+<span class="nc" id="L521">        final String expectedColumn = expectedList.getString(i);</span>
+<span class="nc bnc" id="L522" title="All 2 branches missed.">        for (int j = 0; j &lt; actualList.length(); j++) {</span>
+<span class="nc bnc" id="L523" title="All 2 branches missed.">          if (expectedColumn.equals(actualList.getString(j))) {</span>
+<span class="nc" id="L524">            expectedToActualColMap.put(i, j);</span>
+<span class="nc" id="L525">            found = true;</span>
+<span class="nc" id="L526">            break;</span>
+          }
+        }
+<span class="nc bnc" id="L529" title="All 2 branches missed.">        if (!found) {</span>
+<span class="nc" id="L530">          LOGGER.error(&quot;Column name &quot; + expectedColumn + &quot; not found in actual&quot;);</span>
+<span class="nc" id="L531">          return false;</span>
+        }
+      }
+    }
+
+<span class="nc" id="L536">    return true;</span>
+  }
+
+  private static boolean compareNumDocsScanned(JSONObject actualJson, JSONObject expectedJson)
+      throws JSONException {
+<span class="nc" id="L541">    int actualDocs = actualJson.getInt(NUM_DOCS_SCANNED);</span>
+<span class="nc" id="L542">    int expectedDocs = expectedJson.getInt(NUM_DOCS_SCANNED);</span>
+
+<span class="nc bnc" id="L544" title="All 2 branches missed.">    if (actualDocs != expectedDocs) {</span>
+<span class="nc" id="L545">      LOGGER.error(&quot;Mis-match in number of docs scanned: actual: {} expected: {}&quot;, actualDocs, expectedDocs);</span>
+<span class="nc" id="L546">      return false;</span>
+    }
+
+<span class="nc" id="L549">    return true;</span>
+  }
+
+  private static boolean fuzzyEqual(double d1, double d2) {
+<span class="nc bnc" id="L553" title="All 2 branches missed.">    if (d1 == d2) {</span>
+<span class="nc" id="L554">      return true;</span>
+    }
+
+<span class="nc bnc" id="L557" title="All 2 branches missed.">    if (Math.abs(d1 - d2) &lt; EPSILON) {</span>
+<span class="nc" id="L558">      return true;</span>
+    }
+
+    // For really large numbers, use relative error.
+<span class="nc bnc" id="L562" title="All 4 branches missed.">    if (d1 != 0 &amp;&amp; ((Math.abs(d1 - d2)) / Math.abs(d1)) &lt; EPSILON) {</span>
+<span class="nc" id="L563">      return true;</span>
+    }
+
+<span class="nc" id="L566">    return false;</span>
+  }
+
+  public static void main(String[] args) {
+<span class="nc bnc" id="L570" title="All 2 branches missed.">    if (args.length != 1) {</span>
+<span class="nc" id="L571">      LOGGER.error(&quot;Incorrect number of arguments.&quot;);</span>
+<span class="nc" id="L572">      LOGGER.info(&quot;Usage: &lt;exec&gt; &lt;config-file&gt;&quot;);</span>
+<span class="nc" id="L573">      System.exit(1);</span>
+    }
+
+    try {
+<span class="nc" id="L577">      QueryComparisonConfig config = new QueryComparisonConfig(new File(args[0]));</span>
+<span class="nc" id="L578">      QueryComparison queryComparison = new QueryComparison(config);</span>
+<span class="nc" id="L579">      queryComparison.run();</span>
+<span class="nc" id="L580">    } catch (Exception e) {</span>
+<span class="nc" id="L581">      LOGGER.error(&quot;Exception caught, aborting query comparison: &quot;, e);</span>
+<span class="nc" id="L582">    }</span>
+
+<span class="nc" id="L584">    System.exit(0);</span>
+<span class="nc" id="L585">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

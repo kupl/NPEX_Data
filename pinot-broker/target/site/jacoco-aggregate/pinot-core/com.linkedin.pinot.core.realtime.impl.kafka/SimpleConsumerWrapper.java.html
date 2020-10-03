@@ -1,0 +1,626 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>SimpleConsumerWrapper.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-broker</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.realtime.impl.kafka</a> &gt; <span class="el_source">SimpleConsumerWrapper.java</span></div><h1>SimpleConsumerWrapper.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.linkedin.pinot.core.realtime.impl.kafka;
+
+import com.google.common.base.Preconditions;
+import com.google.common.base.Predicate;
+import com.google.common.base.Splitter;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
+import com.google.common.util.concurrent.Uninterruptibles;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Random;
+import java.util.concurrent.TimeUnit;
+import javax.annotation.Nullable;
+import kafka.api.FetchRequestBuilder;
+import kafka.api.PartitionOffsetRequestInfo;
+import kafka.common.TopicAndPartition;
+import kafka.javaapi.FetchResponse;
+import kafka.javaapi.OffsetRequest;
+import kafka.javaapi.OffsetResponse;
+import kafka.javaapi.PartitionMetadata;
+import kafka.javaapi.TopicMetadata;
+import kafka.javaapi.TopicMetadataRequest;
+import kafka.javaapi.TopicMetadataResponse;
+import kafka.javaapi.consumer.SimpleConsumer;
+import kafka.javaapi.message.ByteBufferMessageSet;
+import kafka.message.MessageAndOffset;
+import org.apache.kafka.common.errors.TimeoutException;
+import org.apache.kafka.common.protocol.Errors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * Wrapper for Kafka's SimpleConsumer which ensures that we're connected to the appropriate broker for consumption.
+ */
+public class SimpleConsumerWrapper implements PinotKafkaConsumer {
+<span class="fc" id="L55">  private static final Logger LOGGER = LoggerFactory.getLogger(SimpleConsumerWrapper.class);</span>
+  private static final int SOCKET_TIMEOUT_MILLIS = 10000;
+  private static final int SOCKET_BUFFER_SIZE = 512000;
+
+<span class="pc" id="L59">  private enum ConsumerState {</span>
+<span class="fc" id="L60">    CONNECTING_TO_BOOTSTRAP_NODE,</span>
+<span class="fc" id="L61">    CONNECTED_TO_BOOTSTRAP_NODE,</span>
+<span class="fc" id="L62">    FETCHING_LEADER_INFORMATION,</span>
+<span class="fc" id="L63">    CONNECTING_TO_PARTITION_LEADER,</span>
+<span class="fc" id="L64">    CONNECTED_TO_PARTITION_LEADER</span>
+  }
+
+  private State _currentState;
+
+  private final String _clientId;
+  private final boolean _metadataOnlyConsumer;
+  private final String _topic;
+  private final int _partition;
+  private final long _connectTimeoutMillis;
+  private final KafkaSimpleConsumerFactory _simpleConsumerFactory;
+  private String[] _bootstrapHosts;
+  private int[] _bootstrapPorts;
+  private SimpleConsumer _simpleConsumer;
+<span class="fc" id="L78">  private final Random _random = new Random();</span>
+  private KafkaBrokerWrapper _leader;
+  private String _currentHost;
+  private int _currentPort;
+
+  /**
+   * A Kafka protocol error that indicates a situation that is not likely to clear up by retrying the request (for
+   * example, no such topic or offset out of range).
+   */
+  public static class PermanentConsumerException extends RuntimeException {
+    public PermanentConsumerException(Errors error) {
+<span class="fc" id="L89">      super(error.exception());</span>
+<span class="fc" id="L90">    }</span>
+  }
+
+  /**
+   * A Kafka protocol error that indicates a situation that is likely to be transient (for example, network error or
+   * broker not available).
+   */
+  public static class TransientConsumerException extends RuntimeException {
+    public TransientConsumerException(Errors error) {
+<span class="nc" id="L99">      super(error.exception());</span>
+<span class="nc" id="L100">    }</span>
+  }
+
+  public SimpleConsumerWrapper(KafkaSimpleConsumerFactory simpleConsumerFactory, String bootstrapNodes,
+<span class="fc" id="L104">      String clientId, long connectTimeoutMillis) {</span>
+<span class="fc" id="L105">    _simpleConsumerFactory = simpleConsumerFactory;</span>
+<span class="fc" id="L106">    _clientId = clientId;</span>
+<span class="fc" id="L107">    _connectTimeoutMillis = connectTimeoutMillis;</span>
+<span class="fc" id="L108">    _metadataOnlyConsumer = true;</span>
+<span class="fc" id="L109">    _simpleConsumer = null;</span>
+
+    // Topic and partition are ignored for metadata-only consumers
+<span class="fc" id="L112">    _topic = null;</span>
+<span class="fc" id="L113">    _partition = Integer.MIN_VALUE;</span>
+
+<span class="fc" id="L115">    initializeBootstrapNodeList(bootstrapNodes);</span>
+<span class="fc" id="L116">    setCurrentState(new ConnectingToBootstrapNode());</span>
+<span class="fc" id="L117">  }</span>
+
+  public SimpleConsumerWrapper(KafkaSimpleConsumerFactory simpleConsumerFactory, String bootstrapNodes,
+<span class="fc" id="L120">      String clientId, String topic, int partition, long connectTimeoutMillis) {</span>
+<span class="fc" id="L121">    _simpleConsumerFactory = simpleConsumerFactory;</span>
+<span class="fc" id="L122">    _clientId = clientId;</span>
+<span class="fc" id="L123">    _topic = topic;</span>
+<span class="fc" id="L124">    _partition = partition;</span>
+<span class="fc" id="L125">    _connectTimeoutMillis = connectTimeoutMillis;</span>
+<span class="fc" id="L126">    _metadataOnlyConsumer = false;</span>
+<span class="fc" id="L127">    _simpleConsumer = null;</span>
+
+<span class="fc" id="L129">    initializeBootstrapNodeList(bootstrapNodes);</span>
+<span class="fc" id="L130">    setCurrentState(new ConnectingToBootstrapNode());</span>
+<span class="fc" id="L131">  }</span>
+
+  private void initializeBootstrapNodeList(String bootstrapNodes) {
+<span class="fc" id="L134">    ArrayList&lt;String&gt; hostsAndPorts =</span>
+        Lists.newArrayList(Splitter.on(',').trimResults().omitEmptyStrings().split(bootstrapNodes));
+
+<span class="fc" id="L137">    final int bootstrapHostCount = hostsAndPorts.size();</span>
+
+<span class="pc bpc" id="L139" title="1 of 2 branches missed.">    if (bootstrapHostCount &lt; 1) {</span>
+<span class="nc" id="L140">      throw new IllegalArgumentException(&quot;Need at least one bootstrap host&quot;);</span>
+    }
+
+<span class="fc" id="L143">    _bootstrapHosts = new String[bootstrapHostCount];</span>
+<span class="fc" id="L144">    _bootstrapPorts = new int[bootstrapHostCount];</span>
+
+<span class="fc bfc" id="L146" title="All 2 branches covered.">    for (int i = 0; i &lt; bootstrapHostCount; i++) {</span>
+<span class="fc" id="L147">      String hostAndPort = hostsAndPorts.get(i);</span>
+<span class="fc" id="L148">      String[] splittedHostAndPort = hostAndPort.split(&quot;:&quot;);</span>
+
+<span class="pc bpc" id="L150" title="1 of 2 branches missed.">      if (splittedHostAndPort.length != 2) {</span>
+<span class="nc" id="L151">        throw new IllegalArgumentException(&quot;Unable to parse host:port combination for &quot; + hostAndPort);</span>
+      }
+
+<span class="fc" id="L154">      _bootstrapHosts[i] = splittedHostAndPort[0];</span>
+
+      try {
+<span class="fc" id="L157">        _bootstrapPorts[i] = Integer.parseInt(splittedHostAndPort[1]);</span>
+<span class="nc" id="L158">      } catch (NumberFormatException e) {</span>
+<span class="nc" id="L159">        throw new IllegalArgumentException(&quot;Could not parse port number &quot; + splittedHostAndPort[1] + &quot; for host:port combination &quot; +  hostAndPort);</span>
+<span class="fc" id="L160">      }</span>
+    }
+<span class="fc" id="L162">  }</span>
+
+  private abstract class State {
+    private ConsumerState stateValue;
+
+<span class="fc" id="L167">    protected State(ConsumerState stateValue) {</span>
+<span class="fc" id="L168">      this.stateValue = stateValue;</span>
+<span class="fc" id="L169">    }</span>
+
+    abstract void process();
+
+    abstract boolean isConnectedToKafkaBroker();
+
+    void handleConsumerException(Exception e) {
+      // By default, just log the exception and switch back to CONNECTING_TO_BOOTSTRAP_NODE (which will take care of
+      // closing the connection if it exists)
+<span class="nc" id="L178">      LOGGER.warn(&quot;Caught Kafka consumer exception while in state {}, disconnecting and trying again&quot;,</span>
+          _currentState.getStateValue(), e);
+
+<span class="nc" id="L181">      Uninterruptibles.sleepUninterruptibly(250, TimeUnit.MILLISECONDS);</span>
+
+<span class="nc" id="L183">      setCurrentState(new ConnectingToBootstrapNode());</span>
+<span class="nc" id="L184">    }</span>
+
+    ConsumerState getStateValue() {
+<span class="fc" id="L187">      return stateValue;</span>
+    }
+  }
+
+  private class ConnectingToBootstrapNode extends State {
+<span class="fc" id="L192">    public ConnectingToBootstrapNode() {</span>
+<span class="fc" id="L193">      super(ConsumerState.CONNECTING_TO_BOOTSTRAP_NODE);</span>
+<span class="fc" id="L194">    }</span>
+
+    @Override
+    public void process() {
+      // Connect to a random bootstrap node
+<span class="pc bpc" id="L199" title="1 of 2 branches missed.">      if (_simpleConsumer != null) {</span>
+        try {
+<span class="nc" id="L201">          _simpleConsumer.close();</span>
+<span class="nc" id="L202">        } catch (Exception e) {</span>
+<span class="nc" id="L203">          LOGGER.warn(&quot;Caught exception while closing consumer, ignoring&quot;, e);</span>
+<span class="nc" id="L204">        }</span>
+      }
+
+<span class="fc" id="L207">      int randomHostIndex = _random.nextInt(_bootstrapHosts.length);</span>
+<span class="fc" id="L208">      _currentHost = _bootstrapHosts[randomHostIndex];</span>
+<span class="fc" id="L209">      _currentPort = _bootstrapPorts[randomHostIndex];</span>
+
+      try {
+<span class="fc" id="L212">        LOGGER.info(&quot;Connecting to bootstrap host {}:{}&quot;, _currentHost, _currentPort);</span>
+<span class="fc" id="L213">        _simpleConsumer = _simpleConsumerFactory.buildSimpleConsumer(_currentHost, _currentPort, SOCKET_TIMEOUT_MILLIS,</span>
+            SOCKET_BUFFER_SIZE, _clientId);
+<span class="fc" id="L215">        setCurrentState(new ConnectedToBootstrapNode());</span>
+<span class="nc" id="L216">      } catch (Exception e) {</span>
+<span class="nc" id="L217">        handleConsumerException(e);</span>
+<span class="fc" id="L218">      }</span>
+<span class="fc" id="L219">    }</span>
+
+    @Override
+    boolean isConnectedToKafkaBroker() {
+<span class="fc" id="L223">      return false;</span>
+    }
+  }
+
+  private class ConnectedToBootstrapNode extends State {
+<span class="fc" id="L228">    protected ConnectedToBootstrapNode() {</span>
+<span class="fc" id="L229">      super(ConsumerState.CONNECTED_TO_BOOTSTRAP_NODE);</span>
+<span class="fc" id="L230">    }</span>
+
+    @Override
+    void process() {
+<span class="pc bpc" id="L234" title="1 of 2 branches missed.">      if (_metadataOnlyConsumer) {</span>
+        // Nothing to do
+      } else {
+        // If we're consuming from a partition, we need to find the leader so that we can consume from it. By design,
+        // Kafka only allows consumption from the leader and not one of the in-sync replicas.
+<span class="fc" id="L239">        setCurrentState(new FetchingLeaderInformation());</span>
+      }
+<span class="fc" id="L241">    }</span>
+
+    @Override
+    boolean isConnectedToKafkaBroker() {
+<span class="fc" id="L245">      return true;</span>
+    }
+  }
+
+  private class FetchingLeaderInformation extends State {
+<span class="fc" id="L250">    public FetchingLeaderInformation() {</span>
+<span class="fc" id="L251">      super(ConsumerState.FETCHING_LEADER_INFORMATION);</span>
+<span class="fc" id="L252">    }</span>
+
+    @Override
+    void process() {
+      // Fetch leader information
+      try {
+<span class="fc" id="L258">        TopicMetadataResponse response = _simpleConsumer.send(new TopicMetadataRequest(Collections.singletonList(_topic)));</span>
+        try {
+<span class="fc" id="L260">          _leader = null;</span>
+<span class="fc" id="L261">          List&lt;PartitionMetadata&gt; pMetaList = response.topicsMetadata().get(0).partitionsMetadata();</span>
+<span class="pc bpc" id="L262" title="1 of 2 branches missed.">          for (PartitionMetadata pMeta : pMetaList) {</span>
+<span class="pc bpc" id="L263" title="1 of 2 branches missed.">            if (pMeta.partitionId() == _partition) {</span>
+<span class="fc" id="L264">              _leader = new KafkaBrokerWrapper(pMeta.leader());</span>
+<span class="fc" id="L265">              break;</span>
+            }
+<span class="nc" id="L267">          }</span>
+
+          // If we've located a broker
+<span class="pc bpc" id="L270" title="1 of 2 branches missed.">          if (_leader != null) {</span>
+<span class="fc" id="L271">            LOGGER.info(&quot;Located leader broker {}, connecting to it.&quot;, _leader);</span>
+<span class="fc" id="L272">            setCurrentState(new ConnectingToPartitionLeader());</span>
+          } else {
+            // Failed to get the leader broker. There could be a leader election at the moment, so retry after a little
+            // bit.
+<span class="nc" id="L276">            LOGGER.warn(&quot;Leader broker is null, retrying leader fetch in 100ms&quot;);</span>
+<span class="nc" id="L277">            Uninterruptibles.sleepUninterruptibly(100, TimeUnit.MILLISECONDS);</span>
+          }
+<span class="nc" id="L279">        } catch (Exception e) {</span>
+          // Failed to get the leader broker. There could be a leader election at the moment, so retry after a little
+          // bit.
+<span class="nc" id="L282">          LOGGER.warn(&quot;Failed to get the leader broker due to exception, retrying in 100ms&quot;, e);</span>
+<span class="nc" id="L283">          Uninterruptibles.sleepUninterruptibly(100, TimeUnit.MILLISECONDS);</span>
+<span class="fc" id="L284">        }</span>
+<span class="nc" id="L285">      } catch (Exception e) {</span>
+<span class="nc" id="L286">        handleConsumerException(e);</span>
+<span class="fc" id="L287">      }</span>
+<span class="fc" id="L288">    }</span>
+
+    @Override
+    boolean isConnectedToKafkaBroker() {
+<span class="nc" id="L292">      return true;</span>
+    }
+  }
+
+  private class ConnectingToPartitionLeader extends State {
+<span class="fc" id="L297">    public ConnectingToPartitionLeader() {</span>
+<span class="fc" id="L298">      super(ConsumerState.CONNECTING_TO_PARTITION_LEADER);</span>
+<span class="fc" id="L299">    }</span>
+
+    @Override
+    void process() {
+      // If we're already connected to the leader broker, don't disconnect and reconnect
+<span class="fc" id="L304">      LOGGER.info(&quot;Trying to fetch leader host and port: {}:{}&quot;, _leader.host(), _leader.port());</span>
+<span class="pc bpc" id="L305" title="2 of 4 branches missed.">      if (_leader.host().equals(_currentHost) &amp;&amp; _leader.port() == _currentPort) {</span>
+<span class="fc" id="L306">        setCurrentState(new ConnectedToPartitionLeader());</span>
+<span class="fc" id="L307">        return;</span>
+      }
+
+      // Disconnect from current broker
+<span class="nc bnc" id="L311" title="All 2 branches missed.">      if(_simpleConsumer != null) {</span>
+        try {
+<span class="nc" id="L313">          _simpleConsumer.close();</span>
+<span class="nc" id="L314">          _simpleConsumer = null;</span>
+<span class="nc" id="L315">        } catch (Exception e) {</span>
+<span class="nc" id="L316">          handleConsumerException(e);</span>
+<span class="nc" id="L317">          return;</span>
+<span class="nc" id="L318">        }</span>
+      }
+
+      // Connect to the partition leader
+      try {
+<span class="nc" id="L323">        _simpleConsumer =</span>
+            _simpleConsumerFactory.buildSimpleConsumer(_leader.host(), _leader.port(), SOCKET_TIMEOUT_MILLIS,
+                SOCKET_BUFFER_SIZE, _clientId);
+
+<span class="nc" id="L327">        setCurrentState(new ConnectedToPartitionLeader());</span>
+<span class="nc" id="L328">      } catch (Exception e) {</span>
+<span class="nc" id="L329">        handleConsumerException(e);</span>
+<span class="nc" id="L330">      }</span>
+<span class="nc" id="L331">    }</span>
+
+    @Override
+    boolean isConnectedToKafkaBroker() {
+<span class="nc" id="L335">      return false;</span>
+    }
+  }
+
+  private class ConnectedToPartitionLeader extends State {
+<span class="fc" id="L340">    public ConnectedToPartitionLeader() {</span>
+<span class="fc" id="L341">      super(ConsumerState.CONNECTED_TO_PARTITION_LEADER);</span>
+<span class="fc" id="L342">    }</span>
+
+    @Override
+    void process() {
+      // Nothing to do
+<span class="nc" id="L347">    }</span>
+
+    @Override
+    boolean isConnectedToKafkaBroker() {
+<span class="nc" id="L351">      return true;</span>
+    }
+  }
+
+  private void setCurrentState(State newState) {
+<span class="fc bfc" id="L356" title="All 2 branches covered.">    if (_currentState != null) {</span>
+<span class="fc" id="L357">      LOGGER.info(&quot;Switching from state {} to state {}&quot;, _currentState.getStateValue(), newState.getStateValue());</span>
+    }
+
+<span class="fc" id="L360">    _currentState = newState;</span>
+<span class="fc" id="L361">  }</span>
+
+  public synchronized int getPartitionCount(String topic, long timeoutMillis) {
+<span class="fc" id="L364">    int unknownTopicReplyCount = 0;</span>
+<span class="fc" id="L365">    final int MAX_UNKNOWN_TOPIC_REPLY_COUNT = 10;</span>
+<span class="fc" id="L366">    int kafkaErrorCount = 0;</span>
+<span class="fc" id="L367">    final int MAX_KAFKA_ERROR_COUNT = 10;</span>
+
+<span class="fc" id="L369">    final long endTime = System.currentTimeMillis() + timeoutMillis;</span>
+
+<span class="pc bpc" id="L371" title="1 of 2 branches missed.">    while(System.currentTimeMillis() &lt; endTime) {</span>
+      // Try to get into a state where we're connected to Kafka
+<span class="pc bpc" id="L373" title="1 of 4 branches missed.">      while (!_currentState.isConnectedToKafkaBroker() &amp;&amp; System.currentTimeMillis() &lt; endTime) {</span>
+<span class="fc" id="L374">        _currentState.process();</span>
+      }
+
+<span class="pc bpc" id="L377" title="3 of 4 branches missed.">      if (endTime &lt;= System.currentTimeMillis() &amp;&amp; !_currentState.isConnectedToKafkaBroker()) {</span>
+<span class="nc" id="L378">        throw new TimeoutException(&quot;Failed to get the partition count for topic &quot; + topic + &quot; within &quot; + timeoutMillis</span>
+            + &quot; ms&quot;);
+      }
+
+      // Send the metadata request to Kafka
+<span class="fc" id="L383">      TopicMetadataResponse topicMetadataResponse = null;</span>
+      try {
+<span class="fc" id="L385">        topicMetadataResponse = _simpleConsumer.send(new TopicMetadataRequest(Collections.singletonList(topic)));</span>
+<span class="nc" id="L386">      } catch (Exception e) {</span>
+<span class="nc" id="L387">        _currentState.handleConsumerException(e);</span>
+<span class="nc" id="L388">        continue;</span>
+<span class="fc" id="L389">      }</span>
+
+<span class="fc" id="L391">      final TopicMetadata topicMetadata = topicMetadataResponse.topicsMetadata().get(0);</span>
+<span class="fc" id="L392">      final short errorCode = topicMetadata.errorCode();</span>
+
+<span class="pc bpc" id="L394" title="1 of 2 branches missed.">      if (errorCode == Errors.NONE.code()) {</span>
+<span class="fc" id="L395">        return topicMetadata.partitionsMetadata().size();</span>
+<span class="nc bnc" id="L396" title="All 2 branches missed.">      } else if (errorCode == Errors.LEADER_NOT_AVAILABLE.code()) {</span>
+        // If there is no leader, it'll take some time for a new leader to be elected, wait 100 ms before retrying
+<span class="nc" id="L398">        Uninterruptibles.sleepUninterruptibly(100, TimeUnit.MILLISECONDS);</span>
+<span class="nc bnc" id="L399" title="All 2 branches missed.">      } else if (errorCode == Errors.INVALID_TOPIC_EXCEPTION.code()) {</span>
+<span class="nc" id="L400">        throw new RuntimeException(&quot;Invalid topic name &quot; + topic);</span>
+<span class="nc bnc" id="L401" title="All 2 branches missed.">      } else if (errorCode == Errors.UNKNOWN_TOPIC_OR_PARTITION.code()) {</span>
+<span class="nc bnc" id="L402" title="All 2 branches missed.">        if (MAX_UNKNOWN_TOPIC_REPLY_COUNT &lt; unknownTopicReplyCount) {</span>
+<span class="nc" id="L403">          throw new RuntimeException(&quot;Topic &quot; + topic + &quot; does not exist&quot;);</span>
+        } else {
+          // Kafka topic creation can sometimes take some time, so we'll retry after a little bit
+<span class="nc" id="L406">          unknownTopicReplyCount++;</span>
+<span class="nc" id="L407">          Uninterruptibles.sleepUninterruptibly(100, TimeUnit.MILLISECONDS);</span>
+        }
+      } else {
+        // Retry after a short delay
+<span class="nc" id="L411">        kafkaErrorCount++;</span>
+
+<span class="nc bnc" id="L413" title="All 2 branches missed.">        if (MAX_KAFKA_ERROR_COUNT &lt; kafkaErrorCount) {</span>
+<span class="nc" id="L414">          throw exceptionForKafkaErrorCode(errorCode);</span>
+        }
+
+<span class="nc" id="L417">        Uninterruptibles.sleepUninterruptibly(100, TimeUnit.MILLISECONDS);</span>
+      }
+<span class="nc" id="L419">    }</span>
+
+<span class="nc" id="L421">    throw new TimeoutException();</span>
+  }
+
+  /**
+   * Fetch messages and the per-partition high watermark from Kafka between the specified offsets.
+   *
+   * @param startOffset The offset of the first message desired, inclusive
+   * @param endOffset The offset of the last message desired, exclusive, or {@link Long#MAX_VALUE} for no end offset.
+   * @param timeoutMillis Timeout in milliseconds
+   * @throws java.util.concurrent.TimeoutException If the operation could not be completed within {@code timeoutMillis}
+   * milliseconds
+   * @return An iterable containing messages fetched from Kafka and their offsets, as well as the high watermark for
+   * this partition.
+   */
+  public synchronized MessageBatch fetchMessages(long startOffset, long endOffset, int timeoutMillis) throws java.util.concurrent.TimeoutException {
+<span class="pc bpc" id="L436" title="1 of 2 branches missed.">    Preconditions.checkState(!_metadataOnlyConsumer, &quot;Cannot fetch messages from a metadata-only SimpleConsumerWrapper&quot;);</span>
+    // Ensure that we're connected to the leader
+    // TODO Improve error handling
+
+<span class="fc" id="L440">    final long connectEndTime = System.currentTimeMillis() + _connectTimeoutMillis;</span>
+<span class="pc bpc" id="L441" title="1 of 4 branches missed.">    while(_currentState.getStateValue() != ConsumerState.CONNECTED_TO_PARTITION_LEADER &amp;&amp;</span>
+        System.currentTimeMillis() &lt; connectEndTime) {
+<span class="fc" id="L443">      _currentState.process();</span>
+    }
+<span class="pc bpc" id="L445" title="3 of 4 branches missed.">    if (_currentState.getStateValue() != ConsumerState.CONNECTED_TO_PARTITION_LEADER &amp;&amp;</span>
+        connectEndTime &lt;= System.currentTimeMillis()) {
+<span class="nc" id="L447">      throw new java.util.concurrent.TimeoutException();</span>
+    }
+
+<span class="fc" id="L450">    FetchResponse fetchResponse = _simpleConsumer.fetch(new FetchRequestBuilder()</span>
+        .minBytes(100000)
+        .maxWait(timeoutMillis)
+        .addFetch(_topic, _partition, startOffset, 500000)
+        .build());
+
+<span class="pc bpc" id="L456" title="1 of 2 branches missed.">    if (!fetchResponse.hasError()) {</span>
+<span class="fc" id="L457">      final Iterable&lt;MessageAndOffset&gt; messageAndOffsetIterable =</span>
+          buildOffsetFilteringIterable(fetchResponse.messageSet(_topic, _partition), startOffset, endOffset);
+
+      // TODO: Instantiate with factory
+<span class="fc" id="L461">      return new SimpleConsumerMessageBatch(messageAndOffsetIterable);</span>
+    } else {
+<span class="nc" id="L463">      throw exceptionForKafkaErrorCode(fetchResponse.errorCode(_topic, _partition));</span>
+    }
+  }
+
+  private RuntimeException exceptionForKafkaErrorCode(short kafkaErrorCode) {
+<span class="nc" id="L468">    final Errors kafkaError = Errors.forCode(kafkaErrorCode);</span>
+<span class="nc bnc" id="L469" title="All 3 branches missed.">    switch (kafkaError) {</span>
+      case UNKNOWN:
+      case OFFSET_OUT_OF_RANGE:
+      case CORRUPT_MESSAGE:
+      case MESSAGE_TOO_LARGE:
+      case OFFSET_METADATA_TOO_LARGE:
+      case INVALID_TOPIC_EXCEPTION:
+      case RECORD_LIST_TOO_LARGE:
+      case INVALID_REQUIRED_ACKS:
+      case ILLEGAL_GENERATION:
+      case INCONSISTENT_GROUP_PROTOCOL:
+      case INVALID_GROUP_ID:
+      case UNKNOWN_MEMBER_ID:
+      case INVALID_SESSION_TIMEOUT:
+      case INVALID_COMMIT_OFFSET_SIZE:
+<span class="nc" id="L484">        return new PermanentConsumerException(kafkaError);</span>
+      case UNKNOWN_TOPIC_OR_PARTITION:
+      case LEADER_NOT_AVAILABLE:
+      case NOT_LEADER_FOR_PARTITION:
+      case REQUEST_TIMED_OUT:
+      case BROKER_NOT_AVAILABLE:
+      case REPLICA_NOT_AVAILABLE:
+      case STALE_CONTROLLER_EPOCH:
+      case NETWORK_EXCEPTION:
+      case GROUP_LOAD_IN_PROGRESS:
+      case GROUP_COORDINATOR_NOT_AVAILABLE:
+      case NOT_COORDINATOR_FOR_GROUP:
+      case NOT_ENOUGH_REPLICAS:
+      case NOT_ENOUGH_REPLICAS_AFTER_APPEND:
+      case REBALANCE_IN_PROGRESS:
+      case TOPIC_AUTHORIZATION_FAILED:
+      case GROUP_AUTHORIZATION_FAILED:
+      case CLUSTER_AUTHORIZATION_FAILED:
+<span class="nc" id="L502">        return new TransientConsumerException(kafkaError);</span>
+      case NONE:
+      default:
+<span class="nc" id="L505">        return new RuntimeException(&quot;Unhandled error &quot; + kafkaError);</span>
+    }
+  }
+
+  /**
+   * Fetches the numeric Kafka offset for this partition for a symbolic name (&quot;largest&quot; or &quot;smallest&quot;).
+   *
+   * @param requestedOffset Either &quot;largest&quot; or &quot;smallest&quot;
+   * @param timeoutMillis Timeout in milliseconds
+   * @throws java.util.concurrent.TimeoutException If the operation could not be completed within {@code timeoutMillis}
+   * milliseconds
+   * @return An offset
+   */
+  public synchronized long fetchPartitionOffset(String requestedOffset, int timeoutMillis)
+      throws java.util.concurrent.TimeoutException {
+<span class="fc" id="L520">    Preconditions.checkNotNull(requestedOffset);</span>
+
+    final long offsetRequestTime;
+<span class="pc bpc" id="L523" title="1 of 2 branches missed.">    if (requestedOffset.equalsIgnoreCase(&quot;largest&quot;)) {</span>
+<span class="nc" id="L524">      offsetRequestTime = kafka.api.OffsetRequest.LatestTime();</span>
+<span class="pc bpc" id="L525" title="1 of 2 branches missed.">    } else if (requestedOffset.equalsIgnoreCase(&quot;smallest&quot;)) {</span>
+<span class="nc" id="L526">      offsetRequestTime = kafka.api.OffsetRequest.EarliestTime();</span>
+<span class="pc bpc" id="L527" title="1 of 2 branches missed.">    } else if (requestedOffset.equalsIgnoreCase(&quot;testDummy&quot;)) {</span>
+<span class="fc" id="L528">      return -1L;</span>
+    } else {
+<span class="nc" id="L530">      throw new IllegalArgumentException(&quot;Unknown initial offset value &quot; + requestedOffset);</span>
+    }
+
+<span class="nc" id="L533">    int kafkaErrorCount = 0;</span>
+<span class="nc" id="L534">    final int MAX_KAFKA_ERROR_COUNT = 10;</span>
+
+<span class="nc" id="L536">    final long endTime = System.currentTimeMillis() + timeoutMillis;</span>
+
+<span class="nc bnc" id="L538" title="All 2 branches missed.">    while(System.currentTimeMillis() &lt; endTime) {</span>
+      // Try to get into a state where we're connected to Kafka
+<span class="nc bnc" id="L540" title="All 4 branches missed.">      while (_currentState.getStateValue() != ConsumerState.CONNECTED_TO_PARTITION_LEADER &amp;&amp;</span>
+          System.currentTimeMillis() &lt; endTime) {
+<span class="nc" id="L542">        _currentState.process();</span>
+      }
+
+<span class="nc bnc" id="L545" title="All 4 branches missed.">      if (_currentState.getStateValue() != ConsumerState.CONNECTED_TO_PARTITION_LEADER &amp;&amp;</span>
+          endTime &lt;= System.currentTimeMillis()) {
+<span class="nc" id="L547">        throw new TimeoutException();</span>
+      }
+
+      // Send the offset request to Kafka
+<span class="nc" id="L551">      OffsetRequest request = new OffsetRequest(Collections.singletonMap(new TopicAndPartition(_topic, _partition),</span>
+          new PartitionOffsetRequestInfo(offsetRequestTime, 1)), kafka.api.OffsetRequest.CurrentVersion(), _clientId);
+      OffsetResponse offsetResponse;
+      try {
+<span class="nc" id="L555">        offsetResponse = _simpleConsumer.getOffsetsBefore(request);</span>
+<span class="nc" id="L556">      } catch (Exception e) {</span>
+<span class="nc" id="L557">        _currentState.handleConsumerException(e);</span>
+<span class="nc" id="L558">        continue;</span>
+<span class="nc" id="L559">      }</span>
+
+<span class="nc" id="L561">      final short errorCode = offsetResponse.errorCode(_topic, _partition);</span>
+
+<span class="nc bnc" id="L563" title="All 2 branches missed.">      if (errorCode == Errors.NONE.code()) {</span>
+<span class="nc" id="L564">        long offset = offsetResponse.offsets(_topic, _partition)[0];</span>
+<span class="nc bnc" id="L565" title="All 2 branches missed.">        if (offset == 0L) {</span>
+<span class="nc" id="L566">          LOGGER.warn(&quot;Fetched offset of 0 for topic {} and partition {}, is this a newly created topic?&quot;, _topic,</span>
+              _partition);
+        }
+<span class="nc" id="L569">        return offset;</span>
+<span class="nc bnc" id="L570" title="All 2 branches missed.">      } else if (errorCode == Errors.LEADER_NOT_AVAILABLE.code()) {</span>
+        // If there is no leader, it'll take some time for a new leader to be elected, wait 100 ms before retrying
+<span class="nc" id="L572">        Uninterruptibles.sleepUninterruptibly(100, TimeUnit.MILLISECONDS);</span>
+      } else {
+        // Retry after a short delay
+<span class="nc" id="L575">        kafkaErrorCount++;</span>
+
+<span class="nc bnc" id="L577" title="All 2 branches missed.">        if (MAX_KAFKA_ERROR_COUNT &lt; kafkaErrorCount) {</span>
+<span class="nc" id="L578">          throw exceptionForKafkaErrorCode(errorCode);</span>
+        }
+
+<span class="nc" id="L581">        Uninterruptibles.sleepUninterruptibly(100, TimeUnit.MILLISECONDS);</span>
+      }
+<span class="nc" id="L583">    }</span>
+
+<span class="nc" id="L585">    throw new TimeoutException();</span>
+  }
+
+  private Iterable&lt;MessageAndOffset&gt; buildOffsetFilteringIterable(final ByteBufferMessageSet messageAndOffsets, final long startOffset, final long endOffset) {
+<span class="fc" id="L589">    return Iterables.filter(messageAndOffsets, new Predicate&lt;MessageAndOffset&gt;() {</span>
+      @Override
+      public boolean apply(@Nullable MessageAndOffset input) {
+        // Filter messages that are either null or have an offset ∉ [startOffset; endOffset[
+<span class="nc bnc" id="L593" title="All 8 branches missed.">        if(input == null || input.offset() &lt; startOffset || (endOffset &lt;= input.offset() &amp;&amp; endOffset != -1)) {</span>
+<span class="nc" id="L594">          return false;</span>
+        }
+
+        // Check the message's checksum
+        // TODO We might want to have better handling of this situation, maybe try to fetch the message again?
+<span class="nc bnc" id="L599" title="All 2 branches missed.">        if(!input.message().isValid()) {</span>
+<span class="nc" id="L600">          LOGGER.warn(&quot;Discarded message with invalid checksum in partition {} of topic {}&quot;, _partition, _topic);</span>
+<span class="nc" id="L601">          return false;</span>
+        }
+
+<span class="nc" id="L604">        return true;</span>
+      }
+    });
+  }
+
+  @Override
+  /**
+   * Closes this consumer.
+   */
+  public void close() throws IOException {
+<span class="pc bpc" id="L614" title="3 of 4 branches missed.">    boolean needToCloseConsumer = _currentState.isConnectedToKafkaBroker() &amp;&amp; _simpleConsumer != null;</span>
+
+    // Reset the state machine
+<span class="fc" id="L617">    setCurrentState(new ConnectingToBootstrapNode());</span>
+
+    // Close the consumer if needed
+<span class="pc bpc" id="L620" title="1 of 2 branches missed.">    if (needToCloseConsumer) {</span>
+<span class="nc" id="L621">      _simpleConsumer.close();</span>
+<span class="nc" id="L622">      _simpleConsumer = null;</span>
+    }
+<span class="fc" id="L624">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

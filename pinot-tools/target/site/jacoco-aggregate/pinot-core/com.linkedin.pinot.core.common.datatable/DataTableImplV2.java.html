@@ -1,0 +1,584 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>DataTableImplV2.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-tools</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.common.datatable</a> &gt; <span class="el_source">DataTableImplV2.java</span></div><h1>DataTableImplV2.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.common.datatable;
+
+import com.linkedin.pinot.common.response.ProcessingException;
+import com.linkedin.pinot.common.utils.DataSchema;
+import com.linkedin.pinot.common.utils.DataTable;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.Charset;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Map.Entry;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+
+
+<span class="pc bpc" id="L35" title="1 of 2 branches missed.">public class DataTableImplV2 implements DataTable {</span>
+  private static final int VERSION = 2;
+<span class="fc" id="L37">  private static final Charset UTF_8 = Charset.forName(&quot;UTF-8&quot;);</span>
+
+  // VERSION
+  // NUM_ROWS
+  // NUM_COLUMNS
+  // DICTIONARY_MAP (START|SIZE)
+  // METADATA (START|SIZE)
+  // DATA_SCHEMA (START|SIZE)
+  // FIXED_SIZE_DATA (START|SIZE)
+  // VARIABLE_SIZE_DATA (START|SIZE)
+  private static final int HEADER_SIZE = (Integer.SIZE / Byte.SIZE) * 13;
+
+  private final int _numRows;
+  private final int _numColumns;
+  private final DataSchema _dataSchema;
+  private final int[] _columnOffsets;
+  private final int _rowSizeInBytes;
+  private final Map&lt;String, Map&lt;Integer, String&gt;&gt; _dictionaryMap;
+  private final byte[] _fixedSizeDataBytes;
+  private final ByteBuffer _fixedSizeData;
+  private final byte[] _variableSizeDataBytes;
+  private final ByteBuffer _variableSizeData;
+  private final Map&lt;String, String&gt; _metadata;
+
+  /**
+   * Construct data table with results. (Server side)
+   */
+  public DataTableImplV2(int numRows, @Nonnull DataSchema dataSchema,
+      @Nonnull Map&lt;String, Map&lt;Integer, String&gt;&gt; dictionaryMap, @Nonnull byte[] fixedSizeDataBytes,
+<span class="fc" id="L66">      @Nonnull byte[] variableSizeDataBytes) {</span>
+<span class="fc" id="L67">    _numRows = numRows;</span>
+<span class="fc" id="L68">    _numColumns = dataSchema.size();</span>
+<span class="fc" id="L69">    _dataSchema = dataSchema;</span>
+<span class="fc" id="L70">    _columnOffsets = new int[_numColumns];</span>
+<span class="fc" id="L71">    _rowSizeInBytes = DataTableUtils.computeColumnOffsets(dataSchema, _columnOffsets);</span>
+<span class="fc" id="L72">    _dictionaryMap = dictionaryMap;</span>
+<span class="fc" id="L73">    _fixedSizeDataBytes = fixedSizeDataBytes;</span>
+<span class="fc" id="L74">    _fixedSizeData = ByteBuffer.wrap(fixedSizeDataBytes);</span>
+<span class="fc" id="L75">    _variableSizeDataBytes = variableSizeDataBytes;</span>
+<span class="fc" id="L76">    _variableSizeData = ByteBuffer.wrap(variableSizeDataBytes);</span>
+<span class="fc" id="L77">    _metadata = new HashMap&lt;&gt;();</span>
+<span class="fc" id="L78">  }</span>
+
+  /**
+   * Construct empty data table. (Server side)
+   */
+<span class="fc" id="L83">  public DataTableImplV2() {</span>
+<span class="fc" id="L84">    _numRows = 0;</span>
+<span class="fc" id="L85">    _numColumns = 0;</span>
+<span class="fc" id="L86">    _dataSchema = null;</span>
+<span class="fc" id="L87">    _columnOffsets = null;</span>
+<span class="fc" id="L88">    _rowSizeInBytes = 0;</span>
+<span class="fc" id="L89">    _dictionaryMap = null;</span>
+<span class="fc" id="L90">    _fixedSizeDataBytes = null;</span>
+<span class="fc" id="L91">    _fixedSizeData = null;</span>
+<span class="fc" id="L92">    _variableSizeDataBytes = null;</span>
+<span class="fc" id="L93">    _variableSizeData = null;</span>
+<span class="fc" id="L94">    _metadata = new HashMap&lt;&gt;();</span>
+<span class="fc" id="L95">  }</span>
+
+  /**
+   * Construct data table from byte array. (broker side)
+   */
+  public DataTableImplV2(@Nonnull ByteBuffer byteBuffer)
+<span class="fc" id="L101">      throws IOException {</span>
+    // Read header.
+<span class="fc" id="L103">    _numRows = byteBuffer.getInt();</span>
+<span class="fc" id="L104">    _numColumns = byteBuffer.getInt();</span>
+<span class="fc" id="L105">    int dictionaryMapStart = byteBuffer.getInt();</span>
+<span class="fc" id="L106">    int dictionaryMapLength = byteBuffer.getInt();</span>
+<span class="fc" id="L107">    int metadataStart = byteBuffer.getInt();</span>
+<span class="fc" id="L108">    int metadataLength = byteBuffer.getInt();</span>
+<span class="fc" id="L109">    int dataSchemaStart = byteBuffer.getInt();</span>
+<span class="fc" id="L110">    int dataSchemaLength = byteBuffer.getInt();</span>
+<span class="fc" id="L111">    int fixedSizeDataStart = byteBuffer.getInt();</span>
+<span class="fc" id="L112">    int fixedSizeDataLength = byteBuffer.getInt();</span>
+<span class="fc" id="L113">    int variableSizeDataStart = byteBuffer.getInt();</span>
+<span class="fc" id="L114">    int variableSizeDataLength = byteBuffer.getInt();</span>
+
+    // Read dictionary.
+<span class="fc bfc" id="L117" title="All 2 branches covered.">    if (dictionaryMapLength != 0) {</span>
+<span class="fc" id="L118">      byte[] dictionaryMapBytes = new byte[dictionaryMapLength];</span>
+<span class="fc" id="L119">      byteBuffer.position(dictionaryMapStart);</span>
+<span class="fc" id="L120">      byteBuffer.get(dictionaryMapBytes);</span>
+<span class="fc" id="L121">      _dictionaryMap = deserializeDictionaryMap(dictionaryMapBytes);</span>
+<span class="fc" id="L122">    } else {</span>
+<span class="fc" id="L123">      _dictionaryMap = null;</span>
+    }
+
+    // Read metadata.
+<span class="fc" id="L127">    byte[] metadataBytes = new byte[metadataLength];</span>
+<span class="fc" id="L128">    byteBuffer.position(metadataStart);</span>
+<span class="fc" id="L129">    byteBuffer.get(metadataBytes);</span>
+<span class="fc" id="L130">    _metadata = deserializeMetadata(metadataBytes);</span>
+
+    // Read data schema.
+<span class="fc bfc" id="L133" title="All 2 branches covered.">    if (dataSchemaLength != 0) {</span>
+<span class="fc" id="L134">      byte[] schemaBytes = new byte[dataSchemaLength];</span>
+<span class="fc" id="L135">      byteBuffer.position(dataSchemaStart);</span>
+<span class="fc" id="L136">      byteBuffer.get(schemaBytes);</span>
+<span class="fc" id="L137">      _dataSchema = DataSchema.fromBytes(schemaBytes);</span>
+<span class="fc" id="L138">      _columnOffsets = new int[_dataSchema.size()];</span>
+<span class="fc" id="L139">      _rowSizeInBytes = DataTableUtils.computeColumnOffsets(_dataSchema, _columnOffsets);</span>
+<span class="fc" id="L140">    } else {</span>
+<span class="fc" id="L141">      _dataSchema = null;</span>
+<span class="fc" id="L142">      _columnOffsets = null;</span>
+<span class="fc" id="L143">      _rowSizeInBytes = 0;</span>
+    }
+
+    // Read fixed size data.
+<span class="fc bfc" id="L147" title="All 2 branches covered.">    if (fixedSizeDataLength != 0) {</span>
+<span class="fc" id="L148">      _fixedSizeDataBytes = new byte[fixedSizeDataLength];</span>
+<span class="fc" id="L149">      byteBuffer.position(fixedSizeDataStart);</span>
+<span class="fc" id="L150">      byteBuffer.get(_fixedSizeDataBytes);</span>
+<span class="fc" id="L151">      _fixedSizeData = ByteBuffer.wrap(_fixedSizeDataBytes);</span>
+    } else {
+<span class="fc" id="L153">      _fixedSizeDataBytes = null;</span>
+<span class="fc" id="L154">      _fixedSizeData = null;</span>
+    }
+
+    // Read variable size data.
+<span class="fc bfc" id="L158" title="All 2 branches covered.">    if (variableSizeDataLength != 0) {</span>
+<span class="fc" id="L159">      _variableSizeDataBytes = new byte[variableSizeDataLength];</span>
+<span class="fc" id="L160">      byteBuffer.position(variableSizeDataStart);</span>
+<span class="fc" id="L161">      byteBuffer.get(_variableSizeDataBytes);</span>
+<span class="fc" id="L162">      _variableSizeData = ByteBuffer.wrap(_variableSizeDataBytes);</span>
+    } else {
+<span class="fc" id="L164">      _variableSizeDataBytes = null;</span>
+<span class="fc" id="L165">      _variableSizeData = null;</span>
+    }
+<span class="fc" id="L167">  }</span>
+
+  private Map&lt;String, Map&lt;Integer, String&gt;&gt; deserializeDictionaryMap(byte[] bytes)
+      throws IOException {
+<span class="fc" id="L171">    ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(bytes);</span>
+<span class="fc" id="L172">    DataInputStream dataInputStream = new DataInputStream(byteArrayInputStream);</span>
+
+<span class="fc" id="L174">    int numDictionaries = dataInputStream.readInt();</span>
+<span class="fc" id="L175">    Map&lt;String, Map&lt;Integer, String&gt;&gt; dictionaryMap = new HashMap&lt;&gt;(numDictionaries);</span>
+
+    int readLength;
+<span class="fc bfc" id="L178" title="All 2 branches covered.">    for (int i = 0; i &lt; numDictionaries; i++) {</span>
+<span class="fc" id="L179">      int columnNameLength = dataInputStream.readInt();</span>
+<span class="fc" id="L180">      byte[] columnNameBytes = new byte[columnNameLength];</span>
+<span class="fc" id="L181">      readLength = dataInputStream.read(columnNameBytes);</span>
+<span class="pc bpc" id="L182" title="2 of 4 branches missed.">      assert readLength == columnNameLength;</span>
+<span class="fc" id="L183">      Map&lt;Integer, String&gt; dictionary = new HashMap&lt;&gt;();</span>
+<span class="fc" id="L184">      dictionaryMap.put(new String(columnNameBytes, UTF_8), dictionary);</span>
+
+<span class="fc" id="L186">      int dictionarySize = dataInputStream.readInt();</span>
+<span class="fc bfc" id="L187" title="All 2 branches covered.">      for (int j = 0; j &lt; dictionarySize; j++) {</span>
+<span class="fc" id="L188">        int key = dataInputStream.readInt();</span>
+<span class="fc" id="L189">        int valueLength = dataInputStream.readInt();</span>
+<span class="fc" id="L190">        byte[] valueBytes = new byte[valueLength];</span>
+<span class="fc" id="L191">        readLength = dataInputStream.read(valueBytes);</span>
+<span class="pc bpc" id="L192" title="2 of 4 branches missed.">        assert readLength == valueLength;</span>
+<span class="fc" id="L193">        dictionary.put(key, new String(valueBytes, UTF_8));</span>
+      }
+    }
+
+<span class="fc" id="L197">    return dictionaryMap;</span>
+  }
+
+  private Map&lt;String, String&gt; deserializeMetadata(byte[] bytes)
+      throws IOException {
+<span class="fc" id="L202">    ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(bytes);</span>
+<span class="fc" id="L203">    DataInputStream dataInputStream = new DataInputStream(byteArrayInputStream);</span>
+
+<span class="fc" id="L205">    int numEntries = dataInputStream.readInt();</span>
+<span class="fc" id="L206">    Map&lt;String, String&gt; metadata = new HashMap&lt;&gt;(numEntries);</span>
+
+    int readLength;
+<span class="fc bfc" id="L209" title="All 2 branches covered.">    for (int i = 0; i &lt; numEntries; i++) {</span>
+<span class="fc" id="L210">      int keyLength = dataInputStream.readInt();</span>
+<span class="fc" id="L211">      byte[] keyBytes = new byte[keyLength];</span>
+<span class="fc" id="L212">      readLength = dataInputStream.read(keyBytes);</span>
+<span class="pc bpc" id="L213" title="2 of 4 branches missed.">      assert readLength == keyLength;</span>
+
+<span class="fc" id="L215">      int valueLength = dataInputStream.readInt();</span>
+<span class="fc" id="L216">      byte[] valueBytes = new byte[valueLength];</span>
+<span class="fc" id="L217">      readLength = dataInputStream.read(valueBytes);</span>
+<span class="pc bpc" id="L218" title="2 of 4 branches missed.">      assert readLength == valueLength;</span>
+
+<span class="fc" id="L220">      metadata.put(new String(keyBytes, UTF_8), new String(valueBytes, UTF_8));</span>
+    }
+
+<span class="fc" id="L223">    return metadata;</span>
+  }
+
+  @Override
+  public void addException(@Nonnull ProcessingException processingException) {
+<span class="fc" id="L228">    _metadata.put(EXCEPTION_METADATA_KEY + processingException.getErrorCode(), processingException.getMessage());</span>
+<span class="fc" id="L229">  }</span>
+
+  @Nonnull
+  @Override
+  public byte[] toBytes()
+      throws IOException {
+<span class="fc" id="L235">    ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();</span>
+<span class="fc" id="L236">    DataOutputStream dataOutputStream = new DataOutputStream(byteArrayOutputStream);</span>
+<span class="fc" id="L237">    dataOutputStream.writeInt(VERSION);</span>
+<span class="fc" id="L238">    dataOutputStream.writeInt(_numRows);</span>
+<span class="fc" id="L239">    dataOutputStream.writeInt(_numColumns);</span>
+<span class="fc" id="L240">    int dataOffset = HEADER_SIZE;</span>
+
+    // Write dictionary.
+<span class="fc" id="L243">    dataOutputStream.writeInt(dataOffset);</span>
+<span class="fc" id="L244">    byte[] dictionaryMapBytes = null;</span>
+<span class="fc bfc" id="L245" title="All 2 branches covered.">    if (_dictionaryMap != null) {</span>
+<span class="fc" id="L246">      dictionaryMapBytes = serializeDictionaryMap();</span>
+<span class="fc" id="L247">      dataOutputStream.writeInt(dictionaryMapBytes.length);</span>
+<span class="fc" id="L248">      dataOffset += dictionaryMapBytes.length;</span>
+    } else {
+<span class="fc" id="L250">      dataOutputStream.writeInt(0);</span>
+    }
+
+    // Write metadata.
+<span class="fc" id="L254">    dataOutputStream.writeInt(dataOffset);</span>
+<span class="fc" id="L255">    byte[] metadataBytes = serializeMetadata();</span>
+<span class="fc" id="L256">    dataOutputStream.writeInt(metadataBytes.length);</span>
+<span class="fc" id="L257">    dataOffset += metadataBytes.length;</span>
+
+    // Write data schema.
+<span class="fc" id="L260">    dataOutputStream.writeInt(dataOffset);</span>
+<span class="fc" id="L261">    byte[] dataSchemaBytes = null;</span>
+<span class="fc bfc" id="L262" title="All 2 branches covered.">    if (_dataSchema != null) {</span>
+<span class="fc" id="L263">      dataSchemaBytes = _dataSchema.toBytes();</span>
+<span class="fc" id="L264">      dataOutputStream.writeInt(dataSchemaBytes.length);</span>
+<span class="fc" id="L265">      dataOffset += dataSchemaBytes.length;</span>
+    } else {
+<span class="fc" id="L267">      dataOutputStream.writeInt(0);</span>
+    }
+
+    // Write fixed size data.
+<span class="fc" id="L271">    dataOutputStream.writeInt(dataOffset);</span>
+<span class="fc bfc" id="L272" title="All 2 branches covered.">    if (_fixedSizeDataBytes != null) {</span>
+<span class="fc" id="L273">      dataOutputStream.writeInt(_fixedSizeDataBytes.length);</span>
+<span class="fc" id="L274">      dataOffset += _fixedSizeDataBytes.length;</span>
+    } else {
+<span class="fc" id="L276">      dataOutputStream.writeInt(0);</span>
+    }
+
+    // Write variable size data.
+<span class="fc" id="L280">    dataOutputStream.writeInt(dataOffset);</span>
+<span class="fc bfc" id="L281" title="All 2 branches covered.">    if (_variableSizeDataBytes != null) {</span>
+<span class="fc" id="L282">      dataOutputStream.writeInt(_variableSizeDataBytes.length);</span>
+    } else {
+<span class="fc" id="L284">      dataOutputStream.writeInt(0);</span>
+    }
+
+    // Write actual data.
+<span class="fc bfc" id="L288" title="All 2 branches covered.">    if (dictionaryMapBytes != null) {</span>
+<span class="fc" id="L289">      dataOutputStream.write(dictionaryMapBytes);</span>
+    }
+<span class="fc" id="L291">    dataOutputStream.write(metadataBytes);</span>
+<span class="fc bfc" id="L292" title="All 2 branches covered.">    if (dataSchemaBytes != null) {</span>
+<span class="fc" id="L293">      dataOutputStream.write(dataSchemaBytes);</span>
+    }
+<span class="fc bfc" id="L295" title="All 2 branches covered.">    if (_fixedSizeDataBytes != null) {</span>
+<span class="fc" id="L296">      dataOutputStream.write(_fixedSizeDataBytes);</span>
+    }
+<span class="fc bfc" id="L298" title="All 2 branches covered.">    if (_variableSizeDataBytes != null) {</span>
+<span class="fc" id="L299">      dataOutputStream.write(_variableSizeDataBytes);</span>
+    }
+
+<span class="fc" id="L302">    return byteArrayOutputStream.toByteArray();</span>
+  }
+
+  private byte[] serializeDictionaryMap()
+      throws IOException {
+<span class="fc" id="L307">    ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();</span>
+<span class="fc" id="L308">    DataOutputStream dataOutputStream = new DataOutputStream(byteArrayOutputStream);</span>
+
+<span class="fc" id="L310">    dataOutputStream.writeInt(_dictionaryMap.size());</span>
+<span class="fc bfc" id="L311" title="All 2 branches covered.">    for (Entry&lt;String, Map&lt;Integer, String&gt;&gt; dictionaryMapEntry : _dictionaryMap.entrySet()) {</span>
+<span class="fc" id="L312">      String columnName = dictionaryMapEntry.getKey();</span>
+<span class="fc" id="L313">      Map&lt;Integer, String&gt; dictionary = dictionaryMapEntry.getValue();</span>
+<span class="fc" id="L314">      byte[] bytes = columnName.getBytes(UTF_8);</span>
+<span class="fc" id="L315">      dataOutputStream.writeInt(bytes.length);</span>
+<span class="fc" id="L316">      dataOutputStream.write(bytes);</span>
+<span class="fc" id="L317">      dataOutputStream.writeInt(dictionary.size());</span>
+
+<span class="fc bfc" id="L319" title="All 2 branches covered.">      for (Entry&lt;Integer, String&gt; dictionaryEntry : dictionary.entrySet()) {</span>
+<span class="fc" id="L320">        dataOutputStream.writeInt(dictionaryEntry.getKey());</span>
+<span class="fc" id="L321">        byte[] valueBytes = dictionaryEntry.getValue().getBytes(UTF_8);</span>
+<span class="fc" id="L322">        dataOutputStream.writeInt(valueBytes.length);</span>
+<span class="fc" id="L323">        dataOutputStream.write(valueBytes);</span>
+<span class="fc" id="L324">      }</span>
+<span class="fc" id="L325">    }</span>
+
+<span class="fc" id="L327">    return byteArrayOutputStream.toByteArray();</span>
+  }
+
+  private byte[] serializeMetadata()
+      throws IOException {
+<span class="fc" id="L332">    ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();</span>
+<span class="fc" id="L333">    DataOutputStream dataOutputStream = new DataOutputStream(byteArrayOutputStream);</span>
+
+<span class="fc" id="L335">    dataOutputStream.writeInt(_metadata.size());</span>
+<span class="fc bfc" id="L336" title="All 2 branches covered.">    for (Entry&lt;String, String&gt; entry : _metadata.entrySet()) {</span>
+<span class="fc" id="L337">      byte[] keyBytes = entry.getKey().getBytes(UTF_8);</span>
+<span class="fc" id="L338">      dataOutputStream.writeInt(keyBytes.length);</span>
+<span class="fc" id="L339">      dataOutputStream.write(keyBytes);</span>
+
+<span class="fc" id="L341">      byte[] valueBytes = entry.getValue().getBytes(UTF_8);</span>
+<span class="fc" id="L342">      dataOutputStream.writeInt(valueBytes.length);</span>
+<span class="fc" id="L343">      dataOutputStream.write(valueBytes);</span>
+<span class="fc" id="L344">    }</span>
+
+<span class="fc" id="L346">    return byteArrayOutputStream.toByteArray();</span>
+  }
+
+  @Nonnull
+  @Override
+  public Map&lt;String, String&gt; getMetadata() {
+<span class="fc" id="L352">    return _metadata;</span>
+  }
+
+  @Nullable
+  @Override
+  public DataSchema getDataSchema() {
+<span class="fc" id="L358">    return _dataSchema;</span>
+  }
+
+  @Override
+  public int getNumberOfRows() {
+<span class="fc" id="L363">    return _numRows;</span>
+  }
+
+  @Override
+  public boolean getBoolean(int rowId, int colId) {
+<span class="fc" id="L368">    _fixedSizeData.position(rowId * _rowSizeInBytes + _columnOffsets[colId]);</span>
+<span class="fc bfc" id="L369" title="All 2 branches covered.">    return _fixedSizeData.get() == 1;</span>
+  }
+
+  @Override
+  public char getChar(int rowId, int colId) {
+<span class="fc" id="L374">    _fixedSizeData.position(rowId * _rowSizeInBytes + _columnOffsets[colId]);</span>
+<span class="fc" id="L375">    return _fixedSizeData.getChar();</span>
+  }
+
+  @Override
+  public byte getByte(int rowId, int colId) {
+<span class="fc" id="L380">    _fixedSizeData.position(rowId * _rowSizeInBytes + _columnOffsets[colId]);</span>
+<span class="fc" id="L381">    return _fixedSizeData.get();</span>
+  }
+
+  @Override
+  public short getShort(int rowId, int colId) {
+<span class="fc" id="L386">    _fixedSizeData.position(rowId * _rowSizeInBytes + _columnOffsets[colId]);</span>
+<span class="fc" id="L387">    return _fixedSizeData.getShort();</span>
+  }
+
+  @Override
+  public int getInt(int rowId, int colId) {
+<span class="fc" id="L392">    _fixedSizeData.position(rowId * _rowSizeInBytes + _columnOffsets[colId]);</span>
+<span class="fc" id="L393">    return _fixedSizeData.getInt();</span>
+  }
+
+  @Override
+  public long getLong(int rowId, int colId) {
+<span class="fc" id="L398">    _fixedSizeData.position(rowId * _rowSizeInBytes + _columnOffsets[colId]);</span>
+<span class="fc" id="L399">    return _fixedSizeData.getLong();</span>
+  }
+
+  @Override
+  public float getFloat(int rowId, int colId) {
+<span class="fc" id="L404">    _fixedSizeData.position(rowId * _rowSizeInBytes + _columnOffsets[colId]);</span>
+<span class="fc" id="L405">    return _fixedSizeData.getFloat();</span>
+  }
+
+  @Override
+  public double getDouble(int rowId, int colId) {
+<span class="fc" id="L410">    _fixedSizeData.position(rowId * _rowSizeInBytes + _columnOffsets[colId]);</span>
+<span class="fc" id="L411">    return _fixedSizeData.getDouble();</span>
+  }
+
+  @Nonnull
+  @Override
+  public String getString(int rowId, int colId) {
+<span class="fc" id="L417">    _fixedSizeData.position(rowId * _rowSizeInBytes + _columnOffsets[colId]);</span>
+<span class="fc" id="L418">    int dictId = _fixedSizeData.getInt();</span>
+<span class="fc" id="L419">    return _dictionaryMap.get(_dataSchema.getColumnName(colId)).get(dictId);</span>
+  }
+
+  @Nonnull
+  @Override
+  public &lt;T&gt; T getObject(int rowId, int colId) {
+<span class="fc" id="L425">    int size = positionCursorInVariableBuffer(rowId, colId);</span>
+<span class="fc" id="L426">    ObjectType objectType = ObjectType.getObjectType(_variableSizeData.getInt());</span>
+<span class="fc" id="L427">    ByteBuffer byteBuffer = _variableSizeData.slice();</span>
+<span class="fc" id="L428">    byteBuffer.limit(size);</span>
+    try {
+<span class="fc" id="L430">      return ObjectCustomSerDe.deserialize(byteBuffer, objectType);</span>
+<span class="nc" id="L431">    } catch (IOException e) {</span>
+<span class="nc" id="L432">      throw new RuntimeException(&quot;Caught exception while de-serializing object.&quot;, e);</span>
+    }
+  }
+
+  @Nonnull
+  @Override
+  public byte[] getByteArray(int rowId, int colId) {
+<span class="fc" id="L439">    int length = positionCursorInVariableBuffer(rowId, colId);</span>
+<span class="fc" id="L440">    byte[] bytes = new byte[length];</span>
+<span class="fc bfc" id="L441" title="All 2 branches covered.">    for (int i = 0; i &lt; length; i++) {</span>
+<span class="fc" id="L442">      bytes[i] = _variableSizeData.get();</span>
+    }
+<span class="fc" id="L444">    return bytes;</span>
+  }
+
+  @Nonnull
+  @Override
+  public char[] getCharArray(int rowId, int colId) {
+<span class="fc" id="L450">    int length = positionCursorInVariableBuffer(rowId, colId);</span>
+<span class="fc" id="L451">    char[] chars = new char[length];</span>
+<span class="fc bfc" id="L452" title="All 2 branches covered.">    for (int i = 0; i &lt; length; i++) {</span>
+<span class="fc" id="L453">      chars[i] = _variableSizeData.getChar();</span>
+    }
+<span class="fc" id="L455">    return chars;</span>
+  }
+
+  @Nonnull
+  @Override
+  public short[] getShortArray(int rowId, int colId) {
+<span class="fc" id="L461">    int length = positionCursorInVariableBuffer(rowId, colId);</span>
+<span class="fc" id="L462">    short[] shorts = new short[length];</span>
+<span class="fc bfc" id="L463" title="All 2 branches covered.">    for (int i = 0; i &lt; length; i++) {</span>
+<span class="fc" id="L464">      shorts[i] = _variableSizeData.getShort();</span>
+    }
+<span class="fc" id="L466">    return shorts;</span>
+  }
+
+  @Nonnull
+  @Override
+  public int[] getIntArray(int rowId, int colId) {
+<span class="fc" id="L472">    int length = positionCursorInVariableBuffer(rowId, colId);</span>
+<span class="fc" id="L473">    int[] ints = new int[length];</span>
+<span class="fc bfc" id="L474" title="All 2 branches covered.">    for (int i = 0; i &lt; length; i++) {</span>
+<span class="fc" id="L475">      ints[i] = _variableSizeData.getInt();</span>
+    }
+<span class="fc" id="L477">    return ints;</span>
+  }
+
+  @Nonnull
+  @Override
+  public long[] getLongArray(int rowId, int colId) {
+<span class="fc" id="L483">    int length = positionCursorInVariableBuffer(rowId, colId);</span>
+<span class="fc" id="L484">    long[] longs = new long[length];</span>
+<span class="fc bfc" id="L485" title="All 2 branches covered.">    for (int i = 0; i &lt; length; i++) {</span>
+<span class="fc" id="L486">      longs[i] = _variableSizeData.getLong();</span>
+    }
+<span class="fc" id="L488">    return longs;</span>
+  }
+
+  @Nonnull
+  @Override
+  public float[] getFloatArray(int rowId, int colId) {
+<span class="fc" id="L494">    int length = positionCursorInVariableBuffer(rowId, colId);</span>
+<span class="fc" id="L495">    float[] floats = new float[length];</span>
+<span class="fc bfc" id="L496" title="All 2 branches covered.">    for (int i = 0; i &lt; length; i++) {</span>
+<span class="fc" id="L497">      floats[i] = _variableSizeData.getFloat();</span>
+    }
+<span class="fc" id="L499">    return floats;</span>
+  }
+
+  @Nonnull
+  @Override
+  public double[] getDoubleArray(int rowId, int colId) {
+<span class="fc" id="L505">    int length = positionCursorInVariableBuffer(rowId, colId);</span>
+<span class="fc" id="L506">    double[] doubles = new double[length];</span>
+<span class="fc bfc" id="L507" title="All 2 branches covered.">    for (int i = 0; i &lt; length; i++) {</span>
+<span class="fc" id="L508">      doubles[i] = _variableSizeData.getDouble();</span>
+    }
+<span class="fc" id="L510">    return doubles;</span>
+  }
+
+  @Nonnull
+  @Override
+  public String[] getStringArray(int rowId, int colId) {
+<span class="fc" id="L516">    int length = positionCursorInVariableBuffer(rowId, colId);</span>
+<span class="fc" id="L517">    String[] strings = new String[length];</span>
+<span class="fc" id="L518">    Map&lt;Integer, String&gt; dictionary = _dictionaryMap.get(_dataSchema.getColumnName(colId));</span>
+<span class="fc bfc" id="L519" title="All 2 branches covered.">    for (int i = 0; i &lt; length; i++) {</span>
+<span class="fc" id="L520">      strings[i] = dictionary.get(_variableSizeData.getInt());</span>
+    }
+<span class="fc" id="L522">    return strings;</span>
+  }
+
+  private int positionCursorInVariableBuffer(int rowId, int colId) {
+<span class="fc" id="L526">    _fixedSizeData.position(rowId * _rowSizeInBytes + _columnOffsets[colId]);</span>
+<span class="fc" id="L527">    _variableSizeData.position(_fixedSizeData.getInt());</span>
+<span class="fc" id="L528">    return _fixedSizeData.getInt();</span>
+  }
+
+  @Override
+  public String toString() {
+<span class="nc bnc" id="L533" title="All 2 branches missed.">    if (_dataSchema == null) {</span>
+<span class="nc" id="L534">      return _metadata.toString();</span>
+    }
+
+<span class="nc" id="L537">    StringBuilder stringBuilder = new StringBuilder();</span>
+<span class="nc" id="L538">    stringBuilder.append(_dataSchema.toString()).append('\n');</span>
+<span class="nc" id="L539">    stringBuilder.append(&quot;numRows: &quot;).append(_numRows).append('\n');</span>
+
+<span class="nc" id="L541">    _fixedSizeData.position(0);</span>
+<span class="nc bnc" id="L542" title="All 2 branches missed.">    for (int rowId = 0; rowId &lt; _numRows; rowId++) {</span>
+<span class="nc bnc" id="L543" title="All 2 branches missed.">      for (int colId = 0; colId &lt; _numColumns; colId++) {</span>
+<span class="nc bnc" id="L544" title="All 10 branches missed.">        switch (_dataSchema.getColumnType(colId)) {</span>
+          case BOOLEAN:
+<span class="nc" id="L546">            stringBuilder.append(_fixedSizeData.get());</span>
+<span class="nc" id="L547">            break;</span>
+          case BYTE:
+<span class="nc" id="L549">            stringBuilder.append(_fixedSizeData.get());</span>
+<span class="nc" id="L550">            break;</span>
+          case CHAR:
+<span class="nc" id="L552">            stringBuilder.append(_fixedSizeData.getChar());</span>
+<span class="nc" id="L553">            break;</span>
+          case SHORT:
+<span class="nc" id="L555">            stringBuilder.append(_fixedSizeData.getShort());</span>
+<span class="nc" id="L556">            break;</span>
+          case INT:
+<span class="nc" id="L558">            stringBuilder.append(_fixedSizeData.getInt());</span>
+<span class="nc" id="L559">            break;</span>
+          case LONG:
+<span class="nc" id="L561">            stringBuilder.append(_fixedSizeData.getLong());</span>
+<span class="nc" id="L562">            break;</span>
+          case FLOAT:
+<span class="nc" id="L564">            stringBuilder.append(_fixedSizeData.getFloat());</span>
+<span class="nc" id="L565">            break;</span>
+          case DOUBLE:
+<span class="nc" id="L567">            stringBuilder.append(_fixedSizeData.getDouble());</span>
+<span class="nc" id="L568">            break;</span>
+          case STRING:
+<span class="nc" id="L570">            stringBuilder.append(_fixedSizeData.getInt());</span>
+<span class="nc" id="L571">            break;</span>
+          // Object and array.
+          default:
+<span class="nc" id="L574">            stringBuilder.append(String.format(&quot;(%s:%s)&quot;, _fixedSizeData.getInt(), _fixedSizeData.getInt()));</span>
+            break;
+        }
+<span class="nc" id="L577">        stringBuilder.append(&quot;\t&quot;);</span>
+      }
+<span class="nc" id="L579">      stringBuilder.append(&quot;\n&quot;);</span>
+    }
+<span class="nc" id="L581">    return stringBuilder.toString();</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

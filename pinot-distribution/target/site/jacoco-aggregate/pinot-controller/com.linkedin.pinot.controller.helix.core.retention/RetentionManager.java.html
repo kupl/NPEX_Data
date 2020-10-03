@@ -1,0 +1,371 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>RetentionManager.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-controller</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.controller.helix.core.retention</a> &gt; <span class="el_source">RetentionManager.java</span></div><h1>RetentionManager.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.controller.helix.core.retention;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
+import org.apache.helix.model.IdealState;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import com.linkedin.pinot.common.config.SegmentsValidationAndRetentionConfig;
+import com.linkedin.pinot.common.config.TableConfig;
+import com.linkedin.pinot.common.config.TableNameBuilder;
+import com.linkedin.pinot.common.metadata.segment.OfflineSegmentZKMetadata;
+import com.linkedin.pinot.common.metadata.segment.RealtimeSegmentZKMetadata;
+import com.linkedin.pinot.common.metadata.segment.SegmentZKMetadata;
+import com.linkedin.pinot.common.utils.CommonConstants;
+import com.linkedin.pinot.common.utils.CommonConstants.Helix.TableType;
+import com.linkedin.pinot.common.utils.CommonConstants.Segment.Realtime.Status;
+import com.linkedin.pinot.common.utils.SegmentName;
+import com.linkedin.pinot.controller.helix.core.PinotHelixResourceManager;
+import com.linkedin.pinot.controller.helix.core.retention.strategy.RetentionStrategy;
+import com.linkedin.pinot.controller.helix.core.retention.strategy.TimeRetentionStrategy;
+import javax.annotation.Nonnull;
+
+
+/**
+ * RetentionManager is scheduled to run only on Leader controller.
+ * It will first scan the table configs to get segment retention strategy then
+ * do data retention..
+ *
+ *
+ */
+<span class="pc bpc" id="L54" title="1 of 2 branches missed.">public class RetentionManager {</span>
+<span class="fc" id="L55">  public static final Logger LOGGER = LoggerFactory.getLogger(RetentionManager.class);</span>
+
+  private final PinotHelixResourceManager _pinotHelixResourceManager;
+
+<span class="fc" id="L59">  private final Map&lt;String, RetentionStrategy&gt; _tableDeletionStrategy = new HashMap&lt;&gt;();</span>
+<span class="fc" id="L60">  private final Map&lt;String, List&lt;SegmentZKMetadata&gt;&gt; _segmentMetadataMap = new HashMap&lt;&gt;();</span>
+<span class="fc" id="L61">  private final Object _lock = new Object();</span>
+
+  private final ScheduledExecutorService _executorService;
+  private final int _runFrequencyInSeconds;
+  private final int _deletedSegmentsRetentionInDays;
+
+  private static final int RETENTION_TIME_FOR_OLD_LLC_SEGMENTS_DAYS = 5;
+  private static final int DEFAULT_RETENTION_FOR_DELETED_SEGMENTS_DAYS = 7;
+
+  public RetentionManager(PinotHelixResourceManager pinotHelixResourceManager, int runFrequencyInSeconds,
+<span class="fc" id="L71">      int deletedSegmentsRetentionInDays) {</span>
+<span class="fc" id="L72">    _pinotHelixResourceManager = pinotHelixResourceManager;</span>
+<span class="fc" id="L73">    _runFrequencyInSeconds = runFrequencyInSeconds;</span>
+<span class="fc" id="L74">    _deletedSegmentsRetentionInDays = deletedSegmentsRetentionInDays;</span>
+<span class="fc" id="L75">    _executorService = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {</span>
+      @Override
+      public Thread newThread(@Nonnull Runnable runnable) {
+<span class="fc" id="L78">        Thread thread = new Thread(runnable);</span>
+<span class="fc" id="L79">        thread.setName(&quot;PinotRetentionManagerExecutorService&quot;);</span>
+<span class="fc" id="L80">        return thread;</span>
+      }
+    });
+<span class="fc" id="L83">  }</span>
+
+  public RetentionManager(PinotHelixResourceManager pinotHelixResourceManager, int runFrequencyInSeconds) {
+<span class="fc" id="L86">    this(pinotHelixResourceManager, runFrequencyInSeconds, DEFAULT_RETENTION_FOR_DELETED_SEGMENTS_DAYS);</span>
+<span class="fc" id="L87">  }</span>
+
+  public static long getRetentionTimeForOldLLCSegmentsDays() {
+<span class="fc" id="L90">    return RETENTION_TIME_FOR_OLD_LLC_SEGMENTS_DAYS;</span>
+  }
+
+  public void start() {
+<span class="fc" id="L94">    scheduleRetentionThreadWithFrequency(_runFrequencyInSeconds);</span>
+<span class="fc" id="L95">    LOGGER.info(&quot;RetentionManager is started!&quot;);</span>
+<span class="fc" id="L96">  }</span>
+
+  private void scheduleRetentionThreadWithFrequency(int runFrequencyInSeconds) {
+<span class="fc" id="L99">    _executorService.scheduleWithFixedDelay(new Runnable() {</span>
+      @Override
+      public void run() {
+<span class="nc" id="L102">        synchronized (getLock()) {</span>
+<span class="nc" id="L103">          execute();</span>
+<span class="nc" id="L104">        }</span>
+<span class="nc" id="L105">      }</span>
+    }, Math.min(50, runFrequencyInSeconds), runFrequencyInSeconds, TimeUnit.SECONDS);
+<span class="fc" id="L107">  }</span>
+
+  private Object getLock() {
+<span class="nc" id="L110">    return _lock;</span>
+  }
+
+  private void execute() {
+    try {
+<span class="pc bpc" id="L115" title="1 of 2 branches missed.">      if (_pinotHelixResourceManager.isLeader()) {</span>
+<span class="fc" id="L116">        LOGGER.info(&quot;Trying to run retentionManager!&quot;);</span>
+<span class="fc" id="L117">        updateDeletionStrategiesForEntireCluster();</span>
+<span class="fc" id="L118">        LOGGER.info(&quot;Finished update deletion strategies for entire cluster!&quot;);</span>
+<span class="fc" id="L119">        updateSegmentMetadataForEntireCluster();</span>
+<span class="fc" id="L120">        LOGGER.info(&quot;Finished update segment metadata for entire cluster!&quot;);</span>
+<span class="fc" id="L121">        scanSegmentMetadataAndPurge();</span>
+<span class="fc" id="L122">        LOGGER.info(&quot;Finished segment purge for entire cluster!&quot;);</span>
+<span class="fc" id="L123">        removeAgedDeletedSegments();</span>
+<span class="fc" id="L124">        LOGGER.info(&quot;Finished remove aged deleted segments!&quot;);</span>
+      } else {
+<span class="nc" id="L126">        LOGGER.info(&quot;Not leader of the controller, sleep!&quot;);</span>
+      }
+<span class="nc" id="L128">    } catch (Exception e) {</span>
+<span class="nc" id="L129">      LOGGER.error(&quot;Caught exception while running retention&quot;, e);</span>
+<span class="fc" id="L130">    }</span>
+<span class="fc" id="L131">  }</span>
+
+  private void scanSegmentMetadataAndPurge() {
+<span class="fc bfc" id="L134" title="All 2 branches covered.">    for (String tableName : _segmentMetadataMap.keySet()) {</span>
+<span class="fc" id="L135">      List&lt;SegmentZKMetadata&gt; segmentZKMetadataList = _segmentMetadataMap.get(tableName);</span>
+<span class="fc" id="L136">      List&lt;String&gt; segmentsToDelete = new ArrayList&lt;&gt;(128);</span>
+<span class="fc" id="L137">      IdealState idealState = null;</span>
+      try {
+<span class="fc bfc" id="L139" title="All 2 branches covered.">        if (TableNameBuilder.getTableTypeFromTableName(tableName).equals(TableType.REALTIME)) {</span>
+<span class="fc" id="L140">          idealState = _pinotHelixResourceManager.getHelixAdmin().getResourceIdealState(</span>
+              _pinotHelixResourceManager.getHelixClusterName(), tableName);
+        }
+<span class="nc" id="L143">      } catch (Exception e) {</span>
+<span class="nc" id="L144">        LOGGER.warn(&quot;Could not get idealstate for {}&quot;, tableName, e);</span>
+        // Ignore, worst case we have some old inactive segments in place.
+<span class="fc" id="L146">      }</span>
+<span class="fc bfc" id="L147" title="All 2 branches covered.">      for (SegmentZKMetadata segmentZKMetadata : segmentZKMetadataList) {</span>
+        RetentionStrategy deletionStrategy;
+<span class="fc" id="L149">        deletionStrategy = _tableDeletionStrategy.get(tableName);</span>
+<span class="pc bpc" id="L150" title="1 of 2 branches missed.">        if (deletionStrategy == null) {</span>
+<span class="nc" id="L151">          LOGGER.info(&quot;No Retention strategy found for segment: {}&quot;, segmentZKMetadata.getSegmentName());</span>
+<span class="nc" id="L152">          continue;</span>
+        }
+<span class="fc bfc" id="L154" title="All 2 branches covered.">        if (segmentZKMetadata instanceof RealtimeSegmentZKMetadata) {</span>
+<span class="fc" id="L155">          final RealtimeSegmentZKMetadata realtimeSegmentZKMetadata = (RealtimeSegmentZKMetadata)segmentZKMetadata;</span>
+<span class="fc bfc" id="L156" title="All 2 branches covered.">          if (realtimeSegmentZKMetadata.getStatus() == Status.IN_PROGRESS) {</span>
+<span class="fc" id="L157">            final String segmentId = realtimeSegmentZKMetadata.getSegmentName();</span>
+<span class="pc bpc" id="L158" title="1 of 2 branches missed.">            if (SegmentName.isHighLevelConsumerSegmentName(segmentId)) {</span>
+<span class="nc" id="L159">              continue;</span>
+            }
+            // This is an in-progress LLC segment. Delete any old ones hanging around. Do not delete
+            // segments that are current since there may be a race with the ValidationManager trying to
+            // auto-create LLC segments.
+<span class="fc bfc" id="L164" title="All 2 branches covered.">            if (shouldDeleteInProgressLLCSegment(segmentId, idealState, realtimeSegmentZKMetadata)) {</span>
+<span class="fc" id="L165">              segmentsToDelete.add(segmentId);</span>
+            }
+            continue;
+          }
+        }
+<span class="fc bfc" id="L170" title="All 2 branches covered.">        if (deletionStrategy.isPurgeable(segmentZKMetadata)) {</span>
+<span class="fc" id="L171">          LOGGER.info(&quot;Marking segment to delete: {}&quot;, segmentZKMetadata.getSegmentName());</span>
+<span class="fc" id="L172">          segmentsToDelete.add(segmentZKMetadata.getSegmentName());</span>
+        }
+<span class="fc" id="L174">      }</span>
+<span class="pc bpc" id="L175" title="1 of 2 branches missed.">      if (segmentsToDelete.size() &gt; 0) {</span>
+<span class="fc" id="L176">        LOGGER.info(&quot;Trying to delete {} segments for table {}&quot;, segmentsToDelete.size(), tableName);</span>
+<span class="fc" id="L177">        _pinotHelixResourceManager.deleteSegments(tableName, segmentsToDelete);</span>
+      }
+<span class="fc" id="L179">    }</span>
+<span class="fc" id="L180">  }</span>
+
+  private void removeAgedDeletedSegments() {
+    // Trigger clean-up for deleted segments from the deleted directory
+<span class="fc" id="L184">    _pinotHelixResourceManager.getSegmentDeletionManager().removeAgedDeletedSegments(_deletedSegmentsRetentionInDays);</span>
+<span class="fc" id="L185">  }</span>
+
+  private boolean shouldDeleteInProgressLLCSegment(final String segmentId, final IdealState idealState, RealtimeSegmentZKMetadata segmentZKMetadata) {
+<span class="pc bpc" id="L188" title="1 of 2 branches missed.">    if (idealState == null) {</span>
+<span class="nc" id="L189">      return false;</span>
+    }
+<span class="fc" id="L191">    Map&lt;String, String&gt; stateMap = idealState.getInstanceStateMap(segmentId);</span>
+<span class="pc bpc" id="L192" title="1 of 2 branches missed.">    if (stateMap == null) {</span>
+      // segment is there in propertystore but not in idealstate. mark for deletion
+<span class="nc" id="L194">      return true;</span>
+    } else {
+<span class="fc" id="L196">      Set&lt;String&gt; states = new HashSet&lt;&gt;(stateMap.values());</span>
+<span class="pc bpc" id="L197" title="1 of 4 branches missed.">      if (states.size() == 1 &amp;&amp; states</span>
+          .contains(CommonConstants.Helix.StateModel.SegmentOnlineOfflineStateModel.OFFLINE)) {
+        // All replicas of this segment are offline, delete it if it is old enough
+<span class="fc" id="L200">        final long now = System.currentTimeMillis();</span>
+<span class="fc bfc" id="L201" title="All 2 branches covered.">        if (now - segmentZKMetadata.getCreationTime() &gt;= TimeUnit.DAYS.toMillis(</span>
+            RETENTION_TIME_FOR_OLD_LLC_SEGMENTS_DAYS)) {
+<span class="fc" id="L203">          return true;</span>
+        }
+      }
+    }
+<span class="fc" id="L207">    return false;</span>
+  }
+
+  private void updateDeletionStrategiesForEntireCluster() {
+<span class="fc" id="L211">    List&lt;String&gt; tableNames = _pinotHelixResourceManager.getAllTables();</span>
+<span class="fc bfc" id="L212" title="All 2 branches covered.">    for (String tableName : tableNames) {</span>
+<span class="fc" id="L213">      updateDeletionStrategyForTable(tableName);</span>
+<span class="fc" id="L214">    }</span>
+<span class="fc" id="L215">  }</span>
+
+  private void updateDeletionStrategyForTable(String tableName) {
+<span class="fc" id="L218">    TableType tableType = TableNameBuilder.getTableTypeFromTableName(tableName);</span>
+<span class="pc bpc" id="L219" title="2 of 4 branches missed.">    assert tableType != null;</span>
+<span class="pc bpc" id="L220" title="1 of 3 branches missed.">    switch (tableType) {</span>
+      case OFFLINE:
+<span class="fc" id="L222">        updateDeletionStrategyForOfflineTable(tableName);</span>
+<span class="fc" id="L223">        break;</span>
+      case REALTIME:
+<span class="fc" id="L225">        updateDeletionStrategyForRealtimeTable(tableName);</span>
+<span class="fc" id="L226">        break;</span>
+      default:
+<span class="nc" id="L228">        throw new IllegalArgumentException(&quot;No table type matches table name: &quot; + tableName);</span>
+    }
+<span class="fc" id="L230">  }</span>
+
+  /**
+   * Update deletion strategy for offline table.
+   * &lt;ul&gt;
+   *   &lt;li&gt;Keep the current deletion strategy when one of the followings happened:
+   *     &lt;ul&gt;
+   *       &lt;li&gt;Failed to fetch the retention config.&lt;/li&gt;
+   *       &lt;li&gt;Push type is not valid (neither 'APPEND' nor 'REFRESH').&lt;/li&gt;
+   *     &lt;/ul&gt;
+   *   &lt;li&gt;
+   *     Remove the deletion strategy when one of the followings happened:
+   *     &lt;ul&gt;
+   *       &lt;li&gt;Push type is set to 'REFRESH'.&lt;/li&gt;
+   *       &lt;li&gt;No valid retention time is set.&lt;/li&gt;
+   *     &lt;/ul&gt;
+   *   &lt;/li&gt;
+   *   &lt;li&gt;Update the deletion strategy when push type is set to 'APPEND' and valid retention time is set.&lt;/li&gt;
+   * &lt;/ul&gt;
+   */
+  private void updateDeletionStrategyForOfflineTable(String offlineTableName) {
+    // Fetch table config.
+    TableConfig offlineTableConfig;
+    try {
+<span class="fc" id="L254">      offlineTableConfig = _pinotHelixResourceManager.getOfflineTableConfig(TableNameBuilder.extractRawTableName(offlineTableName));</span>
+<span class="pc bpc" id="L255" title="1 of 2 branches missed.">      if (offlineTableConfig == null) {</span>
+<span class="nc" id="L256">        LOGGER.error(&quot;Table config is null, skip updating deletion strategy for table: {}.&quot;, offlineTableName);</span>
+<span class="nc" id="L257">        return;</span>
+      }
+<span class="nc" id="L259">    } catch (Exception e) {</span>
+<span class="nc" id="L260">      LOGGER.error(&quot;Caught exception while fetching table config, skip updating deletion strategy for table: {}.&quot;,</span>
+          offlineTableName, e);
+<span class="nc" id="L262">      return;</span>
+<span class="fc" id="L263">    }</span>
+
+    // Fetch validation config.
+<span class="fc" id="L266">    SegmentsValidationAndRetentionConfig validationConfig = offlineTableConfig.getValidationConfig();</span>
+<span class="pc bpc" id="L267" title="1 of 2 branches missed.">    if (validationConfig == null) {</span>
+<span class="nc" id="L268">      LOGGER.error(&quot;Validation config is null, skip updating deletion strategy for table: {}.&quot;, offlineTableName);</span>
+<span class="nc" id="L269">      return;</span>
+    }
+
+    // Fetch push type.
+<span class="fc" id="L273">    String segmentPushType = validationConfig.getSegmentPushType();</span>
+<span class="pc bpc" id="L274" title="4 of 6 branches missed.">    if ((segmentPushType == null)</span>
+        || (!segmentPushType.equalsIgnoreCase(&quot;APPEND&quot;) &amp;&amp; !segmentPushType.equalsIgnoreCase(&quot;REFRESH&quot;))) {
+<span class="nc" id="L276">      LOGGER.error(</span>
+          &quot;Segment push type: {} is not valid ('APPEND' or 'REFRESH'), skip updating deletion strategy for table: {}.&quot;,
+          segmentPushType, offlineTableName);
+<span class="nc" id="L279">      return;</span>
+    }
+<span class="pc bpc" id="L281" title="1 of 2 branches missed.">    if (segmentPushType.equalsIgnoreCase(&quot;REFRESH&quot;)) {</span>
+<span class="nc" id="L282">      LOGGER.info(&quot;Segment push type is set to 'REFRESH', remove deletion strategy for table: {}.&quot;, offlineTableName);</span>
+<span class="nc" id="L283">      _tableDeletionStrategy.remove(offlineTableName);</span>
+<span class="nc" id="L284">      return;</span>
+    }
+
+    // Fetch retention time unit and value.
+<span class="fc" id="L288">    String retentionTimeUnit = validationConfig.getRetentionTimeUnit();</span>
+<span class="fc" id="L289">    String retentionTimeValue = validationConfig.getRetentionTimeValue();</span>
+<span class="pc bpc" id="L290" title="4 of 8 branches missed.">    if (((retentionTimeUnit == null) || retentionTimeUnit.isEmpty())</span>
+        || ((retentionTimeValue == null) || retentionTimeValue.isEmpty())) {
+<span class="nc" id="L292">      LOGGER.info(&quot;Retention time unit/value is not set, remove deletion strategy for table: {}.&quot;, offlineTableName);</span>
+<span class="nc" id="L293">      _tableDeletionStrategy.remove(offlineTableName);</span>
+<span class="nc" id="L294">      return;</span>
+    }
+
+    // Update time retention strategy.
+    try {
+<span class="fc" id="L299">      TimeRetentionStrategy timeRetentionStrategy = new TimeRetentionStrategy(retentionTimeUnit, retentionTimeValue);</span>
+<span class="fc" id="L300">      _tableDeletionStrategy.put(offlineTableName, timeRetentionStrategy);</span>
+<span class="fc" id="L301">      LOGGER.info(&quot;Updated deletion strategy for table: {} using retention time: {} {}.&quot;, offlineTableName,</span>
+          retentionTimeValue, retentionTimeUnit);
+<span class="nc" id="L303">    } catch (Exception e) {</span>
+<span class="nc" id="L304">      LOGGER.error(</span>
+          &quot;Caught exception while building deletion strategy with retention time: {} {], remove deletion strategy for table: {}.&quot;,
+          retentionTimeValue, retentionTimeUnit, offlineTableName);
+<span class="nc" id="L307">      _tableDeletionStrategy.remove(offlineTableName);</span>
+<span class="fc" id="L308">    }</span>
+<span class="fc" id="L309">  }</span>
+
+  /**
+   * Update deletion strategy for realtime table.
+   * &lt;ul&gt;
+   *   &lt;li&gt;Keep the current deletion strategy when failed to get a valid retention time&lt;/li&gt;
+   *   &lt;li&gt;Update the deletion strategy when valid retention time is set.&lt;/li&gt;
+   * &lt;/ul&gt;
+   * The reason for this is that we don't allow realtime table without deletion strategy.
+   */
+  private void updateDeletionStrategyForRealtimeTable(String realtimeTableName) {
+    try {
+<span class="fc" id="L321">      TableConfig realtimeTableConfig =</span>
+          _pinotHelixResourceManager.getRealtimeTableConfig(TableNameBuilder.extractRawTableName(realtimeTableName));
+<span class="pc bpc" id="L323" title="2 of 4 branches missed.">      assert realtimeTableConfig != null;</span>
+<span class="fc" id="L324">      SegmentsValidationAndRetentionConfig validationConfig = realtimeTableConfig.getValidationConfig();</span>
+<span class="fc" id="L325">      TimeRetentionStrategy timeRetentionStrategy =</span>
+          new TimeRetentionStrategy(validationConfig.getRetentionTimeUnit(), validationConfig.getRetentionTimeValue());
+<span class="fc" id="L327">      _tableDeletionStrategy.put(realtimeTableName, timeRetentionStrategy);</span>
+<span class="nc" id="L328">    } catch (Exception e) {</span>
+<span class="nc" id="L329">      LOGGER.error(&quot;Caught exception while updating deletion strategy, skip updating deletion strategy for table: {}.&quot;,</span>
+          realtimeTableName, e);
+<span class="fc" id="L331">    }</span>
+<span class="fc" id="L332">  }</span>
+
+  private void updateSegmentMetadataForEntireCluster() {
+    // Gets table names with type.
+<span class="fc" id="L336">    List&lt;String&gt; tableNames = _pinotHelixResourceManager.getAllTables();</span>
+<span class="fc bfc" id="L337" title="All 2 branches covered.">    for (String tableNameWithType : tableNames) {</span>
+<span class="fc" id="L338">      _segmentMetadataMap.put(tableNameWithType, retrieveSegmentMetadataForTable(tableNameWithType));</span>
+<span class="fc" id="L339">    }</span>
+<span class="fc" id="L340">  }</span>
+
+  private List&lt;SegmentZKMetadata&gt; retrieveSegmentMetadataForTable(String tableNameWithType) {
+<span class="fc" id="L343">    List&lt;SegmentZKMetadata&gt; segmentMetadataList = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L344">    TableType tableType = TableNameBuilder.getTableTypeFromTableName(tableNameWithType);</span>
+<span class="pc bpc" id="L345" title="2 of 4 branches missed.">    assert tableType != null;</span>
+<span class="pc bpc" id="L346" title="1 of 3 branches missed.">    switch (tableType) {</span>
+      case OFFLINE:
+<span class="fc" id="L348">        List&lt;OfflineSegmentZKMetadata&gt; offlineSegmentZKMetadatas = _pinotHelixResourceManager.getOfflineSegmentMetadata(</span>
+            tableNameWithType);
+<span class="fc bfc" id="L350" title="All 2 branches covered.">        for (OfflineSegmentZKMetadata offlineSegmentZKMetadata : offlineSegmentZKMetadatas) {</span>
+<span class="fc" id="L351">          segmentMetadataList.add(offlineSegmentZKMetadata);</span>
+<span class="fc" id="L352">        }</span>
+<span class="fc" id="L353">        break;</span>
+      case REALTIME:
+<span class="fc" id="L355">        List&lt;RealtimeSegmentZKMetadata&gt; realtimeSegmentZKMetadatas = _pinotHelixResourceManager.getRealtimeSegmentMetadata(</span>
+            tableNameWithType);
+<span class="fc bfc" id="L357" title="All 2 branches covered.">        for (RealtimeSegmentZKMetadata realtimeSegmentZKMetadata : realtimeSegmentZKMetadatas) {</span>
+<span class="fc" id="L358">          segmentMetadataList.add(realtimeSegmentZKMetadata);</span>
+<span class="fc" id="L359">        }</span>
+<span class="fc" id="L360">        break;</span>
+      default:
+<span class="nc" id="L362">        throw new IllegalArgumentException(&quot;No table type matches table name: &quot; + tableNameWithType);</span>
+    }
+<span class="fc" id="L364">    return segmentMetadataList;</span>
+  }
+
+  public void stop() {
+<span class="fc" id="L368">    _executorService.shutdown();</span>
+<span class="fc" id="L369">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

@@ -1,0 +1,354 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>ControllerConf.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-controller</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.controller</a> &gt; <span class="el_source">ControllerConf.java</span></div><h1>ControllerConf.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.controller;
+
+import com.linkedin.pinot.common.protocols.SegmentCompletionProtocol;
+import com.linkedin.pinot.common.utils.StringUtil;
+import java.io.File;
+import java.io.UnsupportedEncodingException;
+import java.net.URLEncoder;
+import java.util.ArrayList;
+import java.util.List;
+import org.apache.commons.configuration.ConfigurationException;
+import org.apache.commons.configuration.PropertiesConfiguration;
+
+public class ControllerConf extends PropertiesConfiguration {
+  private static final String CONTROLLER_VIP_HOST = &quot;controller.vip.host&quot;;
+  private static final String CONTROLLER_VIP_PORT = &quot;controller.vip.port&quot;;
+  private static final String CONTROLLER_VIP_PROTOCOL = &quot;controller.vip.protocol&quot;;
+  private static final String CONTROLLER_HOST = &quot;controller.host&quot;;
+  private static final String CONTROLLER_PORT = &quot;controller.port&quot;;
+  private static final String DATA_DIR = &quot;controller.data.dir&quot;;
+  private static final String ZK_STR = &quot;controller.zk.str&quot;;
+  private static final String UPDATE_SEGMENT_STATE_MODEL = &quot;controller.update_segment_state_model&quot;; // boolean: Update the statemodel on boot?
+  private static final String HELIX_CLUSTER_NAME = &quot;controller.helix.cluster.name&quot;;
+  private static final String CLUSTER_TENANT_ISOLATION_ENABLE = &quot;cluster.tenant.isolation.enable&quot;;
+  private static final String CONSOLE_WEBAPP_ROOT_PATH = &quot;controller.query.console&quot;;
+  private static final String EXTERNAL_VIEW_ONLINE_TO_OFFLINE_TIMEOUT = &quot;controller.upload.onlineToOfflineTimeout&quot;;
+  private static final String RETENTION_MANAGER_FREQUENCY_IN_SECONDS = &quot;controller.retention.frequencyInSeconds&quot;;
+  private static final String VALIDATION_MANAGER_FREQUENCY_IN_SECONDS = &quot;controller.validation.frequencyInSeconds&quot;;
+  private static final String STATUS_CHECKER_FREQUENCY_IN_SECONDS = &quot;controller.statuschecker.frequencyInSeconds&quot;;
+  private static final String STATUS_CHECKER_WAIT_FOR_PUSH_TIME_IN_SECONDS = &quot;controller.statuschecker.waitForPushTimeInSeconds&quot;;
+  private static final String SERVER_ADMIN_REQUEST_TIMEOUT_SECONDS = &quot;server.request.timeoutSeconds&quot;;
+  private static final String SEGMENT_COMMIT_TIMEOUT_SECONDS = &quot;controller.realtime.segment.commit.timeoutSeconds&quot;;
+  private static final String DELETED_SEGMENTS_RETENTION_IN_DAYS = &quot;controller.deleted.segments.retentionInDays&quot;;
+  private static final String TASK_MANAGER_FREQUENCY_IN_SECONDS = &quot;controller.task.frequencyInSeconds&quot;;
+  private static final String TABLE_MIN_REPLICAS = &quot;table.minReplicas&quot;;
+  private static final String ENABLE_SPLIT_COMMIT = &quot;controller.enable.split.commit&quot;;
+  private static final String JERSEY_ADMIN_API_PORT = &quot;jersey.admin.api.port&quot;;
+  private static final String JERSEY_ADMIN_IS_PRIMARY = &quot;jersey.admin.isprimary&quot;;
+  private static final String ACCESS_CONTROL_FACTORY_CLASS = &quot;controller.admin.access.control.factory.class&quot;;
+  // Amount of the time the segment can take from the beginning of upload to the end of upload. Used when parallel push
+  // protection is enabled. If the upload does not finish within the timeout, next upload can override the previous one.
+  private static final String SEGMENT_UPLOAD_TIMEOUT_IN_MILLIS = &quot;controller.segment.upload.timeoutInMillis&quot;;
+
+  private static final int DEFAULT_RETENTION_CONTROLLER_FREQUENCY_IN_SECONDS = 6 * 60 * 60; // 6 Hours.
+  private static final int DEFAULT_VALIDATION_CONTROLLER_FREQUENCY_IN_SECONDS = 60 * 60; // 1 Hour.
+  private static final int DEFAULT_STATUS_CONTROLLER_FREQUENCY_IN_SECONDS = 5 * 60; // 5 minutes
+  private static final int DEFAULT_STATUS_CONTROLLER_WAIT_FOR_PUSH_TIME_IN_SECONDS = 10 * 60; // 10 minutes
+  private static final long DEFAULT_EXTERNAL_VIEW_ONLINE_TO_OFFLINE_TIMEOUT_MILLIS = 120_000L; // 2 minutes
+  private static final int DEFAULT_SERVER_ADMIN_REQUEST_TIMEOUT_SECONDS = 30;
+  private static final int DEFAULT_DELETED_SEGMENTS_RETENTION_IN_DAYS = 7;
+  private static final int DEFAULT_TASK_MANAGER_FREQUENCY_IN_SECONDS = -1; // Disabled
+  private static final int DEFAULT_TABLE_MIN_REPLICAS = 1;
+  private static final boolean DEFAULT_ENABLE_SPLIT_COMMIT = false;
+  private static final int DEFAULT_JERSEY_ADMIN_PORT = 21000;
+  private static final String DEFAULT_ACCESS_CONTROL_FACTORY_CLASS =
+      &quot;com.linkedin.pinot.controller.api.access.AllowAllAccessFactory&quot;;
+  private static final long DEFAULT_SEGMENT_UPLOAD_TIMEOUT_IN_MILLIS = 600_000L; // 10 minutes
+
+  public ControllerConf(File file) throws ConfigurationException {
+<span class="nc" id="L74">    super(file);</span>
+<span class="nc" id="L75">  }</span>
+
+  public ControllerConf() {
+<span class="fc" id="L78">    super();</span>
+<span class="fc" id="L79">  }</span>
+
+  public static String constructDownloadUrl(String tableName, String segmentName, String vip) {
+    try {
+<span class="fc" id="L83">      return StringUtil.join(&quot;/&quot;, vip, &quot;segments&quot;, tableName, URLEncoder.encode(segmentName, &quot;UTF-8&quot;));</span>
+<span class="nc" id="L84">    } catch (UnsupportedEncodingException e) {</span>
+      // Shouldn't happen
+<span class="nc" id="L86">      throw new AssertionError(&quot;UTF-8 encoding should always be supported&quot;, e);</span>
+    }
+  }
+
+  public void setSplitCommit(boolean isSplitCommit) {
+<span class="nc" id="L91">    setProperty(ENABLE_SPLIT_COMMIT, isSplitCommit);</span>
+<span class="nc" id="L92">  }</span>
+
+  public void setQueryConsolePath(String path) {
+<span class="nc" id="L95">    setProperty(CONSOLE_WEBAPP_ROOT_PATH, path);</span>
+<span class="nc" id="L96">  }</span>
+
+  public String getQueryConsole() {
+<span class="pc bpc" id="L99" title="1 of 2 branches missed.">    if (containsKey(CONSOLE_WEBAPP_ROOT_PATH)) {</span>
+<span class="nc" id="L100">      return (String) getProperty(CONSOLE_WEBAPP_ROOT_PATH);</span>
+    }
+<span class="fc" id="L102">    return ControllerConf.class.getClassLoader().getResource(&quot;webapp&quot;).toExternalForm();</span>
+  }
+
+  public void setJerseyAdminPrimary(String jerseyAdminPrimary) {
+<span class="nc" id="L106">    setProperty(JERSEY_ADMIN_IS_PRIMARY, jerseyAdminPrimary);</span>
+<span class="nc" id="L107">  }</span>
+
+  public void setHelixClusterName(String clusterName) {
+<span class="fc" id="L110">    setProperty(HELIX_CLUSTER_NAME, clusterName);</span>
+<span class="fc" id="L111">  }</span>
+
+  public void setControllerHost(String host) {
+<span class="fc" id="L114">    setProperty(CONTROLLER_HOST, host);</span>
+<span class="fc" id="L115">  }</span>
+
+  public void setControllerVipHost(String vipHost) {
+<span class="fc" id="L118">    setProperty(CONTROLLER_VIP_HOST, vipHost);</span>
+<span class="fc" id="L119">  }</span>
+
+  public void setControllerVipPort(String vipPort) {
+<span class="nc" id="L122">    setProperty(CONTROLLER_VIP_PORT, vipPort);</span>
+<span class="nc" id="L123">  }</span>
+
+  public void setControllerVipProtocol(String vipProtocol) {
+<span class="nc" id="L126">    setProperty(CONTROLLER_VIP_PROTOCOL, vipProtocol);</span>
+<span class="nc" id="L127">  }</span>
+
+  public void setControllerPort(String port) {
+<span class="fc" id="L130">    setProperty(CONTROLLER_PORT, port);</span>
+<span class="fc" id="L131">  }</span>
+
+  public void setDataDir(String dataDir) {
+<span class="fc" id="L134">    setProperty(DATA_DIR, dataDir);</span>
+<span class="fc" id="L135">  }</span>
+
+  public void setRealtimeSegmentCommitTimeoutSeconds(int timeoutSec) {
+<span class="nc" id="L138">    setProperty(SEGMENT_COMMIT_TIMEOUT_SECONDS, Integer.toString(timeoutSec));</span>
+<span class="nc" id="L139">  }</span>
+
+  public void setUpdateSegmentStateModel(String updateStateModel) {
+<span class="nc" id="L142">    setProperty(UPDATE_SEGMENT_STATE_MODEL, updateStateModel);</span>
+<span class="nc" id="L143">  }</span>
+
+  public void setZkStr(String zkStr) {
+<span class="fc" id="L146">    setProperty(ZK_STR, zkStr);</span>
+<span class="fc" id="L147">  }</span>
+
+  // A boolean to decide whether Jersey API should be the primary one. For now, we set this to be false,
+  // but we turn it on to true when we are sure that jersey api has no backward compatibility problems.
+  public boolean isJerseyAdminPrimary() {
+<span class="nc" id="L152">    return getBoolean(JERSEY_ADMIN_IS_PRIMARY, true);</span>
+  }
+
+  public String getHelixClusterName() {
+<span class="fc" id="L156">    return (String) getProperty(HELIX_CLUSTER_NAME);</span>
+  }
+
+  public String getControllerHost() {
+<span class="fc" id="L160">    return (String) getProperty(CONTROLLER_HOST);</span>
+  }
+
+  public String getControllerPort() {
+<span class="fc" id="L164">    return (String) getProperty(CONTROLLER_PORT);</span>
+  }
+
+  public String getDataDir() {
+<span class="fc" id="L168">    return (String) getProperty(DATA_DIR);</span>
+  }
+
+  public int getSegmentCommitTimeoutSeconds() {
+<span class="pc bpc" id="L172" title="1 of 2 branches missed.">    if (containsKey(SEGMENT_COMMIT_TIMEOUT_SECONDS)) {</span>
+<span class="nc" id="L173">      return Integer.parseInt((String)getProperty(SEGMENT_COMMIT_TIMEOUT_SECONDS));</span>
+    }
+<span class="fc" id="L175">    return SegmentCompletionProtocol.getDefaultMaxSegmentCommitTimeSeconds();</span>
+  }
+
+  public boolean isUpdateSegmentStateModel() {
+<span class="pc bpc" id="L179" title="1 of 2 branches missed.">    if (containsKey(UPDATE_SEGMENT_STATE_MODEL)) {</span>
+<span class="nc" id="L180">      return Boolean.parseBoolean(getProperty(UPDATE_SEGMENT_STATE_MODEL).toString());</span>
+    }
+<span class="fc" id="L182">    return false;   // Default is to leave the statemodel untouched.</span>
+  }
+
+  public String generateVipUrl() {
+<span class="fc" id="L186">    return getControllerVipProtocol() + &quot;://&quot; + getControllerVipHost() + &quot;:&quot; + getControllerVipPort();</span>
+  }
+
+  public String getZkStr() {
+<span class="fc" id="L190">    Object zkAddressObj = getProperty(ZK_STR);</span>
+
+    // The set method converted comma separated string into ArrayList, so need to convert back to String here.
+<span class="pc bpc" id="L193" title="1 of 2 branches missed.">    if (zkAddressObj instanceof ArrayList) {</span>
+<span class="nc" id="L194">      List&lt;String&gt; zkAddressList = (ArrayList&lt;String&gt;) zkAddressObj;</span>
+<span class="nc" id="L195">      String[] zkAddress =  zkAddressList.toArray(new String[0]);</span>
+<span class="nc" id="L196">      return StringUtil.join(&quot;,&quot;, zkAddress);</span>
+<span class="pc bpc" id="L197" title="1 of 2 branches missed.">    } else if (zkAddressObj instanceof String) {</span>
+<span class="fc" id="L198">      return (String) zkAddressObj;</span>
+    } else {
+<span class="nc" id="L200">      throw new RuntimeException(&quot;Unexpected data type for zkAddress PropertiesConfiguration, expecting String but got &quot;</span>
+              + zkAddressObj.getClass().getName());
+    }
+  }
+
+  @Override
+  public String toString() {
+<span class="nc" id="L207">    return super.toString();</span>
+  }
+
+  public boolean getAcceptSplitCommit() {
+<span class="fc" id="L211">    return getBoolean(ENABLE_SPLIT_COMMIT, DEFAULT_ENABLE_SPLIT_COMMIT);</span>
+  }
+
+  public String getControllerVipHost() {
+<span class="pc bpc" id="L215" title="1 of 4 branches missed.">    if (containsKey(CONTROLLER_VIP_HOST) &amp;&amp; ((String) getProperty(CONTROLLER_VIP_HOST)).length() &gt; 0) {</span>
+<span class="fc" id="L216">      return (String) getProperty(CONTROLLER_VIP_HOST);</span>
+    }
+<span class="fc" id="L218">    return (String) getProperty(CONTROLLER_HOST);</span>
+  }
+
+  public String getControllerVipPort() {
+<span class="pc bpc" id="L222" title="3 of 4 branches missed.">    if (containsKey(CONTROLLER_VIP_PORT) &amp;&amp; ((String) getProperty(CONTROLLER_VIP_PORT)).length() &gt; 0) {</span>
+<span class="nc" id="L223">      return (String) getProperty(CONTROLLER_VIP_PORT);</span>
+    }
+<span class="fc" id="L225">    return getControllerPort();</span>
+  }
+
+  public String getControllerVipProtocol() {
+<span class="pc bpc" id="L229" title="3 of 4 branches missed.">    if (containsKey(CONTROLLER_VIP_PROTOCOL) &amp;&amp; ((String) getProperty(CONTROLLER_VIP_PROTOCOL)).equals(&quot;https&quot;)) {</span>
+<span class="nc" id="L230">      return &quot;https&quot;;</span>
+    }
+<span class="fc" id="L232">    return &quot;http&quot;;</span>
+  }
+
+  public int getRetentionControllerFrequencyInSeconds() {
+<span class="pc bpc" id="L236" title="1 of 2 branches missed.">    if (containsKey(RETENTION_MANAGER_FREQUENCY_IN_SECONDS)) {</span>
+<span class="nc" id="L237">      return Integer.parseInt((String) getProperty(RETENTION_MANAGER_FREQUENCY_IN_SECONDS));</span>
+    }
+<span class="fc" id="L239">    return DEFAULT_RETENTION_CONTROLLER_FREQUENCY_IN_SECONDS;</span>
+  }
+
+  public void setRetentionControllerFrequencyInSeconds(int retentionFrequencyInSeconds) {
+<span class="nc" id="L243">    setProperty(RETENTION_MANAGER_FREQUENCY_IN_SECONDS, Integer.toString(retentionFrequencyInSeconds));</span>
+<span class="nc" id="L244">  }</span>
+
+  public int getValidationControllerFrequencyInSeconds() {
+<span class="pc bpc" id="L247" title="1 of 2 branches missed.">    if (containsKey(VALIDATION_MANAGER_FREQUENCY_IN_SECONDS)) {</span>
+<span class="nc" id="L248">      return Integer.parseInt((String) getProperty(VALIDATION_MANAGER_FREQUENCY_IN_SECONDS));</span>
+    }
+<span class="fc" id="L250">    return DEFAULT_VALIDATION_CONTROLLER_FREQUENCY_IN_SECONDS;</span>
+  }
+
+  public void setValidationControllerFrequencyInSeconds(int validationFrequencyInSeconds) {
+<span class="nc" id="L254">    setProperty(VALIDATION_MANAGER_FREQUENCY_IN_SECONDS, Integer.toString(validationFrequencyInSeconds));</span>
+<span class="nc" id="L255">  }</span>
+
+  public int getStatusCheckerFrequencyInSeconds() {
+<span class="pc bpc" id="L258" title="1 of 2 branches missed.">    if (containsKey(STATUS_CHECKER_FREQUENCY_IN_SECONDS)) {</span>
+<span class="nc" id="L259">      return Integer.parseInt((String) getProperty(STATUS_CHECKER_FREQUENCY_IN_SECONDS));</span>
+    }
+<span class="fc" id="L261">    return DEFAULT_STATUS_CONTROLLER_FREQUENCY_IN_SECONDS;</span>
+  }
+
+  public void setStatusCheckerFrequencyInSeconds(int statusCheckerFrequencyInSeconds) {
+<span class="nc" id="L265">    setProperty(STATUS_CHECKER_FREQUENCY_IN_SECONDS, Integer.toString(statusCheckerFrequencyInSeconds));</span>
+<span class="nc" id="L266">  }</span>
+
+  public int getStatusCheckerWaitForPushTimeInSeconds() {
+<span class="pc bpc" id="L269" title="1 of 2 branches missed.">    if (containsKey(STATUS_CHECKER_WAIT_FOR_PUSH_TIME_IN_SECONDS)) {</span>
+<span class="nc" id="L270">      return Integer.parseInt((String) getProperty(STATUS_CHECKER_WAIT_FOR_PUSH_TIME_IN_SECONDS));</span>
+    }
+<span class="fc" id="L272">    return DEFAULT_STATUS_CONTROLLER_WAIT_FOR_PUSH_TIME_IN_SECONDS;</span>
+  }
+
+  public void setStatusCheckerWaitForPushTimeInSeconds(int statusCheckerWaitForPushTimeInSeconds) {
+<span class="nc" id="L276">    setProperty(STATUS_CHECKER_WAIT_FOR_PUSH_TIME_IN_SECONDS, Integer.toString(statusCheckerWaitForPushTimeInSeconds));</span>
+<span class="nc" id="L277">  }</span>
+
+
+  public long getExternalViewOnlineToOfflineTimeout() {
+<span class="pc bpc" id="L281" title="1 of 2 branches missed.">    if (containsKey(EXTERNAL_VIEW_ONLINE_TO_OFFLINE_TIMEOUT)) {</span>
+<span class="nc" id="L282">      return Integer.parseInt((String) getProperty(EXTERNAL_VIEW_ONLINE_TO_OFFLINE_TIMEOUT));</span>
+    }
+<span class="fc" id="L284">    return DEFAULT_EXTERNAL_VIEW_ONLINE_TO_OFFLINE_TIMEOUT_MILLIS;</span>
+  }
+
+  public void setExternalViewOnlineToOfflineTimeout(long timeout) {
+<span class="nc" id="L288">    setProperty(EXTERNAL_VIEW_ONLINE_TO_OFFLINE_TIMEOUT, timeout);</span>
+<span class="nc" id="L289">  }</span>
+
+  public boolean tenantIsolationEnabled() {
+<span class="fc bfc" id="L292" title="All 2 branches covered.">    if (containsKey(CLUSTER_TENANT_ISOLATION_ENABLE)) {</span>
+<span class="fc" id="L293">      return Boolean.parseBoolean(getProperty(CLUSTER_TENANT_ISOLATION_ENABLE).toString());</span>
+    }
+<span class="fc" id="L295">    return true;</span>
+  }
+
+  public void setTenantIsolationEnabled(boolean isSingleTenant) {
+<span class="fc" id="L299">    setProperty(CLUSTER_TENANT_ISOLATION_ENABLE, isSingleTenant);</span>
+<span class="fc" id="L300">  }</span>
+
+  public void setServerAdminRequestTimeoutSeconds(int timeoutSeconds) {
+<span class="nc" id="L303">    setProperty(SERVER_ADMIN_REQUEST_TIMEOUT_SECONDS, timeoutSeconds);</span>
+<span class="nc" id="L304">  }</span>
+
+  public int getServerAdminRequestTimeoutSeconds() {
+<span class="fc" id="L307">    return getInt(SERVER_ADMIN_REQUEST_TIMEOUT_SECONDS, DEFAULT_SERVER_ADMIN_REQUEST_TIMEOUT_SECONDS);</span>
+  }
+
+  public int getDeletedSegmentsRetentionInDays() {
+<span class="fc" id="L311">    return getInt(DELETED_SEGMENTS_RETENTION_IN_DAYS, DEFAULT_DELETED_SEGMENTS_RETENTION_IN_DAYS);</span>
+  }
+
+  public void setDeletedSegmentsRetentionInDays(int retentionInDays) {
+<span class="nc" id="L315">    setProperty(DELETED_SEGMENTS_RETENTION_IN_DAYS, retentionInDays);</span>
+<span class="nc" id="L316">  }</span>
+
+  public int getTaskManagerFrequencyInSeconds() {
+<span class="fc" id="L319">    return getInt(TASK_MANAGER_FREQUENCY_IN_SECONDS, DEFAULT_TASK_MANAGER_FREQUENCY_IN_SECONDS);</span>
+  }
+
+  public void setTaskManagerFrequencyInSeconds(int frequencyInSeconds) {
+<span class="nc" id="L323">    setProperty(TASK_MANAGER_FREQUENCY_IN_SECONDS, Integer.toString(frequencyInSeconds));</span>
+<span class="nc" id="L324">  }</span>
+
+  public int getDefaultTableMinReplicas() {
+<span class="fc" id="L327">    return getInt(TABLE_MIN_REPLICAS, DEFAULT_TABLE_MIN_REPLICAS);</span>
+  }
+
+  public void setTableMinReplicas(int minReplicas) {
+<span class="fc" id="L331">    setProperty(TABLE_MIN_REPLICAS, minReplicas);</span>
+<span class="fc" id="L332">  }</span>
+
+  public String getJerseyAdminApiPort() {
+<span class="nc" id="L335">    return getString(JERSEY_ADMIN_API_PORT, String.valueOf(DEFAULT_JERSEY_ADMIN_PORT));</span>
+  }
+
+  public String getAccessControlFactoryClass() {
+<span class="fc" id="L339">    return getString(ACCESS_CONTROL_FACTORY_CLASS, DEFAULT_ACCESS_CONTROL_FACTORY_CLASS);</span>
+  }
+
+  public void setAccessControlFactoryClass(String accessControlFactoryClass) {
+<span class="fc" id="L343">    setProperty(ACCESS_CONTROL_FACTORY_CLASS, accessControlFactoryClass);</span>
+<span class="fc" id="L344">  }</span>
+
+  public long getSegmentUploadTimeoutInMillis() {
+<span class="nc" id="L347">    return getLong(SEGMENT_UPLOAD_TIMEOUT_IN_MILLIS, DEFAULT_SEGMENT_UPLOAD_TIMEOUT_IN_MILLIS);</span>
+  }
+
+  public void setSegmentUploadTimeoutInMillis(long segmentUploadTimeoutInMillis) {
+<span class="nc" id="L351">    setProperty(SEGMENT_UPLOAD_TIMEOUT_IN_MILLIS, segmentUploadTimeoutInMillis);</span>
+<span class="nc" id="L352">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

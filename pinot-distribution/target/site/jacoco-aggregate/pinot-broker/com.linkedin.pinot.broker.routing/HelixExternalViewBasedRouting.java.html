@@ -1,0 +1,579 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>HelixExternalViewBasedRouting.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-broker</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.broker.routing</a> &gt; <span class="el_source">HelixExternalViewBasedRouting.java</span></div><h1>HelixExternalViewBasedRouting.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.linkedin.pinot.broker.routing;
+
+import com.google.common.collect.Sets;
+import com.linkedin.pinot.broker.routing.builder.RoutingTableBuilder;
+import com.linkedin.pinot.common.config.TableConfig;
+import com.linkedin.pinot.common.config.TableNameBuilder;
+import com.linkedin.pinot.common.metrics.BrokerMeter;
+import com.linkedin.pinot.common.metrics.BrokerMetrics;
+import com.linkedin.pinot.common.metrics.BrokerTimer;
+import com.linkedin.pinot.common.utils.CommonConstants;
+import com.linkedin.pinot.common.utils.EqualityUtils;
+import com.linkedin.pinot.common.utils.NetUtil;
+import com.linkedin.pinot.common.utils.helix.HelixHelper;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import org.apache.commons.configuration.Configuration;
+import org.apache.helix.AccessOption;
+import org.apache.helix.HelixDataAccessor;
+import org.apache.helix.HelixManager;
+import org.apache.helix.PropertyKey;
+import org.apache.helix.ZNRecord;
+import org.apache.helix.model.ExternalView;
+import org.apache.helix.model.InstanceConfig;
+import org.apache.helix.store.zk.ZkHelixPropertyStore;
+import org.apache.zookeeper.data.Stat;
+import org.json.JSONArray;
+import org.json.JSONObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/*
+ * TODO
+ * Would be better to not have the external view based routing not aware of the fact that there are HLC and LLC
+ * implementations. A better way to do it would be to have a RoutingTable implementation that merges the output
+ * of an offline routing table and a realtime routing table, with the realtime routing table being aware of the
+ * fact that there is both an hlc and llc one.
+ */
+public class HelixExternalViewBasedRouting implements RoutingTable {
+<span class="fc" id="L63">  private static final Logger LOGGER = LoggerFactory.getLogger(HelixExternalViewBasedRouting.class);</span>
+
+  private final Map&lt;String,RoutingTableBuilder&gt; _routingTableBuilderMap;
+
+<span class="fc" id="L67">  private final Map&lt;String, Integer&gt; _lastKnownExternalViewVersionMap = new ConcurrentHashMap&lt;&gt;();</span>
+<span class="fc" id="L68">  private final Map&lt;String, Map&lt;String, InstanceConfig&gt;&gt; _lastKnownInstanceConfigsForTable = new ConcurrentHashMap&lt;&gt;();</span>
+<span class="fc" id="L69">  private final Map&lt;String, InstanceConfig&gt; _lastKnownInstanceConfigs = new ConcurrentHashMap&lt;&gt;();</span>
+<span class="fc" id="L70">  private final Map&lt;String, Set&lt;String&gt;&gt; _tablesForInstance = new ConcurrentHashMap&lt;&gt;();</span>
+
+  private final HelixExternalViewBasedTimeBoundaryService _timeBoundaryService;
+  private final HelixManager _helixManager;
+  private static final int INVALID_EXTERNAL_VIEW_VERSION = Integer.MIN_VALUE;
+
+  private BrokerMetrics _brokerMetrics;
+
+  private Configuration _configuration;
+
+  private ZkHelixPropertyStore&lt;ZNRecord&gt; _propertyStore;
+
+  private RoutingTableBuilderFactory _routingTableBuilderFactory;
+
+  public HelixExternalViewBasedRouting(ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore, HelixManager helixManager,
+<span class="fc" id="L85">      Configuration configuration) {</span>
+<span class="fc" id="L86">    _propertyStore = propertyStore;</span>
+<span class="fc" id="L87">    _configuration = configuration;</span>
+<span class="fc" id="L88">    _timeBoundaryService = new HelixExternalViewBasedTimeBoundaryService(propertyStore);</span>
+<span class="fc" id="L89">    _routingTableBuilderMap = new HashMap&lt;&gt;();</span>
+<span class="fc" id="L90">    _helixManager = helixManager;</span>
+<span class="fc" id="L91">    _routingTableBuilderFactory = new RoutingTableBuilderFactory(_configuration, propertyStore);</span>
+<span class="fc" id="L92">  }</span>
+
+  @Override
+  public Map&lt;String, List&lt;String&gt;&gt; getRoutingTable(RoutingTableLookupRequest request) {
+<span class="fc" id="L96">    String tableName = request.getTableName();</span>
+<span class="fc" id="L97">    RoutingTableBuilder routingTableBuilder = _routingTableBuilderMap.get(tableName);</span>
+<span class="fc" id="L98">    return routingTableBuilder.getRoutingTable(request);</span>
+  }
+
+  @Override
+  public boolean routingTableExists(String tableName) {
+<span class="nc" id="L103">    return _routingTableBuilderMap.containsKey(tableName);</span>
+  }
+
+
+  public void setBrokerMetrics(BrokerMetrics brokerMetrics) {
+<span class="fc" id="L108">    _brokerMetrics = brokerMetrics;</span>
+<span class="fc" id="L109">  }</span>
+
+  public void markDataResourceOnline(TableConfig tableConfig, ExternalView externalView,
+      List&lt;InstanceConfig&gt; instanceConfigList) {
+<span class="fc" id="L113">    String tableName = tableConfig.getTableName();</span>
+
+<span class="fc" id="L115">    RoutingTableBuilder routingTableBuilder = _routingTableBuilderFactory.createRoutingTableBuilder(tableConfig);</span>
+<span class="fc" id="L116">    routingTableBuilder.init(_configuration, tableConfig, _propertyStore);</span>
+<span class="fc" id="L117">    LOGGER.info(&quot;Initialized routingTableBuilder: {} for table {}&quot;, routingTableBuilder.getClass().getName(), tableName);</span>
+<span class="fc" id="L118">    _routingTableBuilderMap.put(tableName, routingTableBuilder);</span>
+
+    // Build the routing table
+<span class="fc bfc" id="L121" title="All 2 branches covered.">    if (externalView == null) {</span>
+      // It is possible for us to get a request to serve a table for which there is no external view. In this case, just
+      // keep a bogus last seen external view version to force a rebuild the next time we see an external view.
+<span class="fc" id="L124">      _lastKnownExternalViewVersionMap.put(tableName, INVALID_EXTERNAL_VIEW_VERSION);</span>
+<span class="fc" id="L125">      return;</span>
+    }
+<span class="fc" id="L127">    buildRoutingTable(tableName, externalView, instanceConfigList);</span>
+<span class="fc" id="L128">  }</span>
+
+  private boolean isRoutingTableRebuildRequired(String tableName, ExternalView externalView,
+      List&lt;InstanceConfig&gt; instanceConfigs) {
+    // In unit tests, always rebuild the routing table
+<span class="nc bnc" id="L133" title="All 2 branches missed.">    if (_helixManager == null) {</span>
+<span class="nc" id="L134">      return true;</span>
+    }
+
+    // Do we know about this table?
+<span class="nc bnc" id="L138" title="All 2 branches missed.">    if (!_lastKnownExternalViewVersionMap.containsKey(tableName)) {</span>
+<span class="nc" id="L139">      LOGGER.info(&quot;Routing table for table {} requires rebuild due to it being newly added&quot;, tableName);</span>
+<span class="nc" id="L140">      return true;</span>
+    }
+
+    // Check if the znode version changed
+<span class="nc" id="L144">    int externalViewRecordVersion = externalView.getRecord().getVersion();</span>
+<span class="nc" id="L145">    int lastKnownExternalViewVersion = _lastKnownExternalViewVersionMap.get(tableName);</span>
+
+<span class="nc bnc" id="L147" title="All 4 branches missed.">    if (externalViewRecordVersion != lastKnownExternalViewVersion || lastKnownExternalViewVersion == INVALID_EXTERNAL_VIEW_VERSION) {</span>
+<span class="nc" id="L148">      LOGGER.info(</span>
+          &quot;Routing table for table {} requires rebuild due to external view change (current version {}, last known version {})&quot;,
+          tableName, externalViewRecordVersion, lastKnownExternalViewVersion);
+<span class="nc" id="L151">      return true;</span>
+    }
+
+    // Check if there are relevant instance config changes
+<span class="nc" id="L155">    Map&lt;String, InstanceConfig&gt; lastKnownInstanceConfigs = _lastKnownInstanceConfigsForTable.get(tableName);</span>
+<span class="nc bnc" id="L156" title="All 4 branches missed.">    if (lastKnownInstanceConfigs == null || lastKnownInstanceConfigs.isEmpty()) {</span>
+<span class="nc" id="L157">      LOGGER.info(&quot;Routing table for table {} requires rebuild due to empty/null previous instance configs&quot;, tableName);</span>
+<span class="nc" id="L158">      return true;</span>
+    }
+
+    // Gather relevant incoming instance configs
+<span class="nc" id="L162">    Map&lt;String, InstanceConfig&gt; currentRelevantInstanceConfigs = new HashMap&lt;&gt;();</span>
+<span class="nc bnc" id="L163" title="All 2 branches missed.">    for (InstanceConfig incomingInstanceConfig : instanceConfigs) {</span>
+<span class="nc" id="L164">      String instanceName = incomingInstanceConfig.getInstanceName();</span>
+
+<span class="nc bnc" id="L166" title="All 2 branches missed.">      if (lastKnownInstanceConfigs.containsKey(instanceName)) {</span>
+<span class="nc" id="L167">        currentRelevantInstanceConfigs.put(instanceName, incomingInstanceConfig);</span>
+      }
+<span class="nc" id="L169">    }</span>
+
+    // Did some instances lose their configuration?
+<span class="nc bnc" id="L172" title="All 2 branches missed.">    if (lastKnownInstanceConfigs.size() != currentRelevantInstanceConfigs.size()) {</span>
+<span class="nc" id="L173">      LOGGER.info(</span>
+          &quot;Routing table for table {} requires rebuild due to having a different number of instance configs (known instance config count {}, current instance config count {})&quot;,
+          tableName, lastKnownInstanceConfigs.size(), currentRelevantInstanceConfigs.size());
+<span class="nc" id="L176">      return true;</span>
+    }
+
+    // Did some instance change state?
+<span class="nc bnc" id="L180" title="All 2 branches missed.">    for (String instanceName : lastKnownInstanceConfigs.keySet()) {</span>
+<span class="nc" id="L181">      InstanceConfig previousInstanceConfig = lastKnownInstanceConfigs.get(instanceName);</span>
+<span class="nc" id="L182">      InstanceConfig currentInstanceConfig = currentRelevantInstanceConfigs.get(instanceName);</span>
+
+      // If it's the same znode, don't bother comparing the contents of the instance configs
+<span class="nc bnc" id="L185" title="All 2 branches missed.">      if (previousInstanceConfig.getRecord().getVersion() == currentInstanceConfig.getRecord().getVersion()) {</span>
+<span class="nc" id="L186">        continue;</span>
+      }
+
+      // Check if the instance got enabled/disabled or started/stopped shutting down since the last update
+<span class="nc" id="L190">      boolean wasEnabled = previousInstanceConfig.getInstanceEnabled();</span>
+<span class="nc" id="L191">      boolean isEnabled = currentInstanceConfig.getInstanceEnabled();</span>
+
+<span class="nc" id="L193">      String wasShuttingDown =</span>
+          previousInstanceConfig.getRecord().getSimpleField(CommonConstants.Helix.IS_SHUTDOWN_IN_PROGRESS);
+<span class="nc" id="L195">      String isShuttingDown =</span>
+          currentInstanceConfig.getRecord().getSimpleField(CommonConstants.Helix.IS_SHUTDOWN_IN_PROGRESS);
+
+<span class="nc bnc" id="L198" title="All 4 branches missed.">      boolean instancesChanged =</span>
+          !EqualityUtils.isEqual(wasEnabled, isEnabled) || !EqualityUtils.isEqual(wasShuttingDown, isShuttingDown);
+
+<span class="nc bnc" id="L201" title="All 2 branches missed.">      if (instancesChanged) {</span>
+<span class="nc" id="L202">        LOGGER.info(</span>
+            &quot;Routing table for table {} requires rebuild due to at least one instance changing state (instance {} enabled: {} -&gt; {}; shutting down {} -&gt; {})&quot;,
+            tableName, instanceName, wasEnabled, isEnabled, wasShuttingDown, isShuttingDown);
+<span class="nc" id="L205">        return true;</span>
+      } else {
+        // Update the instance config in our last known instance config, since it hasn't changed
+<span class="nc" id="L208">        _lastKnownInstanceConfigs.put(instanceName, currentInstanceConfig);</span>
+<span class="nc bnc" id="L209" title="All 2 branches missed.">        for (String tableForInstance : _tablesForInstance.get(instanceName)) {</span>
+<span class="nc" id="L210">          _lastKnownInstanceConfigsForTable.get(tableForInstance).put(instanceName, currentInstanceConfig);</span>
+<span class="nc" id="L211">        }</span>
+      }
+<span class="nc" id="L213">    }</span>
+
+    // No relevant changes, no need to update the routing table
+<span class="nc" id="L216">    LOGGER.info(&quot;Routing table for table {} does not require a rebuild&quot;, tableName);</span>
+<span class="nc" id="L217">    return false;</span>
+  }
+
+  private void buildRoutingTable(String tableNameWithType, ExternalView externalView,
+      List&lt;InstanceConfig&gt; instanceConfigs) {
+    // Save the current version number of the external view to avoid unnecessary routing table updates
+<span class="fc" id="L223">    int externalViewRecordVersion = externalView.getRecord().getVersion();</span>
+<span class="fc" id="L224">    _lastKnownExternalViewVersionMap.put(tableNameWithType, externalViewRecordVersion);</span>
+
+<span class="fc" id="L226">    RoutingTableBuilder routingTableBuilder = _routingTableBuilderMap.get(tableNameWithType);</span>
+<span class="pc bpc" id="L227" title="1 of 2 branches missed.">    if(routingTableBuilder == null) {</span>
+      //TODO: warn
+<span class="nc" id="L229">      return;</span>
+    }
+<span class="fc" id="L231">    CommonConstants.Helix.TableType tableType = TableNameBuilder.getTableTypeFromTableName(tableNameWithType);</span>
+
+<span class="fc" id="L233">    LOGGER.info(&quot;Trying to compute routing table for table {} using {}&quot;, tableNameWithType, routingTableBuilder);</span>
+<span class="fc" id="L234">    long startTimeMillis = System.currentTimeMillis();</span>
+
+    try {
+<span class="fc" id="L237">      Map&lt;String, InstanceConfig&gt; relevantInstanceConfigs = new HashMap&lt;&gt;();</span>
+
+<span class="fc" id="L239">      routingTableBuilder.computeRoutingTableFromExternalView(tableNameWithType, externalView, instanceConfigs);</span>
+
+      // Keep track of the instance configs that are used in that routing table
+<span class="fc" id="L242">      updateInstanceConfigsMapFromExternalView(relevantInstanceConfigs, instanceConfigs, externalView);</span>
+
+      // Save the instance configs used so that we can avoid unnecessary routing table updates later
+<span class="fc" id="L245">      _lastKnownInstanceConfigsForTable.put(tableNameWithType, relevantInstanceConfigs);</span>
+<span class="fc bfc" id="L246" title="All 2 branches covered.">      for (InstanceConfig instanceConfig : relevantInstanceConfigs.values()) {</span>
+<span class="fc" id="L247">        _lastKnownInstanceConfigs.put(instanceConfig.getInstanceName(), instanceConfig);</span>
+<span class="fc" id="L248">      }</span>
+
+      // Ensure this table is registered with all relevant instances
+<span class="fc bfc" id="L251" title="All 2 branches covered.">      for (String instanceName : relevantInstanceConfigs.keySet()) {</span>
+<span class="fc" id="L252">        Set&lt;String&gt; tablesForCurrentInstance = _tablesForInstance.get(instanceName);</span>
+
+        // Ensure there is a table set for this instance
+<span class="fc bfc" id="L255" title="All 2 branches covered.">        if (tablesForCurrentInstance == null) {</span>
+<span class="fc" id="L256">          synchronized (_tablesForInstance) {</span>
+<span class="pc bpc" id="L257" title="1 of 2 branches missed.">            if (!_tablesForInstance.containsKey(instanceName)) {</span>
+<span class="fc" id="L258">              tablesForCurrentInstance = Sets.newConcurrentHashSet();</span>
+<span class="fc" id="L259">              _tablesForInstance.put(instanceName, tablesForCurrentInstance);</span>
+            } else {
+              // Another thread has created a table set for this instance, use it
+<span class="nc" id="L262">              tablesForCurrentInstance = _tablesForInstance.get(instanceName);</span>
+            }
+<span class="pc" id="L264">          }</span>
+        }
+
+        // Add the table to the set of tables for this instance
+<span class="fc" id="L268">        tablesForCurrentInstance.add(tableNameWithType);</span>
+<span class="fc" id="L269">      }</span>
+<span class="nc" id="L270">    } catch (Exception e) {</span>
+<span class="nc" id="L271">      _brokerMetrics.addMeteredTableValue(tableNameWithType, BrokerMeter.ROUTING_TABLE_REBUILD_FAILURES, 1L);</span>
+<span class="nc" id="L272">      LOGGER.error(&quot;Failed to compute/update the routing table&quot;, e);</span>
+
+      // Mark the routing table as needing a rebuild
+<span class="nc" id="L275">      _lastKnownExternalViewVersionMap.put(tableNameWithType, INVALID_EXTERNAL_VIEW_VERSION);</span>
+<span class="fc" id="L276">    }</span>
+
+    try {
+      // We need to compute the time boundary only in two situations:
+      // 1) We're adding/updating an offline table and there's a realtime table that we're serving
+      // 2) We're adding a new realtime table and there's already an offline table, in which case we need to update the
+      //    time boundary for the existing offline table
+<span class="fc" id="L283">      String tableForTimeBoundaryUpdate = null;</span>
+<span class="fc" id="L284">      ExternalView externalViewForTimeBoundaryUpdate = null;</span>
+
+<span class="fc bfc" id="L286" title="All 2 branches covered.">      if (tableType == CommonConstants.Helix.TableType.OFFLINE) {</span>
+        // Does a realtime table exist?
+<span class="fc" id="L288">        String realtimeTableName =</span>
+            TableNameBuilder.REALTIME.tableNameWithType(TableNameBuilder.extractRawTableName(tableNameWithType));
+<span class="pc bpc" id="L290" title="1 of 2 branches missed.">        if (_routingTableBuilderMap.containsKey(realtimeTableName)) {</span>
+<span class="nc" id="L291">          tableForTimeBoundaryUpdate = tableNameWithType;</span>
+<span class="nc" id="L292">          externalViewForTimeBoundaryUpdate = externalView;</span>
+        }
+      }
+
+<span class="fc bfc" id="L296" title="All 2 branches covered.">      if (tableType == CommonConstants.Helix.TableType.REALTIME) {</span>
+        // Does an offline table exist?
+<span class="fc" id="L298">        String offlineTableName =</span>
+            TableNameBuilder.OFFLINE.tableNameWithType(TableNameBuilder.extractRawTableName(tableNameWithType));
+<span class="pc bpc" id="L300" title="1 of 2 branches missed.">        if (_routingTableBuilderMap.containsKey(offlineTableName)) {</span>
+          // Is there no time boundary?
+<span class="pc bpc" id="L302" title="1 of 2 branches missed.">          if (_timeBoundaryService.getTimeBoundaryInfoFor(offlineTableName) == null) {</span>
+<span class="fc" id="L303">            tableForTimeBoundaryUpdate = offlineTableName;</span>
+<span class="fc" id="L304">            externalViewForTimeBoundaryUpdate = fetchExternalView(offlineTableName);</span>
+          }
+        }
+      }
+
+<span class="fc bfc" id="L309" title="All 2 branches covered.">      if (tableForTimeBoundaryUpdate != null) {</span>
+<span class="fc" id="L310">        updateTimeBoundary(tableForTimeBoundaryUpdate, externalViewForTimeBoundaryUpdate);</span>
+      } else {
+<span class="fc" id="L312">        LOGGER.info(&quot;No need to update time boundary for table {}&quot;, tableNameWithType);</span>
+      }
+<span class="nc" id="L314">    } catch (Exception e) {</span>
+<span class="nc" id="L315">      LOGGER.error(&quot;Failed to update the TimeBoundaryService&quot;, e);</span>
+<span class="fc" id="L316">    }</span>
+
+<span class="fc" id="L318">    long updateTime = System.currentTimeMillis() - startTimeMillis;</span>
+
+<span class="fc bfc" id="L320" title="All 2 branches covered.">    if (_brokerMetrics != null) {</span>
+<span class="fc" id="L321">      _brokerMetrics.addTimedValue(BrokerTimer.ROUTING_TABLE_UPDATE_TIME, updateTime, TimeUnit.MILLISECONDS);</span>
+    }
+
+<span class="fc" id="L324">    LOGGER.info(&quot;Routing table update for table {} completed in {} ms&quot;, tableNameWithType, updateTime);</span>
+<span class="fc" id="L325">  }</span>
+
+  protected void updateTimeBoundary(String tableName, ExternalView externalView) {
+<span class="nc" id="L328">    LOGGER.info(&quot;Trying to compute time boundary service for table {}&quot;, tableName);</span>
+<span class="nc" id="L329">    long timeBoundaryUpdateStart = System.currentTimeMillis();</span>
+<span class="nc" id="L330">    _timeBoundaryService.updateTimeBoundaryService(externalView);</span>
+<span class="nc" id="L331">    long timeBoundaryUpdateEnd = System.currentTimeMillis();</span>
+<span class="nc" id="L332">    LOGGER.info(&quot;Computed the time boundary for table {} in {} ms&quot;, tableName,</span>
+        (timeBoundaryUpdateEnd - timeBoundaryUpdateStart));
+<span class="nc" id="L334">  }</span>
+
+  protected ExternalView fetchExternalView(String table) {
+<span class="nc" id="L337">    return HelixHelper.getExternalViewForResource(_helixManager.getClusterManagmentTool(),</span>
+        _helixManager.getClusterName(), table);
+  }
+
+  private void updateInstanceConfigsMapFromExternalView(Map&lt;String, InstanceConfig&gt; relevantInstanceConfigs,
+      List&lt;InstanceConfig&gt; instanceConfigs, ExternalView externalView) {
+<span class="fc" id="L343">    Set&lt;String&gt; relevantInstanceNames = new HashSet&lt;&gt;();</span>
+
+    // Gather all the instance names contained in the external view
+<span class="fc bfc" id="L346" title="All 2 branches covered.">    for (String partitionName : externalView.getPartitionSet()) {</span>
+<span class="fc" id="L347">      relevantInstanceNames.addAll(externalView.getStateMap(partitionName).keySet());</span>
+<span class="fc" id="L348">    }</span>
+
+    // Update the relevant instance config map with the instance configs given
+<span class="fc bfc" id="L351" title="All 2 branches covered.">    for (InstanceConfig instanceConfig : instanceConfigs) {</span>
+<span class="fc bfc" id="L352" title="All 2 branches covered.">      if (relevantInstanceNames.contains(instanceConfig.getInstanceName())) {</span>
+<span class="fc" id="L353">        relevantInstanceConfigs.put(instanceConfig.getInstanceName(), instanceConfig);</span>
+      }
+<span class="fc" id="L355">    }</span>
+<span class="fc" id="L356">  }</span>
+
+  public void markDataResourceOffline(String tableName) {
+<span class="nc" id="L359">    LOGGER.info(&quot;Trying to remove data table from broker for {}&quot;, tableName);</span>
+<span class="nc" id="L360">    _routingTableBuilderMap.remove(tableName);</span>
+<span class="nc" id="L361">    _lastKnownExternalViewVersionMap.remove(tableName);</span>
+<span class="nc" id="L362">    _lastKnownInstanceConfigsForTable.remove(tableName);</span>
+<span class="nc" id="L363">    _timeBoundaryService.remove(tableName);</span>
+
+    // Remove table from all instances
+<span class="nc" id="L366">    synchronized (_tablesForInstance) {</span>
+<span class="nc" id="L367">      Iterator&lt;Map.Entry&lt;String, Set&lt;String&gt;&gt;&gt; iterator = _tablesForInstance.entrySet().iterator();</span>
+<span class="nc bnc" id="L368" title="All 2 branches missed.">      while (iterator.hasNext()) {</span>
+<span class="nc" id="L369">        Map.Entry&lt;String, Set&lt;String&gt;&gt; entry = iterator.next();</span>
+<span class="nc" id="L370">        entry.getValue().remove(tableName);</span>
+<span class="nc bnc" id="L371" title="All 2 branches missed.">        if (entry.getValue().isEmpty()) {</span>
+<span class="nc" id="L372">          _lastKnownInstanceConfigs.remove(entry.getKey());</span>
+<span class="nc" id="L373">          iterator.remove();</span>
+        }
+<span class="nc" id="L375">      }</span>
+
+<span class="nc" id="L377">    }</span>
+<span class="nc" id="L378">  }</span>
+
+  public void processExternalViewChange() {
+<span class="fc" id="L381">    long startTime = System.currentTimeMillis();</span>
+
+    // Get list of tables that we're serving
+<span class="fc" id="L384">    List&lt;String&gt; tablesServed = new ArrayList&lt;&gt;(_lastKnownExternalViewVersionMap.keySet());</span>
+
+<span class="fc bfc" id="L386" title="All 2 branches covered.">    if (tablesServed.isEmpty()) {</span>
+<span class="fc" id="L387">      return;</span>
+    }
+
+    // Build list of external views to fetch
+<span class="fc" id="L391">    HelixDataAccessor helixDataAccessor = _helixManager.getHelixDataAccessor();</span>
+<span class="fc" id="L392">    PropertyKey.Builder propertyKeyBuilder = helixDataAccessor.keyBuilder();</span>
+
+<span class="fc" id="L394">    List&lt;String&gt; externalViewPaths = new ArrayList&lt;&gt;(tablesServed.size());</span>
+<span class="fc bfc" id="L395" title="All 2 branches covered.">    for (String tableName : tablesServed) {</span>
+<span class="fc" id="L396">      PropertyKey propertyKey = propertyKeyBuilder.externalView(tableName);</span>
+<span class="fc" id="L397">      externalViewPaths.add(propertyKey.getPath());</span>
+<span class="fc" id="L398">    }</span>
+
+    // Get znode stats for all tables that we're serving
+<span class="fc" id="L401">    long statStartTime = System.currentTimeMillis();</span>
+<span class="fc" id="L402">    Stat[] externalViewStats =</span>
+        helixDataAccessor.getBaseDataAccessor().getStats(externalViewPaths, AccessOption.PERSISTENT);
+<span class="fc" id="L404">    long statEndTime = System.currentTimeMillis();</span>
+
+    // Make a list of external views that changed
+<span class="fc" id="L407">    List&lt;String&gt; tablesThatChanged = new ArrayList&lt;&gt;();</span>
+
+<span class="fc" id="L409">    long evCheckStartTime = System.currentTimeMillis();</span>
+<span class="fc bfc" id="L410" title="All 2 branches covered.">    for (int i = 0; i &lt; externalViewStats.length; i++) {</span>
+<span class="fc" id="L411">      Stat externalViewStat = externalViewStats[i];</span>
+<span class="pc bpc" id="L412" title="1 of 2 branches missed.">      if (externalViewStat != null) {</span>
+<span class="fc" id="L413">        String currentTableName = tablesServed.get(i);</span>
+<span class="fc" id="L414">        int currentExternalViewVersion = externalViewStat.getVersion();</span>
+<span class="fc" id="L415">        int lastKnownExternalViewVersion = _lastKnownExternalViewVersionMap.get(currentTableName);</span>
+
+<span class="fc bfc" id="L417" title="All 2 branches covered.">        if (lastKnownExternalViewVersion != currentExternalViewVersion) {</span>
+<span class="fc" id="L418">          tablesThatChanged.add(currentTableName);</span>
+        }
+      }
+    }
+<span class="fc" id="L422">    long evCheckEndTime = System.currentTimeMillis();</span>
+
+    // Fetch the instance configs and update the routing tables for the tables that changed
+<span class="fc" id="L425">    long icFetchTime = 0;</span>
+<span class="fc" id="L426">    long rebuildStartTime = System.currentTimeMillis();</span>
+<span class="fc bfc" id="L427" title="All 2 branches covered.">    if (!tablesThatChanged.isEmpty()) {</span>
+      // Fetch instance configs
+<span class="fc" id="L429">      long icFetchStart = System.currentTimeMillis();</span>
+<span class="fc" id="L430">      List&lt;InstanceConfig&gt; instanceConfigs = helixDataAccessor.getChildValues(propertyKeyBuilder.instanceConfigs());</span>
+<span class="fc" id="L431">      long icFetchEnd = System.currentTimeMillis();</span>
+<span class="fc" id="L432">      icFetchTime = icFetchEnd - icFetchStart;</span>
+
+<span class="fc bfc" id="L434" title="All 2 branches covered.">      for (String tableThatChanged : tablesThatChanged) {</span>
+        // We ignore the external views given by Helix on external view change and fetch the latest version as our
+        // version of Helix (0.6.5) does not batch external view change messages.
+<span class="fc" id="L437">        ExternalView externalView = helixDataAccessor.getProperty(propertyKeyBuilder.externalView(tableThatChanged));</span>
+
+<span class="fc" id="L439">        buildRoutingTable(tableThatChanged, externalView, instanceConfigs);</span>
+<span class="fc" id="L440">      }</span>
+    }
+<span class="fc" id="L442">    long rebuildEndTime = System.currentTimeMillis();</span>
+
+<span class="fc" id="L444">    long endTime = System.currentTimeMillis();</span>
+<span class="fc" id="L445">    LOGGER.info(</span>
+        &quot;Processed external view change in {} ms (stat {} ms, EV check {} ms, IC fetch {} ms, rebuild {} ms), routing tables rebuilt for tables {}, {} / {} routing tables rebuilt&quot;,
+        (endTime - startTime), (statEndTime - statStartTime), (evCheckEndTime - evCheckStartTime), icFetchTime,
+        (rebuildEndTime - rebuildStartTime), tablesThatChanged, tablesThatChanged.size(), tablesServed.size());
+<span class="fc" id="L449">  }</span>
+
+  public void processInstanceConfigChange() {
+<span class="fc" id="L452">    long startTime = System.currentTimeMillis();</span>
+
+    // Get stats for all relevant instance configs
+<span class="fc" id="L455">    HelixDataAccessor helixDataAccessor = _helixManager.getHelixDataAccessor();</span>
+<span class="fc" id="L456">    PropertyKey.Builder propertyKeyBuilder = helixDataAccessor.keyBuilder();</span>
+<span class="fc" id="L457">    List&lt;String&gt; instancesUsed = new ArrayList&lt;&gt;(_tablesForInstance.keySet());</span>
+<span class="fc" id="L458">    List&lt;String&gt; instancePaths = new ArrayList&lt;&gt;(instancesUsed.size());</span>
+
+<span class="pc bpc" id="L460" title="1 of 2 branches missed.">    for (String instanceName : instancesUsed) {</span>
+<span class="nc" id="L461">      PropertyKey propertyKey = propertyKeyBuilder.instanceConfig(instanceName);</span>
+<span class="nc" id="L462">      instancePaths.add(propertyKey.getPath());</span>
+<span class="nc" id="L463">    }</span>
+
+<span class="pc bpc" id="L465" title="1 of 2 branches missed.">    if (instancePaths.isEmpty()) {</span>
+<span class="fc" id="L466">      return;</span>
+    }
+
+<span class="nc" id="L469">    long statFetchStart = System.currentTimeMillis();</span>
+<span class="nc" id="L470">    Map&lt;String, Stat&gt; instanceConfigStatMap = new HashMap&lt;&gt;();</span>
+<span class="nc" id="L471">    Stat[] instanceConfigStats =</span>
+        helixDataAccessor.getBaseDataAccessor().getStats(instancePaths, AccessOption.PERSISTENT);
+<span class="nc" id="L473">    long statFetchEnd = System.currentTimeMillis();</span>
+
+    // Make a list of instance configs that changed
+<span class="nc" id="L476">    long icConfigCheckStart = System.currentTimeMillis();</span>
+<span class="nc" id="L477">    List&lt;String&gt; instancesThatChanged = new ArrayList&lt;&gt;();</span>
+
+<span class="nc bnc" id="L479" title="All 2 branches missed.">    for (int i = 0; i &lt; instanceConfigStats.length; i++) {</span>
+<span class="nc" id="L480">      Stat instanceConfigStat = instanceConfigStats[i];</span>
+<span class="nc bnc" id="L481" title="All 2 branches missed.">      if (instanceConfigStat != null) {</span>
+<span class="nc" id="L482">        String instanceName = instancesUsed.get(i);</span>
+<span class="nc" id="L483">        int currentInstanceConfigVersion = instanceConfigStat.getVersion();</span>
+<span class="nc" id="L484">        int lastKnownInstanceConfigVersion = _lastKnownInstanceConfigs.get(instanceName).getRecord().getVersion();</span>
+
+<span class="nc bnc" id="L486" title="All 2 branches missed.">        if (currentInstanceConfigVersion != lastKnownInstanceConfigVersion) {</span>
+<span class="nc" id="L487">          instancesThatChanged.add(instanceName);</span>
+        }
+<span class="nc" id="L489">        instanceConfigStatMap.put(instanceName, instanceConfigStat);</span>
+      }
+    }
+
+    // Make a list of all tables affected by the instance config changes
+<span class="nc" id="L494">    Set&lt;String&gt; affectedTables = new HashSet&lt;&gt;();</span>
+<span class="nc bnc" id="L495" title="All 2 branches missed.">    for (String instanceName : instancesThatChanged) {</span>
+<span class="nc" id="L496">      affectedTables.addAll(_tablesForInstance.get(instanceName));</span>
+<span class="nc" id="L497">    }</span>
+<span class="nc" id="L498">    long icConfigCheckEnd = System.currentTimeMillis();</span>
+
+    // Update the routing tables
+<span class="nc" id="L501">    long icFetchTime = 0;</span>
+<span class="nc" id="L502">    long evFetchTime = 0;</span>
+<span class="nc" id="L503">    long rebuildCheckTime = 0;</span>
+<span class="nc" id="L504">    long buildTime = 0;</span>
+<span class="nc" id="L505">    int routingTablesRebuiltCount = 0;</span>
+<span class="nc bnc" id="L506" title="All 2 branches missed.">    if (!affectedTables.isEmpty()) {</span>
+<span class="nc" id="L507">      long icFetchStart = System.currentTimeMillis();</span>
+<span class="nc" id="L508">      List&lt;InstanceConfig&gt; instanceConfigs = helixDataAccessor.getChildValues(propertyKeyBuilder.instanceConfigs());</span>
+      // Helix does not set the version field, we need to set it explicitly
+<span class="nc bnc" id="L510" title="All 2 branches missed.">      for (InstanceConfig instanceConfig : instanceConfigs) {</span>
+<span class="nc" id="L511">        Stat stat = instanceConfigStatMap.get(instanceConfig.getInstanceName());</span>
+<span class="nc bnc" id="L512" title="All 2 branches missed.">        if (stat != null) {</span>
+<span class="nc" id="L513">          instanceConfig.getRecord().setVersion(stat.getVersion());</span>
+        }
+<span class="nc" id="L515">      }</span>
+<span class="nc" id="L516">      long icFetchEnd = System.currentTimeMillis();</span>
+<span class="nc" id="L517">      icFetchTime = icFetchEnd - icFetchStart;</span>
+
+<span class="nc bnc" id="L519" title="All 2 branches missed.">      for (String tableName : affectedTables) {</span>
+<span class="nc" id="L520">        long evFetchStart = System.currentTimeMillis();</span>
+<span class="nc" id="L521">        ExternalView externalView = helixDataAccessor.getProperty(propertyKeyBuilder.externalView(tableName));</span>
+<span class="nc" id="L522">        long evFetchEnd = System.currentTimeMillis();</span>
+<span class="nc" id="L523">        evFetchTime += evFetchEnd - evFetchStart;</span>
+
+<span class="nc" id="L525">        long rebuildCheckStart = System.currentTimeMillis();</span>
+<span class="nc" id="L526">        final boolean routingTableRebuildRequired =</span>
+            isRoutingTableRebuildRequired(tableName, externalView, instanceConfigs);
+<span class="nc" id="L528">        long rebuildCheckEnd = System.currentTimeMillis();</span>
+<span class="nc" id="L529">        rebuildCheckTime += rebuildCheckEnd - rebuildCheckStart;</span>
+
+<span class="nc bnc" id="L531" title="All 2 branches missed.">        if (routingTableRebuildRequired) {</span>
+<span class="nc" id="L532">          long rebuildStart = System.currentTimeMillis();</span>
+<span class="nc" id="L533">          buildRoutingTable(tableName, externalView, instanceConfigs);</span>
+<span class="nc" id="L534">          long rebuildEnd = System.currentTimeMillis();</span>
+<span class="nc" id="L535">          buildTime += rebuildEnd - rebuildStart;</span>
+<span class="nc" id="L536">          routingTablesRebuiltCount++;</span>
+        }
+<span class="nc" id="L538">      }</span>
+    }
+<span class="nc" id="L540">    long endTime = System.currentTimeMillis();</span>
+
+<span class="nc" id="L542">    LOGGER.info(</span>
+        &quot;Processed instance config change in {} ms (stat {} ms, IC check {} ms, IC fetch {} ms, EV fetch {} ms, rebuild check {} ms, rebuild {} ms), {} / {} routing tables rebuilt&quot;,
+        (endTime - startTime), (statFetchEnd - statFetchStart), (icConfigCheckEnd - icConfigCheckStart), icFetchTime,
+        evFetchTime, rebuildCheckTime, buildTime, routingTablesRebuiltCount, _lastKnownExternalViewVersionMap.size());
+<span class="nc" id="L546">  }</span>
+
+  public TimeBoundaryService getTimeBoundaryService() {
+<span class="fc" id="L549">    return _timeBoundaryService;</span>
+  }
+
+  @Override
+  public String dumpSnapshot(String tableName)
+      throws Exception {
+<span class="nc" id="L555">    JSONObject ret = new JSONObject();</span>
+<span class="nc" id="L556">    JSONArray routingTableSnapshot = new JSONArray();</span>
+
+<span class="nc bnc" id="L558" title="All 2 branches missed.">    for (String currentTable : _routingTableBuilderMap.keySet()) {</span>
+<span class="nc bnc" id="L559" title="All 4 branches missed.">      if (tableName == null || currentTable.startsWith(tableName)) {</span>
+<span class="nc" id="L560">        JSONObject tableEntry = new JSONObject();</span>
+<span class="nc" id="L561">        tableEntry.put(&quot;tableName&quot;, currentTable);</span>
+
+<span class="nc" id="L563">        JSONArray entries = new JSONArray();</span>
+<span class="nc" id="L564">        RoutingTableBuilder routingTableBuilder = _routingTableBuilderMap.get(currentTable);</span>
+<span class="nc" id="L565">        List&lt;Map&lt;String, List&lt;String&gt;&gt;&gt; routingTables = routingTableBuilder.getRoutingTables();</span>
+<span class="nc bnc" id="L566" title="All 2 branches missed.">        for (Map&lt;String, List&lt;String&gt;&gt; routingTable : routingTables) {</span>
+<span class="nc" id="L567">          entries.put(new JSONObject(routingTable.toString()));</span>
+<span class="nc" id="L568">        }</span>
+<span class="nc" id="L569">        tableEntry.put(&quot;routingTableEntries&quot;, entries);</span>
+<span class="nc" id="L570">        routingTableSnapshot.put(tableEntry);</span>
+      }
+<span class="nc" id="L572">    }</span>
+<span class="nc" id="L573">    ret.put(&quot;routingTableSnapshot&quot;, routingTableSnapshot);</span>
+<span class="nc" id="L574">    ret.put(&quot;host&quot;, NetUtil.getHostnameOrAddress());</span>
+
+<span class="nc" id="L576">    return ret.toString(2);</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

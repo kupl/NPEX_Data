@@ -1,0 +1,371 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>SelectionOperatorService.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-hadoop</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.query.selection</a> &gt; <span class="el_source">SelectionOperatorService.java</span></div><h1>SelectionOperatorService.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.query.selection;
+
+import com.linkedin.pinot.common.request.Selection;
+import com.linkedin.pinot.common.request.SelectionSort;
+import com.linkedin.pinot.common.response.ServerInstance;
+import com.linkedin.pinot.common.response.broker.SelectionResults;
+import com.linkedin.pinot.common.utils.DataSchema;
+import com.linkedin.pinot.common.utils.DataTable;
+import com.linkedin.pinot.core.common.Block;
+import com.linkedin.pinot.core.common.BlockDocIdIterator;
+import com.linkedin.pinot.core.common.Constants;
+import com.linkedin.pinot.core.indexsegment.IndexSegment;
+import com.linkedin.pinot.core.query.selection.comparator.CompositeDocIdValComparator;
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.PriorityQueue;
+import java.util.Set;
+import javax.annotation.Nonnull;
+
+
+/**
+ * The &lt;code&gt;SelectionOperatorService&lt;/code&gt; class provides the services for selection queries with
+ * &lt;code&gt;ORDER BY&lt;/code&gt;.
+ * &lt;p&gt;Expected behavior:
+ * &lt;ul&gt;
+ *   &lt;li&gt;
+ *     Return selection results with the same order of columns as user passed in.
+ *     &lt;ul&gt;
+ *       &lt;li&gt;Eg. SELECT colB, colA, colC FROM table -&gt; [valB, valA, valC]&lt;/li&gt;
+ *     &lt;/ul&gt;
+ *   &lt;/li&gt;
+ *   &lt;li&gt;
+ *     For 'SELECT *', return columns with alphabetically order.
+ *     &lt;ul&gt;
+ *       &lt;li&gt;Eg. SELECT * FROM table -&gt; [valA, valB, valC]&lt;/li&gt;
+ *     &lt;/ul&gt;
+ *   &lt;/li&gt;
+ *   &lt;li&gt;
+ *     Order by does not change the order of columns in selection results.
+ *     &lt;ul&gt;
+ *       &lt;li&gt;Eg. SELECT colB, colA, colC FROM table ORDER BY calC -&gt; [valB, valA, valC]&lt;/li&gt;
+ *     &lt;/ul&gt;
+ *   &lt;/li&gt;
+ * &lt;/ul&gt;
+ */
+public class SelectionOperatorService {
+  private final List&lt;String&gt; _selectionColumns;
+  private final List&lt;SelectionSort&gt; _sortSequence;
+  private final DataSchema _dataSchema;
+  private final int _selectionOffset;
+  private final int _maxNumRows;
+  private final PriorityQueue&lt;Serializable[]&gt; _rows;
+
+<span class="fc" id="L76">  private long _numDocsScanned = 0;</span>
+
+  /**
+   * Constructor for &lt;code&gt;SelectionOperatorService&lt;/code&gt; with {@link IndexSegment}. (Inner segment)
+   *
+   * @param selection selection query.
+   * @param indexSegment index segment.
+   */
+<span class="fc" id="L84">  public SelectionOperatorService(@Nonnull Selection selection, @Nonnull IndexSegment indexSegment) {</span>
+<span class="fc" id="L85">    _selectionColumns = SelectionOperatorUtils.getSelectionColumns(selection.getSelectionColumns(), indexSegment);</span>
+<span class="fc" id="L86">    _sortSequence = getSortSequence(selection.getSelectionSortSequence());</span>
+<span class="fc" id="L87">    _dataSchema = SelectionOperatorUtils.extractDataSchema(_sortSequence, _selectionColumns, indexSegment);</span>
+    // Select rows from offset to offset + size.
+<span class="fc" id="L89">    _selectionOffset = selection.getOffset();</span>
+<span class="fc" id="L90">    _maxNumRows = _selectionOffset + selection.getSize();</span>
+<span class="fc" id="L91">    _rows = new PriorityQueue&lt;&gt;(_maxNumRows, getStrictComparator());</span>
+<span class="fc" id="L92">  }</span>
+
+  /**
+   * Constructor for &lt;code&gt;SelectionOperatorService&lt;/code&gt; with {@link DataSchema}. (Inter segment)
+   *
+   * @param selection selection query.
+   * @param dataSchema data schema.
+   */
+<span class="fc" id="L100">  public SelectionOperatorService(@Nonnull Selection selection, @Nonnull DataSchema dataSchema) {</span>
+<span class="fc" id="L101">    _selectionColumns = SelectionOperatorUtils.getSelectionColumns(selection.getSelectionColumns(), dataSchema);</span>
+<span class="fc" id="L102">    _sortSequence = getSortSequence(selection.getSelectionSortSequence());</span>
+<span class="fc" id="L103">    _dataSchema = dataSchema;</span>
+    // Select rows from offset to offset + size.
+<span class="fc" id="L105">    _selectionOffset = selection.getOffset();</span>
+<span class="fc" id="L106">    _maxNumRows = _selectionOffset + selection.getSize();</span>
+<span class="fc" id="L107">    _rows = new PriorityQueue&lt;&gt;(_maxNumRows, getTypeCompatibleComparator());</span>
+<span class="fc" id="L108">  }</span>
+
+  /**
+   * Helper method to handle duplicate sort columns.
+   *
+   * @return de-duplicated list of sort sequences.
+   */
+  @Nonnull
+  private List&lt;SelectionSort&gt; getSortSequence(List&lt;SelectionSort&gt; selectionSorts) {
+<span class="fc" id="L117">    List&lt;SelectionSort&gt; deDupedSelectionSorts = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L118">    Set&lt;String&gt; sortColumns = new HashSet&lt;&gt;();</span>
+<span class="fc bfc" id="L119" title="All 2 branches covered.">    for (SelectionSort selectionSort : selectionSorts) {</span>
+<span class="fc" id="L120">      String sortColumn = selectionSort.getColumn();</span>
+<span class="pc bpc" id="L121" title="1 of 2 branches missed.">      if (!sortColumns.contains(sortColumn)) {</span>
+<span class="fc" id="L122">        deDupedSelectionSorts.add(selectionSort);</span>
+<span class="fc" id="L123">        sortColumns.add(sortColumn);</span>
+      }
+<span class="fc" id="L125">    }</span>
+<span class="fc" id="L126">    return deDupedSelectionSorts;</span>
+  }
+
+  /**
+   * Helper method to get the strict {@link Comparator} for selection rows. (Inner segment)
+   * &lt;p&gt;Strict comparator does not allow any schema mismatch (more performance driven).
+   *
+   * @return strict {@link Comparator} for selection rows.
+   */
+  @Nonnull
+  private Comparator&lt;Serializable[]&gt; getStrictComparator() {
+<span class="fc" id="L137">    return new Comparator&lt;Serializable[]&gt;() {</span>
+      @Override
+      public int compare(Serializable[] o1, Serializable[] o2) {
+<span class="fc" id="L140">        int numSortColumns = _sortSequence.size();</span>
+<span class="fc bfc" id="L141" title="All 2 branches covered.">        for (int i = 0; i &lt; numSortColumns; i++) {</span>
+<span class="fc" id="L142">          int ret = 0;</span>
+<span class="fc" id="L143">          SelectionSort selectionSort = _sortSequence.get(i);</span>
+<span class="fc" id="L144">          Serializable v1 = o1[i];</span>
+<span class="fc" id="L145">          Serializable v2 = o2[i];</span>
+
+          // Only compare single-value columns.
+<span class="pc bpc" id="L148" title="4 of 6 branches missed.">          switch (_dataSchema.getColumnType(i)) {</span>
+            case INT:
+<span class="pc bpc" id="L150" title="1 of 2 branches missed.">              if (!selectionSort.isIsAsc()) {</span>
+<span class="nc" id="L151">                ret = ((Integer) v1).compareTo((Integer) v2);</span>
+              } else {
+<span class="fc" id="L153">                ret = ((Integer) v2).compareTo((Integer) v1);</span>
+              }
+<span class="fc" id="L155">              break;</span>
+            case LONG:
+<span class="nc bnc" id="L157" title="All 2 branches missed.">              if (!selectionSort.isIsAsc()) {</span>
+<span class="nc" id="L158">                ret = ((Long) v1).compareTo((Long) v2);</span>
+              } else {
+<span class="nc" id="L160">                ret = ((Long) v2).compareTo((Long) v1);</span>
+              }
+<span class="nc" id="L162">              break;</span>
+            case FLOAT:
+<span class="nc bnc" id="L164" title="All 2 branches missed.">              if (!selectionSort.isIsAsc()) {</span>
+<span class="nc" id="L165">                ret = ((Float) v1).compareTo((Float) v2);</span>
+              } else {
+<span class="nc" id="L167">                ret = ((Float) v2).compareTo((Float) v1);</span>
+              }
+<span class="nc" id="L169">              break;</span>
+            case DOUBLE:
+<span class="nc bnc" id="L171" title="All 2 branches missed.">              if (!selectionSort.isIsAsc()) {</span>
+<span class="nc" id="L172">                ret = ((Double) v1).compareTo((Double) v2);</span>
+              } else {
+<span class="nc" id="L174">                ret = ((Double) v2).compareTo((Double) v1);</span>
+              }
+<span class="nc" id="L176">              break;</span>
+            case STRING:
+<span class="pc bpc" id="L178" title="1 of 2 branches missed.">              if (!selectionSort.isIsAsc()) {</span>
+<span class="nc" id="L179">                ret = ((String) v1).compareTo((String) v2);</span>
+              } else {
+<span class="fc" id="L181">                ret = ((String) v2).compareTo((String) v1);</span>
+              }
+<span class="fc" id="L183">              break;</span>
+            default:
+              break;
+          }
+
+<span class="fc bfc" id="L188" title="All 2 branches covered.">          if (ret != 0) {</span>
+<span class="fc" id="L189">            return ret;</span>
+          }
+        }
+<span class="fc" id="L192">        return 0;</span>
+      }
+    };
+  }
+
+  /**
+   * Helper method to get the type-compatible {@link Comparator} for selection rows. (Inter segment)
+   * &lt;p&gt;Type-compatible comparator allows compatible types to compare with each other.
+   *
+   * @return flexible {@link Comparator} for selection rows.
+   */
+  @Nonnull
+  private Comparator&lt;Serializable[]&gt; getTypeCompatibleComparator() {
+<span class="fc" id="L205">    return new Comparator&lt;Serializable[]&gt;() {</span>
+      @Override
+      public int compare(Serializable[] o1, Serializable[] o2) {
+<span class="fc" id="L208">        int numSortColumns = _sortSequence.size();</span>
+<span class="pc bpc" id="L209" title="1 of 2 branches missed.">        for (int i = 0; i &lt; numSortColumns; i++) {</span>
+<span class="fc" id="L210">          int ret = 0;</span>
+<span class="fc" id="L211">          SelectionSort selectionSort = _sortSequence.get(i);</span>
+<span class="fc" id="L212">          Serializable v1 = o1[i];</span>
+<span class="fc" id="L213">          Serializable v2 = o2[i];</span>
+
+          // Only compare single-value columns.
+<span class="pc bpc" id="L216" title="1 of 2 branches missed.">          if (v1 instanceof Number) {</span>
+<span class="pc bpc" id="L217" title="1 of 2 branches missed.">            if (!selectionSort.isIsAsc()) {</span>
+<span class="fc" id="L218">              ret = Double.compare(((Number) v1).doubleValue(), ((Number) v2).doubleValue());</span>
+            } else {
+<span class="nc" id="L220">              ret = Double.compare(((Number) v2).doubleValue(), ((Number) v1).doubleValue());</span>
+            }
+<span class="nc bnc" id="L222" title="All 2 branches missed.">          } else if (v1 instanceof String) {</span>
+<span class="nc bnc" id="L223" title="All 2 branches missed.">            if (!selectionSort.isIsAsc()) {</span>
+<span class="nc" id="L224">              ret = ((String) v1).compareTo((String) v2);</span>
+            } else {
+<span class="nc" id="L226">              ret = ((String) v2).compareTo((String) v1);</span>
+            }
+          }
+
+<span class="pc bpc" id="L230" title="1 of 2 branches missed.">          if (ret != 0) {</span>
+<span class="fc" id="L231">            return ret;</span>
+          }
+        }
+<span class="nc" id="L234">        return 0;</span>
+      }
+    };
+  }
+
+  /**
+   * Get the {@link DataSchema}.
+   *
+   * @return data schema.
+   */
+  @Nonnull
+  public DataSchema getDataSchema() {
+<span class="fc" id="L246">    return _dataSchema;</span>
+  }
+
+  /**
+   * Get the selection results.
+   *
+   * @return selection results.
+   */
+  @Nonnull
+  public PriorityQueue&lt;Serializable[]&gt; getRows() {
+<span class="fc" id="L256">    return _rows;</span>
+  }
+
+  /**
+   * Get number of documents scanned. (Inner segment)
+   *
+   * @return number of documents scanned.
+   */
+  public long getNumDocsScanned() {
+<span class="fc" id="L265">    return _numDocsScanned;</span>
+  }
+
+  /**
+   * Iterate over {@link Block}s, extract values from them and merge the values to the selection results for selection
+   * queries with &lt;code&gt;ORDER BY&lt;/code&gt;. (Inner segment)
+   *
+   * @param blockDocIdIterator block document id iterator.
+   * @param blocks {@link Block} array.
+   */
+  public void iterateOnBlocksWithOrdering(@Nonnull BlockDocIdIterator blockDocIdIterator, @Nonnull Block[] blocks) {
+<span class="fc" id="L276">    Comparator&lt;Integer&gt; rowDocIdComparator = new CompositeDocIdValComparator(_sortSequence, blocks);</span>
+<span class="fc" id="L277">    PriorityQueue&lt;Integer&gt; rowDocIdPriorityQueue = new PriorityQueue&lt;&gt;(_maxNumRows, rowDocIdComparator);</span>
+    int docId;
+<span class="fc bfc" id="L279" title="All 2 branches covered.">    while ((docId = blockDocIdIterator.next()) != Constants.EOF) {</span>
+<span class="fc" id="L280">      _numDocsScanned++;</span>
+<span class="fc" id="L281">      SelectionOperatorUtils.addToPriorityQueue(docId, rowDocIdPriorityQueue, _maxNumRows);</span>
+    }
+
+<span class="fc" id="L284">    SelectionFetcher selectionFetcher = new SelectionFetcher(blocks, _dataSchema);</span>
+<span class="fc" id="L285">    Collection&lt;Serializable[]&gt; rows = new ArrayList&lt;&gt;(rowDocIdPriorityQueue.size());</span>
+<span class="fc bfc" id="L286" title="All 2 branches covered.">    for (int rowDocId : rowDocIdPriorityQueue) {</span>
+<span class="fc" id="L287">      rows.add(selectionFetcher.getRow(rowDocId));</span>
+<span class="fc" id="L288">    }</span>
+<span class="fc" id="L289">    SelectionOperatorUtils.mergeWithOrdering(_rows, rows, _maxNumRows);</span>
+<span class="fc" id="L290">  }</span>
+
+  /**
+   * Reduce a collection of {@link DataTable}s to selection rows for selection queries with &lt;code&gt;ORDER BY&lt;/code&gt;.
+   * (Broker side)
+   *
+   * @param selectionResults {@link Map} from {@link ServerInstance} to {@link DataTable}.
+   */
+  public void reduceWithOrdering(@Nonnull Map&lt;ServerInstance, DataTable&gt; selectionResults) {
+<span class="nc bnc" id="L299" title="All 2 branches missed.">    for (DataTable dataTable : selectionResults.values()) {</span>
+<span class="nc" id="L300">      int numRows = dataTable.getNumberOfRows();</span>
+<span class="nc bnc" id="L301" title="All 2 branches missed.">      for (int rowId = 0; rowId &lt; numRows; rowId++) {</span>
+<span class="nc" id="L302">        Serializable[] row = SelectionOperatorUtils.extractRowFromDataTable(dataTable, rowId);</span>
+<span class="nc" id="L303">        SelectionOperatorUtils.addToPriorityQueue(row, _rows, _maxNumRows);</span>
+      }
+<span class="nc" id="L305">    }</span>
+<span class="nc" id="L306">  }</span>
+
+  /**
+   * Render the unformatted selection rows to a formatted {@link SelectionResults} object for selection queries with
+   * &lt;code&gt;ORDER BY&lt;/code&gt;. (Broker side)
+   * &lt;p&gt;{@link SelectionResults} object will be used to build the broker response.
+   * &lt;p&gt;Should be called after method &quot;reduceWithOrdering()&quot;.
+   *
+   * @return {@link SelectionResults} object results.
+   */
+  @Nonnull
+  public SelectionResults renderSelectionResultsWithOrdering() {
+<span class="fc" id="L318">    LinkedList&lt;Serializable[]&gt; rowsInSelectionResults = new LinkedList&lt;&gt;();</span>
+
+<span class="fc" id="L320">    int[] columnIndices = getColumnIndices();</span>
+<span class="fc bfc" id="L321" title="All 2 branches covered.">    while (_rows.size() &gt; _selectionOffset) {</span>
+<span class="fc" id="L322">      rowsInSelectionResults.addFirst(getFormattedRowWithOrdering(_rows.poll(), columnIndices));</span>
+    }
+
+<span class="fc" id="L325">    return new SelectionResults(_selectionColumns, rowsInSelectionResults);</span>
+  }
+
+  /**
+   * Helper method to get each selection column index in data schema.
+   *
+   * @return column indices.
+   */
+  private int[] getColumnIndices() {
+<span class="fc" id="L334">    int numSelectionColumns = _selectionColumns.size();</span>
+<span class="fc" id="L335">    int[] columnIndices = new int[numSelectionColumns];</span>
+
+<span class="fc" id="L337">    int numColumnsInDataSchema = _dataSchema.size();</span>
+<span class="fc" id="L338">    Map&lt;String, Integer&gt; dataSchemaIndices = new HashMap&lt;&gt;(numColumnsInDataSchema);</span>
+<span class="fc bfc" id="L339" title="All 2 branches covered.">    for (int i = 0; i &lt; numColumnsInDataSchema; i++) {</span>
+<span class="fc" id="L340">      dataSchemaIndices.put(_dataSchema.getColumnName(i), i);</span>
+    }
+
+<span class="fc bfc" id="L343" title="All 2 branches covered.">    for (int i = 0; i &lt; numSelectionColumns; i++) {</span>
+<span class="fc" id="L344">      columnIndices[i] = dataSchemaIndices.get(_selectionColumns.get(i));</span>
+    }
+
+<span class="fc" id="L347">    return columnIndices;</span>
+  }
+
+  /**
+   * Helper method to format a selection row, make all values string or string array type based on data schema passed in
+   * for selection queries with &lt;code&gt;ORDER BY&lt;/code&gt;. (Broker side)
+   * &lt;p&gt;Formatted row is used to build the {@link SelectionResults}.
+   *
+   * @param row selection row to be formatted.
+   * @param columnIndices column indices of original rows.
+   * @return formatted selection row.
+   */
+  @Nonnull
+  private Serializable[] getFormattedRowWithOrdering(@Nonnull Serializable[] row, @Nonnull int[] columnIndices) {
+<span class="fc" id="L361">    int numColumns = columnIndices.length;</span>
+<span class="fc" id="L362">    Serializable[] formattedRow = new Serializable[numColumns];</span>
+<span class="fc bfc" id="L363" title="All 2 branches covered.">    for (int i = 0; i &lt; numColumns; i++) {</span>
+<span class="fc" id="L364">      int columnIndex = columnIndices[i];</span>
+<span class="fc" id="L365">      formattedRow[i] =</span>
+          SelectionOperatorUtils.getFormattedValue(row[columnIndex], _dataSchema.getColumnType(columnIndex));
+    }
+<span class="fc" id="L368">    return formattedRow;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

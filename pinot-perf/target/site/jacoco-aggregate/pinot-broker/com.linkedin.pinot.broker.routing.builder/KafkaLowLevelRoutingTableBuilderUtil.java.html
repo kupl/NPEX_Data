@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>KafkaLowLevelRoutingTableBuilderUtil.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-perf</a> &gt; <a href="../index.html" class="el_bundle">pinot-broker</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.broker.routing.builder</a> &gt; <span class="el_source">KafkaLowLevelRoutingTableBuilderUtil.java</span></div><h1>KafkaLowLevelRoutingTableBuilderUtil.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.linkedin.pinot.broker.routing.builder;
+
+import com.linkedin.pinot.common.utils.CommonConstants;
+import com.linkedin.pinot.common.utils.LLCSegmentName;
+import com.linkedin.pinot.common.utils.SegmentName;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.SortedSet;
+import java.util.TreeSet;
+import org.apache.helix.model.ExternalView;
+
+
+/**
+ * Util class for Kafka low level routing table builder.
+ */
+<span class="nc" id="L32">public class KafkaLowLevelRoutingTableBuilderUtil {</span>
+
+  /**
+   * Compute the table of a sorted list of segments grouped by Kafka partition.
+   *
+   * @param externalView helix external view.
+   * @return map of Kafka partition to sorted set of segment names.
+   */
+  public static Map&lt;String, SortedSet&lt;SegmentName&gt;&gt; getSortedSegmentsByKafkaPartition(ExternalView externalView) {
+<span class="fc" id="L41">    Map&lt;String, SortedSet&lt;SegmentName&gt;&gt; sortedSegmentsByKafkaPartition = new HashMap&lt;&gt;();</span>
+<span class="fc bfc" id="L42" title="All 2 branches covered.">    for (String helixPartitionName : externalView.getPartitionSet()) {</span>
+      // Ignore segments that are not low level consumer segments
+<span class="pc bpc" id="L44" title="1 of 2 branches missed.">      if (!SegmentName.isLowLevelConsumerSegmentName(helixPartitionName)) {</span>
+<span class="nc" id="L45">        continue;</span>
+      }
+
+<span class="fc" id="L48">      final LLCSegmentName segmentName = new LLCSegmentName(helixPartitionName);</span>
+<span class="fc" id="L49">      String kafkaPartitionName = segmentName.getPartitionRange();</span>
+<span class="fc" id="L50">      SortedSet&lt;SegmentName&gt; segmentsForPartition = sortedSegmentsByKafkaPartition.get(kafkaPartitionName);</span>
+
+      // Create sorted set if necessary
+<span class="fc bfc" id="L53" title="All 2 branches covered.">      if (segmentsForPartition == null) {</span>
+<span class="fc" id="L54">        segmentsForPartition = new TreeSet&lt;&gt;();</span>
+
+<span class="fc" id="L56">        sortedSegmentsByKafkaPartition.put(kafkaPartitionName, segmentsForPartition);</span>
+      }
+
+<span class="fc" id="L59">      segmentsForPartition.add(segmentName);</span>
+<span class="fc" id="L60">    }</span>
+<span class="fc" id="L61">    return sortedSegmentsByKafkaPartition;</span>
+  }
+
+  /**
+   * Compute the map of allowed 'consuming' segments for each partition.
+   *
+   * @param externalView helix external view
+   * @param sortedSegmentsByKafkaPartition map of Kafka partition to sorted set of segment names.
+   * @return map of allowed consuming segment for each partition for routing.
+   */
+  public static Map&lt;String, SegmentName&gt; getAllowedConsumingStateSegments(ExternalView externalView,
+      Map&lt;String, SortedSet&lt;SegmentName&gt;&gt; sortedSegmentsByKafkaPartition) {
+<span class="fc" id="L73">    Map&lt;String, SegmentName&gt; allowedSegmentInConsumingStateByKafkaPartition = new HashMap&lt;&gt;();</span>
+<span class="fc bfc" id="L74" title="All 2 branches covered.">    for (String kafkaPartition : sortedSegmentsByKafkaPartition.keySet()) {</span>
+<span class="fc" id="L75">      SortedSet&lt;SegmentName&gt; sortedSegmentsForKafkaPartition = sortedSegmentsByKafkaPartition.get(kafkaPartition);</span>
+<span class="fc" id="L76">      SegmentName lastAllowedSegmentInConsumingState = null;</span>
+
+<span class="fc bfc" id="L78" title="All 2 branches covered.">      for (SegmentName segmentName : sortedSegmentsForKafkaPartition) {</span>
+<span class="fc" id="L79">        Map&lt;String, String&gt; helixPartitionState = externalView.getStateMap(segmentName.getSegmentName());</span>
+<span class="fc" id="L80">        boolean allInConsumingState = true;</span>
+<span class="fc" id="L81">        int replicasInConsumingState = 0;</span>
+
+        // Only keep the segment if all replicas have it in CONSUMING state
+<span class="fc bfc" id="L84" title="All 2 branches covered.">        for (String externalViewState : helixPartitionState.values()) {</span>
+          // Ignore ERROR state
+<span class="pc bpc" id="L86" title="1 of 2 branches missed.">          if (externalViewState.equalsIgnoreCase(</span>
+              CommonConstants.Helix.StateModel.RealtimeSegmentOnlineOfflineStateModel.ERROR)) {
+<span class="nc" id="L88">            continue;</span>
+          }
+
+          // Not all segments are in CONSUMING state, therefore don't consider the last segment assignable to CONSUMING
+          // replicas
+<span class="fc bfc" id="L93" title="All 2 branches covered.">          if (externalViewState.equalsIgnoreCase(</span>
+              CommonConstants.Helix.StateModel.RealtimeSegmentOnlineOfflineStateModel.ONLINE)) {
+<span class="fc" id="L95">            allInConsumingState = false;</span>
+<span class="fc" id="L96">            break;</span>
+          }
+
+          // Otherwise count the replica as being in CONSUMING state
+<span class="pc bpc" id="L100" title="1 of 2 branches missed.">          if (externalViewState.equalsIgnoreCase(</span>
+              CommonConstants.Helix.StateModel.RealtimeSegmentOnlineOfflineStateModel.CONSUMING)) {
+<span class="fc" id="L102">            replicasInConsumingState++;</span>
+          }
+<span class="fc" id="L104">        }</span>
+
+        // If all replicas have this segment in consuming state (and not all of them are in ERROR state), then pick this
+        // segment to be the last allowed segment to be in CONSUMING state
+<span class="pc bpc" id="L108" title="1 of 4 branches missed.">        if (allInConsumingState &amp;&amp; 0 &lt; replicasInConsumingState) {</span>
+<span class="fc" id="L109">          lastAllowedSegmentInConsumingState = segmentName;</span>
+<span class="fc" id="L110">          break;</span>
+        }
+<span class="fc" id="L112">      }</span>
+
+<span class="fc bfc" id="L114" title="All 2 branches covered.">      if (lastAllowedSegmentInConsumingState != null) {</span>
+<span class="fc" id="L115">        allowedSegmentInConsumingStateByKafkaPartition.put(kafkaPartition, lastAllowedSegmentInConsumingState);</span>
+      }
+<span class="fc" id="L117">    }</span>
+<span class="fc" id="L118">    return allowedSegmentInConsumingStateByKafkaPartition;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>BackfillSegmentUtils.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-tools</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.tools.backfill</a> &gt; <span class="el_source">BackfillSegmentUtils.java</span></div><h1>BackfillSegmentUtils.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.tools.backfill;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.linkedin.pinot.common.utils.CommonConstants.Segment.SegmentType;
+import com.linkedin.pinot.common.utils.FileUploadDownloadClient;
+import com.linkedin.pinot.common.utils.TarGzCompressionUtils;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.URL;
+import java.util.ArrayList;
+import java.util.List;
+import org.apache.commons.io.FileUtils;
+import org.apache.commons.io.IOUtils;
+import org.apache.http.HttpHost;
+import org.apache.http.HttpStatus;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * Contains APIs which are used for backfilling the pinot segments with dateTimeFieldSpec
+ */
+public class BackfillSegmentUtils {
+
+<span class="nc" id="L43">  private static Logger LOGGER = LoggerFactory.getLogger(BackfillSegmentUtils.class);</span>
+
+
+  private static final String SEGMENTS_ENDPOINT = &quot;%s/segments/%s&quot;;
+  private static final String DOWNLOAD_SEGMENT_ENDPOINT = &quot;%s/segments/%s/%s&quot;;
+  public static final String TAR_SUFFIX = &quot;.tar.gz&quot;;
+
+  private HttpHost _controllerHttpHost;
+  private String _controllerHost;
+  private String _controllerPort;
+
+<span class="nc" id="L54">  public BackfillSegmentUtils(String controllerHost, String controllerPort) {</span>
+<span class="nc" id="L55">    _controllerHost = controllerHost;</span>
+<span class="nc" id="L56">    _controllerPort = controllerPort;</span>
+<span class="nc" id="L57">   _controllerHttpHost = new HttpHost(controllerHost, Integer.valueOf(controllerPort));</span>
+<span class="nc" id="L58">  }</span>
+
+
+  /**
+   * Fetches the list of all segment names for a table
+   * @param tableName
+   * @return
+   * @throws IOException
+   */
+  public List&lt;String&gt; getAllSegments(String tableName, SegmentType segmentType) throws IOException {
+
+<span class="nc" id="L69">    List&lt;String&gt; allSegments = new ArrayList&lt;&gt;();</span>
+<span class="nc" id="L70">    String urlString = String.format(SEGMENTS_ENDPOINT, _controllerHttpHost.toURI(), tableName);</span>
+<span class="nc" id="L71">    URL url = new URL(urlString);</span>
+<span class="nc" id="L72">    InputStream is = url.openConnection().getInputStream();</span>
+
+<span class="nc" id="L74">    String response = IOUtils.toString(is);</span>
+<span class="nc" id="L75">    JsonNode segmentsData = new ObjectMapper().readTree(response);</span>
+
+<span class="nc bnc" id="L77" title="All 2 branches missed.">    if (segmentsData != null) {</span>
+<span class="nc bnc" id="L78" title="All 4 branches missed.">      if (segmentType == null || SegmentType.OFFLINE.equals(segmentType)) {</span>
+<span class="nc" id="L79">        JsonNode offlineSegments = segmentsData.get(0).get(SegmentType.OFFLINE.toString());</span>
+<span class="nc bnc" id="L80" title="All 2 branches missed.">        if (offlineSegments != null) {</span>
+<span class="nc bnc" id="L81" title="All 2 branches missed.">          for (JsonNode segment : offlineSegments) {</span>
+<span class="nc" id="L82">            allSegments.add(segment.asText());</span>
+<span class="nc" id="L83">          }</span>
+        }
+      }
+<span class="nc bnc" id="L86" title="All 4 branches missed.">      if (segmentType == null || SegmentType.REALTIME.equals(segmentType)) {</span>
+<span class="nc" id="L87">        JsonNode realtimeSegments = segmentsData.get(0).get(SegmentType.REALTIME.toString());</span>
+<span class="nc bnc" id="L88" title="All 2 branches missed.">        if (realtimeSegments != null) {</span>
+<span class="nc bnc" id="L89" title="All 2 branches missed.">          for (JsonNode segment : realtimeSegments) {</span>
+<span class="nc" id="L90">            allSegments.add(segment.asText());</span>
+<span class="nc" id="L91">          }</span>
+        }
+      }
+    }
+<span class="nc" id="L95">    LOGGER.info(&quot;All segments : {}&quot;, allSegments);</span>
+
+<span class="nc" id="L97">    return allSegments;</span>
+  }
+
+
+  /**
+   * Downloads a segment from a table to a directory locally, and backs it up to given backup path
+   * @param tableName
+   * @param segmentName
+   * @param downloadSegmentDir - download segment path
+   * @param tableBackupDir - backup segments path
+   * @return
+   */
+  public boolean downloadSegment(String tableName, String segmentName, File downloadSegmentDir, File tableBackupDir)  {
+<span class="nc" id="L110">    boolean downloadSuccess = true;</span>
+<span class="nc bnc" id="L111" title="All 2 branches missed.">    if (downloadSegmentDir.exists()) {</span>
+      try {
+<span class="nc" id="L113">        FileUtils.deleteDirectory(downloadSegmentDir);</span>
+<span class="nc" id="L114">      } catch (IOException e) {</span>
+<span class="nc" id="L115">        LOGGER.warn(&quot;Failed to delete directory {}&quot;, downloadSegmentDir, e);</span>
+<span class="nc" id="L116">      }</span>
+    }
+<span class="nc" id="L118">    downloadSegmentDir.mkdirs();</span>
+
+    try {
+<span class="nc" id="L121">      String urlString = String.format(DOWNLOAD_SEGMENT_ENDPOINT, _controllerHttpHost.toURI(), tableName, segmentName);</span>
+<span class="nc" id="L122">      URL url = new URL(urlString);</span>
+<span class="nc" id="L123">      InputStream inputStream = url.openConnection().getInputStream();</span>
+
+<span class="nc" id="L125">      File segmentTar = new File(downloadSegmentDir, segmentName + TAR_SUFFIX);</span>
+<span class="nc" id="L126">      LOGGER.info(&quot;Downloading {} to {}&quot;, segmentName, segmentTar);</span>
+<span class="nc" id="L127">      OutputStream outputStream = new FileOutputStream(segmentTar);</span>
+
+<span class="nc" id="L129">      IOUtils.copyLarge(inputStream, outputStream);</span>
+<span class="nc bnc" id="L130" title="All 2 branches missed.">      if (!segmentTar.exists()) {</span>
+<span class="nc" id="L131">        LOGGER.error(&quot;Download of {} unsuccessful&quot;, segmentName);</span>
+<span class="nc" id="L132">        return false;</span>
+      }
+
+<span class="nc" id="L135">      LOGGER.info(&quot;Backing up segment {} to {}&quot;, segmentTar, tableBackupDir);</span>
+<span class="nc" id="L136">      FileUtils.copyFileToDirectory(segmentTar, tableBackupDir);</span>
+
+<span class="nc" id="L138">      LOGGER.info(&quot;Extracting segment {} to {}&quot;, segmentTar, downloadSegmentDir);</span>
+<span class="nc" id="L139">      TarGzCompressionUtils.unTar(segmentTar, downloadSegmentDir);</span>
+
+<span class="nc" id="L141">      File segmentDir = new File(downloadSegmentDir, segmentName);</span>
+<span class="nc bnc" id="L142" title="All 2 branches missed.">      if (!segmentDir.exists()) {</span>
+<span class="nc" id="L143">        throw new RuntimeException(&quot;Unable to untar segment &quot; + segmentName);</span>
+      } else {
+<span class="nc" id="L145">        FileUtils.deleteQuietly(segmentTar);</span>
+      }
+<span class="nc" id="L147">    } catch (Exception e) {</span>
+<span class="nc" id="L148">      LOGGER.error(&quot;Error in downloading segment {}&quot;, segmentName, e);</span>
+<span class="nc" id="L149">      downloadSuccess = false;</span>
+<span class="nc" id="L150">    }</span>
+
+<span class="nc" id="L152">    return downloadSuccess;</span>
+  }
+
+  /**
+   * Uploads the segment tar to the controller.
+   */
+  public boolean uploadSegment(String segmentName, File segmentDir, File outputDir) {
+<span class="nc" id="L159">    boolean success = true;</span>
+
+<span class="nc" id="L161">    File segmentTar = new File(outputDir, segmentName + TAR_SUFFIX);</span>
+
+    try {
+<span class="nc" id="L164">      TarGzCompressionUtils.createTarGzOfDirectory(segmentDir.getAbsolutePath(), segmentTar.getAbsolutePath());</span>
+<span class="nc" id="L165">      LOGGER.info(&quot;Created tar of {} at {}&quot;, segmentDir.getAbsolutePath(), segmentTar.getAbsolutePath());</span>
+<span class="nc" id="L166">      try (FileUploadDownloadClient fileUploadDownloadClient = new FileUploadDownloadClient()) {</span>
+<span class="nc" id="L167">        int statusCode = fileUploadDownloadClient.uploadSegment(</span>
+            FileUploadDownloadClient.getUploadSegmentHttpURI(_controllerHost, Integer.parseInt(_controllerPort)),
+            segmentName, segmentTar);
+<span class="nc bnc" id="L170" title="All 2 branches missed.">        if (statusCode != HttpStatus.SC_OK) {</span>
+<span class="nc" id="L171">          success = false;</span>
+        }
+<span class="nc" id="L173">        LOGGER.info(&quot;Uploaded segment: {} and got response status code: {}&quot;, segmentName, statusCode);</span>
+<span class="nc bnc" id="L174" title="All 8 branches missed.">      }</span>
+<span class="nc" id="L175">    } catch (Exception e) {</span>
+<span class="nc" id="L176">      LOGGER.error(&quot;Exception in segment upload {}&quot;, segmentTar, e);</span>
+<span class="nc" id="L177">      success = false;</span>
+<span class="nc" id="L178">    }</span>
+<span class="nc" id="L179">    return success;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

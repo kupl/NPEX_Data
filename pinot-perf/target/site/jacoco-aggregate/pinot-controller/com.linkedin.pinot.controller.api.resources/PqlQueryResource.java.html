@@ -1,0 +1,234 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>PqlQueryResource.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-perf</a> &gt; <a href="../index.html" class="el_bundle">pinot-controller</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.controller.api.resources</a> &gt; <span class="el_source">PqlQueryResource.java</span></div><h1>PqlQueryResource.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.controller.api.resources;
+
+import com.linkedin.pinot.common.Utils;
+import com.linkedin.pinot.common.config.TableNameBuilder;
+import com.linkedin.pinot.common.exception.QueryException;
+import com.linkedin.pinot.common.request.BrokerRequest;
+import com.linkedin.pinot.controller.api.access.AccessControl;
+import com.linkedin.pinot.controller.api.access.AccessControlFactory;
+import com.linkedin.pinot.controller.helix.core.PinotHelixResourceManager;
+import com.linkedin.pinot.pql.parsers.Pql2Compiler;
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.Random;
+import java.util.Set;
+import javax.inject.Inject;
+import javax.ws.rs.GET;
+import javax.ws.rs.POST;
+import javax.ws.rs.Path;
+import javax.ws.rs.QueryParam;
+import javax.ws.rs.core.Context;
+import javax.ws.rs.core.HttpHeaders;
+import org.apache.helix.model.InstanceConfig;
+import org.json.JSONObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+@Path(&quot;/&quot;)
+<span class="nc" id="L53">public class PqlQueryResource {</span>
+<span class="nc" id="L54">  private static final Logger LOGGER = LoggerFactory.getLogger(PqlQueryResource.class);</span>
+<span class="nc" id="L55">  private static final Pql2Compiler REQUEST_COMPILER = new Pql2Compiler();</span>
+<span class="nc" id="L56">  private static final Random RANDOM = new Random();</span>
+
+  @Inject
+  PinotHelixResourceManager _pinotHelixResourceManager;
+
+  @Inject
+  AccessControlFactory _accessControlFactory;
+
+  @POST
+  @Path(&quot;pql&quot;)
+  public String post(String requestJsonStr, @Context HttpHeaders httpHeaders) {
+    try {
+<span class="nc" id="L68">      JSONObject requestJson = new JSONObject(requestJsonStr);</span>
+<span class="nc" id="L69">      String pqlQuery = requestJson.getString(&quot;pql&quot;);</span>
+<span class="nc" id="L70">      String traceEnabled = &quot;false&quot;;</span>
+<span class="nc bnc" id="L71" title="All 2 branches missed.">      if (requestJson.has(&quot;trace&quot;)) {</span>
+<span class="nc" id="L72">        traceEnabled = requestJson.getString(&quot;trace&quot;);</span>
+      }
+<span class="nc" id="L74">      LOGGER.debug(&quot;Trace: {}, Running query: {}&quot;, traceEnabled, pqlQuery);</span>
+<span class="nc" id="L75">      return getQueryResponse(pqlQuery, traceEnabled, httpHeaders);</span>
+<span class="nc" id="L76">    } catch (Exception e) {</span>
+<span class="nc" id="L77">      LOGGER.error(&quot;Caught exception while processing post request&quot;, e);</span>
+<span class="nc" id="L78">      return QueryException.getException(QueryException.INTERNAL_ERROR, e).toString();</span>
+    }
+  }
+
+  @GET
+  @Path(&quot;pql&quot;)
+  public String get(
+      @QueryParam(&quot;pql&quot;) String pqlQuery,
+      @QueryParam(&quot;trace&quot;) String traceEnabled,
+      @Context HttpHeaders httpHeaders) {
+    try {
+<span class="nc" id="L89">      LOGGER.debug(&quot;Trace: {}, Running query: {}&quot;, traceEnabled, pqlQuery);</span>
+<span class="nc" id="L90">      return getQueryResponse(pqlQuery, traceEnabled, httpHeaders);</span>
+<span class="nc" id="L91">    } catch (Exception e) {</span>
+<span class="nc" id="L92">      LOGGER.error(&quot;Caught exception while processing get request&quot;, e);</span>
+<span class="nc" id="L93">      return QueryException.getException(QueryException.INTERNAL_ERROR, e).toString();</span>
+    }
+  }
+
+  public String getQueryResponse(String pqlQuery, String traceEnabled, HttpHeaders httpHeaders) {
+    // Get resource table name.
+    BrokerRequest brokerRequest;
+    try {
+<span class="nc" id="L101">      brokerRequest = REQUEST_COMPILER.compileToBrokerRequest(pqlQuery);</span>
+<span class="nc" id="L102">    } catch (Exception e) {</span>
+<span class="nc" id="L103">      LOGGER.info(&quot;Caught exception while compiling PQL query: {}, {}&quot;, pqlQuery, e.getMessage());</span>
+<span class="nc" id="L104">      return QueryException.getException(QueryException.PQL_PARSING_ERROR, e).toString();</span>
+<span class="nc" id="L105">    }</span>
+<span class="nc" id="L106">    String tableName = TableNameBuilder.extractRawTableName(brokerRequest.getQuerySource().getTableName());</span>
+
+    // Validate data access
+<span class="nc" id="L109">    AccessControl accessControl = _accessControlFactory.create();</span>
+<span class="nc bnc" id="L110" title="All 2 branches missed.">    if (!accessControl.hasDataAccess(httpHeaders, tableName)) {</span>
+<span class="nc" id="L111">      return QueryException.ACCESS_DENIED_ERROR.toString();</span>
+    }
+
+    // Get brokers for the resource table.
+<span class="nc" id="L115">    List&lt;String&gt; instanceIds = _pinotHelixResourceManager.getBrokerInstancesFor(tableName);</span>
+<span class="nc bnc" id="L116" title="All 2 branches missed.">    if (instanceIds.isEmpty()) {</span>
+<span class="nc" id="L117">      return QueryException.BROKER_RESOURCE_MISSING_ERROR.toString();</span>
+    }
+
+    // Retain only online brokers.
+<span class="nc" id="L121">    instanceIds.retainAll(_pinotHelixResourceManager.getOnlineInstanceList());</span>
+<span class="nc bnc" id="L122" title="All 2 branches missed.">    if (instanceIds.isEmpty()) {</span>
+<span class="nc" id="L123">      return QueryException.BROKER_INSTANCE_MISSING_ERROR.toString();</span>
+    }
+
+    // Send query to a random broker.
+<span class="nc" id="L127">    String instanceId = instanceIds.get(RANDOM.nextInt(instanceIds.size()));</span>
+<span class="nc" id="L128">    InstanceConfig instanceConfig = _pinotHelixResourceManager.getHelixInstanceConfig(instanceId);</span>
+<span class="nc" id="L129">    String hostNameWithPrefix = instanceConfig.getHostName();</span>
+<span class="nc" id="L130">    String url = &quot;http://&quot; + hostNameWithPrefix.substring(hostNameWithPrefix.indexOf(&quot;_&quot;) + 1) + &quot;:&quot;</span>
+        + instanceConfig.getPort() + &quot;/query&quot;;
+<span class="nc" id="L132">    return sendPQLRaw(url, pqlQuery, traceEnabled);</span>
+  }
+
+  public String sendPostRaw(String urlStr, String requestStr, Map&lt;String, String&gt; headers) {
+<span class="nc" id="L136">    HttpURLConnection conn = null;</span>
+    try {
+      /*if (LOG.isInfoEnabled()){
+        LOGGER.info(&quot;Sending a post request to the server - &quot; + urlStr);
+      }
+
+      if (LOG.isDebugEnabled()){
+        LOGGER.debug(&quot;The request is - &quot; + requestStr);
+      }*/
+
+<span class="nc" id="L146">      LOGGER.info(&quot;url string passed is : &quot; + urlStr);</span>
+<span class="nc" id="L147">      final URL url = new URL(urlStr);</span>
+<span class="nc" id="L148">      conn = (HttpURLConnection) url.openConnection();</span>
+<span class="nc" id="L149">      conn.setDoOutput(true);</span>
+<span class="nc" id="L150">      conn.setRequestMethod(&quot;POST&quot;);</span>
+      // conn.setRequestProperty(&quot;Content-Type&quot;, &quot;application/json; charset=utf-8&quot;);
+
+<span class="nc" id="L153">      conn.setRequestProperty(&quot;Accept-Encoding&quot;, &quot;gzip&quot;);</span>
+
+<span class="nc" id="L155">      final String string = requestStr;</span>
+<span class="nc" id="L156">      final byte[] requestBytes = string.getBytes(&quot;UTF-8&quot;);</span>
+<span class="nc" id="L157">      conn.setRequestProperty(&quot;Content-Length&quot;, String.valueOf(requestBytes.length));</span>
+<span class="nc" id="L158">      conn.setRequestProperty(&quot;http.keepAlive&quot;, String.valueOf(true));</span>
+<span class="nc" id="L159">      conn.setRequestProperty(&quot;default&quot;, String.valueOf(true));</span>
+
+<span class="nc bnc" id="L161" title="All 4 branches missed.">      if (headers != null &amp;&amp; headers.size() &gt; 0) {</span>
+<span class="nc" id="L162">        final Set&lt;Entry&lt;String, String&gt;&gt; entries = headers.entrySet();</span>
+<span class="nc bnc" id="L163" title="All 2 branches missed.">        for (final Entry&lt;String, String&gt; entry : entries) {</span>
+<span class="nc" id="L164">          conn.setRequestProperty(entry.getKey(), entry.getValue());</span>
+<span class="nc" id="L165">        }</span>
+      }
+
+      //GZIPOutputStream zippedOutputStream = new GZIPOutputStream(conn.getOutputStream());
+<span class="nc" id="L169">      final OutputStream os = new BufferedOutputStream(conn.getOutputStream());</span>
+<span class="nc" id="L170">      os.write(requestBytes);</span>
+<span class="nc" id="L171">      os.flush();</span>
+<span class="nc" id="L172">      os.close();</span>
+<span class="nc" id="L173">      final int responseCode = conn.getResponseCode();</span>
+
+      /*if (LOG.isInfoEnabled()){
+        LOGGER.info(&quot;The http response code is &quot; + responseCode);
+      }*/
+<span class="nc bnc" id="L178" title="All 2 branches missed.">      if (responseCode != HttpURLConnection.HTTP_OK) {</span>
+<span class="nc" id="L179">        throw new IOException(&quot;Failed : HTTP error code : &quot; + responseCode);</span>
+      }
+<span class="nc" id="L181">      final byte[] bytes = drain(new BufferedInputStream(conn.getInputStream()));</span>
+
+<span class="nc" id="L183">      final String output = new String(bytes, &quot;UTF-8&quot;);</span>
+      /*if (LOG.isDebugEnabled()){
+        LOGGER.debug(&quot;The response from the server is - &quot; + output);
+      }*/
+<span class="nc" id="L187">      return output;</span>
+<span class="nc" id="L188">    } catch (final Exception ex) {</span>
+<span class="nc" id="L189">      LOGGER.error(&quot;Caught exception while sending pql request&quot;, ex);</span>
+<span class="nc" id="L190">      Utils.rethrowException(ex);</span>
+<span class="nc" id="L191">      throw new AssertionError(&quot;Should not reach this&quot;);</span>
+    } finally {
+<span class="nc bnc" id="L193" title="All 4 branches missed.">      if (conn != null) {</span>
+<span class="nc" id="L194">        conn.disconnect();</span>
+      }
+    }
+  }
+
+  byte[] drain(InputStream inputStream) throws IOException {
+    try {
+<span class="nc" id="L201">      final byte[] buf = new byte[1024];</span>
+      int len;
+<span class="nc" id="L203">      final ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();</span>
+<span class="nc bnc" id="L204" title="All 2 branches missed.">      while ((len = inputStream.read(buf)) &gt; 0) {</span>
+<span class="nc" id="L205">        byteArrayOutputStream.write(buf, 0, len);</span>
+      }
+<span class="nc" id="L207">      return byteArrayOutputStream.toByteArray();</span>
+    } finally {
+<span class="nc" id="L209">      inputStream.close();</span>
+    }
+  }
+
+  public String sendPQLRaw(String url, String pqlRequest, String traceEnabled) {
+    try {
+<span class="nc" id="L215">      final long startTime = System.currentTimeMillis();</span>
+<span class="nc" id="L216">      final JSONObject bqlJson = new JSONObject().put(&quot;pql&quot;, pqlRequest);</span>
+<span class="nc bnc" id="L217" title="All 4 branches missed.">      if (traceEnabled != null &amp;&amp; !traceEnabled.isEmpty()) {</span>
+<span class="nc" id="L218">        bqlJson.put(&quot;trace&quot;, traceEnabled);</span>
+      }
+
+<span class="nc" id="L221">      final String pinotResultString = sendPostRaw(url, bqlJson.toString(), null);</span>
+
+<span class="nc" id="L223">      final long bqlQueryTime = System.currentTimeMillis() - startTime;</span>
+<span class="nc" id="L224">      LOGGER.info(&quot;BQL: &quot; + pqlRequest + &quot; Time: &quot; + bqlQueryTime);</span>
+
+<span class="nc" id="L226">      return pinotResultString;</span>
+<span class="nc" id="L227">    } catch (final Exception ex) {</span>
+<span class="nc" id="L228">      LOGGER.error(&quot;Caught exception in sendPQLRaw&quot;, ex);</span>
+<span class="nc" id="L229">      Utils.rethrowException(ex);</span>
+<span class="nc" id="L230">      throw new AssertionError(&quot;Should not reach this&quot;);</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

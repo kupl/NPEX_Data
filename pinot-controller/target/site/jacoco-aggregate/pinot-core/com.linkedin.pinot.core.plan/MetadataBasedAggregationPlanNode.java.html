@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>MetadataBasedAggregationPlanNode.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-controller</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.plan</a> &gt; <span class="el_source">MetadataBasedAggregationPlanNode.java</span></div><h1>MetadataBasedAggregationPlanNode.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.plan;
+
+import com.linkedin.pinot.common.request.AggregationInfo;
+import com.linkedin.pinot.core.common.Operator;
+import com.linkedin.pinot.core.indexsegment.IndexSegment;
+import com.linkedin.pinot.core.operator.BaseOperator;
+import com.linkedin.pinot.core.operator.query.MetadataBasedAggregationOperator;
+import com.linkedin.pinot.core.query.aggregation.AggregationFunctionContext;
+import com.linkedin.pinot.core.query.aggregation.function.AggregationFunctionFactory;
+import com.linkedin.pinot.core.query.aggregation.function.AggregationFunctionUtils;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * Metadata based aggregation plan node.
+ */
+public class MetadataBasedAggregationPlanNode implements PlanNode {
+<span class="fc" id="L37">  private static final Logger LOGGER = LoggerFactory.getLogger(MetadataBasedAggregationPlanNode.class);</span>
+
+  private final Map&lt;String, ColumnarDataSourcePlanNode&gt; _dataSourcePlanNodeMap;
+  private final AggregationFunctionContext[] _aggregationFunctionContexts;
+  private IndexSegment _indexSegment;
+
+  /**
+   * Constructor for the class.
+   *
+   * @param indexSegment Segment to process
+   * @param aggregationInfos List of aggregation context info.
+   */
+<span class="fc" id="L49">  public MetadataBasedAggregationPlanNode(IndexSegment indexSegment, List&lt;AggregationInfo&gt; aggregationInfos) {</span>
+<span class="fc" id="L50">    _indexSegment = indexSegment;</span>
+<span class="fc" id="L51">    _dataSourcePlanNodeMap = new HashMap&lt;&gt;();</span>
+
+<span class="fc" id="L53">    _aggregationFunctionContexts =</span>
+        AggregationFunctionUtils.getAggregationFunctionContexts(aggregationInfos, indexSegment.getSegmentMetadata());
+
+<span class="fc bfc" id="L56" title="All 2 branches covered.">    for (AggregationFunctionContext aggregationFunctionContext : _aggregationFunctionContexts) {</span>
+<span class="fc" id="L57">      String column = aggregationFunctionContext.getAggregationColumns()[0];</span>
+
+<span class="pc bpc" id="L59" title="1 of 2 branches missed.">      if (!_dataSourcePlanNodeMap.containsKey(column)) {</span>
+        // For count(*), there's no column to have the metadata for.
+<span class="pc bpc" id="L61" title="1 of 2 branches missed.">        if (!aggregationFunctionContext.getAggregationFunction()</span>
+            .getName()
+            .equalsIgnoreCase(AggregationFunctionFactory.AggregationFunctionType.COUNT.getName())) {
+<span class="nc" id="L64">          _dataSourcePlanNodeMap.put(column, new ColumnarDataSourcePlanNode(indexSegment, column));</span>
+        }
+      }
+    }
+<span class="fc" id="L68">  }</span>
+
+  @Override
+  public Operator run() {
+<span class="fc" id="L72">    Map&lt;String, BaseOperator&gt; dataSourceMap = new HashMap&lt;&gt;();</span>
+
+<span class="pc bpc" id="L74" title="1 of 2 branches missed.">    for (String column : _dataSourcePlanNodeMap.keySet()) {</span>
+<span class="nc" id="L75">      ColumnarDataSourcePlanNode columnarDataSourcePlanNode = _dataSourcePlanNodeMap.get(column);</span>
+<span class="nc" id="L76">      BaseOperator operator = columnarDataSourcePlanNode.run();</span>
+<span class="nc" id="L77">      dataSourceMap.put(column, operator);</span>
+<span class="nc" id="L78">    }</span>
+
+<span class="fc" id="L80">    return new MetadataBasedAggregationOperator(_aggregationFunctionContexts, _indexSegment.getSegmentMetadata(),</span>
+        dataSourceMap);
+  }
+
+  @Override
+  public void showTree(String prefix) {
+<span class="nc" id="L86">    LOGGER.debug(&quot;{} Segment Level Inner-Segment Plan Node:&quot;, prefix);</span>
+<span class="nc" id="L87">    LOGGER.debug(&quot;{} Operator: MetadataBasedAggregationOperator&quot;, prefix);</span>
+<span class="nc" id="L88">    LOGGER.debug(&quot;{} IndexSegment: {}&quot;, prefix, _indexSegment.getSegmentName());</span>
+
+<span class="nc" id="L90">    int i = 0;</span>
+<span class="nc bnc" id="L91" title="All 2 branches missed.">    for (String column : _dataSourcePlanNodeMap.keySet()) {</span>
+<span class="nc" id="L92">      LOGGER.debug(&quot;{} Argument {}: DataSourceOperator&quot;, prefix, (i + 1));</span>
+<span class="nc" id="L93">      _dataSourcePlanNodeMap.get(column).showTree(prefix + &quot;    &quot;);</span>
+<span class="nc" id="L94">      i++;</span>
+<span class="nc" id="L95">    }</span>
+<span class="nc" id="L96">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

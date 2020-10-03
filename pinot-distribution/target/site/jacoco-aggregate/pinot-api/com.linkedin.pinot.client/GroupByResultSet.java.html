@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>GroupByResultSet.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-api</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.client</a> &gt; <span class="el_source">GroupByResultSet.java</span></div><h1>GroupByResultSet.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.client;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+/**
+ * A Pinot query result set for group by results, of which there is one of per aggregation function
+ * in the query.
+ */
+class GroupByResultSet extends AbstractResultSet {
+  private final JSONArray _groupByResults;
+  private final JSONArray _groupByColumns;
+  private final String _functionName;
+
+<span class="fc" id="L31">  public GroupByResultSet(JSONObject jsonObject) {</span>
+    try {
+<span class="fc" id="L33">      _groupByResults = jsonObject.getJSONArray(&quot;groupByResult&quot;);</span>
+<span class="fc" id="L34">      _groupByColumns = jsonObject.getJSONArray(&quot;groupByColumns&quot;);</span>
+<span class="fc" id="L35">      _functionName = jsonObject.getString(&quot;function&quot;);</span>
+<span class="nc" id="L36">    } catch (JSONException e) {</span>
+<span class="nc" id="L37">      throw new PinotClientException(e);</span>
+<span class="fc" id="L38">    }</span>
+<span class="fc" id="L39">  }</span>
+
+  /**
+   * Returns the number of rows in this result group.
+   * @return The number of rows in this result group
+   */
+  @Override
+  public int getRowCount() {
+<span class="fc" id="L47">    return _groupByResults.length();</span>
+  }
+
+  @Override
+  public int getColumnCount() {
+<span class="fc" id="L52">    return 1;</span>
+  }
+
+  @Override
+  public String getColumnName(int columnIndex) {
+<span class="fc" id="L57">    return _functionName;</span>
+  }
+
+  @Override
+  public String getString(int rowIndex, int columnIndex) {
+<span class="pc bpc" id="L62" title="1 of 2 branches missed.">    if (columnIndex != 0) {</span>
+<span class="nc" id="L63">      throw new IllegalArgumentException(</span>
+          &quot;Column index must always be 0 for aggregation result sets&quot;);
+    }
+
+    try {
+<span class="fc" id="L68">      return _groupByResults.getJSONObject(rowIndex).getString(&quot;value&quot;);</span>
+<span class="nc" id="L69">    } catch (Exception e) {</span>
+<span class="nc" id="L70">      throw new PinotClientException(e);</span>
+    }
+  }
+
+  @Override
+  public int getGroupKeyLength() {
+<span class="fc" id="L76">    return _groupByColumns.length();</span>
+  }
+
+  @Override
+  public String getGroupKeyString(int rowIndex, int groupKeyColumnIndex) {
+    try {
+<span class="fc" id="L82">      return _groupByResults.getJSONObject(rowIndex).getJSONArray(&quot;group&quot;).getString(groupKeyColumnIndex);</span>
+<span class="nc" id="L83">    } catch (Exception e) {</span>
+<span class="nc" id="L84">      throw new PinotClientException(e);</span>
+    }
+  }
+
+  @Override
+  public String getGroupKeyColumnName(int groupKeyColumnIndex) {
+    try {
+<span class="nc" id="L91">      return _groupByColumns.getString(groupKeyColumnIndex);</span>
+<span class="nc" id="L92">    } catch (Exception e) {</span>
+<span class="nc" id="L93">      throw new PinotClientException(e);</span>
+    }
+  }
+
+  @Override
+  public String toString() {
+<span class="nc" id="L99">    int groupKeyLength = getGroupKeyLength();</span>
+<span class="nc" id="L100">    int numColumns = groupKeyLength + getColumnCount();</span>
+<span class="nc" id="L101">    TextTable table = new TextTable();</span>
+<span class="nc" id="L102">    String[] columnNames = new String[numColumns];</span>
+<span class="nc bnc" id="L103" title="All 2 branches missed.">    for (int c = 0; c &lt; groupKeyLength; c++) {</span>
+      try {
+<span class="nc" id="L105">        columnNames[c] = getGroupKeyColumnName(c);</span>
+<span class="nc" id="L106">      } catch (Exception e) {</span>
+<span class="nc" id="L107">        columnNames[c] = &quot;ERROR&quot;;</span>
+<span class="nc" id="L108">      }</span>
+    }
+<span class="nc bnc" id="L110" title="All 2 branches missed.">    for (int c = 0; c &lt; getColumnCount(); c++) {</span>
+<span class="nc" id="L111">      columnNames[groupKeyLength + c] = getColumnName(c);</span>
+    }
+<span class="nc" id="L113">    table.addHeader(columnNames);</span>
+
+<span class="nc" id="L115">    int numRows = getRowCount();</span>
+<span class="nc bnc" id="L116" title="All 2 branches missed.">    for (int r = 0; r &lt; numRows; r++) {</span>
+<span class="nc" id="L117">      String[] columnValues = new String[numColumns];</span>
+<span class="nc bnc" id="L118" title="All 2 branches missed.">      for (int c = 0; c &lt; groupKeyLength; c++) {</span>
+        try {
+<span class="nc" id="L120">          columnValues[c] = getGroupKeyString(r, c);</span>
+<span class="nc" id="L121">        } catch (Exception e) {</span>
+<span class="nc" id="L122">          columnValues[c] = &quot;ERROR&quot;;</span>
+<span class="nc" id="L123">        }</span>
+      }
+<span class="nc bnc" id="L125" title="All 2 branches missed.">      for (int c = 0; c &lt; getColumnCount(); c++) {</span>
+<span class="nc" id="L126">        columnValues[groupKeyLength + c] = getString(r, c);</span>
+      }
+<span class="nc" id="L128">      table.addRow(columnValues);</span>
+    }
+<span class="nc" id="L130">    return table.toString();</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

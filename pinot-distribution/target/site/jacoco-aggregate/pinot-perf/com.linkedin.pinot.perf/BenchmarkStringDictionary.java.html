@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>BenchmarkStringDictionary.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-perf</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.perf</a> &gt; <span class="el_source">BenchmarkStringDictionary.java</span></div><h1>BenchmarkStringDictionary.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.linkedin.pinot.perf;
+
+import com.linkedin.pinot.core.io.readerwriter.PinotDataBufferMemoryManager;
+import com.linkedin.pinot.core.io.writer.impl.DirectMemoryManager;
+import com.linkedin.pinot.core.realtime.impl.dictionary.StringOffHeapMutableDictionary;
+import com.linkedin.pinot.core.realtime.impl.dictionary.StringOnHeapMutableDictionary;
+import java.util.Random;
+import java.util.concurrent.TimeUnit;
+import org.openjdk.jmh.annotations.Benchmark;
+import org.openjdk.jmh.annotations.BenchmarkMode;
+import org.openjdk.jmh.annotations.Mode;
+import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.Scope;
+import org.openjdk.jmh.annotations.Setup;
+import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.annotations.TearDown;
+import org.openjdk.jmh.profile.GCProfiler;
+import org.openjdk.jmh.profile.HotspotMemoryProfiler;
+import org.openjdk.jmh.runner.Runner;
+import org.openjdk.jmh.runner.options.ChainedOptionsBuilder;
+import org.openjdk.jmh.runner.options.OptionsBuilder;
+import org.openjdk.jmh.runner.options.TimeValue;
+
+
+@State(Scope.Benchmark)
+<span class="nc" id="L42">public class BenchmarkStringDictionary {</span>
+  private static final int ROW_COUNT = 2_500_000;
+  private static final int CARDINALITY = 1_000_000;
+  private static final int MAX_STRING_LEN = 32;
+
+  private String[] _stringValues;
+  private PinotDataBufferMemoryManager _memoryManager;
+
+  @Setup
+  public void setUp() {
+<span class="nc" id="L52">    _memoryManager = new DirectMemoryManager(BenchmarkStringDictionary.class.getName());</span>
+    // Create a list of values to insert into the hash map
+<span class="nc" id="L54">    String[] uniqueStrings = new String[CARDINALITY];</span>
+<span class="nc" id="L55">    Random r = new Random();</span>
+<span class="nc bnc" id="L56" title="All 2 branches missed.">    for (int i = 0; i &lt; uniqueStrings.length; i++) {</span>
+<span class="nc" id="L57">      uniqueStrings[i] = generateRandomString(r, r.nextInt(MAX_STRING_LEN + 1));</span>
+    }
+<span class="nc" id="L59">    _stringValues = new String[ROW_COUNT];</span>
+<span class="nc bnc" id="L60" title="All 2 branches missed.">    for (int i = 0; i &lt; _stringValues.length; i++) {</span>
+<span class="nc" id="L61">      int u = r.nextInt(CARDINALITY);</span>
+<span class="nc" id="L62">      _stringValues[i] = uniqueStrings[u];</span>
+    }
+<span class="nc" id="L64">  }</span>
+
+  @TearDown
+  public void tearDown()
+      throws Exception {
+<span class="nc" id="L69">    _memoryManager.close();</span>
+<span class="nc" id="L70">  }</span>
+
+  // Generates a ascii displayable string of given length
+  private String generateRandomString(Random r, final int len) {
+<span class="nc" id="L74">    byte[] bytes = new byte[len];</span>
+<span class="nc bnc" id="L75" title="All 2 branches missed.">    for (int i = 0; i &lt; len; i++) {</span>
+<span class="nc" id="L76">      bytes[i] = (byte) (r.nextInt(92) + 32);</span>
+    }
+<span class="nc" id="L78">    return new String(bytes);</span>
+  }
+
+  @Benchmark
+  @BenchmarkMode(Mode.SampleTime)
+  @OutputTimeUnit(TimeUnit.MILLISECONDS)
+  public StringOffHeapMutableDictionary benchmarkOffHeapStringDictionary() {
+<span class="nc" id="L85">    StringOffHeapMutableDictionary dictionary =</span>
+        new StringOffHeapMutableDictionary(5000, 10, _memoryManager, &quot;stringColumn&quot;, 32);
+
+<span class="nc bnc" id="L88" title="All 2 branches missed.">    for (String stringValue : _stringValues) {</span>
+<span class="nc" id="L89">      dictionary.index(stringValue);</span>
+    }
+
+<span class="nc" id="L92">    return dictionary;</span>
+  }
+
+  @Benchmark
+  @BenchmarkMode(Mode.SampleTime)
+  @OutputTimeUnit(TimeUnit.MILLISECONDS)
+  public StringOnHeapMutableDictionary benchmarkOnHeapStringDictionary() {
+<span class="nc" id="L99">    StringOnHeapMutableDictionary dictionary = new StringOnHeapMutableDictionary();</span>
+
+<span class="nc bnc" id="L101" title="All 2 branches missed.">    for (String stringValue : _stringValues) {</span>
+<span class="nc" id="L102">      dictionary.index(stringValue);</span>
+    }
+
+<span class="nc" id="L105">    return dictionary;</span>
+  }
+
+  public static void main(String[] args)
+      throws Exception {
+<span class="nc" id="L110">    ChainedOptionsBuilder opt = new OptionsBuilder().include(BenchmarkStringDictionary.class.getSimpleName())</span>
+        .addProfiler(GCProfiler.class)
+        .addProfiler(HotspotMemoryProfiler.class)
+        .warmupTime(TimeValue.seconds(60))
+        .warmupIterations(8)
+        .measurementTime(TimeValue.seconds(60))
+        .measurementIterations(8)
+        .forks(5);
+
+<span class="nc" id="L119">    new Runner(opt.build()).run();</span>
+<span class="nc" id="L120">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

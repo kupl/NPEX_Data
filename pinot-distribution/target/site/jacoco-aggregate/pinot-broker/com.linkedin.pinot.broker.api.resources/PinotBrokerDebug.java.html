@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>PinotBrokerDebug.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-broker</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.broker.api.resources</a> &gt; <span class="el_source">PinotBrokerDebug.java</span></div><h1>PinotBrokerDebug.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.broker.api.resources;
+
+import com.linkedin.pinot.broker.requesthandler.BrokerRequestHandler;
+import com.linkedin.pinot.broker.routing.TimeBoundaryService;
+import com.linkedin.pinot.common.config.TableNameBuilder;
+import com.linkedin.pinot.common.metrics.BrokerMeter;
+import com.linkedin.pinot.common.metrics.BrokerMetrics;
+import com.linkedin.pinot.common.utils.CommonConstants;
+import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
+import io.swagger.annotations.ApiParam;
+import io.swagger.annotations.ApiResponse;
+import io.swagger.annotations.ApiResponses;
+import javax.inject.Inject;
+import javax.ws.rs.GET;
+import javax.ws.rs.Path;
+import javax.ws.rs.PathParam;
+import javax.ws.rs.Produces;
+import javax.ws.rs.WebApplicationException;
+import javax.ws.rs.core.MediaType;
+import javax.ws.rs.core.Response;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+@Api(tags = &quot;Debug&quot;)
+@Path(&quot;/debug&quot;)
+<span class="nc" id="L43">public class PinotBrokerDebug {</span>
+<span class="nc" id="L44">  private static final Logger LOGGER = LoggerFactory.getLogger(PinotBrokerDebug.class);</span>
+
+  @Inject
+  private BrokerRequestHandler requestHandler;
+
+  @Inject
+  private BrokerMetrics brokerMetrics;
+
+  @Inject
+  private TimeBoundaryService timeBoundaryService;
+
+  @GET
+  @Produces(MediaType.APPLICATION_JSON)
+  @Path(&quot;/routingTable/{tableName}&quot;)
+  @ApiOperation(value = &quot;Debugging routing table&quot;)
+  @ApiResponses(value = {
+      @ApiResponse(code = 200, message = &quot;Routing table information of a table&quot;),
+      @ApiResponse(code = 500, message = &quot;Internal server error&quot;)
+  })
+  public String debugRoutingTable(
+      @ApiParam(value = &quot;Name of the table&quot;, required = false) @PathParam(&quot;tableName&quot;) String tableName
+  ) {
+    try {
+<span class="nc" id="L67">      return requestHandler.getRoutingTableSnapshot(tableName);</span>
+<span class="nc" id="L68">    } catch (Exception e) {</span>
+<span class="nc" id="L69">      LOGGER.error(&quot;Caught exception while processing GET request&quot;, e);</span>
+<span class="nc" id="L70">      brokerMetrics.addMeteredGlobalValue(BrokerMeter.UNCAUGHT_GET_EXCEPTIONS, 1);</span>
+<span class="nc" id="L71">      throw new WebApplicationException(e, Response.Status.INTERNAL_SERVER_ERROR);</span>
+    }
+  }
+
+  @GET
+  @Produces(MediaType.APPLICATION_JSON)
+  @Path(&quot;/timeBoundary/{tableName}&quot;)
+  @ApiOperation(value = &quot;Debugging time boundary service&quot;)
+  @ApiResponses(value = {
+      @ApiResponse(code = 200, message = &quot;Time boundary information of a table&quot;),
+      @ApiResponse(code = 500, message = &quot;Internal server error&quot;)
+  })
+  public String debugTimeBoundaryService(
+      @ApiParam(value = &quot;Name of the table&quot;, required = false) @PathParam(&quot;tableName&quot;) String tableName
+  ) {
+    try {
+<span class="nc" id="L87">      String response = &quot;{}&quot;;</span>
+<span class="nc bnc" id="L88" title="All 2 branches missed.">      if (!tableName.isEmpty()) {</span>
+<span class="nc" id="L89">        CommonConstants.Helix.TableType tableType = TableNameBuilder.getTableTypeFromTableName(tableName);</span>
+<span class="nc bnc" id="L90" title="All 2 branches missed.">        if (tableType == null) {</span>
+<span class="nc" id="L91">          tableName = TableNameBuilder.OFFLINE.tableNameWithType(tableName);</span>
+        }
+<span class="nc" id="L93">        TimeBoundaryService.TimeBoundaryInfo tbInfo = timeBoundaryService.getTimeBoundaryInfoFor(tableName);</span>
+<span class="nc bnc" id="L94" title="All 2 branches missed.">        if (tbInfo != null) {</span>
+<span class="nc" id="L95">          response = tbInfo.toJsonString();</span>
+        }
+      }
+<span class="nc" id="L98">      return response;</span>
+<span class="nc" id="L99">    } catch (Exception e) {</span>
+<span class="nc" id="L100">      LOGGER.error(&quot;Caught exception while processing GET request&quot;, e);</span>
+<span class="nc" id="L101">      brokerMetrics.addMeteredGlobalValue(BrokerMeter.UNCAUGHT_GET_EXCEPTIONS, 1);</span>
+<span class="nc" id="L102">      throw new WebApplicationException(e, Response.Status.INTERNAL_SERVER_ERROR);</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

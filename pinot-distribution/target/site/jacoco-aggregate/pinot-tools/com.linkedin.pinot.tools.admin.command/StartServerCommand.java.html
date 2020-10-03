@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>StartServerCommand.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-tools</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.tools.admin.command</a> &gt; <span class="el_source">StartServerCommand.java</span></div><h1>StartServerCommand.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.tools.admin.command;
+
+import com.linkedin.pinot.common.utils.CommonConstants;
+import com.linkedin.pinot.common.utils.NetUtil;
+import com.linkedin.pinot.server.starter.helix.HelixServerStarter;
+import com.linkedin.pinot.tools.Command;
+import java.io.File;
+import org.apache.commons.configuration.Configuration;
+import org.apache.commons.configuration.PropertiesConfiguration;
+import org.kohsuke.args4j.Option;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * Class to implement StartServer command.
+ *
+ */
+<span class="nc" id="L34">public class StartServerCommand extends AbstractBaseAdminCommand implements Command {</span>
+<span class="nc" id="L35">  private static final Logger LOGGER = LoggerFactory.getLogger(StartServerCommand.class);</span>
+
+  @Option(name = &quot;-serverHost&quot;, required = false, metaVar = &quot;&lt;String&gt;&quot;, usage = &quot;Host name for controller.&quot;)
+  private String _serverHost;
+
+<span class="nc" id="L40">  @Option(name = &quot;-serverPort&quot;, required = false, metaVar = &quot;&lt;int&gt;&quot;, usage = &quot;Port number to start the server at.&quot;)</span>
+  private int _serverPort = CommonConstants.Helix.DEFAULT_SERVER_NETTY_PORT;
+
+<span class="nc" id="L43">  @Option(name = &quot;-serverAdminPort&quot;, required = false, metaVar = &quot;&lt;int&gt;&quot;,</span>
+      usage = &quot;Port number to serve the server admin API at.&quot;)
+  private int _serverAdminPort = CommonConstants.Server.DEFAULT_ADMIN_API_PORT;
+
+<span class="nc" id="L47">  @Option(name = &quot;-dataDir&quot;, required = false, metaVar = &quot;&lt;string&gt;&quot;, usage = &quot;Path to directory containing data.&quot;)</span>
+  private String _dataDir = TMP_DIR + &quot;pinotServerData&quot;;
+
+<span class="nc" id="L50">  @Option(name = &quot;-segmentDir&quot;, required = false, metaVar = &quot;&lt;string&gt;&quot;,</span>
+      usage = &quot;Path to directory containing segments.&quot;)
+  private String _segmentDir = TMP_DIR + &quot;pinotSegments&quot;;
+
+<span class="nc" id="L54">  @Option(name = &quot;-zkAddress&quot;, required = false, metaVar = &quot;&lt;http&gt;&quot;, usage = &quot;Http address of Zookeeper.&quot;)</span>
+  private String _zkAddress = DEFAULT_ZK_ADDRESS;
+
+<span class="nc" id="L57">  @Option(name = &quot;-clusterName&quot;, required = false, metaVar = &quot;&lt;String&gt;&quot;, usage = &quot;Pinot cluster name.&quot;)</span>
+  private String _clusterName = &quot;PinotCluster&quot;;
+
+  @Option(name = &quot;-configFileName&quot;, required = false, metaVar = &quot;&lt;Config File Name&gt;&quot;,
+      usage = &quot;Broker Starter Config file.&quot;, forbids = { &quot;-serverHost&quot;, &quot;-serverPort&quot;, &quot;-dataDir&quot;, &quot;-segmentDir&quot;, })
+  private String _configFileName;
+
+<span class="nc" id="L64">  @Option(name = &quot;-help&quot;, required = false, help = true, aliases = { &quot;-h&quot;, &quot;--h&quot;, &quot;--help&quot; },</span>
+      usage = &quot;Print this message.&quot;)
+  private boolean _help = false;
+
+  @Override
+  public boolean getHelp() {
+<span class="nc" id="L70">    return _help;</span>
+  }
+
+  public StartServerCommand setClusterName(String clusterName) {
+<span class="nc" id="L74">    _clusterName = clusterName;</span>
+<span class="nc" id="L75">    return this;</span>
+  }
+
+  public StartServerCommand setZkAddress(String zkAddress) {
+<span class="nc" id="L79">    _zkAddress = zkAddress;</span>
+<span class="nc" id="L80">    return this;</span>
+  }
+
+  public StartServerCommand setPort(int port) {
+<span class="nc" id="L84">    _serverPort = port;</span>
+<span class="nc" id="L85">    return this;</span>
+  }
+
+  public StartServerCommand setAdminPort(int adminPort) {
+<span class="nc" id="L89">    _serverAdminPort = adminPort;</span>
+<span class="nc" id="L90">    return this;</span>
+  }
+
+  public StartServerCommand setDataDir(String dataDir) {
+<span class="nc" id="L94">    _dataDir = dataDir;</span>
+<span class="nc" id="L95">    return this;</span>
+  }
+
+  public StartServerCommand setSegmentDir(String segmentDir) {
+<span class="nc" id="L99">    _segmentDir = segmentDir;</span>
+<span class="nc" id="L100">    return this;</span>
+  }
+
+  public StartServerCommand setConfigFileName(String configFileName) {
+<span class="nc" id="L104">    _configFileName = configFileName;</span>
+<span class="nc" id="L105">    return this;</span>
+  }
+
+  @Override
+  public String toString() {
+<span class="nc bnc" id="L110" title="All 2 branches missed.">    if (_configFileName != null) {</span>
+<span class="nc" id="L111">      return (&quot;StartServer -clusterName &quot; + _clusterName + &quot; -serverHost &quot; + _serverHost + &quot; -serverPort &quot; + _serverPort</span>
+          + &quot; -serverAdminPort &quot; + _serverAdminPort + &quot; -configFileName &quot; + _configFileName + &quot; -zkAddress &quot;
+          + _zkAddress);
+    } else {
+<span class="nc" id="L115">      return (&quot;StartServer -clusterName &quot; + _clusterName + &quot; -serverHost &quot; + _serverHost + &quot; -serverPort &quot; + _serverPort</span>
+          + &quot; -serverAdminPort &quot; + _serverAdminPort + &quot; -dataDir &quot; + _dataDir + &quot; -segmentDir &quot; + _segmentDir
+          + &quot; -zkAddress &quot; + _zkAddress);
+    }
+  }
+
+  @Override
+  public String getName() {
+<span class="nc" id="L123">    return &quot;StartServer&quot;;</span>
+  }
+
+  @Override
+  public void cleanup() {
+
+<span class="nc" id="L129">  }</span>
+
+  @Override
+  public String description() {
+<span class="nc" id="L133">    return &quot;Start the Pinot Server process at the specified port.&quot;;</span>
+  }
+
+  @Override
+  public boolean execute() throws Exception {
+    try {
+<span class="nc bnc" id="L139" title="All 2 branches missed.">      if (_serverHost == null) {</span>
+<span class="nc" id="L140">        _serverHost = NetUtil.getHostAddress();</span>
+      }
+
+<span class="nc" id="L143">      Configuration configuration = readConfigFromFile(_configFileName);</span>
+<span class="nc bnc" id="L144" title="All 2 branches missed.">      if (configuration == null) {</span>
+<span class="nc bnc" id="L145" title="All 2 branches missed.">        if (_configFileName != null) {</span>
+<span class="nc" id="L146">          LOGGER.error(&quot;Error: Unable to find file {}.&quot;, _configFileName);</span>
+<span class="nc" id="L147">          return false;</span>
+        }
+
+<span class="nc" id="L150">        configuration = new PropertiesConfiguration();</span>
+<span class="nc" id="L151">        configuration.addProperty(CommonConstants.Helix.KEY_OF_SERVER_NETTY_HOST, _serverHost);</span>
+<span class="nc" id="L152">        configuration.addProperty(CommonConstants.Helix.KEY_OF_SERVER_NETTY_PORT, _serverPort);</span>
+<span class="nc" id="L153">        configuration.addProperty(CommonConstants.Server.CONFIG_OF_ADMIN_API_PORT, _serverAdminPort);</span>
+<span class="nc" id="L154">        configuration.addProperty(&quot;pinot.server.instance.dataDir&quot;, _dataDir + _serverPort + &quot;/index&quot;);</span>
+<span class="nc" id="L155">        configuration.addProperty(&quot;pinot.server.instance.segmentTarDir&quot;, _segmentDir + _serverPort + &quot;/segmentTar&quot;);</span>
+      }
+
+<span class="nc" id="L158">      LOGGER.info(&quot;Executing command: &quot; + toString());</span>
+<span class="nc" id="L159">      new HelixServerStarter(_clusterName, _zkAddress, configuration);</span>
+<span class="nc" id="L160">      String pidFile = &quot;.pinotAdminServer-&quot; + String.valueOf(System.currentTimeMillis()) + &quot;.pid&quot;;</span>
+<span class="nc" id="L161">      savePID(System.getProperty(&quot;java.io.tmpdir&quot;) + File.separator + pidFile);</span>
+<span class="nc" id="L162">      return true;</span>
+<span class="nc" id="L163">    } catch (Exception e) {</span>
+<span class="nc" id="L164">      LOGGER.error(&quot;Caught exception while starting Pinot server, exiting.&quot;, e);</span>
+<span class="nc" id="L165">      System.exit(-1);</span>
+<span class="nc" id="L166">      return false;</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

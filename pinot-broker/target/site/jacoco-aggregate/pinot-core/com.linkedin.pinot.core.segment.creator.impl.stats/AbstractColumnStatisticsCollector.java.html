@@ -1,0 +1,199 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>AbstractColumnStatisticsCollector.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-broker</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.segment.creator.impl.stats</a> &gt; <span class="el_source">AbstractColumnStatisticsCollector.java</span></div><h1>AbstractColumnStatisticsCollector.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.segment.creator.impl.stats;
+
+import com.linkedin.pinot.common.data.FieldSpec;
+import com.linkedin.pinot.common.data.FieldSpec.DataType;
+import com.linkedin.pinot.core.data.partition.PartitionFunction;
+import com.linkedin.pinot.core.segment.creator.ColumnStatistics;
+import com.linkedin.pinot.core.segment.creator.StatsCollectorConfig;
+import com.linkedin.pinot.core.segment.creator.impl.V1Constants;
+import java.util.Arrays;
+import java.util.List;
+import org.apache.avro.reflect.Nullable;
+import org.apache.commons.lang.math.IntRange;
+
+
+/**
+ * This class in initialized per column and all the data is
+ * sent to it before actual indexes are created
+ * the job of this class is to collect
+ * unique elements
+ * record cardinality
+ * compute min
+ * compute max
+ * see if column isSorted
+ */
+
+public abstract class AbstractColumnStatisticsCollector implements ColumnStatistics {
+  protected static final int INITIAL_HASH_SET_SIZE = 1000;
+<span class="fc" id="L43">  private Object previousValue = null;</span>
+  protected final FieldSpec fieldSpec;
+<span class="fc" id="L45">  private boolean isSorted = true;</span>
+  private final String column;
+
+<span class="fc" id="L48">  protected int totalNumberOfEntries = 0;</span>
+<span class="fc" id="L49">  protected int maxNumberOfMultiValues = 0;</span>
+<span class="fc" id="L50">  private int numInputNullValues = 0;  // Number of rows in which this column was null in the input.</span>
+  private PartitionFunction partitionFunction;
+  private final int numPartitions;
+<span class="fc" id="L53">  private int partitionRangeStart = Integer.MAX_VALUE;</span>
+<span class="fc" id="L54">  private int partitionRangeEnd = Integer.MIN_VALUE;</span>
+
+  void updateTotalNumberOfEntries(Object[] entries) {
+<span class="fc" id="L57">    totalNumberOfEntries += entries.length;</span>
+<span class="fc" id="L58">  }</span>
+
+  public int getTotalNumberOfEntries() {
+<span class="fc" id="L61">    return totalNumberOfEntries;</span>
+  }
+
+<span class="fc" id="L64">  public AbstractColumnStatisticsCollector(String column, StatsCollectorConfig statsCollectorConfig) {</span>
+<span class="fc" id="L65">    this.column = column;</span>
+<span class="fc" id="L66">    fieldSpec = statsCollectorConfig.getFieldSpecForColumn(column);</span>
+<span class="fc" id="L67">    partitionFunction = statsCollectorConfig.getPartitionFunction(column);</span>
+<span class="fc" id="L68">    numPartitions = statsCollectorConfig.getNumPartitions(column);</span>
+<span class="fc" id="L69">    addressNull(previousValue, fieldSpec.getDataType());</span>
+<span class="fc" id="L70">    previousValue = null;</span>
+<span class="fc" id="L71">  }</span>
+
+  public int getMaxNumberOfMultiValues() {
+<span class="fc" id="L74">    return maxNumberOfMultiValues;</span>
+  }
+
+  void addressSorted(Object entry) {
+<span class="fc bfc" id="L78" title="All 2 branches covered.">    if (isSorted) {</span>
+<span class="fc bfc" id="L79" title="All 2 branches covered.">      if (previousValue != null) {</span>
+<span class="pc bpc" id="L80" title="1 of 4 branches missed.">        if (!entry.equals(previousValue) &amp;&amp; previousValue != null) {</span>
+<span class="fc" id="L81">          final Comparable prevValue = (Comparable) previousValue;</span>
+<span class="fc" id="L82">          final Comparable origin = (Comparable) entry;</span>
+<span class="fc bfc" id="L83" title="All 2 branches covered.">          if (origin.compareTo(prevValue) &lt; 0) {</span>
+<span class="fc" id="L84">            isSorted = false;</span>
+          }
+        }
+      }
+<span class="fc" id="L88">      previousValue = entry;</span>
+    }
+<span class="fc" id="L90">  }</span>
+
+  @Override
+  public boolean isSorted() {
+<span class="fc bfc" id="L94" title="All 4 branches covered.">    return fieldSpec.isSingleValueField() &amp;&amp; isSorted;</span>
+  }
+
+  /**
+   * Collect statistics for given the entry.
+   * Entry is expected to be 'raw', and not pre-aggregated (for star-tree).
+   * @param entry Entry to be collected
+   */
+  public abstract void collect(Object entry);
+
+  /**
+   * Collected statistics for the given entry.
+   *
+   * @param entry Entry to be collected
+   * @param isAggregated True for aggregated, False for raw.
+   */
+  public abstract void collect(Object entry, boolean isAggregated);
+
+  public abstract Object getMinValue();
+
+  public abstract Object getMaxValue();
+
+  public abstract Object getUniqueValuesSet();
+
+  public abstract int getCardinality();
+
+  public int getLengthOfLargestElement() {
+<span class="fc" id="L121">    return -1;</span>
+  }
+
+  public abstract void seal();
+
+  Object addressNull(Object entry, DataType e) {
+<span class="pc bpc" id="L127" title="1 of 2 branches missed.">    if (entry == null) {</span>
+<span class="fc bfc" id="L128" title="All 2 branches covered.">      if (e == DataType.STRING) {</span>
+<span class="fc" id="L129">        entry = V1Constants.Str.NULL_STRING;</span>
+<span class="pc bpc" id="L130" title="1 of 2 branches missed.">      } else if (e == DataType.BOOLEAN) {</span>
+<span class="nc" id="L131">        entry = V1Constants.Str.NULL_BOOLEAN;</span>
+<span class="fc bfc" id="L132" title="All 2 branches covered.">      } else if (e == DataType.DOUBLE) {</span>
+<span class="fc" id="L133">        entry = V1Constants.Numbers.NULL_DOUBLE;</span>
+<span class="fc bfc" id="L134" title="All 2 branches covered.">      } else if (e == DataType.FLOAT) {</span>
+<span class="fc" id="L135">        entry = V1Constants.Numbers.NULL_FLOAT;</span>
+<span class="fc bfc" id="L136" title="All 2 branches covered.">      } else if (e == DataType.LONG) {</span>
+<span class="fc" id="L137">        entry = V1Constants.Numbers.NULL_LONG;</span>
+<span class="pc bpc" id="L138" title="1 of 2 branches missed.">      } else if (e == DataType.INT) {</span>
+<span class="fc" id="L139">        entry = V1Constants.Numbers.NULL_INT;</span>
+      }
+    }
+<span class="fc" id="L142">    return entry;</span>
+  }
+
+  /**
+   * Returns the {@link PartitionFunction} for the column.
+   * @return Partition function for the column.
+   */
+  public PartitionFunction getPartitionFunction() {
+<span class="fc" id="L150">    return partitionFunction;</span>
+  }
+
+  /**
+   * Returns the number of partitions for this column.
+   *
+   * @return Number of partitions.
+   */
+  public int getNumPartitions() {
+<span class="fc" id="L159">    return numPartitions;</span>
+  }
+
+  /**
+   * Returns the partition range within which the column values exist.
+   *
+   * @return List of ranges for the column values.
+   */
+  @Nullable
+  public List&lt;IntRange&gt; getPartitionRanges() {
+<span class="fc bfc" id="L169" title="All 2 branches covered.">    if (partitionRangeStart &lt;= partitionRangeEnd) {</span>
+<span class="fc" id="L170">      return Arrays.asList(new IntRange(partitionRangeStart, partitionRangeEnd));</span>
+    } else {
+<span class="fc" id="L172">      return null;</span>
+    }
+  }
+
+  /**
+   * Updates the partition range based on the partition of the given value.
+   *
+   * @param value Column value.
+   */
+  protected void updatePartition(Object value) {
+<span class="fc bfc" id="L182" title="All 2 branches covered.">    if (partitionFunction != null) {</span>
+<span class="fc" id="L183">      int partition = partitionFunction.getPartition(value);</span>
+
+<span class="fc bfc" id="L185" title="All 2 branches covered.">      if (partition &lt; partitionRangeStart) {</span>
+<span class="fc" id="L186">        partitionRangeStart = partition;</span>
+      }
+<span class="fc bfc" id="L188" title="All 2 branches covered.">      if (partition &gt; partitionRangeEnd) {</span>
+<span class="fc" id="L189">        partitionRangeEnd = partition;</span>
+      }
+    }
+<span class="fc" id="L192">  }</span>
+
+  @Override
+  public int getPartitionRangeWidth() {
+<span class="nc" id="L196">    return partitionRangeEnd - partitionRangeStart + 1;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

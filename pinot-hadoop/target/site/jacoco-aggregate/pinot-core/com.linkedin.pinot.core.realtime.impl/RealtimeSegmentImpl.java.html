@@ -1,0 +1,579 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>RealtimeSegmentImpl.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-hadoop</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.realtime.impl</a> &gt; <span class="el_source">RealtimeSegmentImpl.java</span></div><h1>RealtimeSegmentImpl.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.realtime.impl;
+
+import com.google.common.base.Preconditions;
+import com.linkedin.pinot.common.config.SegmentPartitionConfig;
+import com.linkedin.pinot.common.data.FieldSpec;
+import com.linkedin.pinot.common.data.Schema;
+import com.linkedin.pinot.common.segment.SegmentMetadata;
+import com.linkedin.pinot.core.data.GenericRow;
+import com.linkedin.pinot.core.io.reader.DataFileReader;
+import com.linkedin.pinot.core.io.readerwriter.PinotDataBufferMemoryManager;
+import com.linkedin.pinot.core.io.readerwriter.impl.FixedByteSingleColumnMultiValueReaderWriter;
+import com.linkedin.pinot.core.io.readerwriter.impl.FixedByteSingleColumnSingleValueReaderWriter;
+import com.linkedin.pinot.core.realtime.RealtimeSegment;
+import com.linkedin.pinot.core.realtime.impl.dictionary.MutableDictionary;
+import com.linkedin.pinot.core.realtime.impl.dictionary.MutableDictionaryFactory;
+import com.linkedin.pinot.core.realtime.impl.invertedindex.RealtimeInvertedIndexReader;
+import com.linkedin.pinot.core.segment.creator.impl.V1Constants;
+import com.linkedin.pinot.core.segment.index.SegmentMetadataImpl;
+import com.linkedin.pinot.core.segment.index.data.source.ColumnDataSource;
+import com.linkedin.pinot.core.startree.StarTree;
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
+import org.roaringbitmap.IntIterator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+public class RealtimeSegmentImpl implements RealtimeSegment {
+  // For multi-valued column, forward-index.
+  // Maximum number of multi-values per row. We assert on this.
+  private static final int MAX_MULTI_VALUES_PER_ROW = 1000;
+
+  private final Logger _logger;
+<span class="fc" id="L52">  private final long _startTimeMillis = System.currentTimeMillis();</span>
+
+  private final String _segmentName;
+  private final Schema _schema;
+  private final int _capacity;
+  private final SegmentMetadata _segmentMetadata;
+  private final boolean _offHeap;
+  private final PinotDataBufferMemoryManager _memoryManager;
+  private final RealtimeSegmentStatsHistory _statsHistory;
+  private final SegmentPartitionConfig _segmentPartitionConfig;
+
+<span class="fc" id="L63">  private final Map&lt;String, MutableDictionary&gt; _dictionaryMap = new HashMap&lt;&gt;();</span>
+<span class="fc" id="L64">  private final Map&lt;String, DataFileReader&gt; _indexReaderWriterMap = new HashMap&lt;&gt;();</span>
+<span class="fc" id="L65">  private final Map&lt;String, Integer&gt; _maxNumValuesMap = new HashMap&lt;&gt;();</span>
+<span class="fc" id="L66">  private final Map&lt;String, RealtimeInvertedIndexReader&gt; _invertedIndexMap = new HashMap&lt;&gt;();</span>
+
+<span class="fc" id="L68">  private volatile int _numDocsIndexed = 0;</span>
+
+  // to compute the rolling interval
+<span class="fc" id="L71">  private volatile long _minTime = Long.MAX_VALUE;</span>
+<span class="fc" id="L72">  private volatile long _maxTime = Long.MIN_VALUE;</span>
+
+<span class="fc" id="L74">  public RealtimeSegmentImpl(RealtimeSegmentConfig config) {</span>
+<span class="fc" id="L75">    _segmentName = config.getSegmentName();</span>
+<span class="fc" id="L76">    _schema = config.getSchema();</span>
+<span class="fc" id="L77">    _capacity = config.getCapacity();</span>
+<span class="fc" id="L78">    _segmentMetadata = new SegmentMetadataImpl(config.getRealtimeSegmentZKMetadata(), _schema) {</span>
+      @Override
+      public int getTotalDocs() {
+<span class="nc" id="L81">        return _numDocsIndexed;</span>
+      }
+
+      @Override
+      public int getTotalRawDocs() {
+        // In realtime total docs and total raw docs are the same currently.
+<span class="nc" id="L87">        return _numDocsIndexed;</span>
+      }
+    };
+
+<span class="fc" id="L91">    _offHeap = config.isOffHeap();</span>
+<span class="fc" id="L92">    _memoryManager = config.getMemoryManager();</span>
+<span class="fc" id="L93">    _statsHistory = config.getStatsHistory();</span>
+<span class="fc" id="L94">    _segmentPartitionConfig = config.getSegmentPartitionConfig();</span>
+
+<span class="fc" id="L96">    _logger = LoggerFactory.getLogger(</span>
+        RealtimeSegmentImpl.class.getName() + &quot;_&quot; + _segmentName + &quot;_&quot; + config.getStreamName());
+
+<span class="fc" id="L99">    Set&lt;String&gt; noDictionaryColumns = config.getNoDictionaryColumns();</span>
+<span class="fc" id="L100">    Set&lt;String&gt; invertedIndexColumns = config.getInvertedIndexColumns();</span>
+<span class="fc" id="L101">    int avgNumMultiValues = config.getAvgNumMultiValues();</span>
+
+    // Initialize for each column
+<span class="fc bfc" id="L104" title="All 2 branches covered.">    for (FieldSpec fieldSpec : _schema.getAllFieldSpecs()) {</span>
+<span class="fc" id="L105">      String column = fieldSpec.getName();</span>
+<span class="fc" id="L106">      _maxNumValuesMap.put(column, 0);</span>
+
+      // Check whether to generate raw index for the column while consuming
+      // Only support generating raw index on single-value non-string columns that do not have inverted index while
+      // consuming. After consumption completes and the segment is built, all single-value columns can have raw index
+<span class="fc" id="L111">      FieldSpec.DataType dataType = fieldSpec.getDataType();</span>
+<span class="fc" id="L112">      int indexColumnSize = FieldSpec.DataType.INT.size();</span>
+<span class="pc bpc" id="L113" title="7 of 8 branches missed.">      if (noDictionaryColumns.contains(column) &amp;&amp; fieldSpec.isSingleValueField()</span>
+          &amp;&amp; dataType != FieldSpec.DataType.STRING &amp;&amp; !invertedIndexColumns.contains(column)) {
+        // No dictionary
+<span class="nc" id="L116">        indexColumnSize = dataType.size();</span>
+      } else {
+        int dictionaryColumnSize;
+<span class="fc bfc" id="L119" title="All 2 branches covered.">        if (dataType == FieldSpec.DataType.STRING) {</span>
+<span class="fc" id="L120">          dictionaryColumnSize = _statsHistory.getEstimatedAvgColSize(column);</span>
+        } else {
+<span class="fc" id="L122">          dictionaryColumnSize = dataType.size();</span>
+        }
+<span class="fc" id="L124">        String allocationContext = buildAllocationContext(_segmentName, column, V1Constants.Dict.FILE_EXTENSION);</span>
+<span class="fc" id="L125">        MutableDictionary dictionary =</span>
+            MutableDictionaryFactory.getMutableDictionary(dataType, _offHeap, _memoryManager, dictionaryColumnSize,
+                _statsHistory.getEstimatedCardinality(column), allocationContext);
+<span class="fc" id="L128">        _dictionaryMap.put(column, dictionary);</span>
+      }
+
+
+      DataFileReader indexReaderWriter;
+<span class="fc bfc" id="L133" title="All 2 branches covered.">      if (fieldSpec.isSingleValueField()) {</span>
+<span class="fc" id="L134">        String allocationContext =</span>
+            buildAllocationContext(_segmentName, column, V1Constants.Indexes.UNSORTED_SV_FORWARD_INDEX_FILE_EXTENSION);
+<span class="fc" id="L136">        indexReaderWriter = new FixedByteSingleColumnSingleValueReaderWriter(_capacity, indexColumnSize, _memoryManager,</span>
+            allocationContext);
+<span class="fc" id="L138">      } else {</span>
+        // TODO: Start with a smaller capacity on FixedByteSingleColumnMultiValueReaderWriter and let it expand
+<span class="fc" id="L140">        String allocationContext =</span>
+            buildAllocationContext(_segmentName, column, V1Constants.Indexes.UNSORTED_MV_FORWARD_INDEX_FILE_EXTENSION);
+<span class="fc" id="L142">        indexReaderWriter =</span>
+            new FixedByteSingleColumnMultiValueReaderWriter(MAX_MULTI_VALUES_PER_ROW, avgNumMultiValues, _capacity,
+                indexColumnSize, _memoryManager, allocationContext);
+      }
+<span class="fc" id="L146">      _indexReaderWriterMap.put(column, indexReaderWriter);</span>
+
+<span class="fc bfc" id="L148" title="All 2 branches covered.">      if (invertedIndexColumns.contains(column)) {</span>
+<span class="fc" id="L149">        _invertedIndexMap.put(column, new RealtimeInvertedIndexReader());</span>
+      }
+<span class="fc" id="L151">    }</span>
+<span class="fc" id="L152">  }</span>
+
+  public SegmentPartitionConfig getSegmentPartitionConfig() {
+<span class="fc" id="L155">    return _segmentPartitionConfig;</span>
+  }
+
+  public long getMinTime() {
+<span class="nc" id="L159">    return _minTime;</span>
+  }
+
+  public long getMaxTime() {
+<span class="nc" id="L163">    return _maxTime;</span>
+  }
+
+  @Override
+  public boolean index(GenericRow row) {
+    // Update dictionary first
+<span class="fc bfc" id="L169" title="All 2 branches covered.">    for (FieldSpec fieldSpec : _schema.getAllFieldSpecs()) {</span>
+<span class="fc" id="L170">      String column = fieldSpec.getName();</span>
+<span class="fc" id="L171">      Object value = row.getValue(column);</span>
+<span class="fc" id="L172">      MutableDictionary dictionary = _dictionaryMap.get(column);</span>
+<span class="pc bpc" id="L173" title="1 of 2 branches missed.">      if (dictionary != null) {</span>
+<span class="fc" id="L174">        dictionary.index(value);</span>
+      }
+      // Update max number of values for multi-value column
+<span class="fc bfc" id="L177" title="All 2 branches covered.">      if (!fieldSpec.isSingleValueField()) {</span>
+<span class="fc" id="L178">        int numValues = ((Object[]) value).length;</span>
+<span class="fc bfc" id="L179" title="All 2 branches covered.">        if (_maxNumValuesMap.get(column) &lt; numValues) {</span>
+<span class="fc" id="L180">          _maxNumValuesMap.put(column, numValues);</span>
+        }
+        continue;
+      }
+      // Update min/max value for time column
+<span class="fc bfc" id="L185" title="All 2 branches covered.">      if (fieldSpec.getFieldType() == FieldSpec.FieldType.TIME) {</span>
+        long timeValue;
+<span class="pc bpc" id="L187" title="1 of 2 branches missed.">        if (value instanceof Number) {</span>
+<span class="fc" id="L188">          timeValue = ((Number) value).longValue();</span>
+        } else {
+<span class="nc" id="L190">          timeValue = Long.valueOf(value.toString());</span>
+        }
+<span class="fc" id="L192">        _minTime = Math.min(_minTime, timeValue);</span>
+<span class="fc" id="L193">        _maxTime = Math.max(_maxTime, timeValue);</span>
+      }
+<span class="fc" id="L195">    }</span>
+
+    // Update forward index
+<span class="fc" id="L198">    int docId = _numDocsIndexed;</span>
+    // Store dictionary Id(s) for columns with dictionary
+<span class="fc" id="L200">    Map&lt;String, Object&gt; dictIdMap = new HashMap&lt;&gt;();</span>
+<span class="fc bfc" id="L201" title="All 2 branches covered.">    for (FieldSpec fieldSpec : _schema.getAllFieldSpecs()) {</span>
+<span class="fc" id="L202">      String column = fieldSpec.getName();</span>
+<span class="fc" id="L203">      Object value = row.getValue(column);</span>
+<span class="fc bfc" id="L204" title="All 2 branches covered.">      if (fieldSpec.isSingleValueField()) {</span>
+<span class="fc" id="L205">        FixedByteSingleColumnSingleValueReaderWriter indexReaderWriter =</span>
+            (FixedByteSingleColumnSingleValueReaderWriter) _indexReaderWriterMap.get(column);
+<span class="fc" id="L207">        MutableDictionary dictionary = _dictionaryMap.get(column);</span>
+<span class="pc bpc" id="L208" title="1 of 2 branches missed.">        if (dictionary != null) {</span>
+          // Column with dictionary
+<span class="fc" id="L210">          int dictId = dictionary.indexOf(value);</span>
+<span class="fc" id="L211">          indexReaderWriter.setInt(docId, dictId);</span>
+<span class="fc" id="L212">          dictIdMap.put(column, dictId);</span>
+<span class="fc" id="L213">        } else {</span>
+          // No-dictionary column
+<span class="nc" id="L215">          FieldSpec.DataType dataType = fieldSpec.getDataType();</span>
+<span class="nc bnc" id="L216" title="All 5 branches missed.">          switch (dataType) {</span>
+            case INT:
+<span class="nc" id="L218">              indexReaderWriter.setInt(docId, (Integer) value);</span>
+<span class="nc" id="L219">              break;</span>
+            case LONG:
+<span class="nc" id="L221">              indexReaderWriter.setLong(docId, (Long) value);</span>
+<span class="nc" id="L222">              break;</span>
+            case FLOAT:
+<span class="nc" id="L224">              indexReaderWriter.setFloat(docId, (Float) value);</span>
+<span class="nc" id="L225">              break;</span>
+            case DOUBLE:
+<span class="nc" id="L227">              indexReaderWriter.setDouble(docId, (Double) value);</span>
+<span class="nc" id="L228">              break;</span>
+            default:
+<span class="nc" id="L230">              throw new UnsupportedOperationException(</span>
+                  &quot;Unsupported data type: &quot; + dataType + &quot; for no-dictionary column: &quot; + column);
+          }
+        }
+<span class="fc" id="L234">      } else {</span>
+<span class="fc" id="L235">        Object[] values = (Object[]) value;</span>
+<span class="fc" id="L236">        int numValues = values.length;</span>
+<span class="fc" id="L237">        int[] dictIds = new int[numValues];</span>
+<span class="fc bfc" id="L238" title="All 2 branches covered.">        for (int i = 0; i &lt; numValues; i++) {</span>
+<span class="fc" id="L239">          dictIds[i] = _dictionaryMap.get(column).indexOf(values[i]);</span>
+        }
+<span class="fc" id="L241">        ((FixedByteSingleColumnMultiValueReaderWriter) _indexReaderWriterMap.get(column)).setIntArray(docId, dictIds);</span>
+<span class="fc" id="L242">        dictIdMap.put(column, dictIds);</span>
+      }
+<span class="fc" id="L244">    }</span>
+
+    // Update inverted index at last
+    // NOTE: inverted index have to be updated at last because once it gets updated, the latest record will become
+    // queryable
+<span class="fc bfc" id="L249" title="All 2 branches covered.">    for (FieldSpec fieldSpec : _schema.getAllFieldSpecs()) {</span>
+<span class="fc" id="L250">      String column = fieldSpec.getName();</span>
+<span class="fc" id="L251">      RealtimeInvertedIndexReader invertedIndex = _invertedIndexMap.get(column);</span>
+<span class="fc bfc" id="L252" title="All 2 branches covered.">      if (invertedIndex != null) {</span>
+<span class="pc bpc" id="L253" title="1 of 2 branches missed.">        if (fieldSpec.isSingleValueField()) {</span>
+<span class="fc" id="L254">          invertedIndex.add(((Integer) dictIdMap.get(column)), docId);</span>
+        } else {
+<span class="nc" id="L256">          int[] dictIds = (int[]) dictIdMap.get(column);</span>
+<span class="nc bnc" id="L257" title="All 2 branches missed.">          for (int dictId : dictIds) {</span>
+<span class="nc" id="L258">            invertedIndex.add(dictId, docId);</span>
+          }
+        }
+      }
+<span class="fc" id="L262">    }</span>
+
+    // Update number of document indexed at last to make the latest record queryable
+<span class="pc bpc" id="L265" title="1 of 2 branches missed.">    return _numDocsIndexed++ &lt; _capacity;</span>
+  }
+
+  @Override
+  public int getNumDocsIndexed() {
+<span class="fc" id="L270">    return _numDocsIndexed;</span>
+  }
+
+  @Override
+  public GenericRow getRecord(int docId, GenericRow reuse) {
+<span class="fc bfc" id="L275" title="All 2 branches covered.">    for (FieldSpec fieldSpec : _schema.getAllFieldSpecs()) {</span>
+<span class="fc" id="L276">      String column = fieldSpec.getName();</span>
+<span class="fc" id="L277">      DataFileReader indexReaderWriter = _indexReaderWriterMap.get(column);</span>
+<span class="fc" id="L278">      MutableDictionary dictionary = _dictionaryMap.get(column);</span>
+<span class="pc bpc" id="L279" title="1 of 2 branches missed.">      if (dictionary != null) {</span>
+        // Column with dictionary
+<span class="fc bfc" id="L281" title="All 2 branches covered.">        if (fieldSpec.isSingleValueField()) {</span>
+<span class="fc" id="L282">          int dictId = ((FixedByteSingleColumnSingleValueReaderWriter) indexReaderWriter).getInt(docId);</span>
+<span class="fc" id="L283">          reuse.putField(column, dictionary.get(dictId));</span>
+<span class="fc" id="L284">        } else {</span>
+<span class="fc" id="L285">          int[] dictIds = new int[_maxNumValuesMap.get(column)];</span>
+<span class="fc" id="L286">          int numValues = ((FixedByteSingleColumnMultiValueReaderWriter) indexReaderWriter).getIntArray(docId, dictIds);</span>
+<span class="fc" id="L287">          Object[] values = new Object[numValues];</span>
+<span class="fc bfc" id="L288" title="All 2 branches covered.">          for (int i = 0; i &lt; numValues; i++) {</span>
+<span class="fc" id="L289">            values[i] = dictionary.get(dictIds[i]);</span>
+          }
+<span class="fc" id="L291">          reuse.putField(column, values);</span>
+<span class="fc" id="L292">        }</span>
+      } else {
+        // No-dictionary column
+<span class="nc" id="L295">        FixedByteSingleColumnSingleValueReaderWriter singleValueReaderWriter =</span>
+            (FixedByteSingleColumnSingleValueReaderWriter) indexReaderWriter;
+<span class="nc" id="L297">        FieldSpec.DataType dataType = fieldSpec.getDataType();</span>
+<span class="nc bnc" id="L298" title="All 5 branches missed.">        switch (dataType) {</span>
+          case INT:
+<span class="nc" id="L300">            reuse.putField(column, singleValueReaderWriter.getInt(docId));</span>
+<span class="nc" id="L301">            break;</span>
+          case LONG:
+<span class="nc" id="L303">            reuse.putField(column, singleValueReaderWriter.getLong(docId));</span>
+<span class="nc" id="L304">            break;</span>
+          case FLOAT:
+<span class="nc" id="L306">            reuse.putField(column, singleValueReaderWriter.getFloat(docId));</span>
+<span class="nc" id="L307">            break;</span>
+          case DOUBLE:
+<span class="nc" id="L309">            reuse.putField(column, singleValueReaderWriter.getDouble(docId));</span>
+<span class="nc" id="L310">            break;</span>
+          default:
+<span class="nc" id="L312">            throw new UnsupportedOperationException(</span>
+                &quot;Unsupported data type: &quot; + dataType + &quot; for no-dictionary column: &quot; + column);
+        }
+      }
+<span class="fc" id="L316">    }</span>
+<span class="fc" id="L317">    return reuse;</span>
+  }
+
+  @Override
+  public String getSegmentName() {
+<span class="nc" id="L322">    return _segmentName;</span>
+  }
+
+  @Override
+  public SegmentMetadata getSegmentMetadata() {
+<span class="nc" id="L327">    return _segmentMetadata;</span>
+  }
+
+  @Override
+  public Set&lt;String&gt; getColumnNames() {
+<span class="fc" id="L332">    return _schema.getColumnNames();</span>
+  }
+
+  @Override
+  public ColumnDataSource getDataSource(String columnName) {
+<span class="fc" id="L337">    return new ColumnDataSource(_schema.getFieldSpecFor(columnName), _numDocsIndexed, _maxNumValuesMap.get(columnName),</span>
+        _indexReaderWriterMap.get(columnName), _invertedIndexMap.get(columnName), _dictionaryMap.get(columnName));
+  }
+
+  @Override
+  public StarTree getStarTree() {
+<span class="nc" id="L343">    return null;</span>
+  }
+
+  @Override
+  public long getDiskSizeBytes() {
+<span class="nc" id="L348">    return 0;</span>
+  }
+
+  @Override
+  public void destroy() {
+<span class="nc" id="L353">    _logger.info(&quot;Trying to close RealtimeSegmentImpl : {}&quot;, _segmentName);</span>
+
+    // Gather statistics for off-heap mode
+<span class="nc bnc" id="L356" title="All 2 branches missed.">    if (_offHeap) {</span>
+<span class="nc bnc" id="L357" title="All 2 branches missed.">      if (_numDocsIndexed &gt; 0) {</span>
+<span class="nc" id="L358">        int numSeconds = (int) ((System.currentTimeMillis() - _startTimeMillis) / 1000);</span>
+<span class="nc" id="L359">        long totalMemBytes = _memoryManager.getTotalAllocatedBytes();</span>
+<span class="nc" id="L360">        _logger.info(&quot;Segment used {} bytes of memory for {} rows consumed in {} seconds&quot;, totalMemBytes,</span>
+            _numDocsIndexed, numSeconds);
+
+<span class="nc" id="L363">        RealtimeSegmentStatsHistory.SegmentStats segmentStats = new RealtimeSegmentStatsHistory.SegmentStats();</span>
+<span class="nc bnc" id="L364" title="All 2 branches missed.">        for (Map.Entry&lt;String, MutableDictionary&gt; entry : _dictionaryMap.entrySet()) {</span>
+<span class="nc" id="L365">          RealtimeSegmentStatsHistory.ColumnStats columnStats = new RealtimeSegmentStatsHistory.ColumnStats();</span>
+<span class="nc" id="L366">          columnStats.setCardinality(entry.getValue().length());</span>
+<span class="nc" id="L367">          columnStats.setAvgColumnSize(entry.getValue().getAvgValueSize());</span>
+<span class="nc" id="L368">          segmentStats.setColumnStats(entry.getKey(), columnStats);</span>
+<span class="nc" id="L369">        }</span>
+<span class="nc" id="L370">        segmentStats.setNumRowsConsumed(_numDocsIndexed);</span>
+<span class="nc" id="L371">        segmentStats.setMemUsedBytes(totalMemBytes);</span>
+<span class="nc" id="L372">        segmentStats.setNumSeconds(numSeconds);</span>
+<span class="nc" id="L373">        _statsHistory.addSegmentStats(segmentStats);</span>
+<span class="nc" id="L374">        _statsHistory.save();</span>
+      }
+    }
+
+<span class="nc bnc" id="L378" title="All 2 branches missed.">    for (DataFileReader dfReader : _indexReaderWriterMap.values()) {</span>
+      try {
+<span class="nc" id="L380">        dfReader.close();</span>
+<span class="nc" id="L381">      } catch (IOException e) {</span>
+<span class="nc" id="L382">        _logger.error(&quot;Failed to close index. Service will continue with potential memory leak, error: &quot;, e);</span>
+        // fall through to close other segments
+<span class="nc" id="L384">      }</span>
+<span class="nc" id="L385">    }</span>
+    // clear map now that index is closed to prevent accidental usage
+<span class="nc" id="L387">    _indexReaderWriterMap.clear();</span>
+
+<span class="nc bnc" id="L389" title="All 2 branches missed.">    for (RealtimeInvertedIndexReader index : _invertedIndexMap.values()) {</span>
+<span class="nc" id="L390">      index.close();</span>
+<span class="nc" id="L391">    }</span>
+
+<span class="nc bnc" id="L393" title="All 2 branches missed.">    for (Map.Entry&lt;String, MutableDictionary&gt; entry : _dictionaryMap.entrySet()) {</span>
+      try {
+<span class="nc" id="L395">        entry.getValue().close();</span>
+<span class="nc" id="L396">      } catch (IOException e) {</span>
+<span class="nc" id="L397">        _logger.error(&quot;Could not close dictionary for column {}&quot;, entry.getKey());</span>
+<span class="nc" id="L398">      }</span>
+<span class="nc" id="L399">    }</span>
+<span class="nc" id="L400">    _invertedIndexMap.clear();</span>
+<span class="nc" id="L401">    _segmentMetadata.close();</span>
+    try {
+<span class="nc" id="L403">      _memoryManager.close();</span>
+<span class="nc" id="L404">    } catch (IOException e) {</span>
+<span class="nc" id="L405">      _logger.error(&quot;Could not close memory manager&quot;, e);</span>
+<span class="nc" id="L406">    }</span>
+<span class="nc" id="L407">  }</span>
+
+  private IntIterator[] getSortedBitmapIntIteratorsForIntColumn(String column) {
+<span class="nc" id="L410">    MutableDictionary dictionary = _dictionaryMap.get(column);</span>
+<span class="nc" id="L411">    int numValues = dictionary.length();</span>
+<span class="nc" id="L412">    IntIterator[] intIterators = new IntIterator[numValues];</span>
+<span class="nc" id="L413">    RealtimeInvertedIndexReader invertedIndex = _invertedIndexMap.get(column);</span>
+
+<span class="nc" id="L415">    int[] values = new int[numValues];</span>
+<span class="nc bnc" id="L416" title="All 2 branches missed.">    for (int i = 0; i &lt; numValues; i++) {</span>
+<span class="nc" id="L417">      values[i] = (Integer) dictionary.get(i);</span>
+    }
+
+<span class="nc" id="L420">    long start = System.currentTimeMillis();</span>
+<span class="nc" id="L421">    Arrays.sort(values);</span>
+<span class="nc" id="L422">    _logger.info(&quot;Spent {}ms sorting int column: {} with cardinality: {}&quot;, System.currentTimeMillis() - start, column,</span>
+        numValues);
+
+<span class="nc bnc" id="L425" title="All 2 branches missed.">    for (int i = 0; i &lt; numValues; i++) {</span>
+<span class="nc" id="L426">      intIterators[i] = invertedIndex.getDocIds(dictionary.indexOf(values[i])).getIntIterator();</span>
+    }
+<span class="nc" id="L428">    return intIterators;</span>
+  }
+
+  private IntIterator[] getSortedBitmapIntIteratorsForLongColumn(String column) {
+<span class="nc" id="L432">    MutableDictionary dictionary = _dictionaryMap.get(column);</span>
+<span class="nc" id="L433">    int numValues = dictionary.length();</span>
+<span class="nc" id="L434">    IntIterator[] intIterators = new IntIterator[numValues];</span>
+<span class="nc" id="L435">    RealtimeInvertedIndexReader invertedIndex = _invertedIndexMap.get(column);</span>
+
+<span class="nc" id="L437">    long[] values = new long[numValues];</span>
+<span class="nc bnc" id="L438" title="All 2 branches missed.">    for (int i = 0; i &lt; numValues; i++) {</span>
+<span class="nc" id="L439">      values[i] = (Long) dictionary.get(i);</span>
+    }
+
+<span class="nc" id="L442">    long start = System.currentTimeMillis();</span>
+<span class="nc" id="L443">    Arrays.sort(values);</span>
+<span class="nc" id="L444">    _logger.info(&quot;Spent {}ms sorting long column: {} with cardinality: {}&quot;, System.currentTimeMillis() - start, column,</span>
+        numValues);
+
+<span class="nc bnc" id="L447" title="All 2 branches missed.">    for (int i = 0; i &lt; numValues; i++) {</span>
+<span class="nc" id="L448">      intIterators[i] = invertedIndex.getDocIds(dictionary.indexOf(values[i])).getIntIterator();</span>
+    }
+<span class="nc" id="L450">    return intIterators;</span>
+  }
+
+  private IntIterator[] getSortedBitmapIntIteratorsForFloatColumn(String column) {
+<span class="nc" id="L454">    MutableDictionary dictionary = _dictionaryMap.get(column);</span>
+<span class="nc" id="L455">    int numValues = dictionary.length();</span>
+<span class="nc" id="L456">    IntIterator[] intIterators = new IntIterator[numValues];</span>
+<span class="nc" id="L457">    RealtimeInvertedIndexReader invertedIndex = _invertedIndexMap.get(column);</span>
+
+<span class="nc" id="L459">    float[] values = new float[numValues];</span>
+<span class="nc bnc" id="L460" title="All 2 branches missed.">    for (int i = 0; i &lt; numValues; i++) {</span>
+<span class="nc" id="L461">      values[i] = (Float) dictionary.get(i);</span>
+    }
+
+<span class="nc" id="L464">    long start = System.currentTimeMillis();</span>
+<span class="nc" id="L465">    Arrays.sort(values);</span>
+<span class="nc" id="L466">    _logger.info(&quot;Spent {}ms sorting float column: {} with cardinality: {}&quot;, System.currentTimeMillis() - start, column,</span>
+        numValues);
+
+<span class="nc bnc" id="L469" title="All 2 branches missed.">    for (int i = 0; i &lt; numValues; i++) {</span>
+<span class="nc" id="L470">      intIterators[i] = invertedIndex.getDocIds(dictionary.indexOf(values[i])).getIntIterator();</span>
+    }
+<span class="nc" id="L472">    return intIterators;</span>
+  }
+
+  private IntIterator[] getSortedBitmapIntIteratorsForDoubleColumn(String column) {
+<span class="nc" id="L476">    MutableDictionary dictionary = _dictionaryMap.get(column);</span>
+<span class="nc" id="L477">    int numValues = dictionary.length();</span>
+<span class="nc" id="L478">    IntIterator[] intIterators = new IntIterator[numValues];</span>
+<span class="nc" id="L479">    RealtimeInvertedIndexReader invertedIndex = _invertedIndexMap.get(column);</span>
+
+<span class="nc" id="L481">    double[] values = new double[numValues];</span>
+<span class="nc bnc" id="L482" title="All 2 branches missed.">    for (int i = 0; i &lt; numValues; i++) {</span>
+<span class="nc" id="L483">      values[i] = (Double) dictionary.get(i);</span>
+    }
+
+<span class="nc" id="L486">    long start = System.currentTimeMillis();</span>
+<span class="nc" id="L487">    Arrays.sort(values);</span>
+<span class="nc" id="L488">    _logger.info(&quot;Spent {}ms sorting double column: {} with cardinality: {}&quot;, System.currentTimeMillis() - start,</span>
+        column, numValues);
+
+<span class="nc bnc" id="L491" title="All 2 branches missed.">    for (int i = 0; i &lt; numValues; i++) {</span>
+<span class="nc" id="L492">      intIterators[i] = invertedIndex.getDocIds(dictionary.indexOf(values[i])).getIntIterator();</span>
+    }
+<span class="nc" id="L494">    return intIterators;</span>
+  }
+
+  private IntIterator[] getSortedBitmapIntIteratorsForStringColumn(String column) {
+<span class="nc" id="L498">    MutableDictionary dictionary = _dictionaryMap.get(column);</span>
+<span class="nc" id="L499">    int numValues = dictionary.length();</span>
+<span class="nc" id="L500">    IntIterator[] intIterators = new IntIterator[numValues];</span>
+<span class="nc" id="L501">    RealtimeInvertedIndexReader invertedIndex = _invertedIndexMap.get(column);</span>
+
+<span class="nc" id="L503">    String[] values = new String[numValues];</span>
+<span class="nc bnc" id="L504" title="All 2 branches missed.">    for (int i = 0; i &lt; numValues; i++) {</span>
+<span class="nc" id="L505">      values[i] = (String) dictionary.get(i);</span>
+    }
+
+<span class="nc" id="L508">    long start = System.currentTimeMillis();</span>
+<span class="nc" id="L509">    Arrays.sort(values);</span>
+<span class="nc" id="L510">    _logger.info(&quot;Spent {}ms sorting string column: {} with cardinality: {}&quot;, System.currentTimeMillis() - start,</span>
+        column, numValues);
+
+<span class="nc bnc" id="L513" title="All 2 branches missed.">    for (int i = 0; i &lt; numValues; i++) {</span>
+<span class="nc" id="L514">      intIterators[i] = invertedIndex.getDocIds(dictionary.indexOf(values[i])).getIntIterator();</span>
+    }
+<span class="nc" id="L516">    return intIterators;</span>
+  }
+
+  /**
+   * Returns the docIds to use for iteration when the data is sorted by the given column.
+   * &lt;p&gt;Called only by realtime record reader.
+   *
+   * @param column The column to use for sorting
+   * @return The docIds to use for iteration
+   */
+  public int[] getSortedDocIdIterationOrderWithSortedColumn(String column) {
+<span class="nc" id="L527">    int[] docIds = new int[_numDocsIndexed];</span>
+
+    // Get docId iterators that iterate in order on the data
+    IntIterator[] iterators;
+<span class="nc" id="L531">    FieldSpec.DataType dataType = _schema.getFieldSpecFor(column).getDataType();</span>
+<span class="nc bnc" id="L532" title="All 6 branches missed.">    switch (dataType) {</span>
+      case INT:
+<span class="nc" id="L534">        iterators = getSortedBitmapIntIteratorsForIntColumn(column);</span>
+<span class="nc" id="L535">        break;</span>
+      case LONG:
+<span class="nc" id="L537">        iterators = getSortedBitmapIntIteratorsForLongColumn(column);</span>
+<span class="nc" id="L538">        break;</span>
+      case FLOAT:
+<span class="nc" id="L540">        iterators = getSortedBitmapIntIteratorsForFloatColumn(column);</span>
+<span class="nc" id="L541">        break;</span>
+      case DOUBLE:
+<span class="nc" id="L543">        iterators = getSortedBitmapIntIteratorsForDoubleColumn(column);</span>
+<span class="nc" id="L544">        break;</span>
+      case STRING:
+<span class="nc" id="L546">        iterators = getSortedBitmapIntIteratorsForStringColumn(column);</span>
+<span class="nc" id="L547">        break;</span>
+      default:
+<span class="nc" id="L549">        throw new UnsupportedOperationException(&quot;Unsupported data type: &quot; + dataType + &quot; for sorted column: &quot; + column);</span>
+    }
+
+    // Drain the iterators into the docIds array
+<span class="nc" id="L553">    int i = 0;</span>
+<span class="nc bnc" id="L554" title="All 2 branches missed.">    for (IntIterator iterator : iterators) {</span>
+<span class="nc bnc" id="L555" title="All 2 branches missed.">      while (iterator.hasNext()) {</span>
+<span class="nc" id="L556">        docIds[i++] = iterator.next();</span>
+      }
+    }
+
+    // Sanity check
+<span class="nc bnc" id="L561" title="All 2 branches missed.">    Preconditions.checkState(_numDocsIndexed == i,</span>
+        &quot;The number of docs indexed: %s is not equal to the number of sorted documents: %s&quot;, _numDocsIndexed, i);
+
+<span class="nc" id="L564">    return docIds;</span>
+  }
+
+  /**
+   * Helper method that builds allocation context that includes segment name, column name, and index type.
+   *
+   * @param segmentName Name of segment.
+   * @param columnName Name of column.
+   * @param indexType Index type.
+   * @return Allocation context built from segment name, column name and index type.
+   */
+  private String buildAllocationContext(String segmentName, String columnName, String indexType) {
+<span class="fc" id="L576">    return segmentName + &quot;:&quot; + columnName + indexType;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

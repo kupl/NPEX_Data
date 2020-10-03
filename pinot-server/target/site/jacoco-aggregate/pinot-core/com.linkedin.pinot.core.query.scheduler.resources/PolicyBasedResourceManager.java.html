@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>PolicyBasedResourceManager.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-server</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.query.scheduler.resources</a> &gt; <span class="el_source">PolicyBasedResourceManager.java</span></div><h1>PolicyBasedResourceManager.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.query.scheduler.resources;
+
+import com.google.common.base.Preconditions;
+import com.linkedin.pinot.common.query.ServerQueryRequest;
+import com.linkedin.pinot.core.query.scheduler.SchedulerGroupAccountant;
+import org.apache.commons.configuration.Configuration;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * ResourceManager class to manage threadpools as per the configured policy
+ */
+public class PolicyBasedResourceManager extends ResourceManager {
+<span class="fc" id="L30">  private static final Logger LOGGER = LoggerFactory.getLogger(PolicyBasedResourceManager.class);</span>
+
+  private final ResourceLimitPolicy resourcePolicy;
+
+  public PolicyBasedResourceManager(Configuration config) {
+<span class="fc" id="L35">    super(config);</span>
+<span class="fc" id="L36">    this.resourcePolicy = new ResourceLimitPolicy(config, numQueryWorkerThreads);</span>
+<span class="fc" id="L37">  }</span>
+
+  /**
+   * Returns an executor service that query executor can use like a dedicated
+   * service for submitting jobs for parallel execution.
+   * @param query
+   * @param accountant Accountant for a scheduler group
+   * @return BoundedAccountingExecutor service that limits the number of threads available
+   * for query execution. Query execution can submit tasks for parallel execution without need
+   * for limiting their parallelism.
+   */
+  @Override
+  public QueryExecutorService getExecutorService(ServerQueryRequest query, SchedulerGroupAccountant accountant) {
+<span class="fc" id="L50">    int numSegments = query.getInstanceRequest().getSearchSegmentsSize();</span>
+<span class="fc" id="L51">    int queryThreadLimit = Math.max(1, Math.min(resourcePolicy.getMaxThreadsPerQuery(), numSegments));</span>
+<span class="fc" id="L52">    int spareThreads = resourcePolicy.getTableThreadsHardLimit() - accountant.totalReservedThreads();</span>
+<span class="pc bpc" id="L53" title="1 of 2 branches missed.">    if (spareThreads &lt;= 0) {</span>
+<span class="nc" id="L54">      LOGGER.warn(&quot;UNEXPECTED: Attempt to schedule query uses more than the configured hard limit on threads&quot;);</span>
+<span class="nc" id="L55">      spareThreads = 1;</span>
+    } else {
+<span class="fc" id="L57">      spareThreads = Math.min(spareThreads, queryThreadLimit);</span>
+    }
+<span class="pc bpc" id="L59" title="1 of 2 branches missed.">    Preconditions.checkState(spareThreads &gt;= 1);</span>
+    // We do not bound number of threads here by total available threads. We can potentially
+    // over-provision number of threads here. That is intentional and (potentially) good solution.
+    // Queries don't use their workers all the time. So, reserving workers leads to suboptimal resource
+    // utilization. We want to keep the pipe as full as possible for query workers. Overprovisioning is one
+    // way to achieve that (in fact, only way for us).  There is a couter-argument to be made that overprovisioning
+    // can impact cache-lines and memory in general.
+    // We use this thread reservation only to determine priority based on resource utilization and not as a way to
+    // improve system performance (because we don't have good insight on that yet)
+<span class="fc" id="L68">    accountant.addReservedThreads(spareThreads);</span>
+    // TODO: For 1 thread we should have the query run in the same queryRunner thread
+    // by supplying an executor service that similar to Guava' directExecutor()
+<span class="fc" id="L71">    return new BoundedAccountingExecutor(queryWorkers, spareThreads, accountant);</span>
+  }
+
+  @Override
+  public int getTableThreadsHardLimit() {
+<span class="fc" id="L76">    return resourcePolicy.getTableThreadsHardLimit();</span>
+  }
+
+  @Override
+  public int getTableThreadsSoftLimit() {
+<span class="fc" id="L81">    return resourcePolicy.getTableThreadsSoftLimit();</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

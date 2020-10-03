@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>SortedIndexReader.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-tools</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.io.reader.impl.v1</a> &gt; <span class="el_source">SortedIndexReader.java</span></div><h1>SortedIndexReader.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.io.reader.impl.v1;
+
+import com.google.common.base.Preconditions;
+import com.linkedin.pinot.common.utils.Pairs;
+import com.linkedin.pinot.core.io.reader.BaseSingleColumnSingleValueReader;
+import com.linkedin.pinot.core.io.reader.ReaderContext;
+import com.linkedin.pinot.core.io.util.FixedByteValueReaderWriter;
+import com.linkedin.pinot.core.segment.index.readers.InvertedIndexReader;
+import com.linkedin.pinot.core.segment.memory.PinotDataBuffer;
+
+
+public final class SortedIndexReader
+    extends BaseSingleColumnSingleValueReader&lt;SortedIndexReader.Context&gt; implements InvertedIndexReader&lt;Pairs.IntPair&gt; {
+  private static final int INT_SIZE_IN_BYTES = Integer.SIZE / Byte.SIZE;
+
+  private final FixedByteValueReaderWriter _reader;
+  private final int _cardinality;
+
+<span class="fc" id="L34">  public SortedIndexReader(PinotDataBuffer dataBuffer, int cardinality) {</span>
+    // 2 values per dictionary id
+<span class="pc bpc" id="L36" title="1 of 2 branches missed.">    Preconditions.checkState(dataBuffer.size() == 2 * cardinality * INT_SIZE_IN_BYTES);</span>
+<span class="fc" id="L37">    _reader = new FixedByteValueReaderWriter(dataBuffer);</span>
+<span class="fc" id="L38">    _cardinality = cardinality;</span>
+<span class="fc" id="L39">  }</span>
+
+  @Override
+  public int getInt(int row) {
+    // Only one value in dictionary
+<span class="fc bfc" id="L44" title="All 2 branches covered.">    if (_cardinality == 1) {</span>
+<span class="fc" id="L45">      return 0;</span>
+    }
+
+<span class="fc" id="L48">    return binarySearch(row, 0, _cardinality - 1);</span>
+  }
+
+  @Override
+  public int getInt(int row, Context context) {
+    // Only one value in dictionary
+<span class="fc bfc" id="L54" title="All 2 branches covered.">    if (_cardinality == 1) {</span>
+<span class="fc" id="L55">      return 0;</span>
+    }
+
+<span class="fc" id="L58">    int contextDictId = context._dictId;</span>
+<span class="fc" id="L59">    int contextStartOffset = context._startOffset;</span>
+<span class="fc" id="L60">    int contextEndOffset = context._endOffset;</span>
+<span class="pc bpc" id="L61" title="1 of 2 branches missed.">    if (row &gt;= contextStartOffset) {</span>
+      // Same value
+<span class="fc bfc" id="L63" title="All 2 branches covered.">      if (row &lt;= contextEndOffset) {</span>
+<span class="fc" id="L64">        return contextDictId;</span>
+      }
+
+      // Next value in dictionary
+<span class="fc" id="L68">      int nextDictId = contextDictId + 1;</span>
+<span class="fc" id="L69">      int nextEndOffset = _reader.getInt(2 * nextDictId + 1);</span>
+<span class="fc bfc" id="L70" title="All 2 branches covered.">      if (row &lt;= nextEndOffset) {</span>
+<span class="fc" id="L71">        context._dictId = nextDictId;</span>
+<span class="fc" id="L72">        context._startOffset = contextEndOffset + 1;</span>
+<span class="fc" id="L73">        context._endOffset = nextEndOffset;</span>
+<span class="fc" id="L74">        return nextDictId;</span>
+      }
+    }
+
+    int dictId;
+<span class="pc bpc" id="L79" title="1 of 2 branches missed.">    if (row &lt; contextStartOffset) {</span>
+<span class="nc" id="L80">      dictId = binarySearch(row, 0, contextDictId - 1);</span>
+    } else {
+<span class="fc" id="L82">      dictId = binarySearch(row, contextDictId + 2, _cardinality - 1);</span>
+    }
+<span class="fc" id="L84">    context._dictId = dictId;</span>
+<span class="fc" id="L85">    context._startOffset = _reader.getInt(2 * dictId);</span>
+<span class="fc" id="L86">    context._endOffset = _reader.getInt(2 * dictId + 1);</span>
+<span class="fc" id="L87">    return dictId;</span>
+  }
+
+  private int binarySearch(int row, int low, int high) {
+<span class="fc bfc" id="L91" title="All 2 branches covered.">    while (low &lt;= high) {</span>
+<span class="fc" id="L92">      int mid = (low + high) / 2;</span>
+<span class="fc bfc" id="L93" title="All 2 branches covered.">      if (_reader.getInt(2 * mid) &lt;= row) {</span>
+<span class="fc" id="L94">        low = mid + 1;</span>
+      } else {
+<span class="fc" id="L96">        high = mid - 1;</span>
+      }
+<span class="fc" id="L98">    }</span>
+<span class="fc" id="L99">    return high;</span>
+  }
+
+  @Override
+  public void readValues(int[] rows, int rowsStartIndex, int rowSize, int[] values, int valuesStartIndex) {
+<span class="fc" id="L104">    int rowsEndIndex = rowsStartIndex + rowSize;</span>
+<span class="fc bfc" id="L105" title="All 2 branches covered.">    if (_cardinality == 1) {</span>
+<span class="fc bfc" id="L106" title="All 2 branches covered.">      for (int i = rowsStartIndex; i &lt; rowsEndIndex; i++) {</span>
+<span class="fc" id="L107">        values[valuesStartIndex++] = 0;</span>
+      }
+    } else {
+<span class="fc" id="L110">      Context context = new Context();</span>
+<span class="fc bfc" id="L111" title="All 2 branches covered.">      for (int i = rowsStartIndex; i &lt; rowsEndIndex; i++) {</span>
+<span class="fc" id="L112">        values[valuesStartIndex++] = getInt(rows[i], context);</span>
+      }
+    }
+<span class="fc" id="L115">  }</span>
+
+  @Override
+  public Context createContext() {
+<span class="fc" id="L119">    return new Context();</span>
+  }
+
+  @Override
+  public Pairs.IntPair getDocIds(int dictId) {
+<span class="fc" id="L124">    return new Pairs.IntPair(_reader.getInt(2 * dictId), _reader.getInt(2 * dictId + 1));</span>
+  }
+
+  @Override
+  public void close() {
+<span class="fc" id="L129">    _reader.close();</span>
+<span class="fc" id="L130">  }</span>
+
+<span class="fc" id="L132">  public static class Context implements ReaderContext {</span>
+<span class="fc" id="L133">    public int _dictId = -1;</span>
+<span class="fc" id="L134">    public int _startOffset = -1;</span>
+    // Inclusive
+<span class="fc" id="L136">    public int _endOffset = -1;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

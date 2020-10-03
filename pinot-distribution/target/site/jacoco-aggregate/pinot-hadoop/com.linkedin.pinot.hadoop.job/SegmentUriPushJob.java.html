@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>SegmentUriPushJob.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-hadoop</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.hadoop.job</a> &gt; <span class="el_source">SegmentUriPushJob.java</span></div><h1>SegmentUriPushJob.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.hadoop.job;
+
+import com.linkedin.pinot.common.utils.FileUploadDownloadClient;
+import java.util.Properties;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.conf.Configured;
+import org.apache.hadoop.fs.FileStatus;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+public class SegmentUriPushJob extends Configured {
+
+  private String _pushUriPrefix;
+  private String _pushUriSuffix;
+  private String _segmentPath;
+  private String[] _hosts;
+  private int _port;
+
+<span class="nc" id="L37">  private static final Logger LOGGER = LoggerFactory.getLogger(SegmentUriPushJob.class);</span>
+
+  public SegmentUriPushJob(String name, Properties properties) {
+<span class="nc" id="L40">    super(new Configuration());</span>
+<span class="nc" id="L41">    _pushUriPrefix = properties.getProperty(&quot;uri.prefix&quot;, &quot;&quot;);</span>
+<span class="nc" id="L42">    _pushUriSuffix = properties.getProperty(&quot;uri.suffix&quot;, &quot;&quot;);</span>
+<span class="nc" id="L43">    _segmentPath = properties.getProperty(&quot;path.to.output&quot;) + &quot;/&quot;;</span>
+<span class="nc" id="L44">    _hosts = properties.getProperty(&quot;push.to.hosts&quot;).split(&quot;,&quot;);</span>
+<span class="nc" id="L45">    _port = Integer.parseInt(properties.getProperty(&quot;push.to.port&quot;));</span>
+<span class="nc" id="L46">  }</span>
+
+  public void run() throws Exception {
+<span class="nc" id="L49">    Configuration conf = new Configuration();</span>
+<span class="nc" id="L50">    FileSystem fs = FileSystem.get(conf);</span>
+<span class="nc" id="L51">    Path path = new Path(_segmentPath);</span>
+<span class="nc" id="L52">    FileStatus[] fileStatusArr = fs.globStatus(path);</span>
+<span class="nc bnc" id="L53" title="All 2 branches missed.">    for (FileStatus fileStatus : fileStatusArr) {</span>
+<span class="nc bnc" id="L54" title="All 2 branches missed.">      if (fileStatus.isDirectory()) {</span>
+<span class="nc" id="L55">        pushDir(fs, fileStatus.getPath());</span>
+      } else {
+<span class="nc" id="L57">        pushOneTarFile(fs, fileStatus.getPath());</span>
+      }
+    }
+<span class="nc" id="L60">  }</span>
+
+  public void pushDir(FileSystem fs, Path path) throws Exception {
+<span class="nc" id="L63">    LOGGER.info(&quot;******** Now uploading segments tar from dir: {}&quot;, path);</span>
+<span class="nc" id="L64">    FileStatus[] fileStatusArr = fs.listStatus(new Path(path.toString() + &quot;/&quot;));</span>
+<span class="nc bnc" id="L65" title="All 2 branches missed.">    for (FileStatus fileStatus : fileStatusArr) {</span>
+<span class="nc bnc" id="L66" title="All 2 branches missed.">      if (fileStatus.isDirectory()) {</span>
+<span class="nc" id="L67">        pushDir(fs, fileStatus.getPath());</span>
+      } else {
+<span class="nc" id="L69">        pushOneTarFile(fs, fileStatus.getPath());</span>
+      }
+    }
+<span class="nc" id="L72">  }</span>
+
+  public void pushOneTarFile(FileSystem fs, Path path) throws Exception {
+<span class="nc" id="L75">    String fileName = path.getName();</span>
+<span class="nc bnc" id="L76" title="All 2 branches missed.">    if (!fileName.endsWith(&quot;.tar.gz&quot;)) {</span>
+<span class="nc" id="L77">      return;</span>
+    }
+<span class="nc" id="L79">    try (FileUploadDownloadClient fileUploadDownloadClient = new FileUploadDownloadClient()) {</span>
+<span class="nc bnc" id="L80" title="All 2 branches missed.">      for (String host : _hosts) {</span>
+<span class="nc" id="L81">        String uri = String.format(&quot;%s%s%s&quot;, _pushUriPrefix, path.toUri().getRawPath(), _pushUriSuffix);</span>
+<span class="nc" id="L82">        LOGGER.info(&quot;******** Uploading file: {} to Host: {} and Port: {} with download uri: {} *******&quot;, fileName,</span>
+            host, _port, uri);
+        try {
+<span class="nc" id="L85">          int responseCode =</span>
+              fileUploadDownloadClient.sendSegmentUri(FileUploadDownloadClient.getUploadSegmentHttpURI(host, _port),
+                  uri);
+<span class="nc" id="L88">          LOGGER.info(&quot;Response code: {}&quot;, responseCode);</span>
+<span class="nc" id="L89">        } catch (Exception e) {</span>
+<span class="nc" id="L90">          LOGGER.error(&quot;******** Error Uploading file: {} to Host: {} and Port: {}  *******&quot;, fileName, host, _port);</span>
+<span class="nc" id="L91">          LOGGER.error(&quot;Caught exception during upload&quot;, e);</span>
+<span class="nc" id="L92">          throw e;</span>
+<span class="nc" id="L93">        }</span>
+      }
+<span class="nc bnc" id="L95" title="All 8 branches missed.">    }</span>
+<span class="nc" id="L96">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>SegmentTarPushJob.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-hadoop</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.hadoop.job</a> &gt; <span class="el_source">SegmentTarPushJob.java</span></div><h1>SegmentTarPushJob.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.hadoop.job;
+
+import com.linkedin.pinot.common.utils.FileUploadDownloadClient;
+import java.io.InputStream;
+import java.util.Properties;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.conf.Configured;
+import org.apache.hadoop.fs.FileStatus;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+public class SegmentTarPushJob extends Configured {
+
+  private String _segmentPath;
+  private String[] _hosts;
+  private int _port;
+
+<span class="nc" id="L36">  private static final Logger LOGGER = LoggerFactory.getLogger(SegmentTarPushJob.class);</span>
+
+  public SegmentTarPushJob(String name, Properties properties) {
+<span class="nc" id="L39">    super(new Configuration());</span>
+<span class="nc" id="L40">    _segmentPath = properties.getProperty(&quot;path.to.output&quot;) + &quot;/&quot;;</span>
+<span class="nc" id="L41">    _hosts = properties.getProperty(&quot;push.to.hosts&quot;).split(&quot;,&quot;);</span>
+<span class="nc" id="L42">    _port = Integer.parseInt(properties.getProperty(&quot;push.to.port&quot;));</span>
+<span class="nc" id="L43">  }</span>
+
+  public void run() throws Exception {
+<span class="nc" id="L46">    Configuration conf = new Configuration();</span>
+<span class="nc" id="L47">    FileSystem fs = FileSystem.get(conf);</span>
+<span class="nc" id="L48">    Path path = new Path(_segmentPath);</span>
+<span class="nc" id="L49">    FileStatus[] fileStatusArr = fs.globStatus(path);</span>
+<span class="nc bnc" id="L50" title="All 2 branches missed.">    for (FileStatus fileStatus : fileStatusArr) {</span>
+<span class="nc bnc" id="L51" title="All 2 branches missed.">      if (fileStatus.isDirectory()) {</span>
+<span class="nc" id="L52">        pushDir(fs, fileStatus.getPath());</span>
+      } else {
+<span class="nc" id="L54">        pushOneTarFile(fs, fileStatus.getPath());</span>
+      }
+    }
+<span class="nc" id="L57">  }</span>
+
+  public void pushDir(FileSystem fs, Path path) throws Exception {
+<span class="nc" id="L60">    LOGGER.info(&quot;******** Now uploading segments tar from dir: {}&quot;, path);</span>
+<span class="nc" id="L61">    FileStatus[] fileStatusArr = fs.listStatus(new Path(path.toString() + &quot;/&quot;));</span>
+<span class="nc bnc" id="L62" title="All 2 branches missed.">    for (FileStatus fileStatus : fileStatusArr) {</span>
+<span class="nc bnc" id="L63" title="All 2 branches missed.">      if (fileStatus.isDirectory()) {</span>
+<span class="nc" id="L64">        pushDir(fs, fileStatus.getPath());</span>
+      } else {
+<span class="nc" id="L66">        pushOneTarFile(fs, fileStatus.getPath());</span>
+      }
+    }
+<span class="nc" id="L69">  }</span>
+
+  public void pushOneTarFile(FileSystem fs, Path path) throws Exception {
+<span class="nc" id="L72">    String fileName = path.getName();</span>
+<span class="nc bnc" id="L73" title="All 2 branches missed.">    if (!fileName.endsWith(&quot;.tar.gz&quot;)) {</span>
+<span class="nc" id="L74">      return;</span>
+    }
+<span class="nc" id="L76">    try (FileUploadDownloadClient fileUploadDownloadClient = new FileUploadDownloadClient()) {</span>
+<span class="nc bnc" id="L77" title="All 2 branches missed.">      for (String host : _hosts) {</span>
+<span class="nc" id="L78">        try (InputStream inputStream = fs.open(path)) {</span>
+<span class="nc" id="L79">          fileName = fileName.split(&quot;.tar.gz&quot;)[0];</span>
+<span class="nc" id="L80">          LOGGER.info(&quot;******** Uploading file: {} to Host: {} and Port: {} *******&quot;, fileName, host, _port);</span>
+<span class="nc" id="L81">          int responseCode =</span>
+              fileUploadDownloadClient.uploadSegment(FileUploadDownloadClient.getUploadSegmentHttpURI(host, _port),
+                  fileName, inputStream);
+<span class="nc" id="L84">          LOGGER.info(&quot;Response code: {}&quot;, responseCode);</span>
+<span class="nc bnc" id="L85" title="All 8 branches missed.">        } catch (Exception e) {</span>
+<span class="nc" id="L86">          LOGGER.error(&quot;******** Error Uploading file: {} to Host: {} and Port: {}  *******&quot;, fileName, host, _port);</span>
+<span class="nc" id="L87">          LOGGER.error(&quot;Caught exception during upload&quot;, e);</span>
+<span class="nc" id="L88">          throw e;</span>
+<span class="nc" id="L89">        }</span>
+      }
+<span class="nc bnc" id="L91" title="All 8 branches missed.">    }</span>
+<span class="nc" id="L92">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

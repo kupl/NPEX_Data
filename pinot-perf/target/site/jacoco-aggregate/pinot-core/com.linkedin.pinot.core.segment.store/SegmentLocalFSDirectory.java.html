@@ -1,0 +1,501 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>SegmentLocalFSDirectory.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-perf</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.segment.store</a> &gt; <span class="el_source">SegmentLocalFSDirectory.java</span></div><h1>SegmentLocalFSDirectory.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.segment.store;
+
+import com.google.common.base.Preconditions;
+import com.linkedin.pinot.common.segment.ReadMode;
+import com.linkedin.pinot.core.indexsegment.generator.SegmentVersion;
+import com.linkedin.pinot.core.segment.creator.impl.V1Constants;
+import com.linkedin.pinot.core.segment.index.SegmentMetadataImpl;
+import com.linkedin.pinot.core.segment.memory.PinotDataBuffer;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.file.Path;
+import java.util.concurrent.atomic.AtomicLong;
+import org.apache.commons.configuration.ConfigurationException;
+import org.apache.commons.io.FileUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+class SegmentLocalFSDirectory extends SegmentDirectory {
+<span class="fc" id="L40">  private static Logger LOGGER = LoggerFactory.getLogger(SegmentLocalFSDirectory.class);</span>
+
+  // matches most systems
+  private static final int PAGE_SIZE_BYTES = 4096;
+  // Prefetch limit...arbitrary but related to common server memory and data size profiles
+  private static final long MAX_MMAP_PREFETCH_PAGES = 100 * 1024 * 1024 * 1024L / PAGE_SIZE_BYTES;
+  private static final double PREFETCH_SLOWDOWN_PCT = 0.67;
+<span class="fc" id="L47">  private static AtomicLong prefetchedPages = new AtomicLong(0);</span>
+
+  private final File segmentDirectory;
+  SegmentLock segmentLock;
+  private SegmentMetadataImpl segmentMetadata;
+  private ReadMode readMode;
+
+  private ColumnIndexDirectory columnIndexDirectory;
+
+  SegmentLocalFSDirectory(String directoryPath, SegmentMetadataImpl metadata, ReadMode readMode) {
+<span class="nc" id="L57">    this(new File(directoryPath), metadata, readMode);</span>
+<span class="nc" id="L58">  }</span>
+
+  SegmentLocalFSDirectory (File directory, ReadMode readMode)
+      throws IOException, ConfigurationException {
+<span class="fc" id="L62">    this(directory, loadSegmentMetadata(directory), readMode);</span>
+<span class="fc" id="L63">  }</span>
+
+<span class="fc" id="L65">  SegmentLocalFSDirectory(File directoryFile, SegmentMetadataImpl metadata, ReadMode readMode) {</span>
+
+<span class="fc" id="L67">    Preconditions.checkNotNull(directoryFile);</span>
+<span class="fc" id="L68">    Preconditions.checkNotNull(metadata);</span>
+
+<span class="fc" id="L70">    segmentDirectory = getSegmentPath(directoryFile, metadata.getSegmentVersion());</span>
+<span class="fc" id="L71">    Preconditions.checkState(segmentDirectory.exists(), &quot;Segment directory: &quot; + directoryFile + &quot; must exist&quot;);</span>
+
+<span class="fc" id="L73">    segmentLock = new SegmentLock();</span>
+<span class="fc" id="L74">    this.segmentMetadata = metadata;</span>
+<span class="fc" id="L75">    this.readMode = readMode;</span>
+    try {
+<span class="fc" id="L77">      load();</span>
+<span class="nc" id="L78">    } catch (IOException | ConfigurationException e) {</span>
+<span class="nc" id="L79">      LOGGER.error(&quot;Failed to load segment, error: &quot;, e);</span>
+<span class="nc" id="L80">      throw new RuntimeException(e);</span>
+<span class="fc" id="L81">    }</span>
+<span class="fc" id="L82">  }</span>
+
+  private File getSegmentPath(File segmentDirectory, SegmentVersion segmentVersion) {
+<span class="pc bpc" id="L85" title="1 of 4 branches missed.">    if (segmentVersion == SegmentVersion.v1 || segmentVersion == SegmentVersion.v2) {</span>
+<span class="fc" id="L86">      return segmentDirectory;</span>
+    }
+
+<span class="pc bpc" id="L89" title="1 of 2 branches missed.">    if (segmentVersion == SegmentVersion.v3) {</span>
+<span class="fc bfc" id="L90" title="All 2 branches covered.">      if (segmentDirectory.getAbsolutePath().endsWith(SegmentDirectoryPaths.V3_SUBDIRECTORY_NAME)) {</span>
+<span class="fc" id="L91">        return segmentDirectory;</span>
+      }
+<span class="fc" id="L93">      File v3SubDir = new File(segmentDirectory, SegmentDirectoryPaths.V3_SUBDIRECTORY_NAME);</span>
+<span class="fc bfc" id="L94" title="All 2 branches covered.">      if (v3SubDir.exists()) {</span>
+<span class="fc" id="L95">        return v3SubDir;</span>
+      }
+      // return input path by default
+<span class="fc" id="L98">      return segmentDirectory;</span>
+    }
+<span class="nc" id="L100">    throw new IllegalArgumentException(&quot;Unknown segment version: &quot; + segmentVersion);</span>
+  }
+
+  public static SegmentMetadataImpl loadSegmentMetadata(File segmentDirectory)
+      throws IOException, ConfigurationException {
+<span class="fc" id="L105">    return new SegmentMetadataImpl(segmentDirectory);</span>
+  }
+
+  @Override
+  public Path getPath() {
+<span class="fc" id="L110">    return segmentDirectory.toPath();</span>
+  }
+
+  @Override
+  public long getDiskSizeBytes() {
+    // [PINOT-3479] For newly added refresh segments, the new segment will
+    // replace the old segment on disk before the new segment is loaded.
+    // That means, the new segment may be in the pre-processing state.
+    // So, the segment format may not have been converted, and inverted indexes
+    // or default columns will not exist.
+
+    // check that v3 subdirectory exists since the format may not have been converted
+<span class="pc bpc" id="L122" title="1 of 2 branches missed.">    if (segmentDirectory.exists()) {</span>
+      try {
+<span class="fc" id="L124">        return FileUtils.sizeOfDirectory(segmentDirectory.toPath().toFile());</span>
+<span class="nc" id="L125">      } catch (IllegalArgumentException e) {</span>
+<span class="nc" id="L126">        LOGGER.error(&quot;Failed to read disk size for direcotry: &quot;, segmentDirectory.getAbsolutePath());</span>
+<span class="nc" id="L127">        return -1;</span>
+      }
+    } else {
+<span class="nc bnc" id="L130" title="All 2 branches missed.">      if (! SegmentDirectoryPaths.isV3Directory(segmentDirectory)) {</span>
+<span class="nc" id="L131">        LOGGER.error(&quot;Segment directory: {} not found on disk and is not v3 format&quot;, segmentDirectory.getAbsolutePath());</span>
+<span class="nc" id="L132">        return -1;</span>
+      }
+<span class="nc" id="L134">      File[] files = segmentDirectory.getParentFile().listFiles();</span>
+<span class="nc bnc" id="L135" title="All 2 branches missed.">      if (files == null) {</span>
+<span class="nc" id="L136">        LOGGER.warn(&quot;Empty list of files for path: {}, segmentDirectory: {}&quot;, segmentDirectory.getParentFile(), segmentDirectory);</span>
+<span class="nc" id="L137">        return -1;</span>
+      }
+
+<span class="nc" id="L140">      long size = 0L;</span>
+<span class="nc bnc" id="L141" title="All 2 branches missed.">      for (File file : files) {</span>
+<span class="nc bnc" id="L142" title="All 2 branches missed.">        if (file.isFile()) {</span>
+<span class="nc" id="L143">          size += file.length();</span>
+        }
+      }
+<span class="nc" id="L146">      return size;</span>
+    }
+  }
+
+  public Reader createReader()
+      throws IOException {
+
+<span class="fc bfc" id="L153" title="All 2 branches covered.">    if (segmentLock.tryReadLock()) {</span>
+<span class="fc" id="L154">      loadData();</span>
+<span class="fc" id="L155">      return new Reader();</span>
+    }
+<span class="fc" id="L157">    return null;</span>
+  }
+
+  public Writer createWriter()
+      throws IOException {
+
+<span class="fc bfc" id="L163" title="All 2 branches covered.">    if (segmentLock.tryWriteLock()) {</span>
+<span class="fc" id="L164">      loadData();</span>
+<span class="fc" id="L165">      return new Writer();</span>
+    }
+
+<span class="fc" id="L168">    return null;</span>
+  }
+
+  @Override
+  public String toString() {
+<span class="fc" id="L173">    return segmentDirectory.toString();</span>
+  }
+
+  protected void load()
+      throws IOException, ConfigurationException {
+    // in future, we can extend this to support metadata loading as well
+<span class="fc" id="L179">    loadData();</span>
+<span class="fc" id="L180">  }</span>
+
+  private synchronized void loadData()
+      throws IOException {
+<span class="fc bfc" id="L184" title="All 2 branches covered.">    if (columnIndexDirectory != null) {</span>
+<span class="fc" id="L185">      return;</span>
+    }
+
+<span class="fc" id="L188">    String version = segmentMetadata.getVersion();</span>
+<span class="fc" id="L189">    SegmentVersion segmentVersion = SegmentVersion.valueOf(version);</span>
+
+<span class="pc bpc" id="L191" title="1 of 3 branches missed.">    switch (segmentVersion) {</span>
+      case v1:
+      case v2:
+<span class="fc" id="L194">        columnIndexDirectory = new FilePerIndexDirectory(segmentDirectory, segmentMetadata, readMode);</span>
+<span class="fc" id="L195">        break;</span>
+      case v3:
+        try {
+<span class="fc" id="L198">          columnIndexDirectory = new SingleFileIndexDirectory(segmentDirectory, segmentMetadata, readMode);</span>
+<span class="nc" id="L199">        } catch (ConfigurationException e) {</span>
+<span class="nc" id="L200">          LOGGER.error(&quot;Failed to create columnar index directory&quot;, e);</span>
+<span class="nc" id="L201">          throw new RuntimeException(e);</span>
+<span class="fc" id="L202">        }</span>
+        break;
+    }
+<span class="fc" id="L205">  }</span>
+
+  @Override
+  public void close()
+      throws Exception {
+<span class="fc" id="L210">    segmentLock.close();</span>
+<span class="fc" id="L211">    synchronized (this) {</span>
+<span class="fc bfc" id="L212" title="All 2 branches covered.">      if (columnIndexDirectory != null) {</span>
+<span class="fc" id="L213">        columnIndexDirectory.close();</span>
+<span class="fc" id="L214">        columnIndexDirectory = null;</span>
+      }
+<span class="pc" id="L216">    }</span>
+<span class="fc" id="L217">  }</span>
+
+  protected File starTreeIndexFile() {
+    // this is not version dependent for now
+<span class="fc" id="L221">    return new File(segmentDirectory, V1Constants.STAR_TREE_INDEX_FILE);</span>
+  }
+
+  private PinotDataBuffer getIndexForColumn(String column, ColumnIndexType type)
+      throws IOException {
+    PinotDataBuffer buffer;
+<span class="pc bpc" id="L227" title="1 of 4 branches missed.">    switch (type) {</span>
+      case DICTIONARY:
+<span class="fc" id="L229">        buffer = columnIndexDirectory.getDictionaryBufferFor(column);</span>
+<span class="fc" id="L230">        break;</span>
+      case FORWARD_INDEX:
+<span class="fc" id="L232">        buffer = columnIndexDirectory.getForwardIndexBufferFor(column);</span>
+<span class="fc" id="L233">        break;</span>
+      case INVERTED_INDEX:
+<span class="fc" id="L235">        buffer = columnIndexDirectory.getInvertedIndexBufferFor(column);</span>
+<span class="fc" id="L236">        break;</span>
+      default:
+<span class="nc" id="L238">        throw new RuntimeException(&quot;Unknown index type: &quot; + type.name());</span>
+    }
+<span class="fc bfc" id="L240" title="All 2 branches covered.">    if (readMode == ReadMode.mmap) {</span>
+<span class="fc" id="L241">      prefetchMmapData(buffer);</span>
+    }
+<span class="fc" id="L243">    return buffer;</span>
+  }
+
+  private void prefetchMmapData(PinotDataBuffer buffer) {
+    // mmap mode causes high number of major page faults after server restart.
+    // This impacts latency especially for prod &quot;online&quot; use cases that require low latency.
+    // This function proactively loads pages in memory to lower the variance in
+    // latencies after server startup.
+
+    // This has to handle two different data size profiles
+    // 1. Servers with data size close to main memory size
+    // 2. Servers with very large data sizes (terabytes)
+    // To prevent it from loading terabytes of data on startup, we put a limit
+    // on the number of pages this will prefetch (OS will do something more on top of this)
+    // The logic here is as follows:
+    // Server doesn't know total data size it is expected to serve. So this will
+    // load all data till 2/3rd (PREFETCH_SLOWDOWN_PCT) of the configured limit. After that it will only
+    // read the header page. We read headers because that has more frequently accessed
+    // information which will have bigger impact on the latency. This can go over the limit
+    // because it doesn't stop at any point. But that's not an issue considering this is
+    // an optimization.
+
+    // Prefetch limit and slowdown percentage are arbitrary
+<span class="pc bpc" id="L266" title="1 of 2 branches missed.">    if (prefetchedPages.get() &gt;= MAX_MMAP_PREFETCH_PAGES) {</span>
+<span class="nc" id="L267">      return;</span>
+    }
+
+<span class="fc" id="L270">    final long prefetchSlowdownPageLimit = (long) (PREFETCH_SLOWDOWN_PCT * MAX_MMAP_PREFETCH_PAGES);</span>
+<span class="pc bpc" id="L271" title="1 of 2 branches missed.">    if (prefetchedPages.get() &gt;= prefetchSlowdownPageLimit) {</span>
+<span class="nc bnc" id="L272" title="All 2 branches missed.">      if (0 &lt; buffer.size()) {</span>
+<span class="nc" id="L273">        buffer.getByte(0);</span>
+<span class="nc" id="L274">        prefetchedPages.incrementAndGet();</span>
+      }
+    } else {
+      // pos needs to be long because buffer.size() is 32 bit but
+      // adding 4k can make it go over int size
+<span class="pc bpc" id="L279" title="1 of 4 branches missed.">      for (long pos = 0; pos &lt; buffer.size() &amp;&amp; prefetchedPages.get() &lt; prefetchSlowdownPageLimit; pos += PAGE_SIZE_BYTES) {</span>
+<span class="fc" id="L280">        buffer.getByte((int)pos);</span>
+<span class="fc" id="L281">        prefetchedPages.incrementAndGet();</span>
+      }
+    }
+<span class="fc" id="L284">  }</span>
+
+  private boolean hasIndexFor(String column, ColumnIndexType type) {
+<span class="nc" id="L287">    return columnIndexDirectory.hasIndexFor(column, type);</span>
+  }
+
+  private InputStream getStarTreeStream() {
+<span class="fc" id="L291">    File starTreeFile = starTreeIndexFile();</span>
+<span class="fc" id="L292">    Preconditions.checkState(starTreeFile.exists(), &quot;Star tree file for segment: {} does not exist&quot;);</span>
+<span class="fc" id="L293">    Preconditions.checkState(starTreeFile.isFile(), &quot;Star tree file: {} for segment: {} is not a regular file&quot;);</span>
+
+    try {
+<span class="fc" id="L296">      return new FileInputStream(starTreeFile);</span>
+<span class="nc" id="L297">    } catch (FileNotFoundException e) {</span>
+      // we should not reach here
+<span class="nc" id="L299">      LOGGER.error(&quot;Star tree file for segment: {} is not found&quot;, segmentDirectory, e);</span>
+<span class="nc" id="L300">      throw new IllegalStateException(&quot;Star tree file for segment: &quot; + segmentDirectory +</span>
+          &quot; is not found&quot;, e);
+    }
+  }
+
+  public boolean hasStarTree() {
+<span class="fc" id="L306">    return starTreeIndexFile().exists();</span>
+  }
+
+  /***************************  SegmentDirectory Reader *********************/
+<span class="fc" id="L310">  public class Reader extends SegmentDirectory.Reader {</span>
+
+    @Override
+    public PinotDataBuffer getIndexFor(String column, ColumnIndexType type)
+        throws IOException {
+<span class="fc" id="L315">      return getIndexForColumn(column, type);</span>
+    }
+
+    @Override
+    public InputStream getStarTreeStream() {
+<span class="fc" id="L320">      return SegmentLocalFSDirectory.this.getStarTreeStream();</span>
+    }
+
+    @Override
+    public File getStarTreeFile() {
+<span class="fc" id="L325">      return SegmentLocalFSDirectory.this.starTreeIndexFile();</span>
+    }
+
+    @Override
+    public boolean hasStarTree() {
+<span class="fc" id="L330">      return SegmentLocalFSDirectory.this.hasStarTree();</span>
+    }
+
+    @Override
+    public boolean hasIndexFor(String column, ColumnIndexType type) {
+<span class="fc" id="L335">      return columnIndexDirectory.hasIndexFor(column, type);</span>
+    }
+
+    @Override
+    public void close() {
+      // do nothing here
+<span class="fc" id="L341">      segmentLock.unlock();</span>
+<span class="fc" id="L342">    }</span>
+
+    @Override
+    public String toString() {
+<span class="fc" id="L346">      return segmentDirectory.toString();</span>
+    }
+  }
+
+  /***************************  SegmentDirectory Writer *********************/
+  // TODO: thread-safety. Single writer may be shared
+  // by multiple threads. This is not our typical use-case
+  // but it's nice to have interface guarantee that.
+  public class Writer extends SegmentDirectory.Writer {
+
+<span class="fc" id="L356">    public Writer() {</span>
+<span class="fc" id="L357">    }</span>
+
+    @Override
+    public PinotDataBuffer newIndexFor(String columnName, ColumnIndexType indexType, int sizeBytes)
+        throws IOException {
+<span class="fc" id="L362">      return getNewIndexBuffer(new IndexKey(columnName, indexType), sizeBytes);</span>
+    }
+
+    @Override
+    public OutputStream starTreeOutputStream() {
+      // this checks about file's existence and if it's a regular file
+      try {
+<span class="fc" id="L369">        return new FileOutputStream(starTreeIndexFile());</span>
+<span class="nc" id="L370">      } catch (FileNotFoundException e) {</span>
+<span class="nc" id="L371">        LOGGER.error(&quot;Failed to open star tree output stream for segment: {}&quot;, segmentDirectory, e);</span>
+<span class="nc" id="L372">        throw new RuntimeException(&quot;Failed to open star tree output stream for segment: &quot; + segmentDirectory, e);</span>
+      }
+    }
+
+    @Override
+    public boolean isIndexRemovalSupported() {
+<span class="nc" id="L378">      return columnIndexDirectory.isIndexRemovalSupported();</span>
+    }
+
+    @Override
+    public InputStream getStarTreeStream() {
+<span class="nc" id="L383">      return SegmentLocalFSDirectory.this.getStarTreeStream();</span>
+    }
+
+    @Override
+    public File getStarTreeFile() {
+<span class="nc" id="L388">      return SegmentLocalFSDirectory.this.starTreeIndexFile();</span>
+    }
+
+    @Override
+    public boolean hasStarTree() {
+<span class="nc" id="L393">      return SegmentLocalFSDirectory.this.hasStarTree();</span>
+    }
+
+    @Override
+    public void removeIndex(String columnName, ColumnIndexType indexType) {
+<span class="nc" id="L398">      columnIndexDirectory.removeIndex(columnName, indexType);</span>
+<span class="nc" id="L399">    }</span>
+
+    @Override
+    public void removeStarTree() {
+<span class="fc" id="L403">      starTreeIndexFile().delete();</span>
+<span class="fc" id="L404">    }</span>
+
+    private PinotDataBuffer getNewIndexBuffer(IndexKey key, long sizeBytes)
+        throws IOException {
+<span class="fc" id="L408">      ColumnIndexType indexType = key.type;</span>
+<span class="pc bpc" id="L409" title="1 of 4 branches missed.">      switch (indexType) {</span>
+        case DICTIONARY:
+<span class="fc" id="L411">          return columnIndexDirectory.newDictionaryBuffer(key.name, (int) sizeBytes);</span>
+
+        case FORWARD_INDEX:
+<span class="fc" id="L414">          return columnIndexDirectory.newForwardIndexBuffer(key.name, (int) sizeBytes);</span>
+        case INVERTED_INDEX:
+<span class="fc" id="L416">          return columnIndexDirectory.newInvertedIndexBuffer(key.name, ((int) sizeBytes));</span>
+        default:
+<span class="nc" id="L418">          throw new RuntimeException(&quot;Unknown index type: &quot; + indexType.name() +</span>
+              &quot; for directory: &quot; + segmentDirectory);
+      }
+    }
+
+    @Override
+    public void abortAndClose()
+        throws Exception {
+<span class="nc" id="L426">      abort();</span>
+<span class="nc" id="L427">      close();</span>
+<span class="nc" id="L428">    }</span>
+
+    @Override
+    public void save() throws IOException {
+<span class="fc" id="L432">    }</span>
+
+    void abort() {
+
+<span class="nc" id="L436">    }</span>
+
+    @Override
+    public String toString() {
+<span class="nc" id="L440">      return segmentDirectory.toString();</span>
+    }
+
+    public void close() {
+<span class="fc" id="L444">      segmentLock.unlock();</span>
+<span class="fc bfc" id="L445" title="All 2 branches covered.">      if (columnIndexDirectory != null) {</span>
+<span class="fc" id="L446">        columnIndexDirectory.close();</span>
+      }
+<span class="fc" id="L448">      columnIndexDirectory = null;</span>
+<span class="fc" id="L449">    }</span>
+
+    @Override
+    public PinotDataBuffer getIndexFor(String column, ColumnIndexType type)
+        throws IOException {
+<span class="fc" id="L454">      return getIndexForColumn(column, type);</span>
+    }
+
+    @Override
+    public boolean hasIndexFor(String column, ColumnIndexType type) {
+<span class="fc" id="L459">      return columnIndexDirectory.hasIndexFor(column, type);</span>
+    }
+  }
+
+  /*
+   * This is NOT a re-entrant lock. ReentrantReadWriteLock
+   * allows the thread hold write lock to create readers.
+   * We want to prevent that.
+   */
+<span class="fc" id="L468">  class SegmentLock implements AutoCloseable {</span>
+<span class="fc" id="L469">    int readers = 0;</span>
+<span class="fc" id="L470">    int writers = 0;</span>
+
+    synchronized boolean tryReadLock() {
+<span class="fc bfc" id="L473" title="All 2 branches covered.">      if (writers &gt; 0) {</span>
+<span class="fc" id="L474">        return false;</span>
+      }
+<span class="fc" id="L476">      ++readers;</span>
+<span class="fc" id="L477">      return true;</span>
+    }
+
+    synchronized boolean tryWriteLock() {
+<span class="fc bfc" id="L481" title="All 4 branches covered.">      if (readers &gt; 0 || writers &gt; 0) {</span>
+<span class="fc" id="L482">        return false;</span>
+      }
+<span class="fc" id="L484">      ++writers;</span>
+<span class="fc" id="L485">      return true;</span>
+    }
+
+    synchronized void unlock() {
+<span class="fc bfc" id="L489" title="All 2 branches covered.">      if (writers &gt; 0) {</span>
+<span class="fc" id="L490">        --writers;</span>
+<span class="fc bfc" id="L491" title="All 2 branches covered.">      } else if (readers &gt; 0) {</span>
+<span class="fc" id="L492">        --readers;</span>
+      }
+<span class="fc" id="L494">    }</span>
+
+    public void close() {
+<span class="fc" id="L497">      unlock();</span>
+<span class="fc" id="L498">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

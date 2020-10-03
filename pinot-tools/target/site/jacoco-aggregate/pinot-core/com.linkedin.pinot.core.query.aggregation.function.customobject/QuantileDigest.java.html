@@ -1,0 +1,1195 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>QuantileDigest.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-tools</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.query.aggregation.function.customobject</a> &gt; <span class="el_source">QuantileDigest.java</span></div><h1>QuantileDigest.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.query.aggregation.function.customobject;
+
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Function;
+import com.google.common.base.Objects;
+import com.google.common.base.Preconditions;
+import com.google.common.base.Throwables;
+import com.google.common.base.Ticker;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterators;
+import com.google.common.collect.Multimap;
+import com.google.common.collect.Multimaps;
+import com.google.common.collect.Ordering;
+import com.google.common.collect.PeekingIterator;
+import com.google.common.util.concurrent.AtomicDouble;
+import java.io.ByteArrayInputStream;
+import java.io.DataInput;
+import java.io.DataInputStream;
+import java.io.DataOutput;
+import java.io.Externalizable;
+import java.io.IOException;
+import java.io.ObjectInput;
+import java.io.ObjectOutput;
+import java.io.ObjectStreamException;
+import java.io.Serializable;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Deque;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import javax.annotation.concurrent.NotThreadSafe;
+
+import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.base.Preconditions.checkState;
+import static java.lang.String.format;
+
+
+/**
+ * Re-implement io.airlift.stats.QuantileDigest with additional methods facilitating serialization.
+ */
+@NotThreadSafe
+public class QuantileDigest implements Serializable {
+  private static final int MAX_BITS = 64;
+  private static final double MAX_SIZE_FACTOR = 1.5;
+
+  // needs to be such that Math.exp(alpha * seconds) does not grow too big
+  static final long RESCALE_THRESHOLD_SECONDS = 50;
+  static final double ZERO_WEIGHT_THRESHOLD = 1e-5;
+
+  private final double maxError;
+  private final Ticker ticker;
+  private final double alpha;
+  private final boolean compressAutomatically;
+
+  private Node root;
+
+  private double weightedCount;
+<span class="fc" id="L78">  private long max = Long.MIN_VALUE;</span>
+<span class="fc" id="L79">  private long min = Long.MAX_VALUE;</span>
+
+  private long landmarkInSeconds;
+
+<span class="fc" id="L83">  private int totalNodeCount = 0;</span>
+<span class="fc" id="L84">  private int nonZeroNodeCount = 0;</span>
+<span class="fc" id="L85">  private int compressions = 0;</span>
+
+<span class="pc" id="L87">  private enum TraversalOrder {</span>
+<span class="fc" id="L88">    FORWARD, REVERSE</span>
+  }
+
+  /**
+   * &lt;p&gt;Create a QuantileDigest with a maximum error guarantee of &quot;maxError&quot; and no decay.
+   *
+   * @param maxError the max error tolerance
+   */
+  public QuantileDigest(double maxError) {
+<span class="fc" id="L97">    this(maxError, 0);</span>
+<span class="fc" id="L98">  }</span>
+
+  /**
+   * &lt;p&gt;Create a QuantileDigest with a maximum error guarantee of &quot;maxError&quot; and exponential decay
+   * with factor &quot;alpha&quot;.&lt;/p&gt;
+   *
+   * @param maxError the max error tolerance
+   * @param alpha    the exponential decay factor
+   */
+  public QuantileDigest(double maxError, double alpha) {
+<span class="fc" id="L108">    this(maxError, alpha, Ticker.systemTicker(), true);</span>
+<span class="fc" id="L109">  }</span>
+
+  @VisibleForTesting
+<span class="fc" id="L112">  QuantileDigest(double maxError, double alpha, Ticker ticker, boolean compressAutomatically) {</span>
+<span class="pc bpc" id="L113" title="2 of 4 branches missed.">    checkArgument(maxError &gt;= 0 &amp;&amp; maxError &lt;= 1, &quot;maxError must be in range [0, 1]&quot;);</span>
+<span class="pc bpc" id="L114" title="2 of 4 branches missed.">    checkArgument(alpha &gt;= 0 &amp;&amp; alpha &lt; 1, &quot;alpha must be in range [0, 1)&quot;);</span>
+
+<span class="fc" id="L116">    this.maxError = maxError;</span>
+<span class="fc" id="L117">    this.alpha = alpha;</span>
+<span class="fc" id="L118">    this.ticker = ticker;</span>
+<span class="fc" id="L119">    this.compressAutomatically = compressAutomatically;</span>
+
+<span class="fc" id="L121">    landmarkInSeconds = TimeUnit.NANOSECONDS.toSeconds(ticker.read());</span>
+<span class="fc" id="L122">  }</span>
+
+  public QuantileDigest(QuantileDigest quantileDigest) {
+<span class="nc" id="L125">    this(quantileDigest.getMaxError(), quantileDigest.getAlpha());</span>
+<span class="nc" id="L126">    merge(quantileDigest);</span>
+<span class="nc" id="L127">  }</span>
+
+  public double getMaxError() {
+<span class="nc" id="L130">    return maxError;</span>
+  }
+
+  public double getAlpha() {
+<span class="nc" id="L134">    return alpha;</span>
+  }
+
+  public void add(long value) {
+<span class="fc" id="L138">    add(value, 1);</span>
+<span class="fc" id="L139">  }</span>
+
+  /**
+   * Adds a value to this digest. The value must be {@code &gt;= 0}
+   */
+  public void add(long value, long count) {
+<span class="pc bpc" id="L145" title="1 of 2 branches missed.">    checkArgument(count &gt; 0, &quot;count must be &gt; 0&quot;);</span>
+
+<span class="fc" id="L147">    long nowInSeconds = TimeUnit.NANOSECONDS.toSeconds(ticker.read());</span>
+
+<span class="fc" id="L149">    int maxExpectedNodeCount = 3 * calculateCompressionFactor();</span>
+<span class="pc bpc" id="L150" title="1 of 2 branches missed.">    if (nowInSeconds - landmarkInSeconds &gt;= RESCALE_THRESHOLD_SECONDS) {</span>
+<span class="nc" id="L151">      rescale(nowInSeconds);</span>
+<span class="nc" id="L152">      compress(); // need to compress to get rid of nodes that may have decayed to ~ 0</span>
+<span class="pc bpc" id="L153" title="1 of 4 branches missed.">    } else if (nonZeroNodeCount &gt; MAX_SIZE_FACTOR * maxExpectedNodeCount &amp;&amp; compressAutomatically) {</span>
+      // The size (number of non-zero nodes) of the digest is at most 3 * compression factor
+      // If we're over MAX_SIZE_FACTOR of the expected size, compress
+      // Note: we don't compress as soon as we go over expectedNodeCount to avoid unnecessarily
+      // running a compression for every new added element when we're close to boundary
+<span class="fc" id="L158">      compress();</span>
+    }
+
+<span class="fc" id="L161">    double weight = weight(TimeUnit.NANOSECONDS.toSeconds(ticker.read())) * count;</span>
+
+<span class="fc" id="L163">    max = Math.max(max, value);</span>
+<span class="fc" id="L164">    min = Math.min(min, value);</span>
+
+<span class="fc" id="L166">    insert(longToBits(value), weight);</span>
+<span class="fc" id="L167">  }</span>
+
+  public void merge(QuantileDigest other) {
+<span class="fc" id="L170">    rescaleToCommonLandmark(this, other);</span>
+
+    // 2. merge other into this (don't modify other)
+<span class="fc" id="L173">    root = merge(root, other.root);</span>
+
+<span class="fc" id="L175">    max = Math.max(max, other.max);</span>
+<span class="fc" id="L176">    min = Math.min(min, other.min);</span>
+
+    // 3. compress to remove unnecessary nodes
+<span class="fc" id="L179">    compress();</span>
+<span class="fc" id="L180">  }</span>
+
+  /**
+   * Gets the values at the specified quantiles +/- maxError. The list of quantiles must be sorted
+   * in increasing order, and each value must be in the range [0, 1]
+   */
+  public List&lt;Long&gt; getQuantiles(List&lt;Double&gt; quantiles) {
+<span class="fc" id="L187">    checkArgument(Ordering.natural().isOrdered(quantiles), &quot;quantiles must be sorted in increasing order&quot;);</span>
+<span class="fc bfc" id="L188" title="All 2 branches covered.">    for (double quantile : quantiles) {</span>
+<span class="pc bpc" id="L189" title="2 of 4 branches missed.">      checkArgument(quantile &gt;= 0 &amp;&amp; quantile &lt;= 1, &quot;quantile must be between [0,1]&quot;);</span>
+<span class="fc" id="L190">    }</span>
+
+<span class="fc" id="L192">    final ImmutableList.Builder&lt;Long&gt; builder = ImmutableList.builder();</span>
+<span class="fc" id="L193">    final PeekingIterator&lt;Double&gt; iterator = Iterators.peekingIterator(quantiles.iterator());</span>
+
+<span class="fc" id="L195">    postOrderTraversal(root, new Callback() {</span>
+<span class="fc" id="L196">      private double sum = 0;</span>
+
+      @Override
+      public boolean process(Node node) {
+<span class="fc" id="L200">        sum += node.weightedCount;</span>
+
+<span class="fc bfc" id="L202" title="All 4 branches covered.">        while (iterator.hasNext() &amp;&amp; sum &gt; iterator.peek() * weightedCount) {</span>
+<span class="fc" id="L203">          iterator.next();</span>
+
+          // we know the max value ever seen, so cap the percentile to provide better error
+          // bounds in this case
+<span class="fc" id="L207">          long value = Math.min(node.getUpperBound(), max);</span>
+
+<span class="fc" id="L209">          builder.add(value);</span>
+<span class="fc" id="L210">        }</span>
+
+<span class="fc" id="L212">        return iterator.hasNext();</span>
+      }
+    });
+
+    // we finished the traversal without consuming all quantiles. This means the remaining quantiles
+    // correspond to the max known value
+<span class="pc bpc" id="L218" title="1 of 2 branches missed.">    while (iterator.hasNext()) {</span>
+<span class="nc" id="L219">      builder.add(max);</span>
+<span class="nc" id="L220">      iterator.next();</span>
+    }
+
+<span class="fc" id="L223">    return builder.build();</span>
+  }
+
+  /**
+   * Gets the value at the specified quantile +/- maxError. The quantile must be in the range [0, 1]
+   */
+  public long getQuantile(double quantile) {
+<span class="fc" id="L230">    return getQuantiles(ImmutableList.of(quantile)).get(0);</span>
+  }
+
+  /**
+   * Number (decayed) of elements added to this quantile digest
+   */
+  public double getCount() {
+<span class="nc" id="L237">    return weightedCount / weight(TimeUnit.NANOSECONDS.toSeconds(ticker.read()));</span>
+  }
+
+  /*
+  * Get the exponentially-decayed approximate counts of values in multiple buckets. The elements in
+  * the provided list denote the upper bound each of the buckets and must be sorted in ascending
+  * order.
+  *
+  * The approximate count in each bucket is guaranteed to be within 2 * totalCount * maxError of
+  * the real count.
+  */
+  public List&lt;Bucket&gt; getHistogram(List&lt;Long&gt; bucketUpperBounds) {
+<span class="nc" id="L249">    checkArgument(Ordering.natural().isOrdered(bucketUpperBounds), &quot;buckets must be sorted in increasing order&quot;);</span>
+
+<span class="nc" id="L251">    final ImmutableList.Builder&lt;Bucket&gt; builder = ImmutableList.builder();</span>
+<span class="nc" id="L252">    final PeekingIterator&lt;Long&gt; iterator = Iterators.peekingIterator(bucketUpperBounds.iterator());</span>
+
+<span class="nc" id="L254">    final AtomicDouble sum = new AtomicDouble();</span>
+<span class="nc" id="L255">    final AtomicDouble lastSum = new AtomicDouble();</span>
+
+    // for computing weighed average of values in bucket
+<span class="nc" id="L258">    final AtomicDouble bucketWeightedSum = new AtomicDouble();</span>
+
+<span class="nc" id="L260">    final double normalizationFactor = weight(TimeUnit.NANOSECONDS.toSeconds(ticker.read()));</span>
+
+<span class="nc" id="L262">    postOrderTraversal(root, new Callback() {</span>
+      @Override
+      public boolean process(Node node) {
+
+<span class="nc bnc" id="L266" title="All 4 branches missed.">        while (iterator.hasNext() &amp;&amp; iterator.peek() &lt;= node.getUpperBound()) {</span>
+<span class="nc" id="L267">          double bucketCount = sum.get() - lastSum.get();</span>
+
+<span class="nc" id="L269">          Bucket bucket = new Bucket(bucketCount / normalizationFactor, bucketWeightedSum.get() / bucketCount);</span>
+
+<span class="nc" id="L271">          builder.add(bucket);</span>
+<span class="nc" id="L272">          lastSum.set(sum.get());</span>
+<span class="nc" id="L273">          bucketWeightedSum.set(0);</span>
+<span class="nc" id="L274">          iterator.next();</span>
+<span class="nc" id="L275">        }</span>
+
+<span class="nc" id="L277">        bucketWeightedSum.addAndGet(node.getMiddle() * node.weightedCount);</span>
+<span class="nc" id="L278">        sum.addAndGet(node.weightedCount);</span>
+<span class="nc" id="L279">        return iterator.hasNext();</span>
+      }
+    });
+
+<span class="nc bnc" id="L283" title="All 2 branches missed.">    while (iterator.hasNext()) {</span>
+<span class="nc" id="L284">      double bucketCount = sum.get() - lastSum.get();</span>
+<span class="nc" id="L285">      Bucket bucket = new Bucket(bucketCount / normalizationFactor, bucketWeightedSum.get() / bucketCount);</span>
+
+<span class="nc" id="L287">      builder.add(bucket);</span>
+
+<span class="nc" id="L289">      iterator.next();</span>
+<span class="nc" id="L290">    }</span>
+
+<span class="nc" id="L292">    return builder.build();</span>
+  }
+
+  public long getMin() {
+<span class="nc" id="L296">    final AtomicLong chosen = new AtomicLong(min);</span>
+<span class="nc" id="L297">    postOrderTraversal(root, new Callback() {</span>
+      @Override
+      public boolean process(Node node) {
+<span class="nc bnc" id="L300" title="All 2 branches missed.">        if (node.weightedCount &gt;= ZERO_WEIGHT_THRESHOLD) {</span>
+<span class="nc" id="L301">          chosen.set(node.getLowerBound());</span>
+<span class="nc" id="L302">          return false;</span>
+        }
+<span class="nc" id="L304">        return true;</span>
+      }
+    }, TraversalOrder.FORWARD);
+
+<span class="nc" id="L308">    return Math.max(min, chosen.get());</span>
+  }
+
+  public long getMax() {
+<span class="nc" id="L312">    final AtomicLong chosen = new AtomicLong(max);</span>
+<span class="nc" id="L313">    postOrderTraversal(root, new Callback() {</span>
+      @Override
+      public boolean process(Node node) {
+<span class="nc bnc" id="L316" title="All 2 branches missed.">        if (node.weightedCount &gt;= ZERO_WEIGHT_THRESHOLD) {</span>
+<span class="nc" id="L317">          chosen.set(node.getUpperBound());</span>
+<span class="nc" id="L318">          return false;</span>
+        }
+<span class="nc" id="L320">        return true;</span>
+      }
+    }, TraversalOrder.REVERSE);
+
+<span class="nc" id="L324">    return Math.min(max, chosen.get());</span>
+  }
+
+  public int estimatedSerializedSizeInBytes() {
+<span class="nc" id="L328">    int estimatedNodeSize = SizeOf.BYTE + // flags</span>
+        SizeOf.BYTE + // level
+        SizeOf.LONG + // value
+        SizeOf.DOUBLE; // weight
+
+<span class="nc" id="L333">    return SizeOf.DOUBLE + // maxError</span>
+        SizeOf.DOUBLE + // alpha
+        SizeOf.LONG + // landmark
+        SizeOf.LONG + // min
+        SizeOf.LONG + // max
+        SizeOf.INTEGER + // node count
+        totalNodeCount * estimatedNodeSize;
+  }
+
+  public void serialize(final DataOutput output) {
+    try {
+<span class="fc" id="L344">      output.writeDouble(maxError);</span>
+<span class="fc" id="L345">      output.writeDouble(alpha);</span>
+<span class="fc" id="L346">      output.writeLong(landmarkInSeconds);</span>
+<span class="fc" id="L347">      output.writeLong(min);</span>
+<span class="fc" id="L348">      output.writeLong(max);</span>
+<span class="fc" id="L349">      output.writeInt(totalNodeCount);</span>
+
+<span class="fc" id="L351">      postOrderTraversal(root, new Callback() {</span>
+        @Override
+        public boolean process(Node node) {
+          try {
+<span class="fc" id="L355">            serializeNode(output, node);</span>
+<span class="nc" id="L356">          } catch (IOException e) {</span>
+<span class="nc" id="L357">            Throwables.propagate(e);</span>
+<span class="fc" id="L358">          }</span>
+<span class="fc" id="L359">          return true;</span>
+        }
+      });
+<span class="nc" id="L362">    } catch (IOException e) {</span>
+<span class="nc" id="L363">      Throwables.propagate(e);</span>
+<span class="fc" id="L364">    }</span>
+<span class="fc" id="L365">  }</span>
+
+  private void serializeNode(DataOutput output, Node node)
+      throws IOException {
+<span class="fc" id="L369">    int flags = 0;</span>
+<span class="fc bfc" id="L370" title="All 2 branches covered.">    if (node.left != null) {</span>
+<span class="fc" id="L371">      flags |= Flags.HAS_LEFT;</span>
+    }
+<span class="fc bfc" id="L373" title="All 2 branches covered.">    if (node.right != null) {</span>
+<span class="fc" id="L374">      flags |= Flags.HAS_RIGHT;</span>
+    }
+
+<span class="fc" id="L377">    output.writeByte(flags);</span>
+<span class="fc" id="L378">    output.writeByte(node.level);</span>
+<span class="fc" id="L379">    output.writeLong(node.bits);</span>
+<span class="fc" id="L380">    output.writeDouble(node.weightedCount);</span>
+<span class="fc" id="L381">  }</span>
+
+  public static QuantileDigest deserialize(DataInput input) {
+    try {
+<span class="fc" id="L385">      double maxError = input.readDouble();</span>
+<span class="fc" id="L386">      double alpha = input.readDouble();</span>
+
+<span class="fc" id="L388">      QuantileDigest result = new QuantileDigest(maxError, alpha);</span>
+
+<span class="fc" id="L390">      result.landmarkInSeconds = input.readLong();</span>
+<span class="fc" id="L391">      result.min = input.readLong();</span>
+<span class="fc" id="L392">      result.max = input.readLong();</span>
+<span class="fc" id="L393">      result.totalNodeCount = input.readInt();</span>
+
+<span class="fc" id="L395">      Deque&lt;Node&gt; stack = new ArrayDeque&lt;&gt;();</span>
+<span class="fc bfc" id="L396" title="All 2 branches covered.">      for (int i = 0; i &lt; result.totalNodeCount; i++) {</span>
+<span class="fc" id="L397">        int flags = input.readByte();</span>
+
+<span class="fc" id="L399">        Node node = deserializeNode(input);</span>
+
+<span class="fc bfc" id="L401" title="All 2 branches covered.">        if ((flags &amp; Flags.HAS_RIGHT) != 0) {</span>
+<span class="fc" id="L402">          node.right = stack.pop();</span>
+        }
+
+<span class="fc bfc" id="L405" title="All 2 branches covered.">        if ((flags &amp; Flags.HAS_LEFT) != 0) {</span>
+<span class="fc" id="L406">          node.left = stack.pop();</span>
+        }
+
+<span class="fc" id="L409">        stack.push(node);</span>
+<span class="fc" id="L410">        result.weightedCount += node.weightedCount;</span>
+<span class="fc bfc" id="L411" title="All 2 branches covered.">        if (node.weightedCount &gt;= ZERO_WEIGHT_THRESHOLD) {</span>
+<span class="fc" id="L412">          result.nonZeroNodeCount++;</span>
+        }
+      }
+
+<span class="pc bpc" id="L416" title="1 of 2 branches missed.">      if (!stack.isEmpty()) {</span>
+<span class="pc bpc" id="L417" title="1 of 2 branches missed.">        Preconditions.checkArgument(stack.size() == 1, &quot;Tree is corrupted. Expected a single root node&quot;);</span>
+<span class="fc" id="L418">        result.root = stack.pop();</span>
+      }
+
+<span class="fc" id="L421">      return result;</span>
+<span class="nc" id="L422">    } catch (IOException e) {</span>
+<span class="nc" id="L423">      throw Throwables.propagate(e);</span>
+    }
+  }
+
+  private static Node deserializeNode(DataInput input)
+      throws IOException {
+<span class="fc" id="L429">    int level = input.readUnsignedByte();</span>
+<span class="fc" id="L430">    long value = input.readLong();</span>
+<span class="fc" id="L431">    double weight = input.readDouble();</span>
+
+<span class="fc" id="L433">    return new Node(value, level, weight);</span>
+  }
+
+  @VisibleForTesting
+  int getTotalNodeCount() {
+<span class="nc" id="L438">    return totalNodeCount;</span>
+  }
+
+  @VisibleForTesting
+  int getNonZeroNodeCount() {
+<span class="nc" id="L443">    return nonZeroNodeCount;</span>
+  }
+
+  @VisibleForTesting
+  int getCompressions() {
+<span class="nc" id="L448">    return compressions;</span>
+  }
+
+  @VisibleForTesting
+  void compress() {
+<span class="fc" id="L453">    ++compressions;</span>
+
+<span class="fc" id="L455">    final int compressionFactor = calculateCompressionFactor();</span>
+
+<span class="fc" id="L457">    postOrderTraversal(root, new Callback() {</span>
+      @Override
+      public boolean process(Node node) {
+<span class="fc bfc" id="L460" title="All 2 branches covered.">        if (node.isLeaf()) {</span>
+<span class="fc" id="L461">          return true;</span>
+        }
+
+        // if children's weights are ~0 remove them and shift the weight to their parent
+
+<span class="fc" id="L466">        double leftWeight = 0;</span>
+<span class="fc bfc" id="L467" title="All 2 branches covered.">        if (node.left != null) {</span>
+<span class="fc" id="L468">          leftWeight = node.left.weightedCount;</span>
+        }
+
+<span class="fc" id="L471">        double rightWeight = 0;</span>
+<span class="fc bfc" id="L472" title="All 2 branches covered.">        if (node.right != null) {</span>
+<span class="fc" id="L473">          rightWeight = node.right.weightedCount;</span>
+        }
+
+<span class="fc bfc" id="L476" title="All 2 branches covered.">        boolean shouldCompress =</span>
+            node.weightedCount + leftWeight + rightWeight &lt; (int) (weightedCount / compressionFactor);
+
+<span class="fc" id="L479">        double oldNodeWeight = node.weightedCount;</span>
+<span class="fc bfc" id="L480" title="All 4 branches covered.">        if (shouldCompress || leftWeight &lt; ZERO_WEIGHT_THRESHOLD) {</span>
+<span class="fc" id="L481">          node.left = tryRemove(node.left);</span>
+
+<span class="fc" id="L483">          weightedCount += leftWeight;</span>
+<span class="fc" id="L484">          node.weightedCount += leftWeight;</span>
+        }
+
+<span class="fc bfc" id="L487" title="All 4 branches covered.">        if (shouldCompress || rightWeight &lt; ZERO_WEIGHT_THRESHOLD) {</span>
+<span class="fc" id="L488">          node.right = tryRemove(node.right);</span>
+
+<span class="fc" id="L490">          weightedCount += rightWeight;</span>
+<span class="fc" id="L491">          node.weightedCount += rightWeight;</span>
+        }
+
+<span class="fc bfc" id="L494" title="All 4 branches covered.">        if (oldNodeWeight &lt; ZERO_WEIGHT_THRESHOLD &amp;&amp; node.weightedCount &gt;= ZERO_WEIGHT_THRESHOLD) {</span>
+<span class="fc" id="L495">          ++nonZeroNodeCount;</span>
+        }
+
+<span class="fc" id="L498">        return true;</span>
+      }
+    });
+
+<span class="pc bpc" id="L502" title="1 of 4 branches missed.">    if (root != null &amp;&amp; root.weightedCount &lt; ZERO_WEIGHT_THRESHOLD) {</span>
+<span class="fc" id="L503">      root = tryRemove(root);</span>
+    }
+<span class="fc" id="L505">  }</span>
+
+  private double weight(long timestamp) {
+<span class="fc" id="L508">    return Math.exp(alpha * (timestamp - landmarkInSeconds));</span>
+  }
+
+  private void rescale(long newLandmarkInSeconds) {
+    // rescale the weights based on a new landmark to avoid numerical overflow issues
+
+<span class="fc" id="L514">    final double factor = Math.exp(-alpha * (newLandmarkInSeconds - landmarkInSeconds));</span>
+
+<span class="fc" id="L516">    weightedCount *= factor;</span>
+
+<span class="fc" id="L518">    postOrderTraversal(root, new Callback() {</span>
+      @Override
+      public boolean process(Node node) {
+<span class="fc" id="L521">        double oldWeight = node.weightedCount;</span>
+
+<span class="fc" id="L523">        node.weightedCount *= factor;</span>
+
+<span class="pc bpc" id="L525" title="1 of 4 branches missed.">        if (oldWeight &gt;= ZERO_WEIGHT_THRESHOLD &amp;&amp; node.weightedCount &lt; ZERO_WEIGHT_THRESHOLD) {</span>
+<span class="nc" id="L526">          --nonZeroNodeCount;</span>
+        }
+
+<span class="fc" id="L529">        return true;</span>
+      }
+    });
+
+<span class="fc" id="L533">    landmarkInSeconds = newLandmarkInSeconds;</span>
+<span class="fc" id="L534">  }</span>
+
+  private int calculateCompressionFactor() {
+<span class="fc bfc" id="L537" title="All 2 branches covered.">    if (root == null) {</span>
+<span class="fc" id="L538">      return 1;</span>
+    }
+
+<span class="fc" id="L541">    return Math.max((int) ((root.level + 1) / maxError), 1);</span>
+  }
+
+  private void insert(long bits, double weight) {
+<span class="fc" id="L545">    long lastBranch = 0;</span>
+<span class="fc" id="L546">    Node parent = null;</span>
+<span class="fc" id="L547">    Node current = root;</span>
+
+    while (true) {
+<span class="fc bfc" id="L550" title="All 2 branches covered.">      if (current == null) {</span>
+<span class="fc" id="L551">        setChild(parent, lastBranch, createLeaf(bits, weight));</span>
+<span class="fc" id="L552">        return;</span>
+<span class="fc bfc" id="L553" title="All 2 branches covered.">      } else if (!inSameSubtree(bits, current.bits, current.level)) {</span>
+        // if bits and node.bits are not in the same branch given node's level,
+        // insert a parent above them at the point at which branches diverge
+<span class="fc" id="L556">        setChild(parent, lastBranch, makeSiblings(current, createLeaf(bits, weight)));</span>
+<span class="fc" id="L557">        return;</span>
+<span class="pc bpc" id="L558" title="1 of 4 branches missed.">      } else if (current.level == 0 &amp;&amp; current.bits == bits) {</span>
+        // found the node
+
+<span class="fc" id="L561">        double oldWeight = current.weightedCount;</span>
+
+<span class="fc" id="L563">        current.weightedCount += weight;</span>
+
+<span class="pc bpc" id="L565" title="2 of 4 branches missed.">        if (current.weightedCount &gt;= ZERO_WEIGHT_THRESHOLD &amp;&amp; oldWeight &lt; ZERO_WEIGHT_THRESHOLD) {</span>
+<span class="nc" id="L566">          ++nonZeroNodeCount;</span>
+        }
+
+<span class="fc" id="L569">        weightedCount += weight;</span>
+
+<span class="fc" id="L571">        return;</span>
+      }
+
+      // we're on the correct branch of the tree and we haven't reached a leaf, so keep going down
+<span class="fc" id="L575">      long branch = bits &amp; current.getBranchMask();</span>
+
+<span class="fc" id="L577">      parent = current;</span>
+<span class="fc" id="L578">      lastBranch = branch;</span>
+
+<span class="fc bfc" id="L580" title="All 2 branches covered.">      if (branch == 0) {</span>
+<span class="fc" id="L581">        current = current.left;</span>
+      } else {
+<span class="fc" id="L583">        current = current.right;</span>
+      }
+<span class="fc" id="L585">    }</span>
+  }
+
+  private void setChild(Node parent, long branch, Node child) {
+<span class="fc bfc" id="L589" title="All 2 branches covered.">    if (parent == null) {</span>
+<span class="fc" id="L590">      root = child;</span>
+<span class="fc bfc" id="L591" title="All 2 branches covered.">    } else if (branch == 0) {</span>
+<span class="fc" id="L592">      parent.left = child;</span>
+    } else {
+<span class="fc" id="L594">      parent.right = child;</span>
+    }
+<span class="fc" id="L596">  }</span>
+
+  private Node makeSiblings(Node node, Node sibling) {
+<span class="fc" id="L599">    int parentLevel = MAX_BITS - Long.numberOfLeadingZeros(node.bits ^ sibling.bits);</span>
+
+<span class="fc" id="L601">    Node parent = createNode(node.bits, parentLevel, 0);</span>
+
+    // the branch is given by the bit at the level one below parent
+<span class="fc" id="L604">    long branch = sibling.bits &amp; parent.getBranchMask();</span>
+<span class="fc bfc" id="L605" title="All 2 branches covered.">    if (branch == 0) {</span>
+<span class="fc" id="L606">      parent.left = sibling;</span>
+<span class="fc" id="L607">      parent.right = node;</span>
+    } else {
+<span class="fc" id="L609">      parent.left = node;</span>
+<span class="fc" id="L610">      parent.right = sibling;</span>
+    }
+
+<span class="fc" id="L613">    return parent;</span>
+  }
+
+  private Node createLeaf(long bits, double weight) {
+<span class="fc" id="L617">    return createNode(bits, 0, weight);</span>
+  }
+
+  private Node createNode(long bits, int level, double weight) {
+<span class="fc" id="L621">    weightedCount += weight;</span>
+<span class="fc" id="L622">    ++totalNodeCount;</span>
+<span class="fc bfc" id="L623" title="All 2 branches covered.">    if (weight &gt;= ZERO_WEIGHT_THRESHOLD) {</span>
+<span class="fc" id="L624">      nonZeroNodeCount++;</span>
+    }
+<span class="fc" id="L626">    return new Node(bits, level, weight);</span>
+  }
+
+  private Node merge(Node node, Node other) {
+<span class="fc bfc" id="L630" title="All 2 branches covered.">    if (node == null) {</span>
+<span class="fc" id="L631">      return copyRecursive(other);</span>
+<span class="pc bpc" id="L632" title="1 of 2 branches missed.">    } else if (other == null) {</span>
+<span class="nc" id="L633">      return node;</span>
+<span class="pc bpc" id="L634" title="1 of 2 branches missed.">    } else if (!inSameSubtree(node.bits, other.bits, Math.max(node.level, other.level))) {</span>
+<span class="nc" id="L635">      return makeSiblings(node, copyRecursive(other));</span>
+<span class="pc bpc" id="L636" title="1 of 2 branches missed.">    } else if (node.level &gt; other.level) {</span>
+<span class="nc" id="L637">      long branch = other.bits &amp; node.getBranchMask();</span>
+
+<span class="nc bnc" id="L639" title="All 2 branches missed.">      if (branch == 0) {</span>
+<span class="nc" id="L640">        node.left = merge(node.left, other);</span>
+      } else {
+<span class="nc" id="L642">        node.right = merge(node.right, other);</span>
+      }
+<span class="nc" id="L644">      return node;</span>
+<span class="pc bpc" id="L645" title="1 of 2 branches missed.">    } else if (node.level &lt; other.level) {</span>
+<span class="nc" id="L646">      Node result = createNode(other.bits, other.level, other.weightedCount);</span>
+
+<span class="nc" id="L648">      long branch = node.bits &amp; other.getBranchMask();</span>
+<span class="nc bnc" id="L649" title="All 2 branches missed.">      if (branch == 0) {</span>
+<span class="nc" id="L650">        result.left = merge(node, other.left);</span>
+<span class="nc" id="L651">        result.right = copyRecursive(other.right);</span>
+      } else {
+<span class="nc" id="L653">        result.left = copyRecursive(other.left);</span>
+<span class="nc" id="L654">        result.right = merge(node, other.right);</span>
+      }
+
+<span class="nc" id="L657">      return result;</span>
+    }
+
+    // else, they must be at the same level and on the same path, so just bump the counts
+<span class="fc" id="L661">    double oldWeight = node.weightedCount;</span>
+
+<span class="fc" id="L663">    weightedCount += other.weightedCount;</span>
+<span class="fc" id="L664">    node.weightedCount = node.weightedCount + other.weightedCount;</span>
+<span class="fc" id="L665">    node.left = merge(node.left, other.left);</span>
+<span class="fc" id="L666">    node.right = merge(node.right, other.right);</span>
+
+<span class="pc bpc" id="L668" title="1 of 4 branches missed.">    if (oldWeight &lt; ZERO_WEIGHT_THRESHOLD &amp;&amp; node.weightedCount &gt;= ZERO_WEIGHT_THRESHOLD) {</span>
+<span class="nc" id="L669">      nonZeroNodeCount++;</span>
+    }
+
+<span class="fc" id="L672">    return node;</span>
+  }
+
+  private static boolean inSameSubtree(long bitsA, long bitsB, int level) {
+<span class="pc bpc" id="L676" title="1 of 4 branches missed.">    return level == MAX_BITS || (bitsA &gt;&gt;&gt; level) == (bitsB &gt;&gt;&gt; level);</span>
+  }
+
+  private Node copyRecursive(Node node) {
+<span class="fc" id="L680">    Node result = null;</span>
+
+<span class="pc bpc" id="L682" title="1 of 2 branches missed.">    if (node != null) {</span>
+<span class="nc" id="L683">      result = createNode(node.bits, node.level, node.weightedCount);</span>
+<span class="nc" id="L684">      result.left = copyRecursive(node.left);</span>
+<span class="nc" id="L685">      result.right = copyRecursive(node.right);</span>
+    }
+
+<span class="fc" id="L688">    return result;</span>
+  }
+
+  /**
+   * Remove the node if possible or set its count to 0 if it has children and
+   * it needs to be kept around
+   */
+  private Node tryRemove(Node node) {
+<span class="fc bfc" id="L696" title="All 2 branches covered.">    if (node == null) {</span>
+<span class="fc" id="L697">      return null;</span>
+    }
+
+<span class="fc bfc" id="L700" title="All 2 branches covered.">    if (node.weightedCount &gt;= ZERO_WEIGHT_THRESHOLD) {</span>
+<span class="fc" id="L701">      --nonZeroNodeCount;</span>
+    }
+
+<span class="fc" id="L704">    weightedCount -= node.weightedCount;</span>
+
+<span class="fc" id="L706">    Node result = null;</span>
+<span class="fc bfc" id="L707" title="All 2 branches covered.">    if (node.isLeaf()) {</span>
+<span class="fc" id="L708">      --totalNodeCount;</span>
+<span class="fc bfc" id="L709" title="All 2 branches covered.">    } else if (node.hasSingleChild()) {</span>
+<span class="fc" id="L710">      result = node.getSingleChild();</span>
+<span class="fc" id="L711">      --totalNodeCount;</span>
+    } else {
+<span class="fc" id="L713">      node.weightedCount = 0;</span>
+<span class="fc" id="L714">      result = node;</span>
+    }
+
+<span class="fc" id="L717">    return result;</span>
+  }
+
+  private boolean postOrderTraversal(Node node, Callback callback) {
+<span class="fc" id="L721">    return postOrderTraversal(node, callback, TraversalOrder.FORWARD);</span>
+  }
+
+  // returns true if traversal should continue
+  private boolean postOrderTraversal(Node node, Callback callback, TraversalOrder order) {
+<span class="pc bpc" id="L726" title="1 of 2 branches missed.">    if (node == null) {</span>
+<span class="nc" id="L727">      return false;</span>
+    }
+
+    Node first;
+    Node second;
+
+<span class="pc bpc" id="L733" title="1 of 2 branches missed.">    if (order == TraversalOrder.FORWARD) {</span>
+<span class="fc" id="L734">      first = node.left;</span>
+<span class="fc" id="L735">      second = node.right;</span>
+    } else {
+<span class="nc" id="L737">      first = node.right;</span>
+<span class="nc" id="L738">      second = node.left;</span>
+    }
+
+<span class="fc bfc" id="L741" title="All 4 branches covered.">    if (first != null &amp;&amp; !postOrderTraversal(first, callback, order)) {</span>
+<span class="fc" id="L742">      return false;</span>
+    }
+
+<span class="fc bfc" id="L745" title="All 4 branches covered.">    if (second != null &amp;&amp; !postOrderTraversal(second, callback, order)) {</span>
+<span class="fc" id="L746">      return false;</span>
+    }
+
+<span class="fc" id="L749">    return callback.process(node);</span>
+  }
+
+  /**
+   * Computes the maximum error of the current digest
+   */
+  public double getConfidenceFactor() {
+<span class="nc" id="L756">    return computeMaxPathWeight(root) * 1.0 / weightedCount;</span>
+  }
+
+  public boolean equivalent(QuantileDigest other) {
+<span class="nc" id="L760">    rescaleToCommonLandmark(this, other);</span>
+
+<span class="nc bnc" id="L762" title="All 12 branches missed.">    return (totalNodeCount == other.totalNodeCount &amp;&amp;</span>
+        nonZeroNodeCount == other.nonZeroNodeCount &amp;&amp;
+        min == other.min &amp;&amp;
+        max == other.max &amp;&amp;
+        weightedCount == other.weightedCount &amp;&amp;
+        Objects.equal(root, other.root));
+  }
+
+  private void rescaleToCommonLandmark(QuantileDigest one, QuantileDigest two) {
+<span class="fc" id="L771">    long nowInSeconds = TimeUnit.NANOSECONDS.toSeconds(ticker.read());</span>
+
+    // 1. rescale this and other to common landmark
+<span class="fc" id="L774">    long targetLandmark = Math.max(one.landmarkInSeconds, two.landmarkInSeconds);</span>
+
+<span class="pc bpc" id="L776" title="1 of 2 branches missed.">    if (nowInSeconds - targetLandmark &gt;= RESCALE_THRESHOLD_SECONDS) {</span>
+<span class="nc" id="L777">      targetLandmark = nowInSeconds;</span>
+    }
+
+<span class="fc bfc" id="L780" title="All 2 branches covered.">    if (targetLandmark != one.landmarkInSeconds) {</span>
+<span class="fc" id="L781">      one.rescale(targetLandmark);</span>
+    }
+
+<span class="pc bpc" id="L784" title="1 of 2 branches missed.">    if (targetLandmark != two.landmarkInSeconds) {</span>
+<span class="nc" id="L785">      two.rescale(targetLandmark);</span>
+    }
+<span class="fc" id="L787">  }</span>
+
+  /**
+   * Computes the max &quot;weight&quot; of any path starting at node and ending at a leaf in the
+   * hypothetical complete tree. The weight is the sum of counts in the ancestors of a given node
+   */
+  private double computeMaxPathWeight(Node node) {
+<span class="nc bnc" id="L794" title="All 4 branches missed.">    if (node == null || node.level == 0) {</span>
+<span class="nc" id="L795">      return 0;</span>
+    }
+
+<span class="nc" id="L798">    double leftMaxWeight = computeMaxPathWeight(node.left);</span>
+<span class="nc" id="L799">    double rightMaxWeight = computeMaxPathWeight(node.right);</span>
+
+<span class="nc" id="L801">    return Math.max(leftMaxWeight, rightMaxWeight) + node.weightedCount;</span>
+  }
+
+  @VisibleForTesting
+  void validate() {
+<span class="nc" id="L806">    final AtomicDouble sumOfWeights = new AtomicDouble();</span>
+<span class="nc" id="L807">    final AtomicInteger actualNodeCount = new AtomicInteger();</span>
+<span class="nc" id="L808">    final AtomicInteger actualNonZeroNodeCount = new AtomicInteger();</span>
+
+<span class="nc bnc" id="L810" title="All 2 branches missed.">    if (root != null) {</span>
+<span class="nc" id="L811">      validateStructure(root);</span>
+
+<span class="nc" id="L813">      postOrderTraversal(root, new Callback() {</span>
+        @Override
+        public boolean process(Node node) {
+<span class="nc" id="L816">          sumOfWeights.addAndGet(node.weightedCount);</span>
+<span class="nc" id="L817">          actualNodeCount.incrementAndGet();</span>
+
+<span class="nc bnc" id="L819" title="All 2 branches missed.">          if (node.weightedCount &gt;= ZERO_WEIGHT_THRESHOLD) {</span>
+<span class="nc" id="L820">            actualNonZeroNodeCount.incrementAndGet();</span>
+          }
+
+<span class="nc" id="L823">          return true;</span>
+        }
+      });
+    }
+
+<span class="nc bnc" id="L828" title="All 2 branches missed.">    checkState(Math.abs(sumOfWeights.get() - weightedCount) &lt; ZERO_WEIGHT_THRESHOLD,</span>
+        &quot;Computed weight (%s) doesn't match summary (%s)&quot;, sumOfWeights.get(), weightedCount);
+
+<span class="nc bnc" id="L831" title="All 2 branches missed.">    checkState(actualNodeCount.get() == totalNodeCount, &quot;Actual node count (%s) doesn't match summary (%s)&quot;,</span>
+        actualNodeCount.get(), totalNodeCount);
+
+<span class="nc bnc" id="L834" title="All 2 branches missed.">    checkState(actualNonZeroNodeCount.get() == nonZeroNodeCount,</span>
+        &quot;Actual non-zero node count (%s) doesn't match summary (%s)&quot;, actualNonZeroNodeCount.get(), nonZeroNodeCount);
+<span class="nc" id="L836">  }</span>
+
+  private void validateStructure(Node node) {
+<span class="nc bnc" id="L839" title="All 2 branches missed.">    checkState(node.level &gt;= 0);</span>
+
+<span class="nc bnc" id="L841" title="All 2 branches missed.">    if (node.left != null) {</span>
+<span class="nc" id="L842">      validateBranchStructure(node, node.left, node.right, true);</span>
+<span class="nc" id="L843">      validateStructure(node.left);</span>
+    }
+
+<span class="nc bnc" id="L846" title="All 2 branches missed.">    if (node.right != null) {</span>
+<span class="nc" id="L847">      validateBranchStructure(node, node.right, node.left, false);</span>
+<span class="nc" id="L848">      validateStructure(node.right);</span>
+    }
+<span class="nc" id="L850">  }</span>
+
+  private void validateBranchStructure(Node parent, Node child, Node otherChild, boolean isLeft) {
+<span class="nc bnc" id="L853" title="All 2 branches missed.">    checkState(child.level &lt; parent.level, &quot;Child level (%s) should be smaller than parent level (%s)&quot;, child.level,</span>
+        parent.level);
+
+<span class="nc" id="L856">    long branch = child.bits &amp; (1L &lt;&lt; (parent.level - 1));</span>
+<span class="nc bnc" id="L857" title="All 8 branches missed.">    checkState(branch == 0 &amp;&amp; isLeft || branch != 0 &amp;&amp; !isLeft, &quot;Value of child node is inconsistent with its branch&quot;);</span>
+
+<span class="nc bnc" id="L859" title="All 6 branches missed.">    Preconditions.checkState(parent.weightedCount &gt;= ZERO_WEIGHT_THRESHOLD ||</span>
+            child.weightedCount &gt;= ZERO_WEIGHT_THRESHOLD || otherChild != null,
+        &quot;Found a linear chain of zero-weight nodes&quot;);
+<span class="nc" id="L862">  }</span>
+
+  public String toGraphviz() {
+<span class="nc" id="L865">    StringBuilder builder = new StringBuilder();</span>
+
+<span class="nc" id="L867">    builder.append(&quot;digraph QuantileDigest {\n&quot;).append(&quot;\tgraph [ordering=\&quot;out\&quot;];&quot;);</span>
+
+<span class="nc" id="L869">    final List&lt;Node&gt; nodes = new ArrayList&lt;&gt;();</span>
+<span class="nc" id="L870">    postOrderTraversal(root, new Callback() {</span>
+      @Override
+      public boolean process(Node node) {
+<span class="nc" id="L873">        nodes.add(node);</span>
+<span class="nc" id="L874">        return true;</span>
+      }
+    });
+
+<span class="nc" id="L878">    Multimap&lt;Integer, Node&gt; nodesByLevel = Multimaps.index(nodes, new Function&lt;Node, Integer&gt;() {</span>
+      @Override
+      public Integer apply(Node input) {
+<span class="nc" id="L881">        return input.level;</span>
+      }
+    });
+
+<span class="nc bnc" id="L885" title="All 2 branches missed.">    for (Map.Entry&lt;Integer, Collection&lt;Node&gt;&gt; entry : nodesByLevel.asMap().entrySet()) {</span>
+<span class="nc" id="L886">      builder.append(&quot;\tsubgraph level_&quot; + entry.getKey() + &quot; {\n&quot;).append(&quot;\t\trank = same;\n&quot;);</span>
+
+<span class="nc bnc" id="L888" title="All 2 branches missed.">      for (Node node : entry.getValue()) {</span>
+<span class="nc bnc" id="L889" title="All 2 branches missed.">        builder.append(</span>
+            String.format(&quot;\t\t%s [label=\&quot;[%s..%s]@%s\\n%s\&quot;, shape=rect, style=filled,color=%s];\n&quot;, idFor(node),
+                node.getLowerBound(), node.getUpperBound(), node.level, node.weightedCount,
+                node.weightedCount &gt; 0 ? &quot;salmon2&quot; : &quot;white&quot;));
+<span class="nc" id="L893">      }</span>
+
+<span class="nc" id="L895">      builder.append(&quot;\t}\n&quot;);</span>
+<span class="nc" id="L896">    }</span>
+
+<span class="nc bnc" id="L898" title="All 2 branches missed.">    for (Node node : nodes) {</span>
+<span class="nc bnc" id="L899" title="All 2 branches missed.">      if (node.left != null) {</span>
+<span class="nc" id="L900">        builder.append(format(&quot;\t%s -&gt; %s;\n&quot;, idFor(node), idFor(node.left)));</span>
+      }
+<span class="nc bnc" id="L902" title="All 2 branches missed.">      if (node.right != null) {</span>
+<span class="nc" id="L903">        builder.append(format(&quot;\t%s -&gt; %s;\n&quot;, idFor(node), idFor(node.right)));</span>
+      }
+<span class="nc" id="L905">    }</span>
+
+<span class="nc" id="L907">    builder.append(&quot;}\n&quot;);</span>
+
+<span class="nc" id="L909">    return builder.toString();</span>
+  }
+
+  private static String idFor(Node node) {
+<span class="nc" id="L913">    return String.format(&quot;node_%x_%x&quot;, node.bits, node.level);</span>
+  }
+
+  /**
+   * Convert a java long (two's complement representation) to a 64-bit lexicographically-sortable binary
+   */
+  private static long longToBits(long value) {
+<span class="fc" id="L920">    return value ^ 0x8000_0000_0000_0000L;</span>
+  }
+
+  /**
+   * Convert a 64-bit lexicographically-sortable binary to a java long (two's complement representation)
+   */
+  private static long bitsToLong(long bits) {
+<span class="fc" id="L927">    return bits ^ 0x8000_0000_0000_0000L;</span>
+  }
+
+  public static class Bucket {
+    private double count;
+    private double mean;
+
+<span class="nc" id="L934">    public Bucket(double count, double mean) {</span>
+<span class="nc" id="L935">      this.count = count;</span>
+<span class="nc" id="L936">      this.mean = mean;</span>
+<span class="nc" id="L937">    }</span>
+
+    public double getCount() {
+<span class="nc" id="L940">      return count;</span>
+    }
+
+    public double getMean() {
+<span class="nc" id="L944">      return mean;</span>
+    }
+
+    @Override
+    public boolean equals(Object o) {
+<span class="nc bnc" id="L949" title="All 2 branches missed.">      if (this == o) {</span>
+<span class="nc" id="L950">        return true;</span>
+      }
+<span class="nc bnc" id="L952" title="All 4 branches missed.">      if (o == null || getClass() != o.getClass()) {</span>
+<span class="nc" id="L953">        return false;</span>
+      }
+
+<span class="nc" id="L956">      final Bucket bucket = (Bucket) o;</span>
+
+<span class="nc bnc" id="L958" title="All 2 branches missed.">      if (Double.compare(bucket.count, count) != 0) {</span>
+<span class="nc" id="L959">        return false;</span>
+      }
+<span class="nc bnc" id="L961" title="All 2 branches missed.">      if (Double.compare(bucket.mean, mean) != 0) {</span>
+<span class="nc" id="L962">        return false;</span>
+      }
+
+<span class="nc" id="L965">      return true;</span>
+    }
+
+    @Override
+    public int hashCode() {
+      int result;
+      long temp;
+<span class="nc bnc" id="L972" title="All 2 branches missed.">      temp = count != +0.0d ? Double.doubleToLongBits(count) : 0L;</span>
+<span class="nc" id="L973">      result = (int) (temp ^ (temp &gt;&gt;&gt; 32));</span>
+<span class="nc bnc" id="L974" title="All 2 branches missed.">      temp = mean != +0.0d ? Double.doubleToLongBits(mean) : 0L;</span>
+<span class="nc" id="L975">      result = 31 * result + (int) (temp ^ (temp &gt;&gt;&gt; 32));</span>
+<span class="nc" id="L976">      return result;</span>
+    }
+
+    @Override
+    public String toString() {
+<span class="nc" id="L981">      return String.format(&quot;[count: %f, mean: %f]&quot;, count, mean);</span>
+    }
+  }
+
+  private static class Node {
+    private double weightedCount;
+    private int level;
+    private long bits;
+    private Node left;
+    private Node right;
+
+<span class="fc" id="L992">    private Node(long bits, int level, double weightedCount) {</span>
+<span class="fc" id="L993">      this.bits = bits;</span>
+<span class="fc" id="L994">      this.level = level;</span>
+<span class="fc" id="L995">      this.weightedCount = weightedCount;</span>
+<span class="fc" id="L996">    }</span>
+
+    public boolean isLeaf() {
+<span class="fc bfc" id="L999" title="All 4 branches covered.">      return left == null &amp;&amp; right == null;</span>
+    }
+
+    public boolean hasSingleChild() {
+<span class="pc bpc" id="L1003" title="2 of 8 branches missed.">      return left == null &amp;&amp; right != null || left != null &amp;&amp; right == null;</span>
+    }
+
+    public Node getSingleChild() {
+<span class="fc" id="L1007">      checkState(hasSingleChild(), &quot;Node does not have a single child&quot;);</span>
+<span class="fc" id="L1008">      return firstNonNull(left, right);</span>
+    }
+
+    public long getUpperBound() {
+      // set all lsb below level to 1 (we're looking for the highest value of the range covered by this node)
+<span class="fc" id="L1013">      long mask = 0;</span>
+
+<span class="fc bfc" id="L1015" title="All 2 branches covered.">      if (level &gt; 0) { // need to special case when level == 0 because (value &gt;&gt; 64 really means value &gt;&gt; (64 % 64))</span>
+<span class="fc" id="L1016">        mask = 0xFFFF_FFFF_FFFF_FFFFL &gt;&gt;&gt; (MAX_BITS - level);</span>
+      }
+<span class="fc" id="L1018">      return bitsToLong(bits | mask);</span>
+    }
+
+    public long getBranchMask() {
+<span class="fc" id="L1022">      return (1L &lt;&lt; (level - 1));</span>
+    }
+
+    public long getLowerBound() {
+      // set all lsb below level to 0 (we're looking for the lowest value of the range covered by this node)
+<span class="nc" id="L1027">      long mask = 0;</span>
+
+<span class="nc bnc" id="L1029" title="All 2 branches missed.">      if (level &gt; 0) { // need to special case when level == 0 because (value &gt;&gt; 64 really means value &gt;&gt; (64 % 64))</span>
+<span class="nc" id="L1030">        mask = 0xFFFF_FFFF_FFFF_FFFFL &gt;&gt;&gt; (MAX_BITS - level);</span>
+      }
+
+<span class="nc" id="L1033">      return bitsToLong(bits &amp; (~mask));</span>
+    }
+
+    public long getMiddle() {
+<span class="nc" id="L1037">      return getLowerBound() + (getUpperBound() - getLowerBound()) / 2;</span>
+    }
+
+    @Override
+    public String toString() {
+<span class="nc bnc" id="L1042" title="All 4 branches missed.">      return format(&quot;%s (level = %d, count = %s, left = %s, right = %s)&quot;, bits, level, weightedCount, left != null,</span>
+          right != null);
+    }
+
+    @Override
+    public int hashCode() {
+<span class="nc" id="L1048">      return Objects.hashCode(weightedCount, level, bits, left, right);</span>
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+<span class="nc bnc" id="L1053" title="All 2 branches missed.">      if (this == obj) {</span>
+<span class="nc" id="L1054">        return true;</span>
+      }
+<span class="nc bnc" id="L1056" title="All 4 branches missed.">      if (obj == null || getClass() != obj.getClass()) {</span>
+<span class="nc" id="L1057">        return false;</span>
+      }
+<span class="nc" id="L1059">      final Node other = (Node) obj;</span>
+<span class="nc bnc" id="L1060" title="All 10 branches missed.">      return Objects.equal(this.weightedCount, other.weightedCount) &amp;&amp;</span>
+          Objects.equal(this.level, other.level) &amp;&amp;
+          Objects.equal(this.bits, other.bits) &amp;&amp;
+          Objects.equal(this.left, other.left) &amp;&amp;
+          Objects.equal(this.right, other.right);
+    }
+  }
+
+  private static interface Callback {
+    /**
+     * @param node the node to process
+     * @return true if processing should continue
+     */
+    boolean process(Node node);
+  }
+
+<span class="nc" id="L1076">  private static class SizeOf {</span>
+    public static final int BYTE = 1;
+    public static final int INTEGER = 4;
+    public static final int LONG = 8;
+
+    public static final int DOUBLE = 8;
+  }
+
+<span class="nc" id="L1084">  private static class Flags {</span>
+    public static final int HAS_LEFT = 1 &lt;&lt; 0;
+    public static final int HAS_RIGHT = 1 &lt;&lt; 1;
+  }
+
+  // ----------------------------
+  // additional methods
+  // ----------------------------
+
+  public static &lt;T&gt; T firstNonNull(T first, T second) {
+<span class="fc bfc" id="L1094" title="All 2 branches covered.">    return first != null ? first : checkNotNull(second);</span>
+  }
+
+  public void offer(long value) {
+<span class="nc" id="L1098">    add(value);</span>
+<span class="nc" id="L1099">  }</span>
+
+  public static QuantileDigest merge(List&lt;QuantileDigest&gt; digests) {
+<span class="nc bnc" id="L1102" title="All 2 branches missed.">    if (digests.isEmpty()) {</span>
+<span class="nc" id="L1103">      throw new RuntimeException(&quot;Digests to be unioned should not be empty!&quot;);</span>
+    }
+
+<span class="nc" id="L1106">    QuantileDigest ret = digests.get(0);</span>
+
+<span class="nc bnc" id="L1108" title="All 2 branches missed.">    for (int i = 1; i &lt; digests.size(); i++) {</span>
+<span class="nc" id="L1109">      ret.merge(digests.get(i));</span>
+    }
+
+<span class="nc" id="L1112">    return ret;</span>
+  }
+
+  private Object writeReplace()
+      throws ObjectStreamException {
+<span class="nc" id="L1117">    return new SerializationHolder(this);</span>
+  }
+
+  private void writeBytes(DataOutput buf)
+      throws IOException {
+<span class="nc" id="L1122">    serialize(buf);</span>
+<span class="nc" id="L1123">  }</span>
+
+  /**
+   * This class exists to support Externalizable semantics for
+   * HyperLogLog objects without having to expose a public
+   * constructor, public write/read methods, or pretend final
+   * fields aren't final.
+   * &lt;p&gt;
+   * In short, Externalizable allows you to skip some of the more
+   * verbose meta-data default Serializable gets you, but still
+   * includes the class name. In that sense, there is some cost
+   * to this holder object because it has a longer class name. I
+   * imagine people who care about optimizing for that have their
+   * own work-around for long class names in general, or just use
+   * a custom serialization framework. Therefore we make no attempt
+   * to optimize that here (eg. by raising this from an inner class
+   * and giving it an unhelpful name).
+   */
+  private static class SerializationHolder implements Externalizable {
+    QuantileDigest holder;
+
+<span class="nc" id="L1144">    public SerializationHolder(QuantileDigest holder) {</span>
+<span class="nc" id="L1145">      this.holder = holder;</span>
+<span class="nc" id="L1146">    }</span>
+
+    /**
+     * required for Externalizable
+     */
+<span class="nc" id="L1151">    public SerializationHolder() {</span>
+
+<span class="nc" id="L1153">    }</span>
+
+    @Override
+    public void writeExternal(ObjectOutput out)
+        throws IOException {
+<span class="nc" id="L1158">      holder.writeBytes(out);</span>
+<span class="nc" id="L1159">    }</span>
+
+    @Override
+    public void readExternal(ObjectInput in)
+        throws IOException, ClassNotFoundException {
+<span class="nc" id="L1164">      holder = Builder.build(in);</span>
+<span class="nc" id="L1165">    }</span>
+
+    private Object readResolve() {
+<span class="nc" id="L1168">      return holder;</span>
+    }
+  }
+
+  public static class Builder implements Serializable {
+    private double rsd;
+
+<span class="nc" id="L1175">    public Builder(double rsd) {</span>
+<span class="nc" id="L1176">      this.rsd = rsd;</span>
+<span class="nc" id="L1177">    }</span>
+
+    public QuantileDigest build() {
+<span class="nc" id="L1180">      return new QuantileDigest(rsd);</span>
+    }
+
+    public static QuantileDigest build(byte[] bytes)
+        throws IOException {
+<span class="nc" id="L1185">      ByteArrayInputStream bais = new ByteArrayInputStream(bytes);</span>
+<span class="nc" id="L1186">      return build(new DataInputStream(bais));</span>
+    }
+
+    public static QuantileDigest build(DataInput buf)
+        throws IOException {
+<span class="nc" id="L1191">      return QuantileDigest.deserialize(buf);</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

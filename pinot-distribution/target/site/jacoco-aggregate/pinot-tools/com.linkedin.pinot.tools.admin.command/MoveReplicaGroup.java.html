@@ -1,0 +1,481 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>MoveReplicaGroup.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-tools</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.tools.admin.command</a> &gt; <span class="el_source">MoveReplicaGroup.java</span></div><h1>MoveReplicaGroup.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.linkedin.pinot.tools.admin.command;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.common.base.Function;
+import com.google.common.base.Joiner;
+import com.google.common.base.Preconditions;
+import com.linkedin.pinot.common.config.TableConfig;
+import com.linkedin.pinot.common.utils.CommonConstants;
+import com.linkedin.pinot.common.utils.helix.HelixHelper;
+import com.linkedin.pinot.common.utils.retry.RetryPolicies;
+import com.linkedin.pinot.tools.Command;
+import com.linkedin.pinot.tools.PinotZKChanger;
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.Charset;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.PriorityQueue;
+import javax.annotation.Nullable;
+import org.apache.helix.PropertyPathConfig;
+import org.apache.helix.PropertyType;
+import org.apache.helix.ZNRecord;
+import org.apache.helix.manager.zk.ZKHelixAdmin;
+import org.apache.helix.manager.zk.ZNRecordSerializer;
+import org.apache.helix.model.IdealState;
+import org.apache.helix.store.zk.ZkHelixPropertyStore;
+import org.json.JSONException;
+import org.kohsuke.args4j.CmdLineException;
+import org.kohsuke.args4j.CmdLineParser;
+import org.kohsuke.args4j.Option;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * Command to migrate a subset of replica group from current servers to the provided destination servers.
+ * This command is intended to be run multiple times to migrate all the replicas of a table to the destination
+ * servers (if intended).
+ */
+<span class="nc" id="L63">public class MoveReplicaGroup extends AbstractBaseAdminCommand implements Command {</span>
+<span class="nc" id="L64">  private static Logger LOGGER = LoggerFactory.getLogger(MoveReplicaGroup.class);</span>
+
+  @Option(name = &quot;-srcHosts&quot;, aliases = {&quot;-s&quot;, &quot;--src&quot;}, required = true, metaVar = &quot;&lt;filePath or csv hostnames&gt;&quot;,
+      usage = &quot;File with names of source hosts or csv list of hostnames&quot;)
+  private String srcHosts;
+
+<span class="nc" id="L70">  @Option(name = &quot;-destHostsFile&quot;, aliases = {&quot;-d&quot;, &quot;--dest&quot;}, required = false, metaVar = &quot;&lt;File Path&gt;&quot;,</span>
+      usage = &quot;File with destination servers list&quot;)
+  private String destHostsFile = &quot;&quot;;
+
+  @Option(name = &quot;-tableName&quot;, aliases = {&quot;-t&quot;, &quot;-table&quot;}, required = true, metaVar = &quot;&lt;string&gt;&quot;,
+      usage = &quot;Table name. Supports only OFFLINE table (type is optional)&quot;)
+  private String tableName;
+
+<span class="nc" id="L78">  @Option(name = &quot;-maxSegmentsToMove&quot;, aliases = {&quot;-m&quot;, &quot;--max&quot;}, required = false, metaVar = &quot;&lt;int&gt;&quot;, usage = &quot;MaxSegmentsToMove&quot;)</span>
+  private int maxSegmentsToMove = Integer.MAX_VALUE;
+
+  @Option(name = &quot;-zkHost&quot;, aliases = {&quot;--zk&quot;, &quot;-z&quot;}, required = true, metaVar = &quot;&lt;string&gt;&quot;, usage = &quot;Zookeeper host:port&quot;)
+  private String zkHost;
+
+  @Option(name = &quot;-zkPath&quot;, aliases = {&quot;--cluster&quot;, &quot;-c&quot;}, required = true, metaVar = &quot;&lt;string&gt;&quot;, usage = &quot;Zookeeper cluster path(Ex: /pinot&quot;)
+  private String zkPath;
+
+<span class="nc" id="L87">  @Option(name = &quot;-exec&quot;, required = false, metaVar = &quot;&lt;boolean&gt;&quot;, usage = &quot;Execute replica group move. dryRun(default) if not specified&quot;)</span>
+  private boolean exec = false;
+
+<span class="nc" id="L90">  @Option(name = &quot;-help&quot;, required = false, aliases = { &quot;-h&quot;, &quot;--h&quot;, &quot;--help&quot;}, metaVar = &quot;&lt;boolean&gt;&quot;, usage = &quot;Prints help&quot;)</span>
+  private boolean help = false;
+
+
+  private ZKHelixAdmin helix;
+  private PinotZKChanger zkChanger;
+
+  @Override
+  public boolean getHelp() {
+<span class="nc" id="L99">    return help;</span>
+  }
+
+  @Override
+  public String getName() {
+<span class="nc" id="L104">    return &quot;MoveReplicaGroup&quot;;</span>
+  }
+
+  public String description() {
+<span class="nc" id="L108">    return &quot;Move complete set of segment replica from source servers to tagged servers in cluster&quot;;</span>
+  }
+
+  public String toString() {
+<span class="nc bnc" id="L112" title="All 2 branches missed.">    String retString = &quot;MoveReplicaGroup -srcHosts &quot; + srcHosts + &quot; -tableName &quot; +</span>
+        tableName + &quot; -zkHost &quot; + zkHost + &quot; -zkPath &quot; + zkPath +
+        (exec ? &quot; -exec&quot; : &quot;&quot;);
+<span class="nc" id="L115">    return retString;</span>
+  }
+
+  @Override
+  public void cleanup() {
+
+<span class="nc" id="L121">  }</span>
+
+  public boolean execute()
+      throws IOException, JSONException, InterruptedException {
+<span class="nc" id="L125">    validateParams();</span>
+
+<span class="nc" id="L127">    zkChanger = new PinotZKChanger(zkHost, zkPath);</span>
+<span class="nc" id="L128">    this.helix = zkChanger.getHelixAdmin();</span>
+
+<span class="nc bnc" id="L130" title="All 2 branches missed.">    if (! isExistingTable(tableName)) {</span>
+<span class="nc" id="L131">      LOGGER.error(&quot;Table {} does not exist&quot;, tableName);</span>
+    }
+
+    // expects returned host names to be instance names (Server_&lt;hostName&gt;_&lt;port&gt;)
+<span class="nc" id="L135">    List&lt;String&gt; srcHostsList = readSourceHosts();</span>
+<span class="nc" id="L136">    LOGGER.info(&quot;Source hosts: {}&quot;, srcHostsList);</span>
+
+<span class="nc" id="L138">    String serverTenant = getServerTenantName(tableName) + &quot;_OFFLINE&quot;;</span>
+<span class="nc" id="L139">    LOGGER.debug(&quot;Using server tenant: {}&quot;, serverTenant);</span>
+<span class="nc" id="L140">    List&lt;String&gt; destinationServers = readDestinationServers();</span>
+<span class="nc" id="L141">    LOGGER.info(&quot;Destination servers: {}&quot;, destinationServers);</span>
+<span class="nc" id="L142">    verifyServerLists(srcHostsList, destinationServers);</span>
+
+<span class="nc" id="L144">    Map&lt;String, Map&lt;String, String&gt;&gt; idealStateMap = helix.getResourceIdealState(zkPath, tableName)</span>
+        .getRecord().getMapFields();
+
+<span class="nc" id="L147">    System.out.println(&quot;Existing idealstate:&quot;);</span>
+<span class="nc" id="L148">    printIdealState(idealStateMap);</span>
+
+<span class="nc" id="L150">    PriorityQueue&lt;SourceSegments&gt; segmentsToMove = getSegmentsToMoveQueue(idealStateMap, srcHostsList);</span>
+<span class="nc" id="L151">    PriorityQueue&lt;ServerInstance&gt; destinationServerQueue = getDestinationServerQueue(idealStateMap, destinationServers);</span>
+
+<span class="nc" id="L153">    Map&lt;String, Map&lt;String, String&gt;&gt; proposedIdealState =</span>
+        computeNewIdealState(idealStateMap, segmentsToMove, destinationServerQueue, srcHostsList);
+<span class="nc" id="L155">    System.out.println(&quot;Proposed idealstate:&quot;);</span>
+<span class="nc" id="L156">    printIdealState(proposedIdealState);</span>
+<span class="nc" id="L157">    printDestinationServerCounts(destinationServerQueue);</span>
+<span class="nc bnc" id="L158" title="All 2 branches missed.">    if (! exec) {</span>
+<span class="nc" id="L159">      LOGGER.info(&quot;Run with -exec to apply this IdealState&quot;);</span>
+<span class="nc" id="L160">      System.exit(0);</span>
+    }
+
+<span class="nc" id="L163">    applyIdealState(proposedIdealState);</span>
+<span class="nc" id="L164">    zkChanger.waitForStable(tableName);</span>
+<span class="nc" id="L165">    return true;</span>
+  }
+
+  private List&lt;String&gt; readSourceHosts()
+      throws IOException {
+<span class="nc bnc" id="L170" title="All 2 branches missed.">    if (this.srcHosts.isEmpty()) {</span>
+<span class="nc" id="L171">     LOGGER.error(&quot;Source hosts(-s) are required&quot;);</span>
+<span class="nc" id="L172">      System.exit(1);</span>
+    }
+
+<span class="nc" id="L175">    File srcFile = new File(this.srcHosts);</span>
+<span class="nc" id="L176">    List&lt;String&gt; srcHostsList = null;</span>
+<span class="nc bnc" id="L177" title="All 2 branches missed.">    if (srcFile.exists()) {</span>
+<span class="nc" id="L178">       srcHostsList = readHostsFromFile(this.srcHosts);</span>
+<span class="nc bnc" id="L179" title="All 2 branches missed.">      if (srcHostsList.isEmpty()) {</span>
+<span class="nc" id="L180">        LOGGER.error(&quot;Empty list of servers. Nothing to do&quot;);</span>
+        // this is not process error but most likely usage error
+        // exiting with status 1 so that scripts can catch this
+<span class="nc" id="L183">        System.exit(1);</span>
+      }
+    } else {
+<span class="nc" id="L186">      List&lt;String&gt; hosts = Arrays.asList(this.srcHosts.split(&quot;\\s*,\\s*&quot;));</span>
+<span class="nc" id="L187">      srcHostsList = hostNameToInstanceNames(hosts);</span>
+    }
+<span class="nc" id="L189">    return srcHostsList;</span>
+  }
+
+  private void printDestinationServerCounts(PriorityQueue&lt;ServerInstance&gt; destinationServerQueue) {
+<span class="nc" id="L193">    System.out.println(&quot;Number of segments per server: &quot;);</span>
+<span class="nc bnc" id="L194" title="All 2 branches missed.">    for (ServerInstance instance : destinationServerQueue) {</span>
+<span class="nc" id="L195">      System.out.println(instance.server + &quot; : &quot; + instance.segments);</span>
+<span class="nc" id="L196">    }</span>
+<span class="nc" id="L197">  }</span>
+
+  private void printIdealState(Map&lt;String, Map&lt;String, String&gt;&gt; idealState)
+      throws JsonProcessingException {
+<span class="nc" id="L201">    String output = new ObjectMapper().writerWithDefaultPrettyPrinter().writeValueAsString(idealState);</span>
+<span class="nc" id="L202">    System.out.println(output);</span>
+<span class="nc" id="L203">  }</span>
+
+  private void applyIdealState(final Map&lt;String, Map&lt;String, String&gt;&gt; proposedIdealState) {
+<span class="nc" id="L206">    HelixHelper.updateIdealState(zkChanger.getHelixManager(), tableName, new Function&lt;IdealState, IdealState&gt;() {</span>
+      @Nullable
+      @Override
+      public IdealState apply(@Nullable IdealState input) {
+<span class="nc" id="L210">        Map&lt;String, Map&lt;String, String&gt;&gt; existingMapField = input.getRecord().getMapFields();</span>
+
+<span class="nc bnc" id="L212" title="All 2 branches missed.">        for (Map.Entry&lt;String, Map&lt;String, String&gt;&gt; segmentEntry : proposedIdealState.entrySet()) {</span>
+<span class="nc" id="L213">          existingMapField.put(segmentEntry.getKey(), segmentEntry.getValue());</span>
+<span class="nc" id="L214">        }</span>
+<span class="nc" id="L215">        return input;</span>
+      }
+    }, RetryPolicies.exponentialBackoffRetryPolicy(5, 500L, 2.0f));
+<span class="nc" id="L218">  }</span>
+
+  private Map&lt;String, Map&lt;String, String&gt;&gt; computeNewIdealState(Map&lt;String, Map&lt;String, String&gt;&gt; idealStateMap,
+      PriorityQueue&lt;SourceSegments&gt; segmentsToMove, PriorityQueue&lt;ServerInstance&gt; destinationServers,
+      List&lt;String&gt; srcHostsList) {
+
+<span class="nc" id="L224">    Map&lt;String, Map&lt;String, String&gt;&gt; newIdealState = copyIdealState(idealStateMap);</span>
+
+<span class="nc bnc" id="L226" title="All 4 branches missed.">    for (int remapCount = 0; remapCount &lt; maxSegmentsToMove &amp;&amp; !segmentsToMove.isEmpty(); ++remapCount) {</span>
+<span class="nc" id="L227">      String segment = segmentsToMove.poll().segment;</span>
+<span class="nc" id="L228">      Map&lt;String, String&gt; existingMapping = newIdealState.get(segment);</span>
+<span class="nc" id="L229">      String destinationServer = getDestinationServer(destinationServers, existingMapping);</span>
+<span class="nc bnc" id="L230" title="All 2 branches missed.">      if (destinationServer == null) {</span>
+<span class="nc" id="L231">        throw new RuntimeException(&quot;No destination server for segment: &quot; + segment);</span>
+      }
+<span class="nc" id="L233">      String toRemove = null;</span>
+
+<span class="nc bnc" id="L235" title="All 2 branches missed.">      for (Map.Entry&lt;String, String&gt; existingInstanceEntry : existingMapping.entrySet()) {</span>
+<span class="nc bnc" id="L236" title="All 2 branches missed.">        if (srcHostsList.contains(existingInstanceEntry.getKey())) {</span>
+<span class="nc" id="L237">          toRemove = existingInstanceEntry.getKey();</span>
+<span class="nc" id="L238">          break;</span>
+        }
+<span class="nc" id="L240">      }</span>
+
+<span class="nc bnc" id="L242" title="All 2 branches missed.">      if (toRemove == null) {</span>
+<span class="nc" id="L243">        throw new RuntimeException(&quot;Could not find a source host to remove for segment: &quot; + segment);</span>
+      }
+<span class="nc" id="L245">      existingMapping.remove(toRemove);</span>
+<span class="nc" id="L246">      existingMapping.put(destinationServer, &quot;ONLINE&quot;);</span>
+    }
+<span class="nc" id="L248">    return newIdealState;</span>
+  }
+
+  private String getDestinationServer(PriorityQueue&lt;ServerInstance&gt; destinationServers, Map&lt;String, String&gt; existingSegmentMapping) {
+<span class="nc" id="L252">    Preconditions.checkNotNull(destinationServers);</span>
+<span class="nc bnc" id="L253" title="All 2 branches missed.">    Preconditions.checkArgument(! destinationServers.isEmpty());</span>
+
+<span class="nc" id="L255">    List&lt;ServerInstance&gt; removedServers = new ArrayList&lt;&gt;();</span>
+<span class="nc" id="L256">    String selectedServer = null;</span>
+<span class="nc bnc" id="L257" title="All 2 branches missed.">    while (!destinationServers.isEmpty()) {</span>
+<span class="nc" id="L258">      ServerInstance si = destinationServers.poll();</span>
+<span class="nc" id="L259">      removedServers.add(si);</span>
+<span class="nc bnc" id="L260" title="All 2 branches missed.">      if (! existingSegmentMapping.containsKey(si.server)) {</span>
+<span class="nc" id="L261">        selectedServer = si.server;</span>
+<span class="nc" id="L262">        ++si.segments;</span>
+<span class="nc" id="L263">        break;</span>
+      }
+<span class="nc" id="L265">    }</span>
+<span class="nc bnc" id="L266" title="All 2 branches missed.">    for (ServerInstance removedServer : removedServers) {</span>
+<span class="nc" id="L267">      destinationServers.add(removedServer);</span>
+<span class="nc" id="L268">    }</span>
+<span class="nc" id="L269">    return selectedServer;</span>
+  }
+
+  private Map&lt;String, Map&lt;String, String&gt;&gt; copyIdealState(Map&lt;String, Map&lt;String, String&gt;&gt; idealStateMap) {
+<span class="nc" id="L273">    Map&lt;String, Map&lt;String, String&gt;&gt; copy = new HashMap&lt;&gt;(idealStateMap);</span>
+<span class="nc bnc" id="L274" title="All 2 branches missed.">    for (Map.Entry&lt;String, Map&lt;String, String&gt;&gt; segmentEntry : idealStateMap.entrySet()) {</span>
+<span class="nc" id="L275">      Map&lt;String, String&gt; instanceCopy = new HashMap&lt;&gt;(segmentEntry.getValue().size());</span>
+<span class="nc bnc" id="L276" title="All 2 branches missed.">      for (Map.Entry&lt;String, String&gt; instanceEntry : segmentEntry.getValue().entrySet()) {</span>
+<span class="nc" id="L277">        instanceCopy.put(instanceEntry.getKey(), instanceEntry.getValue());</span>
+<span class="nc" id="L278">      }</span>
+<span class="nc" id="L279">      copy.put(segmentEntry.getKey(), instanceCopy);</span>
+<span class="nc" id="L280">    }</span>
+<span class="nc" id="L281">    return copy;</span>
+  }
+
+  private void verifyServerLists(List&lt;String&gt; srcHosts, List&lt;String&gt; taggedServers) {
+<span class="nc bnc" id="L285" title="All 2 branches missed.">    for (String srcHost : srcHosts) {</span>
+<span class="nc bnc" id="L286" title="All 2 branches missed.">      if (taggedServers.contains(srcHost)) {</span>
+<span class="nc" id="L287">        LOGGER.error(&quot;Source host: {} is also present in destination list&quot;, srcHost);</span>
+<span class="nc" id="L288">        LOGGER.error(&quot;Refusing to migrate replica group&quot;);</span>
+<span class="nc" id="L289">        System.exit(1);</span>
+      }
+<span class="nc" id="L291">    }</span>
+
+    // having disabled source hosts in okay since we are moving segments away from source
+<span class="nc bnc" id="L294" title="All 2 branches missed.">    if (hasDisabledInstances(&quot;Destination&quot;, taggedServers)) {</span>
+<span class="nc" id="L295">      LOGGER.error(&quot;Destination server list has disabled instances. Retry after correcting input&quot;);</span>
+<span class="nc" id="L296">      System.exit(1);</span>
+    }
+<span class="nc" id="L298">  }</span>
+
+  private boolean hasDisabledInstances(String logTag, List&lt;String&gt; instances) {
+<span class="nc" id="L301">    boolean hasDisabled = false;</span>
+<span class="nc bnc" id="L302" title="All 2 branches missed.">    for (String instance : instances) {</span>
+<span class="nc bnc" id="L303" title="All 2 branches missed.">      if (! helix.getInstanceConfig(zkPath, instance).getInstanceEnabled()) {</span>
+<span class="nc" id="L304">        LOGGER.error(&quot;{} instance: {} is disabled&quot;, logTag, instance);</span>
+<span class="nc" id="L305">        hasDisabled = true;</span>
+      }
+<span class="nc" id="L307">    }</span>
+<span class="nc" id="L308">    return hasDisabled;</span>
+  }
+
+
+  private PriorityQueue&lt;ServerInstance&gt; getDestinationServerQueue(Map&lt;String, Map&lt;String, String&gt;&gt; idealStateMap,
+      List&lt;String&gt; destServers) {
+    // better to keep map rather than removing elements from heap each time
+<span class="nc" id="L315">    Map&lt;String, ServerInstance&gt; serverMap = new HashMap&lt;&gt;(destServers.size());</span>
+<span class="nc bnc" id="L316" title="All 2 branches missed.">    for (String ds : destServers) {</span>
+<span class="nc" id="L317">      serverMap.put(ds, new ServerInstance(ds, 0));</span>
+<span class="nc" id="L318">    }</span>
+
+    // For existing mapping of destination servers in idealstate, update the segment count
+<span class="nc bnc" id="L321" title="All 2 branches missed.">    for (Map.Entry&lt;String, Map&lt;String, String&gt;&gt; segmentEntry : idealStateMap.entrySet()) {</span>
+<span class="nc bnc" id="L322" title="All 2 branches missed.">      for (Map.Entry&lt;String, String&gt; instanceEntry : segmentEntry.getValue().entrySet()) {</span>
+<span class="nc" id="L323">        String server = instanceEntry.getKey();</span>
+<span class="nc" id="L324">        ServerInstance instance = serverMap.get(server);</span>
+<span class="nc bnc" id="L325" title="All 2 branches missed.">        if (instance != null) {</span>
+<span class="nc" id="L326">          ++instance.segments;</span>
+        }
+<span class="nc" id="L328">      }</span>
+<span class="nc" id="L329">    }</span>
+
+<span class="nc" id="L331">    PriorityQueue&lt;ServerInstance&gt; destServerQueue = new PriorityQueue&lt;&gt;(destServers.size(),</span>
+<span class="nc" id="L332">        new Comparator&lt;ServerInstance&gt;() {</span>
+          @Override
+          public int compare(ServerInstance o1, ServerInstance o2) {
+<span class="nc bnc" id="L335" title="All 2 branches missed.">            return o1.segments &lt; o2.segments ? -1 : 1;</span>
+          }
+        });
+<span class="nc bnc" id="L338" title="All 2 branches missed.">    for (Map.Entry&lt;String, ServerInstance&gt; serverEntry : serverMap.entrySet()) {</span>
+<span class="nc" id="L339">      destServerQueue.add(serverEntry.getValue());</span>
+<span class="nc" id="L340">    }</span>
+<span class="nc" id="L341">    return destServerQueue;</span>
+  }
+
+  class SourceSegments {
+<span class="nc" id="L345">    SourceSegments(String segment, int replicas) {</span>
+<span class="nc" id="L346">      this.segment = segment;</span>
+<span class="nc" id="L347">      this.replicaCount = replicas;</span>
+<span class="nc" id="L348">    }</span>
+    String segment;
+    int replicaCount;
+  }
+
+<span class="nc" id="L353">  class ServerInstance{</span>
+<span class="nc" id="L354">    ServerInstance(String server, int segments) {</span>
+<span class="nc" id="L355">      this.server = server;</span>
+<span class="nc" id="L356">      this.segments = segments;</span>
+<span class="nc" id="L357">    }</span>
+
+    String server;
+    int segments;
+  }
+
+  // this is a priority queue so that we first move those segments which have highest replicasx
+  // on srcHosts. This can happen if previous run of the program limited the number of segments to move
+  private PriorityQueue&lt;SourceSegments&gt; getSegmentsToMoveQueue(Map&lt;String, Map&lt;String, String&gt;&gt; idealStateMap,
+      List&lt;String&gt; srcHosts) {
+<span class="nc" id="L367">    PriorityQueue&lt;SourceSegments&gt; sourceSegments = new PriorityQueue&lt;&gt;(idealStateMap.keySet().size(),</span>
+<span class="nc" id="L368">        new Comparator&lt;SourceSegments&gt;() {</span>
+          @Override
+          public int compare(SourceSegments s1, SourceSegments s2) {
+            // arbitrary decision for equals case
+<span class="nc bnc" id="L372" title="All 2 branches missed.">            return (s1.replicaCount &gt; s2.replicaCount ? -1: 1);</span>
+          }
+        });
+<span class="nc bnc" id="L375" title="All 2 branches missed.">    for (Map.Entry&lt;String, Map&lt;String, String&gt;&gt; segmentEntry : idealStateMap.entrySet()) {</span>
+<span class="nc" id="L376">      SourceSegments srcSegment = new SourceSegments(segmentEntry.getKey(), 0);</span>
+<span class="nc bnc" id="L377" title="All 2 branches missed.">      for (Map.Entry&lt;String, String&gt; instanceEntry : segmentEntry.getValue().entrySet()) {</span>
+<span class="nc bnc" id="L378" title="All 2 branches missed.">        if (srcHosts.contains(instanceEntry.getKey())) {</span>
+<span class="nc" id="L379">          ++srcSegment.replicaCount;</span>
+        }
+<span class="nc" id="L381">      }</span>
+<span class="nc bnc" id="L382" title="All 2 branches missed.">      if (srcSegment.replicaCount &gt; 0) {</span>
+<span class="nc" id="L383">        sourceSegments.add(srcSegment);</span>
+      }
+<span class="nc" id="L385">    }</span>
+<span class="nc" id="L386">    return sourceSegments;</span>
+  }
+
+  private void validateParams() {
+<span class="nc bnc" id="L390" title="All 4 branches missed.">    if (tableName == null || tableName.isEmpty()) {</span>
+<span class="nc" id="L391">      LOGGER.error(&quot;Table name is required and can not be empty&quot;);</span>
+<span class="nc" id="L392">      System.exit(1);</span>
+    }
+<span class="nc bnc" id="L394" title="All 2 branches missed.">    if (tableName.endsWith(CommonConstants.Helix.TableType.REALTIME.toString())) {</span>
+<span class="nc" id="L395">      LOGGER.error(&quot;This operation is not supported for realtime table. table: {}&quot;, tableName);</span>
+<span class="nc" id="L396">      System.exit(1);</span>
+    }
+
+<span class="nc bnc" id="L399" title="All 2 branches missed.">    tableName = tableName.endsWith(CommonConstants.Helix.TableType.OFFLINE.toString()) ?</span>
+        tableName : tableName + &quot;_OFFLINE&quot;;
+<span class="nc bnc" id="L401" title="All 4 branches missed.">    if (zkHost.isEmpty() || zkPath.isEmpty()) {</span>
+<span class="nc" id="L402">      LOGGER.error(&quot;zkHost or zkPath should not be empty&quot;);</span>
+<span class="nc" id="L403">      System.exit(1);</span>
+    }
+<span class="nc bnc" id="L405" title="All 2 branches missed.">    if (zkPath.startsWith(&quot;/&quot;)) {</span>
+<span class="nc" id="L406">      zkPath = zkPath.substring(1);</span>
+    }
+<span class="nc" id="L408">    String[] hostSplits = zkHost.split(&quot;/&quot;);</span>
+<span class="nc" id="L409">    String[] pathSplits = zkPath.split(&quot;/&quot;);</span>
+
+<span class="nc bnc" id="L411" title="All 6 branches missed.">    if (hostSplits.length == 1 || (hostSplits.length == 2 &amp;&amp; hostSplits[1].isEmpty())) {</span>
+<span class="nc" id="L412">      zkHost = hostSplits[0] + &quot;/&quot; + pathSplits[0];</span>
+<span class="nc" id="L413">      zkPath = Joiner.on(&quot;/&quot;).join(Arrays.copyOfRange(pathSplits, 1, pathSplits.length));</span>
+    }
+<span class="nc" id="L415">    LOGGER.info(&quot;Using zkHost: {}, zkPath: {}&quot;, zkHost, zkPath);</span>
+<span class="nc" id="L416">  }</span>
+
+  private String getServerTenantName(String tableName)
+      throws IOException, JSONException {
+<span class="nc" id="L420">    return getTableConfig(tableName).getTenantConfig().getServer();</span>
+  }
+
+  private TableConfig getTableConfig(String tableName)
+      throws IOException, JSONException {
+<span class="nc" id="L425">    ZNRecordSerializer serializer = new ZNRecordSerializer();</span>
+<span class="nc" id="L426">    String path = PropertyPathConfig.getPath(PropertyType.PROPERTYSTORE, zkPath);</span>
+<span class="nc" id="L427">    ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore = new ZkHelixPropertyStore&lt;&gt;(zkHost, serializer, path);</span>
+<span class="nc" id="L428">    ZNRecord tcZnRecord = propertyStore.get(&quot;/CONFIGS/TABLE/&quot; + tableName, null, 0);</span>
+<span class="nc" id="L429">    TableConfig tableConfig = TableConfig.fromZnRecord(tcZnRecord);</span>
+<span class="nc" id="L430">    LOGGER.debug(&quot;Loaded table config&quot;);</span>
+<span class="nc" id="L431">    return tableConfig;</span>
+  }
+
+  private boolean isExistingTable(String tableName) {
+<span class="nc" id="L435">    return helix.getResourcesInCluster(zkPath).contains(tableName);</span>
+  }
+
+  private List&lt;String&gt; readDestinationServers()
+      throws IOException, JSONException {
+<span class="nc bnc" id="L440" title="All 2 branches missed.">    if (destHostsFile.isEmpty()) {</span>
+<span class="nc" id="L441">      String serverTenant = getServerTenantName(tableName) + &quot;_OFFLINE&quot;;</span>
+<span class="nc" id="L442">      LOGGER.debug(&quot;Using server tenant: {}&quot;, serverTenant);</span>
+<span class="nc" id="L443">      return HelixHelper.getEnabledInstancesWithTag(helix, zkPath, serverTenant);</span>
+    } else {
+<span class="nc" id="L445">      return readHostsFromFile(destHostsFile);</span>
+    }
+  }
+
+  private List&lt;String&gt; readHostsFromFile(String filename)
+      throws IOException {
+<span class="nc" id="L451">    List&lt;String&gt; hosts = Files.readAllLines(Paths.get(filename), Charset.defaultCharset());</span>
+<span class="nc" id="L452">    return hostNameToInstanceNames(hosts);</span>
+  }
+
+  private List&lt;String&gt; hostNameToInstanceNames(List&lt;String&gt; hosts) {
+<span class="nc" id="L456">    List&lt;String&gt; srcHosts = new ArrayList&lt;&gt;(hosts.size());</span>
+<span class="nc bnc" id="L457" title="All 2 branches missed.">    for (String host : hosts) {</span>
+<span class="nc bnc" id="L458" title="All 2 branches missed.">      if (host.isEmpty()) {</span>
+<span class="nc" id="L459">        continue;</span>
+      }
+<span class="nc bnc" id="L461" title="All 2 branches missed.">      String server = host.split(&quot;_&quot;).length == 1 ? &quot;Server_&quot; + host + &quot;_8001&quot; : host;</span>
+<span class="nc" id="L462">      srcHosts.add(server);</span>
+<span class="nc" id="L463">    }</span>
+<span class="nc" id="L464">    return srcHosts;</span>
+  }
+  public static void main(String[] args)
+      throws Exception {
+<span class="nc" id="L468">    MoveReplicaGroup mrg = new MoveReplicaGroup();</span>
+
+<span class="nc" id="L470">    CmdLineParser parser = new CmdLineParser(mrg);</span>
+    try {
+<span class="nc" id="L472">      parser.parseArgument(args);</span>
+<span class="nc" id="L473">    } catch (CmdLineException e) {</span>
+<span class="nc" id="L474">      LOGGER.error(&quot;Failed to parse arguments: {}&quot;, e);</span>
+<span class="nc" id="L475">      parser.printUsage(System.err);</span>
+<span class="nc" id="L476">      System.exit(1);</span>
+<span class="nc" id="L477">    }</span>
+<span class="nc" id="L478">    mrg.execute();</span>
+<span class="nc" id="L479">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

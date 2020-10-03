@@ -1,0 +1,1050 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>OffHeapStarTreeBuilder.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.startree</a> &gt; <span class="el_source">OffHeapStarTreeBuilder.java</span></div><h1>OffHeapStarTreeBuilder.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.startree;
+
+import com.google.common.base.Preconditions;
+import com.google.common.collect.BiMap;
+import com.google.common.collect.HashBiMap;
+import com.linkedin.pinot.common.data.FieldSpec;
+import com.linkedin.pinot.common.data.MetricFieldSpec;
+import com.linkedin.pinot.common.data.Schema;
+import com.linkedin.pinot.common.utils.Pairs.IntPair;
+import com.linkedin.pinot.core.data.GenericRow;
+import com.linkedin.pinot.core.segment.creator.ColumnIndexCreationInfo;
+import com.linkedin.pinot.core.segment.creator.impl.V1Constants;
+import com.linkedin.pinot.core.startree.hll.HllUtil;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+import java.io.BufferedOutputStream;
+import java.io.DataOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.nio.ByteOrder;
+import java.nio.channels.FileChannel;
+import java.nio.charset.Charset;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Queue;
+import java.util.Set;
+import org.apache.commons.io.FileUtils;
+import org.apache.commons.lang3.tuple.ImmutablePair;
+import org.apache.commons.lang3.tuple.Pair;
+import org.joda.time.DateTime;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import xerial.larray.buffer.LBuffer;
+import xerial.larray.buffer.LBufferAPI;
+import xerial.larray.mmap.MMapBuffer;
+import xerial.larray.mmap.MMapMode;
+
+
+/**
+ * Uses file to build the star tree. Each row is divided into dimension and metrics. Time is added
+ * to dimension list.
+ * We use the split order to build the tree. In most cases, split order will be ranked depending on
+ * the cardinality (descending order).
+ * Time column will be excluded or last entry in split order irrespective of its cardinality
+ * This is a recursive algorithm where we branch on one dimension at every level.
+ * &lt;b&gt;Psuedo algo&lt;/b&gt;
+ * &lt;code&gt;
+ *
+ * build(){
+ *  let table(1,N) consists of N input rows
+ *  table.sort(1,N) //sort the table on all dimensions, according to split order
+ *  constructTree(table, 0, N, 0);
+ * }
+ * constructTree(table,start,end, level){
+ *    splitDimensionName = dimensionsSplitOrder[level]
+ *    groupByResult&lt;dimName, length&gt; = table.groupBy(dimensionsSplitOrder[level]); //returns the number of rows for each value in splitDimension
+ *    int rangeStart = 0;
+ *    for each ( entry&lt;dimName,length&gt; groupByResult){
+ *      if(entry.length &gt; minThreshold){
+ *        constructTree(table, rangeStart, rangeStart + entry.length, level +1);
+ *      }
+ *      rangeStart = rangeStart + entry.length;
+ *      updateStarTree() //add new child
+ *    }
+ *
+ *    //create a star tree node
+ *
+ *    aggregatedRows = table.uniqueAfterRemovingAttributeAndAggregateMetrics(start,end, splitDimensionName);
+ *    for(each row in aggregatedRows_
+ *    table.add(row);
+ *    if(aggregateRows.size &gt; minThreshold) {
+ *      table.sort(end, end + aggregatedRows.size);
+ *      constructStarTree(table, end, end + aggregatedRows.size, level +1);
+ *    }
+ * }
+ * &lt;/code&gt;
+ */
+<span class="fc" id="L102">public class OffHeapStarTreeBuilder implements StarTreeBuilder {</span>
+<span class="fc" id="L103">  private static final Logger LOGGER = LoggerFactory.getLogger(OffHeapStarTreeBuilder.class);</span>
+<span class="fc" id="L104">  private static final Charset UTF_8 = Charset.forName(&quot;UTF-8&quot;);</span>
+
+  // If the temporary buffer needed is larger than 500M, create a file and use MMapBuffer, otherwise use LBuffer
+  private static final long MMAP_SIZE_THRESHOLD = 500_000_000;
+
+  private File _tempDir;
+  private File _dataFile;
+  private DataOutputStream _dataOutputStream;
+
+  private Schema _schema;
+  private List&lt;Integer&gt; _dimensionsSplitOrder;
+  private Set&lt;Integer&gt; _skipStarNodeCreationDimensions;
+  private Set&lt;Integer&gt; _skipMaterializationDimensions;
+  private int _skipMaterializationCardinalityThreshold;
+  private int _maxNumLeafRecords;
+  private boolean _excludeSkipMaterializationDimensionsForStarTreeIndex;
+
+  private int _numRawDocs;
+  private int _numAggregatedDocs;
+  private TreeNode _rootNode;
+  private int _numNodes;
+
+  // Dimensions
+  private int _numDimensions;
+<span class="fc" id="L128">  private final List&lt;String&gt; _dimensionNames = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L129">  private final List&lt;Object&gt; _dimensionStarValues = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L130">  private final List&lt;BiMap&lt;Object, Integer&gt;&gt; _dimensionDictionaries = new ArrayList&lt;&gt;();</span>
+  private int _dimensionSize;
+  // Metrics
+  private int _numMetrics;
+<span class="fc" id="L134">  private final List&lt;String&gt; _metricNames = new ArrayList&lt;&gt;();</span>
+  private int _metricSize;
+
+  private long _docSize;
+  private int[] _sortOrder;
+
+  // Store data tables that need to be closed in close()
+<span class="fc" id="L141">  private final List&lt;StarTreeDataTable&gt; _dataTablesToClose = new ArrayList&lt;&gt;();</span>
+
+<span class="pc bpc" id="L143" title="1 of 2 branches missed.">  private static final boolean NEED_FLIP_ENDIANNESS = ByteOrder.nativeOrder() != ByteOrder.BIG_ENDIAN;</span>
+
+  /**
+   * Flip the endianness of an int if needed.
+   * &lt;p&gt;This is required to keep all the int as native order. (FileOutputStream always write int using BIG_ENDIAN)
+   */
+  private static int flipEndiannessIfNeeded(int value) {
+<span class="pc bpc" id="L150" title="1 of 2 branches missed.">    if (NEED_FLIP_ENDIANNESS) {</span>
+<span class="fc" id="L151">      return Integer.reverseBytes(value);</span>
+    } else {
+<span class="nc" id="L153">      return value;</span>
+    }
+  }
+
+  /**
+   * Helper class to represent a tree node.
+   */
+<span class="fc" id="L160">  private static class TreeNode {</span>
+<span class="fc" id="L161">    int _dimensionId = -1;</span>
+<span class="fc" id="L162">    int _dimensionValue = -1;</span>
+<span class="fc" id="L163">    int _childDimensionId = -1;</span>
+    Map&lt;Integer, TreeNode&gt; _children;
+    int _startDocId;
+    int _endDocId;
+    int _aggregatedDocId;
+  }
+
+  @Override
+  public void init(StarTreeBuilderConfig builderConfig) throws IOException {
+<span class="fc" id="L172">    _tempDir = builderConfig.getOutDir();</span>
+<span class="pc bpc" id="L173" title="1 of 2 branches missed.">    if (_tempDir == null) {</span>
+<span class="nc" id="L174">      _tempDir = new File(FileUtils.getTempDirectory(), V1Constants.STAR_TREE_INDEX_DIR + &quot;_&quot; + DateTime.now());</span>
+    }
+<span class="fc" id="L176">    FileUtils.forceMkdir(_tempDir);</span>
+<span class="fc" id="L177">    LOGGER.info(&quot;Star tree temporary directory: {}&quot;, _tempDir);</span>
+<span class="fc" id="L178">    _dataFile = new File(_tempDir, &quot;star-tree.buf&quot;);</span>
+<span class="fc" id="L179">    LOGGER.info(&quot;Star tree data file: {}&quot;, _dataFile);</span>
+<span class="fc" id="L180">    _dataOutputStream = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(_dataFile)));</span>
+
+<span class="fc" id="L182">    _schema = builderConfig.getSchema();</span>
+<span class="fc" id="L183">    _skipMaterializationCardinalityThreshold = builderConfig.getSkipMaterializationCardinalityThreshold();</span>
+<span class="fc" id="L184">    _maxNumLeafRecords = builderConfig.getMaxNumLeafRecords();</span>
+<span class="fc" id="L185">    _excludeSkipMaterializationDimensionsForStarTreeIndex =</span>
+        builderConfig.isExcludeSkipMaterializationDimensionsForStarTreeIndex();
+
+    // Dimension fields
+<span class="fc bfc" id="L189" title="All 2 branches covered.">    for (FieldSpec fieldSpec : _schema.getAllFieldSpecs()) {</span>
+      // Count all fields that are not metrics as dimensions
+<span class="fc bfc" id="L191" title="All 2 branches covered.">      if (fieldSpec.getFieldType() != FieldSpec.FieldType.METRIC) {</span>
+<span class="fc" id="L192">        String dimensionName = fieldSpec.getName();</span>
+<span class="fc" id="L193">        _numDimensions++;</span>
+<span class="fc" id="L194">        _dimensionNames.add(dimensionName);</span>
+<span class="fc" id="L195">        _dimensionStarValues.add(fieldSpec.getDefaultNullValue());</span>
+<span class="fc" id="L196">        _dimensionDictionaries.add(HashBiMap.&lt;Object, Integer&gt;create());</span>
+      }
+<span class="fc" id="L198">    }</span>
+<span class="fc" id="L199">    _dimensionSize = _numDimensions * V1Constants.Numbers.INTEGER_SIZE;</span>
+
+    // Convert string based config to index based config
+<span class="fc" id="L202">    List&lt;String&gt; dimensionsSplitOrder = builderConfig.getDimensionsSplitOrder();</span>
+<span class="fc bfc" id="L203" title="All 2 branches covered.">    if (dimensionsSplitOrder != null) {</span>
+<span class="fc" id="L204">      _dimensionsSplitOrder = new ArrayList&lt;&gt;(dimensionsSplitOrder.size());</span>
+<span class="fc bfc" id="L205" title="All 2 branches covered.">      for (String dimensionName : dimensionsSplitOrder) {</span>
+<span class="fc" id="L206">        _dimensionsSplitOrder.add(_dimensionNames.indexOf(dimensionName));</span>
+<span class="fc" id="L207">      }</span>
+    }
+<span class="fc" id="L209">    Set&lt;String&gt; skipStarNodeCreationDimensions = builderConfig.getSkipStarNodeCreationDimensions();</span>
+<span class="fc bfc" id="L210" title="All 2 branches covered.">    if (skipStarNodeCreationDimensions != null) {</span>
+<span class="fc" id="L211">      _skipStarNodeCreationDimensions = getDimensionIdSet(skipStarNodeCreationDimensions);</span>
+    }
+<span class="fc" id="L213">    Set&lt;String&gt; skipMaterializationDimensions = builderConfig.getSkipMaterializationDimensions();</span>
+<span class="fc bfc" id="L214" title="All 2 branches covered.">    if (skipMaterializationDimensions != null) {</span>
+<span class="fc" id="L215">      _skipMaterializationDimensions = getDimensionIdSet(skipMaterializationDimensions);</span>
+    }
+
+    // Metric fields
+    // NOTE: the order of _metricNames should be the same as _schema.getMetricFieldSpecs()
+<span class="fc bfc" id="L220" title="All 2 branches covered.">    for (MetricFieldSpec metricFieldSpec : _schema.getMetricFieldSpecs()) {</span>
+<span class="fc" id="L221">      _numMetrics++;</span>
+<span class="fc" id="L222">      _metricNames.add(metricFieldSpec.getName());</span>
+<span class="fc" id="L223">      _metricSize += metricFieldSpec.getFieldSize();</span>
+<span class="fc" id="L224">    }</span>
+
+<span class="fc" id="L226">    LOGGER.info(&quot;Dimension Names: {}&quot;, _dimensionNames);</span>
+<span class="fc" id="L227">    LOGGER.info(&quot;Metric Names: {}&quot;, _metricNames);</span>
+
+<span class="fc" id="L229">    _docSize = _dimensionSize + _metricSize;</span>
+
+    // Initialize the root node
+<span class="fc" id="L232">    _rootNode = new TreeNode();</span>
+<span class="fc" id="L233">    _numNodes++;</span>
+<span class="fc" id="L234">  }</span>
+
+  private Set&lt;Integer&gt; getDimensionIdSet(Set&lt;String&gt; dimensionNameSet) {
+<span class="fc" id="L237">    Set&lt;Integer&gt; dimensionIdSet = new HashSet&lt;&gt;(dimensionNameSet.size());</span>
+<span class="fc bfc" id="L238" title="All 2 branches covered.">    for (int i = 0; i &lt; _numDimensions; i++) {</span>
+<span class="fc bfc" id="L239" title="All 2 branches covered.">      if (dimensionNameSet.contains(_dimensionNames.get(i))) {</span>
+<span class="fc" id="L240">        dimensionIdSet.add(i);</span>
+      }
+    }
+<span class="fc" id="L243">    return dimensionIdSet;</span>
+  }
+
+  @Override
+  public void append(GenericRow row) throws IOException {
+    // Dimensions
+<span class="fc" id="L249">    DimensionBuffer dimensions = new DimensionBuffer(_numDimensions);</span>
+<span class="fc bfc" id="L250" title="All 2 branches covered.">    for (int i = 0; i &lt; _numDimensions; i++) {</span>
+<span class="fc" id="L251">      String dimensionName = _dimensionNames.get(i);</span>
+<span class="fc" id="L252">      Object dimensionValue = row.getValue(dimensionName);</span>
+<span class="fc" id="L253">      BiMap&lt;Object, Integer&gt; dimensionDictionary = _dimensionDictionaries.get(i);</span>
+<span class="fc" id="L254">      Integer dictId = dimensionDictionary.get(dimensionValue);</span>
+<span class="fc bfc" id="L255" title="All 2 branches covered.">      if (dictId == null) {</span>
+<span class="fc" id="L256">        dictId = dimensionDictionary.size();</span>
+<span class="fc" id="L257">        dimensionDictionary.put(dimensionValue, dictId);</span>
+      }
+<span class="fc" id="L259">      dimensions.setDimension(i, dictId);</span>
+    }
+
+    // Metrics
+<span class="fc" id="L263">    Object[] metricValues = new Object[_numMetrics];</span>
+<span class="fc" id="L264">    List&lt;MetricFieldSpec&gt; metricFieldSpecs = _schema.getMetricFieldSpecs();</span>
+<span class="fc bfc" id="L265" title="All 2 branches covered.">    for (int i = 0; i &lt; _numMetrics; i++) {</span>
+<span class="fc" id="L266">      String metricName = _metricNames.get(i);</span>
+<span class="fc" id="L267">      Object metricValue = row.getValue(metricName);</span>
+<span class="fc bfc" id="L268" title="All 2 branches covered.">      if (metricFieldSpecs.get(i).getDerivedMetricType() == MetricFieldSpec.DerivedMetricType.HLL) {</span>
+        // Convert HLL field from string format to HyperLogLog
+<span class="fc" id="L270">        metricValues[i] = HllUtil.convertStringToHll((String) metricValue);</span>
+      } else {
+        // No conversion for standard data types
+<span class="fc" id="L273">        metricValues[i] = metricValue;</span>
+      }
+    }
+<span class="fc" id="L276">    MetricBuffer metrics = new MetricBuffer(metricValues, metricFieldSpecs);</span>
+
+<span class="fc" id="L278">    appendToRawBuffer(dimensions, metrics);</span>
+<span class="fc" id="L279">  }</span>
+
+  private void appendToRawBuffer(DimensionBuffer dimensions, MetricBuffer metrics) throws IOException {
+<span class="fc" id="L282">    appendToBuffer(dimensions, metrics);</span>
+<span class="fc" id="L283">    _numRawDocs++;</span>
+<span class="fc" id="L284">  }</span>
+
+  private void appendToAggBuffer(DimensionBuffer dimensions, MetricBuffer metrics) throws IOException {
+<span class="fc" id="L287">    appendToBuffer(dimensions, metrics);</span>
+<span class="fc" id="L288">    _numAggregatedDocs++;</span>
+<span class="fc" id="L289">  }</span>
+
+  private void appendToBuffer(DimensionBuffer dimensions, MetricBuffer metricHolder) throws IOException {
+<span class="fc bfc" id="L292" title="All 2 branches covered.">    for (int i = 0; i &lt; _numDimensions; i++) {</span>
+<span class="fc" id="L293">      _dataOutputStream.writeInt(flipEndiannessIfNeeded(dimensions.getDimension(i)));</span>
+    }
+<span class="fc" id="L295">    _dataOutputStream.write(metricHolder.toBytes(_metricSize));</span>
+<span class="fc" id="L296">  }</span>
+
+  @Override
+  public void build() throws IOException {
+    // From this point, all raw documents have been appended
+<span class="fc" id="L301">    _dataOutputStream.flush();</span>
+
+<span class="fc bfc" id="L303" title="All 2 branches covered.">    if (_skipMaterializationDimensions == null) {</span>
+<span class="fc" id="L304">      _skipMaterializationDimensions = computeDefaultDimensionsToSkipMaterialization();</span>
+    }
+
+    // For default split order, give preference to skipMaterializationForDimensions.
+    // For user-defined split order, give preference to split-order.
+<span class="pc bpc" id="L309" title="1 of 4 branches missed.">    if (_dimensionsSplitOrder == null || _dimensionsSplitOrder.isEmpty()) {</span>
+<span class="fc" id="L310">      _dimensionsSplitOrder = computeDefaultSplitOrder();</span>
+    } else {
+<span class="fc" id="L312">      _skipMaterializationDimensions.removeAll(_dimensionsSplitOrder);</span>
+    }
+
+<span class="fc" id="L315">    LOGGER.info(&quot;Split Order: {}&quot;, _dimensionsSplitOrder);</span>
+<span class="fc" id="L316">    LOGGER.info(&quot;Skip Materialization Dimensions: {}&quot;, _skipMaterializationDimensions);</span>
+
+    // Compute the sort order
+<span class="fc" id="L319">    _sortOrder = new int[_dimensionNames.size()];</span>
+    // Add dimensions in the split order first
+<span class="fc" id="L321">    int index = 0;</span>
+<span class="fc bfc" id="L322" title="All 2 branches covered.">    for (int dimensionId : _dimensionsSplitOrder) {</span>
+<span class="fc" id="L323">      _sortOrder[index++] = dimensionId;</span>
+<span class="fc" id="L324">    }</span>
+    // Add dimensions that are not part of dimensionsSplitOrder or skipMaterializationForDimensions
+<span class="fc bfc" id="L326" title="All 2 branches covered.">    for (int i = 0; i &lt; _numDimensions; i++) {</span>
+<span class="fc bfc" id="L327" title="All 4 branches covered.">      if (!_dimensionsSplitOrder.contains(i) &amp;&amp; !_skipMaterializationDimensions.contains(i)) {</span>
+<span class="fc" id="L328">        _sortOrder[index++] = i;</span>
+      }
+    }
+    // Add dimensions in the skipMaterializationForDimensions last
+    // The reason for this is that, after sorting and replacing the value for dimensions not materialized to ALL, the
+    // docs with same dimensions will be grouped together for aggregation
+<span class="fc bfc" id="L334" title="All 2 branches covered.">    for (int dimensionId : _skipMaterializationDimensions) {</span>
+<span class="fc" id="L335">      _sortOrder[index++] = dimensionId;</span>
+<span class="fc" id="L336">    }</span>
+
+<span class="fc" id="L338">    long start = System.currentTimeMillis();</span>
+<span class="pc bpc" id="L339" title="1 of 4 branches missed.">    if (!_skipMaterializationDimensions.isEmpty() &amp;&amp; _excludeSkipMaterializationDimensionsForStarTreeIndex) {</span>
+      // Remove the skip materialization dimensions
+<span class="nc" id="L341">      removeSkipMaterializationDimensions();</span>
+      // Recursively construct the star tree
+<span class="nc" id="L343">      constructStarTree(_rootNode, _numRawDocs, _numRawDocs + _numAggregatedDocs, 0);</span>
+    } else {
+      // Sort the documents
+<span class="pc" id="L346">      try (StarTreeDataTable dataTable = new StarTreeDataTable(new MMapBuffer(_dataFile, MMapMode.READ_WRITE),</span>
+          _dimensionSize, _metricSize, 0, _numRawDocs)) {
+<span class="fc" id="L348">        dataTable.sort(0, _numRawDocs, _sortOrder);</span>
+<span class="fc" id="L349">        dataTable.flush();</span>
+<span class="pc bpc" id="L350" title="6 of 8 branches missed.">      }</span>
+      // Recursively construct the star tree
+<span class="fc" id="L352">      constructStarTree(_rootNode, 0, _numRawDocs, 0);</span>
+    }
+
+<span class="fc" id="L355">    splitLeafNodesOnTimeColumn();</span>
+
+    // Create aggregate rows for all nodes in the tree
+<span class="fc" id="L358">    createAggregatedDocForAllNodes();</span>
+
+<span class="fc" id="L360">    long end = System.currentTimeMillis();</span>
+<span class="fc" id="L361">    LOGGER.info(&quot;Took {}ms to build star tree index with {} raw documents and {} aggregated documents&quot;, (end - start),</span>
+        _numRawDocs, _numAggregatedDocs);
+<span class="fc" id="L363">  }</span>
+
+  private void removeSkipMaterializationDimensions() throws IOException {
+<span class="nc" id="L366">    try (StarTreeDataTable dataTable = new StarTreeDataTable(new MMapBuffer(_dataFile, MMapMode.READ_WRITE),</span>
+        _dimensionSize, _metricSize, 0, _numRawDocs)) {
+<span class="nc" id="L368">      dataTable.sort(0, _numRawDocs, _sortOrder);</span>
+<span class="nc" id="L369">      dataTable.flush();</span>
+<span class="nc" id="L370">      Iterator&lt;Pair&lt;byte[], byte[]&gt;&gt; iterator = dataTable.iterator(0, _numRawDocs);</span>
+<span class="nc" id="L371">      DimensionBuffer currentDimensions = null;</span>
+<span class="nc" id="L372">      MetricBuffer currentMetrics = null;</span>
+<span class="nc bnc" id="L373" title="All 2 branches missed.">      while (iterator.hasNext()) {</span>
+<span class="nc" id="L374">        Pair&lt;byte[], byte[]&gt; next = iterator.next();</span>
+<span class="nc" id="L375">        byte[] dimensionBytes = next.getLeft();</span>
+<span class="nc" id="L376">        byte[] metricBytes = next.getRight();</span>
+<span class="nc" id="L377">        DimensionBuffer dimensions = DimensionBuffer.fromBytes(dimensionBytes);</span>
+<span class="nc" id="L378">        MetricBuffer metrics = MetricBuffer.fromBytes(metricBytes, _schema.getMetricFieldSpecs());</span>
+<span class="nc bnc" id="L379" title="All 2 branches missed.">        for (int i = 0; i &lt; _numDimensions; i++) {</span>
+<span class="nc bnc" id="L380" title="All 2 branches missed.">          if (_skipMaterializationDimensions.contains(i)) {</span>
+<span class="nc" id="L381">            dimensions.setDimension(i, StarTreeNode.ALL);</span>
+          }
+        }
+
+<span class="nc bnc" id="L385" title="All 2 branches missed.">        if (currentDimensions == null) {</span>
+<span class="nc" id="L386">          currentDimensions = dimensions;</span>
+<span class="nc" id="L387">          currentMetrics = metrics;</span>
+        } else {
+<span class="nc bnc" id="L389" title="All 2 branches missed.">          if (dimensions.equals(currentDimensions)) {</span>
+<span class="nc" id="L390">            currentMetrics.aggregate(metrics);</span>
+          } else {
+<span class="nc" id="L392">            appendToAggBuffer(currentDimensions, currentMetrics);</span>
+<span class="nc" id="L393">            currentDimensions = dimensions;</span>
+<span class="nc" id="L394">            currentMetrics = metrics;</span>
+          }
+        }
+<span class="nc" id="L397">      }</span>
+<span class="nc" id="L398">      appendToAggBuffer(currentDimensions, currentMetrics);</span>
+<span class="nc bnc" id="L399" title="All 8 branches missed.">    }</span>
+<span class="nc" id="L400">    _dataOutputStream.flush();</span>
+<span class="nc" id="L401">  }</span>
+
+  private void createAggregatedDocForAllNodes() throws IOException {
+<span class="pc" id="L404">    try (StarTreeDataTable dataTable = new StarTreeDataTable(new MMapBuffer(_dataFile, MMapMode.READ_ONLY),</span>
+        _dimensionSize, _metricSize, 0, _numRawDocs + _numAggregatedDocs)) {
+<span class="fc" id="L406">      DimensionBuffer dimensions = new DimensionBuffer(_numDimensions);</span>
+<span class="fc bfc" id="L407" title="All 2 branches covered.">      for (int i = 0; i &lt; _numDimensions; i++) {</span>
+<span class="fc" id="L408">        dimensions.setDimension(i, StarTreeNode.ALL);</span>
+      }
+<span class="fc" id="L410">      createAggregatedDocForAllNodesHelper(dataTable, _rootNode, dimensions);</span>
+<span class="pc bpc" id="L411" title="6 of 8 branches missed.">    }</span>
+<span class="fc" id="L412">    _dataOutputStream.flush();</span>
+<span class="fc" id="L413">  }</span>
+
+  private MetricBuffer createAggregatedDocForAllNodesHelper(StarTreeDataTable dataTable, TreeNode node,
+      DimensionBuffer dimensions) throws IOException {
+<span class="fc" id="L417">    MetricBuffer aggregatedMetrics = null;</span>
+<span class="fc bfc" id="L418" title="All 2 branches covered.">    if (node._children == null) {</span>
+      // Leaf node
+
+<span class="fc" id="L421">      Iterator&lt;Pair&lt;byte[], byte[]&gt;&gt; iterator = dataTable.iterator(node._startDocId, node._endDocId);</span>
+<span class="fc" id="L422">      Pair&lt;byte[], byte[]&gt; first = iterator.next();</span>
+<span class="fc" id="L423">      aggregatedMetrics = MetricBuffer.fromBytes(first.getRight(), _schema.getMetricFieldSpecs());</span>
+<span class="fc bfc" id="L424" title="All 2 branches covered.">      while (iterator.hasNext()) {</span>
+<span class="fc" id="L425">        Pair&lt;byte[], byte[]&gt; next = iterator.next();</span>
+<span class="fc" id="L426">        MetricBuffer metricBuffer = MetricBuffer.fromBytes(next.getRight(), _schema.getMetricFieldSpecs());</span>
+<span class="fc" id="L427">        aggregatedMetrics.aggregate(metricBuffer);</span>
+<span class="fc" id="L428">      }</span>
+<span class="fc" id="L429">    } else {</span>
+      // Non-leaf node
+
+<span class="fc" id="L432">      int childDimensionId = node._childDimensionId;</span>
+<span class="fc bfc" id="L433" title="All 2 branches covered.">      for (Map.Entry&lt;Integer, TreeNode&gt; entry : node._children.entrySet()) {</span>
+<span class="fc" id="L434">        int childDimensionValue = entry.getKey();</span>
+<span class="fc" id="L435">        TreeNode child = entry.getValue();</span>
+<span class="fc" id="L436">        dimensions.setDimension(childDimensionId, childDimensionValue);</span>
+<span class="fc" id="L437">        MetricBuffer childAggregatedMetrics = createAggregatedDocForAllNodesHelper(dataTable, child, dimensions);</span>
+        // Skip star node value when computing aggregate for the parent
+<span class="fc bfc" id="L439" title="All 2 branches covered.">        if (childDimensionValue != StarTreeNode.ALL) {</span>
+<span class="fc bfc" id="L440" title="All 2 branches covered.">          if (aggregatedMetrics == null) {</span>
+<span class="fc" id="L441">            aggregatedMetrics = childAggregatedMetrics;</span>
+          } else {
+<span class="fc" id="L443">            aggregatedMetrics.aggregate(childAggregatedMetrics);</span>
+          }
+        }
+<span class="fc" id="L446">      }</span>
+<span class="fc" id="L447">      dimensions.setDimension(childDimensionId, StarTreeNode.ALL);</span>
+    }
+<span class="fc" id="L449">    node._aggregatedDocId = _numRawDocs + _numAggregatedDocs;</span>
+<span class="fc" id="L450">    appendToAggBuffer(dimensions, aggregatedMetrics);</span>
+<span class="fc" id="L451">    return aggregatedMetrics;</span>
+  }
+
+  /**
+   * Split the leaf nodes on time column if we have not split on time-column name yet, and time column is still
+   * preserved (i.e. not replaced by StarTreeNode.all()).
+   * &lt;p&gt;The method visits each leaf node does the following:
+   * &lt;ul&gt;
+   *   &lt;li&gt;Re-order the documents under the leaf node based on time column&lt;/li&gt;
+   *   &lt;li&gt;Create children nodes for each time value under this leaf node&lt;/li&gt;
+   * &lt;/ul&gt;
+   */
+  private void splitLeafNodesOnTimeColumn() throws IOException {
+<span class="fc" id="L464">    String timeColumnName = _schema.getTimeColumnName();</span>
+<span class="fc bfc" id="L465" title="All 2 branches covered.">    if (timeColumnName != null) {</span>
+<span class="fc" id="L466">      int timeColumnId = _dimensionNames.indexOf(timeColumnName);</span>
+<span class="pc bpc" id="L467" title="2 of 4 branches missed.">      if (!_skipMaterializationDimensions.contains(timeColumnId) &amp;&amp; !_dimensionsSplitOrder.contains(timeColumnId)) {</span>
+<span class="pc" id="L468">        try (StarTreeDataTable dataTable = new StarTreeDataTable(new MMapBuffer(_dataFile, MMapMode.READ_WRITE),</span>
+            _dimensionSize, _metricSize, 0, _numRawDocs + _numAggregatedDocs)) {
+<span class="fc" id="L470">          splitLeafNodesOnTimeColumnHelper(dataTable, _rootNode, 0, timeColumnId);</span>
+<span class="fc" id="L471">          dataTable.flush();</span>
+<span class="pc bpc" id="L472" title="6 of 8 branches missed.">        }</span>
+      }
+    }
+<span class="fc" id="L475">  }</span>
+
+  private void splitLeafNodesOnTimeColumnHelper(StarTreeDataTable dataTable, TreeNode node, int level,
+      int timeColumnId) {
+<span class="fc bfc" id="L479" title="All 2 branches covered.">    if (node._children == null) {</span>
+      // Leaf node
+
+<span class="fc" id="L482">      int startDocId = node._startDocId;</span>
+<span class="fc" id="L483">      int endDocId = node._endDocId;</span>
+<span class="fc" id="L484">      dataTable.sort(startDocId, endDocId, getNewSortOrder(timeColumnId, level));</span>
+<span class="fc" id="L485">      Int2ObjectMap&lt;IntPair&gt; timeColumnRangeMap = dataTable.groupOnDimension(startDocId, endDocId, timeColumnId);</span>
+<span class="fc" id="L486">      node._childDimensionId = timeColumnId;</span>
+<span class="fc" id="L487">      Map&lt;Integer, TreeNode&gt; children = new HashMap&lt;&gt;(timeColumnRangeMap.size());</span>
+<span class="fc" id="L488">      node._children = children;</span>
+<span class="fc bfc" id="L489" title="All 2 branches covered.">      for (Int2ObjectMap.Entry&lt;IntPair&gt; entry : timeColumnRangeMap.int2ObjectEntrySet()) {</span>
+<span class="fc" id="L490">        int timeValue = entry.getIntKey();</span>
+<span class="fc" id="L491">        IntPair range = entry.getValue();</span>
+<span class="fc" id="L492">        TreeNode child = new TreeNode();</span>
+<span class="fc" id="L493">        _numNodes++;</span>
+<span class="fc" id="L494">        children.put(timeValue, child);</span>
+<span class="fc" id="L495">        child._dimensionId = timeColumnId;</span>
+<span class="fc" id="L496">        child._dimensionValue = timeValue;</span>
+<span class="fc" id="L497">        child._startDocId = range.getLeft();</span>
+<span class="fc" id="L498">        child._endDocId = range.getRight();</span>
+<span class="fc" id="L499">      }</span>
+<span class="fc" id="L500">    } else {</span>
+      // Non-leaf node
+
+<span class="fc bfc" id="L503" title="All 2 branches covered.">      for (TreeNode child : node._children.values()) {</span>
+<span class="fc" id="L504">        splitLeafNodesOnTimeColumnHelper(dataTable, child, level + 1, timeColumnId);</span>
+<span class="fc" id="L505">      }</span>
+    }
+<span class="fc" id="L507">  }</span>
+
+  /**
+   * Move the value in the sort order to the new index, keep the order of other values the same.
+   */
+  private int[] getNewSortOrder(int value, int newIndex) {
+<span class="fc" id="L513">    int length = _sortOrder.length;</span>
+<span class="fc" id="L514">    int[] newSortOrder = new int[length];</span>
+<span class="fc" id="L515">    int sortOrderIndex = 0;</span>
+<span class="fc bfc" id="L516" title="All 2 branches covered.">    for (int i = 0; i &lt; length; i++) {</span>
+<span class="fc bfc" id="L517" title="All 2 branches covered.">      if (i == newIndex) {</span>
+<span class="fc" id="L518">        newSortOrder[i] = value;</span>
+      } else {
+<span class="fc bfc" id="L520" title="All 2 branches covered.">        if (_sortOrder[sortOrderIndex] == value) {</span>
+<span class="fc" id="L521">          sortOrderIndex++;</span>
+        }
+<span class="fc" id="L523">        newSortOrder[i] = _sortOrder[sortOrderIndex++];</span>
+      }
+    }
+<span class="fc" id="L526">    return newSortOrder;</span>
+  }
+
+  private Set&lt;Integer&gt; computeDefaultDimensionsToSkipMaterialization() {
+<span class="fc" id="L530">    Set&lt;Integer&gt; skipDimensions = new HashSet&lt;&gt;();</span>
+<span class="fc bfc" id="L531" title="All 2 branches covered.">    for (int i = 0; i &lt; _numDimensions; i++) {</span>
+<span class="fc bfc" id="L532" title="All 2 branches covered.">      if (_dimensionDictionaries.get(i).size() &gt; _skipMaterializationCardinalityThreshold) {</span>
+<span class="fc" id="L533">        skipDimensions.add(i);</span>
+      }
+    }
+<span class="fc" id="L536">    return skipDimensions;</span>
+  }
+
+  private List&lt;Integer&gt; computeDefaultSplitOrder() {
+<span class="fc" id="L540">    List&lt;Integer&gt; defaultSplitOrder = new ArrayList&lt;&gt;();</span>
+
+    // Sort on all non-time dimensions that are not skipped in descending order
+<span class="fc" id="L543">    Set&lt;String&gt; timeDimensions = new HashSet&lt;&gt;(_schema.getDateTimeNames());</span>
+<span class="fc" id="L544">    String timeColumnName = _schema.getTimeColumnName();</span>
+<span class="fc bfc" id="L545" title="All 2 branches covered.">    if (timeColumnName != null) {</span>
+<span class="fc" id="L546">      timeDimensions.add(timeColumnName);</span>
+    }
+<span class="fc bfc" id="L548" title="All 2 branches covered.">    for (int i = 0; i &lt; _numDimensions; i++) {</span>
+<span class="fc bfc" id="L549" title="All 4 branches covered.">      if (!_skipMaterializationDimensions.contains(i) &amp;&amp; !timeDimensions.contains(_dimensionNames.get(i))) {</span>
+<span class="fc" id="L550">        defaultSplitOrder.add(i);</span>
+      }
+    }
+<span class="fc" id="L553">    Collections.sort(defaultSplitOrder, new Comparator&lt;Integer&gt;() {</span>
+      @Override
+      public int compare(Integer o1, Integer o2) {
+        // Descending order
+<span class="fc" id="L557">        return _dimensionDictionaries.get(o2).size() - _dimensionDictionaries.get(o1).size();</span>
+      }
+    });
+
+<span class="fc" id="L561">    return defaultSplitOrder;</span>
+  }
+
+  private void constructStarTree(TreeNode node, int startDocId, int endDocId, int level) throws IOException {
+<span class="fc bfc" id="L565" title="All 2 branches covered.">    if (level == _dimensionsSplitOrder.size()) {</span>
+<span class="fc" id="L566">      return;</span>
+    }
+
+<span class="fc" id="L569">    int splitDimensionId = _dimensionsSplitOrder.get(level);</span>
+<span class="fc" id="L570">    LOGGER.debug(&quot;Building tree at level: {} from startDoc: {} endDocId: {} splitting on dimension id: {}&quot;, level,</span>
+        startDocId, endDocId, splitDimensionId);
+
+<span class="fc" id="L573">    int numDocs = endDocId - startDocId;</span>
+    Int2ObjectMap&lt;IntPair&gt; dimensionRangeMap;
+<span class="pc" id="L575">    try (StarTreeDataTable dataTable = new StarTreeDataTable(</span>
+        new MMapBuffer(_dataFile, startDocId * _docSize, numDocs * _docSize, MMapMode.READ_ONLY), _dimensionSize,
+        _metricSize, startDocId, endDocId)) {
+<span class="fc" id="L578">      dimensionRangeMap = dataTable.groupOnDimension(startDocId, endDocId, splitDimensionId);</span>
+<span class="pc bpc" id="L579" title="6 of 8 branches missed.">    }</span>
+<span class="fc" id="L580">    LOGGER.debug(&quot;Group stats:{}&quot;, dimensionRangeMap);</span>
+
+<span class="fc" id="L582">    node._childDimensionId = splitDimensionId;</span>
+    // Reserve one space for star node
+<span class="fc" id="L584">    Map&lt;Integer, TreeNode&gt; children = new HashMap&lt;&gt;(dimensionRangeMap.size() + 1);</span>
+<span class="fc" id="L585">    node._children = children;</span>
+<span class="fc bfc" id="L586" title="All 2 branches covered.">    for (Int2ObjectMap.Entry&lt;IntPair&gt; entry : dimensionRangeMap.int2ObjectEntrySet()) {</span>
+<span class="fc" id="L587">      int childDimensionValue = entry.getIntKey();</span>
+<span class="fc" id="L588">      TreeNode child = new TreeNode();</span>
+<span class="fc" id="L589">      _numNodes++;</span>
+<span class="fc" id="L590">      children.put(childDimensionValue, child);</span>
+
+      // The range pair value is the relative value to the start document id
+<span class="fc" id="L593">      IntPair range = dimensionRangeMap.get(childDimensionValue);</span>
+<span class="fc" id="L594">      int childStartDocId = range.getLeft();</span>
+<span class="fc" id="L595">      child._startDocId = childStartDocId;</span>
+<span class="fc" id="L596">      int childEndDocId = range.getRight();</span>
+<span class="fc" id="L597">      child._endDocId = childEndDocId;</span>
+
+<span class="fc bfc" id="L599" title="All 2 branches covered.">      if (childEndDocId - childStartDocId &gt; _maxNumLeafRecords) {</span>
+<span class="fc" id="L600">        constructStarTree(child, childStartDocId, childEndDocId, level + 1);</span>
+      }
+<span class="fc" id="L602">    }</span>
+
+    // Directly return if we don't need to create star-node
+<span class="pc bpc" id="L605" title="1 of 4 branches missed.">    if (_skipStarNodeCreationDimensions != null &amp;&amp; _skipStarNodeCreationDimensions.contains(splitDimensionId)) {</span>
+<span class="nc" id="L606">      return;</span>
+    }
+
+    // Create star node
+<span class="fc" id="L610">    TreeNode starChild = new TreeNode();</span>
+<span class="fc" id="L611">    _numNodes++;</span>
+<span class="fc" id="L612">    children.put(StarTreeNode.ALL, starChild);</span>
+<span class="fc" id="L613">    starChild._dimensionId = splitDimensionId;</span>
+<span class="fc" id="L614">    starChild._dimensionValue = StarTreeNode.ALL;</span>
+
+<span class="fc" id="L616">    Iterator&lt;Pair&lt;DimensionBuffer, MetricBuffer&gt;&gt; iterator =</span>
+        getUniqueCombinations(startDocId, endDocId, splitDimensionId);
+<span class="fc" id="L618">    int starChildStartDocId = _numRawDocs + _numAggregatedDocs;</span>
+<span class="fc bfc" id="L619" title="All 2 branches covered.">    while (iterator.hasNext()) {</span>
+<span class="fc" id="L620">      Pair&lt;DimensionBuffer, MetricBuffer&gt; next = iterator.next();</span>
+<span class="fc" id="L621">      DimensionBuffer dimensions = next.getLeft();</span>
+<span class="fc" id="L622">      MetricBuffer metrics = next.getRight();</span>
+<span class="fc" id="L623">      appendToAggBuffer(dimensions, metrics);</span>
+<span class="fc" id="L624">    }</span>
+<span class="fc" id="L625">    _dataOutputStream.flush();</span>
+<span class="fc" id="L626">    int starChildEndDocId = _numRawDocs + _numAggregatedDocs;</span>
+
+<span class="fc" id="L628">    starChild._startDocId = starChildStartDocId;</span>
+<span class="fc" id="L629">    starChild._endDocId = starChildEndDocId;</span>
+<span class="fc bfc" id="L630" title="All 2 branches covered.">    if (starChildEndDocId - starChildStartDocId &gt; _maxNumLeafRecords) {</span>
+<span class="fc" id="L631">      constructStarTree(starChild, starChildStartDocId, starChildEndDocId, level + 1);</span>
+    }
+<span class="fc" id="L633">  }</span>
+
+  /**
+   * Get the unique combinations after removing a specified dimension.
+   * &lt;p&gt;Here we assume the data file is already sorted.
+   * &lt;p&gt;Aggregates the metrics for each unique combination.
+   */
+  private Iterator&lt;Pair&lt;DimensionBuffer, MetricBuffer&gt;&gt; getUniqueCombinations(final int startDocId, final int endDocId,
+      int dimensionIdToRemove) throws IOException {
+<span class="fc" id="L642">    LBufferAPI tempBuffer = null;</span>
+<span class="fc" id="L643">    int numDocs = endDocId - startDocId;</span>
+<span class="fc" id="L644">    long tempBufferSize = numDocs * _docSize;</span>
+<span class="pc bpc" id="L645" title="1 of 2 branches missed.">    if (tempBufferSize &gt; MMAP_SIZE_THRESHOLD) {</span>
+      // Create a temporary file and use MMapBuffer
+<span class="nc" id="L647">      File tempFile = new File(_tempDir, startDocId + &quot;_&quot; + endDocId + &quot;.unique.tmp&quot;);</span>
+<span class="nc" id="L648">      try (FileChannel src = new FileInputStream(_dataFile).getChannel();</span>
+<span class="nc" id="L649">          FileChannel dest = new FileOutputStream(tempFile).getChannel()) {</span>
+<span class="nc" id="L650">        dest.transferFrom(src, startDocId * _docSize, tempBufferSize);</span>
+<span class="nc bnc" id="L651" title="All 16 branches missed.">      }</span>
+<span class="nc" id="L652">      tempBuffer = new MMapBuffer(tempFile, MMapMode.READ_WRITE);</span>
+<span class="nc" id="L653">    } else {</span>
+      // Use LBuffer (direct memory buffer)
+<span class="fc" id="L655">      MMapBuffer dataBuffer = null;</span>
+      try {
+<span class="fc" id="L657">        tempBuffer = new LBuffer(tempBufferSize);</span>
+<span class="fc" id="L658">        dataBuffer = new MMapBuffer(_dataFile, startDocId * _docSize, tempBufferSize, MMapMode.READ_ONLY);</span>
+<span class="fc" id="L659">        dataBuffer.copyTo(0, tempBuffer, 0, tempBufferSize);</span>
+<span class="nc" id="L660">      } catch (Exception e) {</span>
+<span class="nc bnc" id="L661" title="All 2 branches missed.">        if (tempBuffer != null) {</span>
+<span class="nc" id="L662">          tempBuffer.release();</span>
+        }
+<span class="nc" id="L664">        throw e;</span>
+      } finally {
+<span class="pc bpc" id="L666" title="3 of 4 branches missed.">        if (dataBuffer != null) {</span>
+<span class="pc" id="L667">          dataBuffer.close();</span>
+        }
+      }
+    }
+
+<span class="fc" id="L672">    final StarTreeDataTable dataTable =</span>
+        new StarTreeDataTable(tempBuffer, _dimensionSize, _metricSize, startDocId, endDocId);
+<span class="fc" id="L674">    _dataTablesToClose.add(dataTable);</span>
+
+    // Need to set skip materialization dimensions value to ALL before sorting
+<span class="pc bpc" id="L677" title="1 of 4 branches missed.">    if (!_skipMaterializationDimensions.isEmpty() &amp;&amp; !_excludeSkipMaterializationDimensionsForStarTreeIndex) {</span>
+<span class="fc bfc" id="L678" title="All 2 branches covered.">      for (int dimensionIdToSkip : _skipMaterializationDimensions) {</span>
+<span class="fc" id="L679">        dataTable.setDimensionValue(dimensionIdToSkip, StarTreeNode.ALL);</span>
+<span class="fc" id="L680">      }</span>
+    }
+<span class="fc" id="L682">    dataTable.setDimensionValue(dimensionIdToRemove, StarTreeNode.ALL);</span>
+<span class="fc" id="L683">    dataTable.sort(startDocId, endDocId, _sortOrder);</span>
+<span class="fc" id="L684">    dataTable.flush();</span>
+
+<span class="fc" id="L686">    return new Iterator&lt;Pair&lt;DimensionBuffer, MetricBuffer&gt;&gt;() {</span>
+<span class="fc" id="L687">      private final Iterator&lt;Pair&lt;byte[], byte[]&gt;&gt; _iterator = dataTable.iterator(startDocId, endDocId);</span>
+      private DimensionBuffer _currentDimensions;
+      private MetricBuffer _currentMetrics;
+<span class="fc" id="L690">      boolean _hasNext = true;</span>
+
+      @Override
+      public boolean hasNext() {
+<span class="fc" id="L694">        return _hasNext;</span>
+      }
+
+      @Override
+      public Pair&lt;DimensionBuffer, MetricBuffer&gt; next() {
+<span class="fc bfc" id="L699" title="All 2 branches covered.">        while (_iterator.hasNext()) {</span>
+<span class="fc" id="L700">          Pair&lt;byte[], byte[]&gt; next = _iterator.next();</span>
+<span class="fc" id="L701">          DimensionBuffer dimensions = DimensionBuffer.fromBytes(next.getLeft());</span>
+<span class="fc" id="L702">          MetricBuffer metrics = MetricBuffer.fromBytes(next.getRight(), _schema.getMetricFieldSpecs());</span>
+<span class="fc bfc" id="L703" title="All 2 branches covered.">          if (_currentDimensions == null) {</span>
+<span class="fc" id="L704">            _currentDimensions = dimensions;</span>
+<span class="fc" id="L705">            _currentMetrics = metrics;</span>
+          } else {
+<span class="fc bfc" id="L707" title="All 2 branches covered.">            if (dimensions.equals(_currentDimensions)) {</span>
+<span class="fc" id="L708">              _currentMetrics.aggregate(metrics);</span>
+            } else {
+<span class="fc" id="L710">              ImmutablePair&lt;DimensionBuffer, MetricBuffer&gt; ret =</span>
+                  new ImmutablePair&lt;&gt;(_currentDimensions, _currentMetrics);
+<span class="fc" id="L712">              _currentDimensions = dimensions;</span>
+<span class="fc" id="L713">              _currentMetrics = metrics;</span>
+<span class="fc" id="L714">              return ret;</span>
+            }
+          }
+<span class="fc" id="L717">        }</span>
+<span class="fc" id="L718">        _hasNext = false;</span>
+<span class="fc" id="L719">        closeDataTable(dataTable);</span>
+<span class="fc" id="L720">        return new ImmutablePair&lt;&gt;(_currentDimensions, _currentMetrics);</span>
+      }
+
+      @Override
+      public void remove() {
+<span class="nc" id="L725">        throw new UnsupportedOperationException();</span>
+      }
+    };
+  }
+
+  @Override
+  public Iterator&lt;GenericRow&gt; iterator(final int startDocId, final int endDocId) throws IOException {
+<span class="fc" id="L732">    int numDocs = endDocId - startDocId;</span>
+<span class="fc" id="L733">    final StarTreeDataTable dataTable =</span>
+        new StarTreeDataTable(new MMapBuffer(_dataFile, startDocId * _docSize, numDocs * _docSize, MMapMode.READ_ONLY),
+            _dimensionSize, _metricSize, startDocId, endDocId);
+<span class="fc" id="L736">    _dataTablesToClose.add(dataTable);</span>
+
+<span class="fc" id="L738">    return new Iterator&lt;GenericRow&gt;() {</span>
+<span class="fc" id="L739">      private final Iterator&lt;Pair&lt;byte[], byte[]&gt;&gt; _iterator = dataTable.iterator(startDocId, endDocId);</span>
+
+      @Override
+      public boolean hasNext() {
+<span class="fc" id="L743">        boolean hasNext = _iterator.hasNext();</span>
+<span class="fc bfc" id="L744" title="All 2 branches covered.">        if (!hasNext) {</span>
+<span class="fc" id="L745">          closeDataTable(dataTable);</span>
+        }
+<span class="fc" id="L747">        return hasNext;</span>
+      }
+
+      @Override
+      public GenericRow next() {
+<span class="fc" id="L752">        Pair&lt;byte[], byte[]&gt; pair = _iterator.next();</span>
+<span class="fc" id="L753">        DimensionBuffer dimensions = DimensionBuffer.fromBytes(pair.getLeft());</span>
+<span class="fc" id="L754">        MetricBuffer metrics = MetricBuffer.fromBytes(pair.getRight(), _schema.getMetricFieldSpecs());</span>
+<span class="fc" id="L755">        return toGenericRow(dimensions, metrics);</span>
+      }
+
+      @Override
+      public void remove() {
+<span class="nc" id="L760">        throw new UnsupportedOperationException();</span>
+      }
+    };
+  }
+
+  private void closeDataTable(StarTreeDataTable dataTable) {
+    try {
+<span class="fc" id="L767">      dataTable.close();</span>
+<span class="nc" id="L768">    } catch (IOException e) {</span>
+<span class="nc" id="L769">      throw new RuntimeException(e);</span>
+<span class="fc" id="L770">    }</span>
+<span class="fc" id="L771">    _dataTablesToClose.remove(dataTable);</span>
+<span class="fc" id="L772">  }</span>
+
+  private GenericRow toGenericRow(DimensionBuffer dimensions, MetricBuffer metrics) {
+<span class="fc" id="L775">    GenericRow row = new GenericRow();</span>
+<span class="fc" id="L776">    Map&lt;String, Object&gt; map = new HashMap&lt;&gt;();</span>
+<span class="fc bfc" id="L777" title="All 2 branches covered.">    for (int i = 0; i &lt; _numDimensions; i++) {</span>
+<span class="fc" id="L778">      String dimensionName = _dimensionNames.get(i);</span>
+<span class="fc" id="L779">      int dictId = dimensions.getDimension(i);</span>
+<span class="fc bfc" id="L780" title="All 2 branches covered.">      if (dictId == StarTreeNode.ALL) {</span>
+<span class="fc" id="L781">        map.put(dimensionName, _dimensionStarValues.get(i));</span>
+      } else {
+<span class="fc" id="L783">        map.put(dimensionName, _dimensionDictionaries.get(i).inverse().get(dictId));</span>
+      }
+    }
+<span class="fc bfc" id="L786" title="All 2 branches covered.">    for (int i = 0; i &lt; _numMetrics; i++) {</span>
+<span class="fc" id="L787">      map.put(_metricNames.get(i), metrics.getValueConformToDataType(i));</span>
+    }
+<span class="fc" id="L789">    row.init(map);</span>
+<span class="fc" id="L790">    return row;</span>
+  }
+
+  @Override
+  public void serializeTree(File starTreeFile, Map&lt;String, ColumnIndexCreationInfo&gt; indexCreationInfoMap)
+      throws IOException {
+    // Update the star tree with the segment dictionary
+<span class="fc" id="L797">    updateTree(_rootNode, indexCreationInfoMap);</span>
+
+    // Serialize the star tree into a file
+<span class="fc" id="L800">    serializeTree(starTreeFile);</span>
+
+<span class="fc" id="L802">    LOGGER.info(&quot;Finish serializing star tree into file: {}&quot;, starTreeFile);</span>
+<span class="fc" id="L803">  }</span>
+
+  private void updateTree(TreeNode node, Map&lt;String, ColumnIndexCreationInfo&gt; indexCreationInfoMap) {
+    // Only need to update children map because the caller already updates the node
+<span class="fc" id="L807">    Map&lt;Integer, TreeNode&gt; children = node._children;</span>
+<span class="fc bfc" id="L808" title="All 2 branches covered.">    if (children != null) {</span>
+<span class="fc" id="L809">      Map&lt;Integer, TreeNode&gt; newChildren = new HashMap&lt;&gt;(children.size());</span>
+<span class="fc" id="L810">      node._children = newChildren;</span>
+<span class="fc" id="L811">      int childDimensionId = node._childDimensionId;</span>
+<span class="fc" id="L812">      BiMap&lt;Integer, Object&gt; dimensionDictionary = _dimensionDictionaries.get(childDimensionId).inverse();</span>
+<span class="fc" id="L813">      String childDimensionName = _dimensionNames.get(childDimensionId);</span>
+<span class="fc" id="L814">      Object segmentDictionary = indexCreationInfoMap.get(childDimensionName).getSortedUniqueElementsArray();</span>
+<span class="fc bfc" id="L815" title="All 2 branches covered.">      for (Map.Entry&lt;Integer, TreeNode&gt; entry : children.entrySet()) {</span>
+<span class="fc" id="L816">        int childDimensionValue = entry.getKey();</span>
+<span class="fc" id="L817">        TreeNode childNode = entry.getValue();</span>
+<span class="fc" id="L818">        int dictId = StarTreeNode.ALL;</span>
+        // Only need to update the value for non-star node
+<span class="fc bfc" id="L820" title="All 2 branches covered.">        if (childDimensionValue != StarTreeNode.ALL) {</span>
+<span class="fc" id="L821">          dictId = indexOf(segmentDictionary, dimensionDictionary.get(childDimensionValue));</span>
+<span class="fc" id="L822">          childNode._dimensionValue = dictId;</span>
+        }
+<span class="fc" id="L824">        newChildren.put(dictId, childNode);</span>
+<span class="fc" id="L825">        updateTree(childNode, indexCreationInfoMap);</span>
+<span class="fc" id="L826">      }</span>
+    }
+<span class="fc" id="L828">  }</span>
+
+  /**
+   * Helper method to binary-search the index of a given value in an array.
+   */
+  private static int indexOf(Object array, Object value) {
+<span class="fc bfc" id="L834" title="All 2 branches covered.">    if (array instanceof int[]) {</span>
+<span class="fc" id="L835">      return Arrays.binarySearch((int[]) array, (Integer) value);</span>
+<span class="pc bpc" id="L836" title="1 of 2 branches missed.">    } else if (array instanceof long[]) {</span>
+<span class="nc" id="L837">      return Arrays.binarySearch((long[]) array, (Long) value);</span>
+<span class="pc bpc" id="L838" title="1 of 2 branches missed.">    } else if (array instanceof float[]) {</span>
+<span class="nc" id="L839">      return Arrays.binarySearch((float[]) array, (Float) value);</span>
+<span class="pc bpc" id="L840" title="1 of 2 branches missed.">    } else if (array instanceof double[]) {</span>
+<span class="nc" id="L841">      return Arrays.binarySearch((double[]) array, (Double) value);</span>
+<span class="pc bpc" id="L842" title="1 of 2 branches missed.">    } else if (array instanceof String[]) {</span>
+<span class="fc" id="L843">      return Arrays.binarySearch((String[]) array, value);</span>
+    } else {
+<span class="nc" id="L845">      throw new IllegalStateException();</span>
+    }
+  }
+
+  /**
+   * Helper method to serialize the updated tree into a file.
+   */
+  private void serializeTree(File starTreeFile) throws IOException {
+<span class="fc" id="L853">    int headerSizeInBytes = computeHeaderSizeInBytes();</span>
+<span class="fc" id="L854">    long totalSizeInBytes = headerSizeInBytes + _numNodes * OffHeapStarTreeNode.SERIALIZABLE_SIZE_IN_BYTES;</span>
+
+<span class="fc" id="L856">    MMapBuffer dataBuffer = new MMapBuffer(starTreeFile, 0, totalSizeInBytes, MMapMode.READ_WRITE);</span>
+    try {
+<span class="fc" id="L858">      long offset = writeHeader(dataBuffer, headerSizeInBytes);</span>
+<span class="pc bpc" id="L859" title="1 of 2 branches missed.">      Preconditions.checkState(offset == headerSizeInBytes, &quot;Error writing Star Tree file, header size mis-match&quot;);</span>
+
+<span class="fc" id="L861">      writeNodes(dataBuffer, offset);</span>
+    } finally {
+<span class="pc" id="L863">      dataBuffer.flush();</span>
+<span class="pc" id="L864">      dataBuffer.close();</span>
+<span class="fc" id="L865">    }</span>
+<span class="fc" id="L866">  }</span>
+
+  /**
+   * Helper method to compute size of the header of the star tree in bytes.
+   * &lt;p&gt;The header contains the following fields:
+   * &lt;ul&gt;
+   *   &lt;li&gt;Magic marker (long)&lt;/li&gt;
+   *   &lt;li&gt;Size of the header (int)&lt;/li&gt;
+   *   &lt;li&gt;Version (int)&lt;/li&gt;
+   *   &lt;li&gt;Number of dimensions (int)&lt;/li&gt;
+   *   &lt;li&gt;For each dimension, index of the dimension (int), number of bytes in the dimension string (int), and the byte
+   *   array for the string&lt;/li&gt;
+   *   &lt;li&gt;Number of nodes in the tree (int)&lt;/li&gt;
+   * &lt;/ul&gt;
+   */
+  private int computeHeaderSizeInBytes() {
+    // Magic marker (8), version (4), size of header (4) and number of dimensions (4)
+<span class="fc" id="L883">    int headerSizeInBytes = 20;</span>
+
+<span class="fc bfc" id="L885" title="All 2 branches covered.">    for (String dimension : _dimensionNames) {</span>
+<span class="fc" id="L886">      headerSizeInBytes += V1Constants.Numbers.INTEGER_SIZE; // For dimension index</span>
+<span class="fc" id="L887">      headerSizeInBytes += V1Constants.Numbers.INTEGER_SIZE; // For length of dimension name</span>
+<span class="fc" id="L888">      headerSizeInBytes += dimension.getBytes(UTF_8).length; // For dimension name</span>
+<span class="fc" id="L889">    }</span>
+
+<span class="fc" id="L891">    headerSizeInBytes += V1Constants.Numbers.INTEGER_SIZE; // For number of nodes.</span>
+<span class="fc" id="L892">    return headerSizeInBytes;</span>
+  }
+
+  /**
+   * Helper method to write the header into the data buffer.
+   */
+  private long writeHeader(MMapBuffer dataBuffer, int headerSizeInBytes) {
+<span class="fc" id="L899">    long offset = 0L;</span>
+
+<span class="fc" id="L901">    dataBuffer.putLong(offset, OffHeapStarTree.MAGIC_MARKER);</span>
+<span class="fc" id="L902">    offset += V1Constants.Numbers.LONG_SIZE;</span>
+
+<span class="fc" id="L904">    dataBuffer.putInt(offset, OffHeapStarTree.VERSION);</span>
+<span class="fc" id="L905">    offset += V1Constants.Numbers.INTEGER_SIZE;</span>
+
+<span class="fc" id="L907">    dataBuffer.putInt(offset, headerSizeInBytes);</span>
+<span class="fc" id="L908">    offset += V1Constants.Numbers.INTEGER_SIZE;</span>
+
+<span class="fc" id="L910">    dataBuffer.putInt(offset, _numDimensions);</span>
+<span class="fc" id="L911">    offset += V1Constants.Numbers.INTEGER_SIZE;</span>
+
+<span class="fc bfc" id="L913" title="All 2 branches covered.">    for (int i = 0; i &lt; _numDimensions; i++) {</span>
+<span class="fc" id="L914">      String dimensionName = _dimensionNames.get(i);</span>
+
+<span class="fc" id="L916">      dataBuffer.putInt(offset, i);</span>
+<span class="fc" id="L917">      offset += V1Constants.Numbers.INTEGER_SIZE;</span>
+
+<span class="fc" id="L919">      byte[] dimensionBytes = dimensionName.getBytes(UTF_8);</span>
+<span class="fc" id="L920">      int dimensionLength = dimensionBytes.length;</span>
+<span class="fc" id="L921">      dataBuffer.putInt(offset, dimensionLength);</span>
+<span class="fc" id="L922">      offset += V1Constants.Numbers.INTEGER_SIZE;</span>
+
+<span class="fc" id="L924">      dataBuffer.readFrom(dimensionBytes, offset);</span>
+<span class="fc" id="L925">      offset += dimensionLength;</span>
+    }
+
+<span class="fc" id="L928">    dataBuffer.putInt(offset, _numNodes);</span>
+<span class="fc" id="L929">    offset += V1Constants.Numbers.INTEGER_SIZE;</span>
+
+<span class="fc" id="L931">    return offset;</span>
+  }
+
+  /**
+   * Helper method to write the star tree nodes into the data buffer.
+   */
+  private void writeNodes(MMapBuffer dataBuffer, long offset) {
+<span class="fc" id="L938">    int index = 0;</span>
+<span class="fc" id="L939">    Queue&lt;TreeNode&gt; queue = new LinkedList&lt;&gt;();</span>
+<span class="fc" id="L940">    queue.add(_rootNode);</span>
+
+<span class="fc bfc" id="L942" title="All 2 branches covered.">    while (!queue.isEmpty()) {</span>
+<span class="fc" id="L943">      TreeNode node = queue.remove();</span>
+
+<span class="fc bfc" id="L945" title="All 2 branches covered.">      if (node._children == null) {</span>
+        // Leaf node
+
+<span class="fc" id="L948">        offset =</span>
+            writeNode(dataBuffer, node, offset, OffHeapStarTreeNode.INVALID_INDEX, OffHeapStarTreeNode.INVALID_INDEX);
+      } else {
+        // Non-leaf node
+
+        // Get a list of children nodes sorted on the dimension value
+<span class="fc" id="L954">        List&lt;TreeNode&gt; sortedChildren = new ArrayList&lt;&gt;(node._children.values());</span>
+<span class="fc" id="L955">        Collections.sort(sortedChildren, new Comparator&lt;TreeNode&gt;() {</span>
+          @Override
+          public int compare(TreeNode o1, TreeNode o2) {
+<span class="fc" id="L958">            return Integer.compare(o1._dimensionValue, o2._dimensionValue);</span>
+          }
+        });
+
+<span class="fc" id="L962">        int startChildrenIndex = index + queue.size() + 1;</span>
+<span class="fc" id="L963">        int endChildrenIndex = startChildrenIndex + sortedChildren.size() - 1;</span>
+<span class="fc" id="L964">        offset = writeNode(dataBuffer, node, offset, startChildrenIndex, endChildrenIndex);</span>
+
+<span class="fc" id="L966">        queue.addAll(sortedChildren);</span>
+      }
+
+<span class="fc" id="L969">      index++;</span>
+<span class="fc" id="L970">    }</span>
+<span class="fc" id="L971">  }</span>
+
+  /**
+   * Helper method to write one node into the data buffer.
+   */
+  private static long writeNode(MMapBuffer dataBuffer, TreeNode node, long offset, int startChildrenIndex,
+      int endChildrenIndex) {
+<span class="fc" id="L978">    dataBuffer.putInt(offset, node._dimensionId);</span>
+<span class="fc" id="L979">    offset += V1Constants.Numbers.INTEGER_SIZE;</span>
+
+<span class="fc" id="L981">    dataBuffer.putInt(offset, node._dimensionValue);</span>
+<span class="fc" id="L982">    offset += V1Constants.Numbers.INTEGER_SIZE;</span>
+
+<span class="fc" id="L984">    dataBuffer.putInt(offset, node._startDocId);</span>
+<span class="fc" id="L985">    offset += V1Constants.Numbers.INTEGER_SIZE;</span>
+
+<span class="fc" id="L987">    dataBuffer.putInt(offset, node._endDocId);</span>
+<span class="fc" id="L988">    offset += V1Constants.Numbers.INTEGER_SIZE;</span>
+
+<span class="fc" id="L990">    dataBuffer.putInt(offset, node._aggregatedDocId);</span>
+<span class="fc" id="L991">    offset += V1Constants.Numbers.INTEGER_SIZE;</span>
+
+<span class="fc" id="L993">    dataBuffer.putInt(offset, startChildrenIndex);</span>
+<span class="fc" id="L994">    offset += V1Constants.Numbers.INTEGER_SIZE;</span>
+
+<span class="fc" id="L996">    dataBuffer.putInt(offset, endChildrenIndex);</span>
+<span class="fc" id="L997">    offset += V1Constants.Numbers.INTEGER_SIZE;</span>
+
+<span class="fc" id="L999">    return offset;</span>
+  }
+
+  @Override
+  public int getTotalRawDocumentCount() {
+<span class="fc" id="L1004">    return _numRawDocs;</span>
+  }
+
+  @Override
+  public int getTotalAggregateDocumentCount() {
+<span class="fc" id="L1009">    return _numAggregatedDocs;</span>
+  }
+
+  @Override
+  public List&lt;String&gt; getDimensionsSplitOrder() {
+<span class="fc" id="L1014">    List&lt;String&gt; dimensionsSplitOrder = new ArrayList&lt;&gt;(_dimensionsSplitOrder.size());</span>
+<span class="fc bfc" id="L1015" title="All 2 branches covered.">    for (int dimensionId : _dimensionsSplitOrder) {</span>
+<span class="fc" id="L1016">      dimensionsSplitOrder.add(_dimensionNames.get(dimensionId));</span>
+<span class="fc" id="L1017">    }</span>
+<span class="fc" id="L1018">    return dimensionsSplitOrder;</span>
+  }
+
+  @Override
+  public Set&lt;String&gt; getSkipMaterializationDimensions() {
+<span class="fc" id="L1023">    Set&lt;String&gt; skipMaterializationDimensions = new HashSet&lt;&gt;(_skipMaterializationDimensions.size());</span>
+<span class="fc bfc" id="L1024" title="All 2 branches covered.">    for (int dimensionId : _skipMaterializationDimensions) {</span>
+<span class="fc" id="L1025">      skipMaterializationDimensions.add(_dimensionNames.get(dimensionId));</span>
+<span class="fc" id="L1026">    }</span>
+<span class="fc" id="L1027">    return skipMaterializationDimensions;</span>
+  }
+
+  @Override
+  public List&lt;String&gt; getDimensionNames() {
+<span class="nc" id="L1032">    return _dimensionNames;</span>
+  }
+
+  @Override
+  public List&lt;BiMap&lt;Object, Integer&gt;&gt; getDimensionDictionaries() {
+<span class="nc" id="L1037">    return _dimensionDictionaries;</span>
+  }
+
+  @Override
+  public void close() throws IOException {
+<span class="fc" id="L1042">    _dataOutputStream.close();</span>
+<span class="pc bpc" id="L1043" title="1 of 2 branches missed.">    for (StarTreeDataTable dataTable : _dataTablesToClose) {</span>
+<span class="nc" id="L1044">      dataTable.close();</span>
+<span class="nc" id="L1045">    }</span>
+<span class="fc" id="L1046">    _dataTablesToClose.clear();</span>
+<span class="fc" id="L1047">    FileUtils.deleteDirectory(_tempDir);</span>
+<span class="fc" id="L1048">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

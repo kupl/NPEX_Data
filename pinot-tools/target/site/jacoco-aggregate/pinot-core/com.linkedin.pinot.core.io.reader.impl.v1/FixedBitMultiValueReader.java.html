@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>FixedBitMultiValueReader.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-tools</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.io.reader.impl.v1</a> &gt; <span class="el_source">FixedBitMultiValueReader.java</span></div><h1>FixedBitMultiValueReader.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.io.reader.impl.v1;
+
+import com.linkedin.pinot.core.io.reader.BaseSingleColumnMultiValueReader;
+import com.linkedin.pinot.core.io.reader.ReaderContext;
+import com.linkedin.pinot.core.io.util.FixedBitIntReaderWriter;
+import com.linkedin.pinot.core.io.util.FixedByteValueReaderWriter;
+import com.linkedin.pinot.core.io.util.PinotDataBitSet;
+import com.linkedin.pinot.core.segment.memory.PinotDataBuffer;
+
+
+/**
+ * Storage Layout:
+ * &lt;ul&gt;
+ *   &lt;li&gt;
+ *     There will be three sections: CHUNK OFFSET, BITMAP and RAW DATA.
+ *   &lt;/li&gt;
+ *   &lt;li&gt;
+ *     CHUNK OFFSET contains the start offset of each chunk.
+ *   &lt;/li&gt;
+ *   &lt;li&gt;
+ *     BITMAP contains sequence of bits. The number of bits equals to the total number of values. The number of set bits
+ *     equals to the number of rows. A bit is set if it is the start of a new row.
+ *   &lt;/li&gt;
+ *   &lt;li&gt;
+ *     RAW DATA contains the bit compressed values. We divide RAW DATA into chunks, where each chunk has the same number
+ *     of rows.
+ *   &lt;/li&gt;
+ * &lt;/ul&gt;
+ */
+public final class FixedBitMultiValueReader extends BaseSingleColumnMultiValueReader&lt;FixedBitMultiValueReader.Context&gt; {
+  private static final int INT_SIZE_IN_BYTES = Integer.SIZE / Byte.SIZE;
+  private static final int PREFERRED_NUM_VALUES_PER_CHUNK = 2048;
+
+  private final PinotDataBuffer _dataBuffer;
+  private final FixedByteValueReaderWriter _chunkOffsetReader;
+  private final PinotDataBitSet _bitmapReader;
+  private final FixedBitIntReaderWriter _rawDataReader;
+  private final int _numRows;
+  private final int _numValues;
+  private final int _numRowsPerChunk;
+
+<span class="fc" id="L57">  public FixedBitMultiValueReader(PinotDataBuffer dataBuffer, int numRows, int numValues, int numBitsPerValue) {</span>
+<span class="fc" id="L58">    _dataBuffer = dataBuffer;</span>
+<span class="fc" id="L59">    _numRows = numRows;</span>
+<span class="fc" id="L60">    _numValues = numValues;</span>
+<span class="fc" id="L61">    _numRowsPerChunk = (int) (Math.ceil((float) PREFERRED_NUM_VALUES_PER_CHUNK / (numValues / numRows)));</span>
+<span class="fc" id="L62">    int numChunks = (numRows + _numRowsPerChunk - 1) / _numRowsPerChunk;</span>
+<span class="fc" id="L63">    long endOffset = numChunks * INT_SIZE_IN_BYTES;</span>
+<span class="fc" id="L64">    _chunkOffsetReader = new FixedByteValueReaderWriter(dataBuffer.view(0L, endOffset));</span>
+<span class="fc" id="L65">    int bitmapSize = (numValues + Byte.SIZE - 1) / Byte.SIZE;</span>
+<span class="fc" id="L66">    _bitmapReader = new PinotDataBitSet(dataBuffer.view(endOffset, endOffset + bitmapSize));</span>
+<span class="fc" id="L67">    endOffset += bitmapSize;</span>
+<span class="fc" id="L68">    int rawDataSize = (int) (((long) numValues * numBitsPerValue + Byte.SIZE - 1) / Byte.SIZE);</span>
+<span class="fc" id="L69">    _rawDataReader =</span>
+        new FixedBitIntReaderWriter(dataBuffer.view(endOffset, endOffset + rawDataSize), numValues, numBitsPerValue);
+<span class="fc" id="L71">  }</span>
+
+  @Override
+  public int getIntArray(int row, int[] intArray) {
+<span class="fc" id="L75">    int chunkId = row / _numRowsPerChunk;</span>
+<span class="fc" id="L76">    int chunkOffset = _chunkOffsetReader.getInt(chunkId);</span>
+<span class="fc" id="L77">    int indexInChunk = row % _numRowsPerChunk;</span>
+    int startIndex;
+<span class="fc bfc" id="L79" title="All 2 branches covered.">    if (indexInChunk == 0) {</span>
+<span class="fc" id="L80">      startIndex = chunkOffset;</span>
+    } else {
+<span class="fc" id="L82">      startIndex = _bitmapReader.getNextNthSetBitOffset(chunkOffset + 1, indexInChunk);</span>
+    }
+    int endIndex;
+<span class="fc bfc" id="L85" title="All 2 branches covered.">    if (row == _numRows - 1) {</span>
+<span class="fc" id="L86">      endIndex = _numValues;</span>
+    } else {
+<span class="fc" id="L88">      endIndex = _bitmapReader.getNextSetBitOffset(startIndex + 1);</span>
+    }
+<span class="fc" id="L90">    int numValues = endIndex - startIndex;</span>
+<span class="fc" id="L91">    _rawDataReader.readInt(startIndex, numValues, intArray);</span>
+<span class="fc" id="L92">    return numValues;</span>
+  }
+
+  @Override
+  public int getIntArray(int row, int[] intArray, Context context) {
+<span class="fc" id="L97">    int contextRow = context._row;</span>
+<span class="fc" id="L98">    int contextEndOffset = context._endOffset;</span>
+    int startIndex;
+<span class="fc bfc" id="L100" title="All 2 branches covered.">    if (row == contextRow + 1) {</span>
+<span class="fc" id="L101">      startIndex = contextEndOffset;</span>
+    } else {
+<span class="fc" id="L103">      int chunkId = row / _numRowsPerChunk;</span>
+<span class="fc bfc" id="L104" title="All 4 branches covered.">      if (row &gt; contextRow &amp;&amp; chunkId == contextRow / _numRowsPerChunk) {</span>
+        // Same chunk
+<span class="fc" id="L106">        startIndex = _bitmapReader.getNextNthSetBitOffset(contextEndOffset + 1, row - contextRow - 1);</span>
+      } else {
+        // Different chunk
+<span class="fc" id="L109">        int chunkOffset = _chunkOffsetReader.getInt(chunkId);</span>
+<span class="fc" id="L110">        int indexInChunk = row % _numRowsPerChunk;</span>
+<span class="fc bfc" id="L111" title="All 2 branches covered.">        if (indexInChunk == 0) {</span>
+<span class="fc" id="L112">          startIndex = chunkOffset;</span>
+        } else {
+<span class="fc" id="L114">          startIndex = _bitmapReader.getNextNthSetBitOffset(chunkOffset + 1, indexInChunk);</span>
+        }
+      }
+    }
+    int endIndex;
+<span class="fc bfc" id="L119" title="All 2 branches covered.">    if (row == _numRows - 1) {</span>
+<span class="fc" id="L120">      endIndex = _numValues;</span>
+    } else {
+<span class="fc" id="L122">      endIndex = _bitmapReader.getNextSetBitOffset(startIndex + 1);</span>
+    }
+<span class="fc" id="L124">    int numValues = endIndex - startIndex;</span>
+<span class="fc" id="L125">    _rawDataReader.readInt(startIndex, numValues, intArray);</span>
+
+    // Update context
+<span class="fc" id="L128">    context._row = row;</span>
+<span class="fc" id="L129">    context._endOffset = endIndex;</span>
+
+<span class="fc" id="L131">    return numValues;</span>
+  }
+
+  @Override
+  public Context createContext() {
+<span class="fc" id="L136">    return new Context();</span>
+  }
+
+  @Override
+  public void close() {
+<span class="fc" id="L141">    _chunkOffsetReader.close();</span>
+<span class="fc" id="L142">    _bitmapReader.close();</span>
+<span class="fc" id="L143">    _rawDataReader.close();</span>
+<span class="fc" id="L144">    _dataBuffer.close();</span>
+<span class="fc" id="L145">  }</span>
+
+<span class="fc" id="L147">  public static class Context implements ReaderContext {</span>
+<span class="fc" id="L148">    public int _row = -1;</span>
+    // Exclusive
+<span class="fc" id="L150">    public int _endOffset = 0;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

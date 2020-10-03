@@ -1,0 +1,2318 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>PinotHelixResourceManager.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-controller</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.controller.helix.core</a> &gt; <span class="el_source">PinotHelixResourceManager.java</span></div><h1>PinotHelixResourceManager.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.controller.helix.core;
+
+import com.google.common.base.Function;
+import com.google.common.base.Preconditions;
+import com.google.common.collect.BiMap;
+import com.google.common.collect.HashBiMap;
+import com.google.common.collect.Lists;
+import com.google.common.util.concurrent.Uninterruptibles;
+import com.linkedin.pinot.common.config.IndexingConfig;
+import com.linkedin.pinot.common.config.ReplicaGroupStrategyConfig;
+import com.linkedin.pinot.common.config.SegmentsValidationAndRetentionConfig;
+import com.linkedin.pinot.common.config.TableConfig;
+import com.linkedin.pinot.common.config.TableCustomConfig;
+import com.linkedin.pinot.common.config.TableNameBuilder;
+import com.linkedin.pinot.common.config.Tenant;
+import com.linkedin.pinot.common.config.TenantConfig;
+import com.linkedin.pinot.common.data.Schema;
+import com.linkedin.pinot.common.messages.SegmentRefreshMessage;
+import com.linkedin.pinot.common.messages.SegmentReloadMessage;
+import com.linkedin.pinot.common.metadata.ZKMetadataProvider;
+import com.linkedin.pinot.common.metadata.instance.InstanceZKMetadata;
+import com.linkedin.pinot.common.metadata.segment.OfflineSegmentZKMetadata;
+import com.linkedin.pinot.common.metadata.segment.PartitionToReplicaGroupMappingZKMetadata;
+import com.linkedin.pinot.common.metadata.segment.RealtimeSegmentZKMetadata;
+import com.linkedin.pinot.common.metadata.segment.SegmentZKMetadata;
+import com.linkedin.pinot.common.metadata.stream.KafkaStreamMetadata;
+import com.linkedin.pinot.common.segment.SegmentMetadata;
+import com.linkedin.pinot.common.utils.CommonConstants;
+import com.linkedin.pinot.common.utils.CommonConstants.Helix.StateModel.BrokerOnlineOfflineStateModel;
+import com.linkedin.pinot.common.utils.CommonConstants.Helix.StateModel.SegmentOnlineOfflineStateModel;
+import com.linkedin.pinot.common.utils.CommonConstants.Helix.TableType;
+import com.linkedin.pinot.common.utils.ControllerTenantNameBuilder;
+import com.linkedin.pinot.common.utils.SchemaUtils;
+import com.linkedin.pinot.common.utils.SegmentName;
+import com.linkedin.pinot.common.utils.TenantRole;
+import com.linkedin.pinot.common.utils.helix.HelixHelper;
+import com.linkedin.pinot.common.utils.helix.PinotHelixPropertyStoreZnRecordProvider;
+import com.linkedin.pinot.common.utils.retry.RetryPolicies;
+import com.linkedin.pinot.common.utils.retry.RetryPolicy;
+import com.linkedin.pinot.controller.ControllerConf;
+import com.linkedin.pinot.controller.api.pojos.Instance;
+import com.linkedin.pinot.controller.helix.core.PinotResourceManagerResponse.ResponseStatus;
+import com.linkedin.pinot.controller.helix.core.realtime.PinotLLCRealtimeSegmentManager;
+import com.linkedin.pinot.controller.helix.core.sharding.SegmentAssignmentStrategy;
+import com.linkedin.pinot.controller.helix.core.sharding.SegmentAssignmentStrategyEnum;
+import com.linkedin.pinot.controller.helix.core.sharding.SegmentAssignmentStrategyFactory;
+import com.linkedin.pinot.controller.helix.core.util.HelixSetupUtils;
+import com.linkedin.pinot.controller.helix.core.util.ZKMetadataUtils;
+import com.linkedin.pinot.controller.helix.starter.HelixConfig;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.TimeUnit;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+import org.apache.helix.AccessOption;
+import org.apache.helix.ClusterMessagingService;
+import org.apache.helix.Criteria;
+import org.apache.helix.HelixAdmin;
+import org.apache.helix.HelixDataAccessor;
+import org.apache.helix.HelixException;
+import org.apache.helix.HelixManager;
+import org.apache.helix.InstanceType;
+import org.apache.helix.PropertyKey;
+import org.apache.helix.PropertyKey.Builder;
+import org.apache.helix.ZNRecord;
+import org.apache.helix.controller.rebalancer.strategy.AutoRebalanceStrategy;
+import org.apache.helix.controller.stages.ClusterDataCache;
+import org.apache.helix.model.CurrentState;
+import org.apache.helix.model.ExternalView;
+import org.apache.helix.model.IdealState;
+import org.apache.helix.model.InstanceConfig;
+import org.apache.helix.model.LiveInstance;
+import org.apache.helix.store.zk.ZkHelixPropertyStore;
+import org.apache.zookeeper.data.Stat;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+public class PinotHelixResourceManager {
+<span class="fc" id="L105">  private static final Logger LOGGER = LoggerFactory.getLogger(PinotHelixResourceManager.class);</span>
+  private static final long DEFAULT_EXTERNAL_VIEW_UPDATE_TIMEOUT_MILLIS = 120_000L; // 2 minutes
+  private static final long DEFAULT_EXTERNAL_VIEW_UPDATE_RETRY_INTERVAL_MILLIS = 500L;
+<span class="fc" id="L108">  private static final RetryPolicy DEFAULT_RETRY_POLICY = RetryPolicies.exponentialBackoffRetryPolicy(5, 1000L, 2.0f);</span>
+
+<span class="fc" id="L110">  private final Map&lt;String, Map&lt;String, Long&gt;&gt; _segmentCrcMap = new HashMap&lt;&gt;();</span>
+<span class="fc" id="L111">  private final Map&lt;String, Map&lt;String, Integer&gt;&gt; _lastKnownSegmentMetadataVersionMap = new HashMap&lt;&gt;();</span>
+
+  private final String _helixZkURL;
+  private final String _helixClusterName;
+  private final String _instanceId;
+  private final String _localDiskDir;
+  private final long _externalViewOnlineToOfflineTimeoutMillis;
+  private final boolean _isSingleTenantCluster;
+  private final boolean _isUpdateStateModel;
+
+  private HelixManager _helixZkManager;
+  private HelixAdmin _helixAdmin;
+  private ZkHelixPropertyStore&lt;ZNRecord&gt; _propertyStore;
+  private HelixDataAccessor _helixDataAccessor;
+  private Builder _keyBuilder;
+  private SegmentDeletionManager _segmentDeletionManager;
+
+  public PinotHelixResourceManager(@Nonnull String zkURL, @Nonnull String helixClusterName,
+      @Nonnull String controllerInstanceId, String localDiskDir, long externalViewOnlineToOfflineTimeoutMillis,
+<span class="fc" id="L130">      boolean isSingleTenantCluster, boolean isUpdateStateModel) {</span>
+<span class="fc" id="L131">    _helixZkURL = HelixConfig.getAbsoluteZkPathForHelix(zkURL);</span>
+<span class="fc" id="L132">    _helixClusterName = helixClusterName;</span>
+<span class="fc" id="L133">    _instanceId = controllerInstanceId;</span>
+<span class="fc" id="L134">    _localDiskDir = localDiskDir;</span>
+<span class="fc" id="L135">    _externalViewOnlineToOfflineTimeoutMillis = externalViewOnlineToOfflineTimeoutMillis;</span>
+<span class="fc" id="L136">    _isSingleTenantCluster = isSingleTenantCluster;</span>
+<span class="fc" id="L137">    _isUpdateStateModel = isUpdateStateModel;</span>
+<span class="fc" id="L138">  }</span>
+
+  public PinotHelixResourceManager(@Nonnull String zkURL, @Nonnull String helixClusterName,
+      @Nonnull String controllerInstanceId, @Nonnull String localDiskDir) {
+<span class="nc" id="L142">    this(zkURL, helixClusterName, controllerInstanceId, localDiskDir, DEFAULT_EXTERNAL_VIEW_UPDATE_TIMEOUT_MILLIS,</span>
+        false, false);
+<span class="nc" id="L144">  }</span>
+
+  public PinotHelixResourceManager(@Nonnull ControllerConf controllerConf) {
+<span class="fc" id="L147">    this(controllerConf.getZkStr(), controllerConf.getHelixClusterName(),</span>
+        controllerConf.getControllerHost() + &quot;_&quot; + controllerConf.getControllerPort(), controllerConf.getDataDir(),
+        controllerConf.getExternalViewOnlineToOfflineTimeout(), controllerConf.tenantIsolationEnabled(),
+        controllerConf.isUpdateSegmentStateModel());
+<span class="fc" id="L151">  }</span>
+
+  /**
+   * Create Helix cluster if needed, and then start a Pinot controller instance.
+   */
+  public synchronized void start() {
+<span class="fc" id="L157">    _helixZkManager = HelixSetupUtils.setup(_helixClusterName, _helixZkURL, _instanceId, _isUpdateStateModel);</span>
+<span class="fc" id="L158">    Preconditions.checkNotNull(_helixZkManager);</span>
+<span class="fc" id="L159">    _helixAdmin = _helixZkManager.getClusterManagmentTool();</span>
+<span class="fc" id="L160">    _propertyStore = _helixZkManager.getHelixPropertyStore();</span>
+<span class="fc" id="L161">    _helixDataAccessor = _helixZkManager.getHelixDataAccessor();</span>
+<span class="fc" id="L162">    _keyBuilder = _helixDataAccessor.keyBuilder();</span>
+<span class="fc" id="L163">    _segmentDeletionManager = new SegmentDeletionManager(_localDiskDir, _helixAdmin, _helixClusterName, _propertyStore);</span>
+<span class="fc" id="L164">    ZKMetadataProvider.setClusterTenantIsolationEnabled(_propertyStore, _isSingleTenantCluster);</span>
+<span class="fc" id="L165">  }</span>
+
+  /**
+   * Stop the Pinot controller instance.
+   */
+  public synchronized void stop() {
+<span class="fc" id="L171">    _segmentDeletionManager.stop();</span>
+<span class="fc" id="L172">    _helixZkManager.disconnect();</span>
+<span class="fc" id="L173">  }</span>
+
+  /**
+   * Get the Helix cluster Zookeeper URL.
+   *
+   * @return Helix cluster Zookeeper URL
+   */
+  @Nonnull
+  public String getHelixZkURL() {
+<span class="fc" id="L182">    return _helixZkURL;</span>
+  }
+
+  /**
+   * Get the Helix cluster name.
+   *
+   * @return Helix cluster name
+   */
+  public String getHelixClusterName() {
+<span class="fc" id="L191">    return _helixClusterName;</span>
+  }
+
+  /**
+   * Get the segment deletion manager.
+   *
+   * @return Segment deletion manager
+   */
+  @Nonnull
+  public SegmentDeletionManager getSegmentDeletionManager() {
+<span class="nc" id="L201">    return _segmentDeletionManager;</span>
+  }
+
+  /**
+   * Get the Helix manager.
+   *
+   * @return Helix manager
+   */
+  public HelixManager getHelixZkManager() {
+<span class="fc" id="L210">    return _helixZkManager;</span>
+  }
+
+  /**
+   * Check whether the Helix manager is the leader.
+   *
+   * @return Whether the Helix manager is the leader
+   */
+  public boolean isLeader() {
+<span class="fc" id="L219">    return _helixZkManager.isLeader();</span>
+  }
+
+  /**
+   * Get the Helix admin.
+   *
+   * @return Helix admin
+   */
+  public HelixAdmin getHelixAdmin() {
+<span class="fc" id="L228">    return _helixAdmin;</span>
+  }
+
+  /**
+   * Get the Helix property store.
+   *
+   * @return Helix property store
+   */
+  public ZkHelixPropertyStore&lt;ZNRecord&gt; getPropertyStore() {
+<span class="fc" id="L237">    return _propertyStore;</span>
+  }
+
+  /**
+   * Instance related APIs
+   */
+
+  /**
+   * Get all instance Ids.
+   *
+   * @return List of instance Ids
+   */
+  @Nonnull
+  public List&lt;String&gt; getAllInstances() {
+<span class="fc" id="L251">    return _helixAdmin.getInstancesInCluster(_helixClusterName);</span>
+  }
+
+  /**
+   * Get the Helix instance config for the given instance Id.
+   *
+   * @param instanceId Instance Id
+   * @return Helix instance config
+   */
+  @Nonnull
+  public InstanceConfig getHelixInstanceConfig(@Nonnull String instanceId) {
+<span class="fc" id="L262">    return _helixAdmin.getInstanceConfig(_helixClusterName, instanceId);</span>
+  }
+
+  /**
+   * Get the instance Zookeeper metadata for the given instance Id.
+   *
+   * @param instanceId Instance Id
+   * @return Instance Zookeeper metadata, or null if not found
+   */
+  @Nullable
+  public InstanceZKMetadata getInstanceZKMetadata(@Nonnull String instanceId) {
+<span class="fc" id="L273">    return ZKMetadataProvider.getInstanceZKMetadata(_propertyStore, instanceId);</span>
+  }
+
+  /**
+   * Get all the broker instances for the given table name.
+   *
+   * @param tableName Table name with or without type suffix
+   * @return List of broker instance Ids
+   */
+  @Nonnull
+  public List&lt;String&gt; getBrokerInstancesFor(@Nonnull String tableName) {
+<span class="nc" id="L284">    String brokerTenantName = null;</span>
+<span class="nc" id="L285">    TableConfig offlineTableConfig = ZKMetadataProvider.getOfflineTableConfig(_propertyStore, tableName);</span>
+<span class="nc bnc" id="L286" title="All 2 branches missed.">    if (offlineTableConfig != null) {</span>
+<span class="nc" id="L287">      brokerTenantName = offlineTableConfig.getTenantConfig().getBroker();</span>
+    } else {
+<span class="nc" id="L289">      TableConfig realtimeTableConfig = ZKMetadataProvider.getRealtimeTableConfig(_propertyStore, tableName);</span>
+<span class="nc bnc" id="L290" title="All 2 branches missed.">      if (realtimeTableConfig != null) {</span>
+<span class="nc" id="L291">        brokerTenantName = realtimeTableConfig.getTenantConfig().getBroker();</span>
+      }
+    }
+<span class="nc" id="L294">    return _helixAdmin.getInstancesInClusterWithTag(_helixClusterName,</span>
+        ControllerTenantNameBuilder.getBrokerTenantNameForTenant(brokerTenantName));
+  }
+
+  /**
+   * Add an instance into the Helix cluster.
+   *
+   * @param instance Instance to be added
+   * @return Request response
+   */
+  @Nonnull
+  public synchronized PinotResourceManagerResponse addInstance(@Nonnull Instance instance) {
+<span class="fc" id="L306">    List&lt;String&gt; instances = getAllInstances();</span>
+<span class="fc" id="L307">    String instanceIdToAdd = instance.toInstanceId();</span>
+<span class="fc bfc" id="L308" title="All 2 branches covered.">    if (instances.contains(instanceIdToAdd)) {</span>
+<span class="fc" id="L309">      return new PinotResourceManagerResponse(&quot;Instance &quot; + instanceIdToAdd + &quot; already exists&quot;, false);</span>
+    } else {
+<span class="fc" id="L311">      _helixAdmin.addInstance(_helixClusterName, instance.toInstanceConfig());</span>
+<span class="fc" id="L312">      return new PinotResourceManagerResponse(true);</span>
+    }
+  }
+
+  /**
+   * Tenant related APIs
+   */
+  // TODO: move tenant related APIs here
+
+  /**
+   * Resource related APIs
+   */
+
+  /**
+   * Get all resource names.
+   *
+   * @return List of resource names
+   */
+  @Nonnull
+  public List&lt;String&gt; getAllResources() {
+<span class="fc" id="L332">    return _helixAdmin.getResourcesInCluster(_helixClusterName);</span>
+  }
+
+  /**
+   * Get all Pinot table names (server resources).
+   *
+   * @return List of Pinot table names
+   */
+  @Nonnull
+  public List&lt;String&gt; getAllTables() {
+<span class="fc" id="L342">    List&lt;String&gt; tableNames = new ArrayList&lt;&gt;();</span>
+<span class="fc bfc" id="L343" title="All 2 branches covered.">    for (String resourceName : getAllResources()) {</span>
+<span class="fc bfc" id="L344" title="All 2 branches covered.">      if (TableNameBuilder.isTableResource(resourceName)) {</span>
+<span class="fc" id="L345">        tableNames.add(resourceName);</span>
+      }
+<span class="fc" id="L347">    }</span>
+<span class="fc" id="L348">    return tableNames;</span>
+  }
+
+  /**
+   * Get all Pinot realtime table names.
+   *
+   * @return List of Pinot realtime table names
+   */
+  @Nonnull
+  public List&lt;String&gt; getAllRealtimeTables() {
+<span class="fc" id="L358">    List&lt;String&gt; resourceNames = getAllResources();</span>
+<span class="fc" id="L359">    Iterator&lt;String&gt; iterator = resourceNames.iterator();</span>
+<span class="fc bfc" id="L360" title="All 2 branches covered.">    while (iterator.hasNext()) {</span>
+<span class="fc bfc" id="L361" title="All 2 branches covered.">      if (!TableNameBuilder.REALTIME.tableHasTypeSuffix(iterator.next())) {</span>
+<span class="fc" id="L362">        iterator.remove();</span>
+      }
+    }
+<span class="fc" id="L365">    return resourceNames;</span>
+  }
+  /**
+   * Get all Pinot raw table names.
+   *
+   * @return Set of Pinot raw table names
+   */
+  @Nonnull
+  public List&lt;String&gt; getAllRawTables() {
+<span class="nc" id="L374">    Set&lt;String&gt; rawTableNames = new HashSet&lt;&gt;();</span>
+<span class="nc bnc" id="L375" title="All 2 branches missed.">    for (String resourceName : getAllResources()) {</span>
+<span class="nc bnc" id="L376" title="All 2 branches missed.">      if (TableNameBuilder.isTableResource(resourceName)) {</span>
+<span class="nc" id="L377">        rawTableNames.add(TableNameBuilder.extractRawTableName(resourceName));</span>
+      }
+<span class="nc" id="L379">    }</span>
+<span class="nc" id="L380">    return new ArrayList&lt;&gt;(rawTableNames);</span>
+  }
+
+  /**
+   * Table related APIs
+   */
+  // TODO: move table related APIs here
+
+  /**
+   * Segment related APIs
+   */
+
+  /**
+   * Get segments for the given table name with type suffix.
+   *
+   * @param tableNameWithType Table name with type suffix
+   * @return List of segment names
+   */
+  @Nonnull
+  public List&lt;String&gt; getSegmentsFor(@Nonnull String tableNameWithType) {
+<span class="fc" id="L400">    Preconditions.checkArgument(TableNameBuilder.isTableResource(tableNameWithType),</span>
+        &quot;Table name: %s is not a valid table name with type suffix&quot;, tableNameWithType);
+
+<span class="fc" id="L403">    TableType tableType = TableNameBuilder.getTableTypeFromTableName(tableNameWithType);</span>
+<span class="fc" id="L404">    List&lt;String&gt; segmentNames = new ArrayList&lt;&gt;();</span>
+<span class="fc bfc" id="L405" title="All 2 branches covered.">    if (tableType == TableType.OFFLINE) {</span>
+<span class="fc bfc" id="L406" title="All 2 branches covered.">      for (OfflineSegmentZKMetadata segmentZKMetadata : ZKMetadataProvider.getOfflineSegmentZKMetadataListForTable(</span>
+          _propertyStore, tableNameWithType)) {
+<span class="fc" id="L408">        segmentNames.add(segmentZKMetadata.getSegmentName());</span>
+<span class="fc" id="L409">      }</span>
+    } else {
+<span class="pc bpc" id="L411" title="1 of 2 branches missed.">      for (RealtimeSegmentZKMetadata segmentZKMetadata : ZKMetadataProvider.getRealtimeSegmentZKMetadataListForTable(</span>
+          _propertyStore, tableNameWithType)) {
+<span class="nc" id="L413">        segmentNames.add(segmentZKMetadata.getSegmentName());</span>
+<span class="nc" id="L414">      }</span>
+    }
+<span class="fc" id="L416">    return segmentNames;</span>
+  }
+
+  public OfflineSegmentZKMetadata getOfflineSegmentZKMetadata(@Nonnull String tableName, @Nonnull String segmentName) {
+<span class="fc" id="L420">    return ZKMetadataProvider.getOfflineSegmentZKMetadata(_propertyStore, tableName, segmentName);</span>
+  }
+
+  @Nonnull
+  public List&lt;OfflineSegmentZKMetadata&gt; getOfflineSegmentMetadata(@Nonnull String tableName) {
+<span class="fc" id="L425">    return ZKMetadataProvider.getOfflineSegmentZKMetadataListForTable(_propertyStore, tableName);</span>
+  }
+
+  @Nonnull
+  public List&lt;RealtimeSegmentZKMetadata&gt; getRealtimeSegmentMetadata(@Nonnull String tableName) {
+<span class="fc" id="L430">    return ZKMetadataProvider.getRealtimeSegmentZKMetadataListForTable(_propertyStore, tableName);</span>
+  }
+
+  /**
+   * Delete a list of segments from ideal state and remove them from the local storage.
+   *
+   * @param tableNameWithType Table name with type suffix
+   * @param segmentNames List of names of segment to be deleted
+   * @return Request response
+   */
+  @Nonnull
+  public synchronized PinotResourceManagerResponse deleteSegments(@Nonnull String tableNameWithType,
+      @Nonnull List&lt;String&gt; segmentNames) {
+    try {
+<span class="fc" id="L444">      LOGGER.info(&quot;Trying to delete segments: {} from table: {} &quot;, segmentNames, tableNameWithType);</span>
+<span class="fc" id="L445">      Preconditions.checkArgument(TableNameBuilder.isTableResource(tableNameWithType),</span>
+          &quot;Table name: %s is not a valid table name with type suffix&quot;, tableNameWithType);
+<span class="fc" id="L447">      HelixHelper.removeSegmentsFromIdealState(_helixZkManager, tableNameWithType, segmentNames);</span>
+<span class="fc" id="L448">      _segmentDeletionManager.deleteSegments(tableNameWithType, segmentNames);</span>
+<span class="fc" id="L449">      return new PinotResourceManagerResponse(&quot;Segment: &quot; + segmentNames + &quot; are successfully deleted&quot;, true);</span>
+<span class="nc" id="L450">    } catch (final Exception e) {</span>
+<span class="nc" id="L451">      LOGGER.error(&quot;Caught exception while deleting segment: {} from table: {}&quot;, segmentNames, tableNameWithType, e);</span>
+<span class="nc" id="L452">      return new PinotResourceManagerResponse(e.getMessage(), false);</span>
+    }
+  }
+
+  /**
+   * Delete a single segment from ideal state and remove it from the local storage.
+   *
+   * @param tableNameWithType Table name with type suffix
+   * @param segmentName Name of segment to be deleted
+   * @return Request response
+   */
+  @Nonnull
+  public synchronized PinotResourceManagerResponse deleteSegment(@Nonnull String tableNameWithType,
+      @Nonnull String segmentName) {
+<span class="fc" id="L466">    return deleteSegments(tableNameWithType, Collections.singletonList(segmentName));</span>
+  }
+
+  private boolean ifExternalViewChangeReflectedForState(String tableName, String segmentName, String targetState,
+      long timeoutMillis, boolean considerErrorStateAsDifferentFromTarget) {
+<span class="nc" id="L471">    long externalViewChangeCompletedDeadline = System.currentTimeMillis() + timeoutMillis;</span>
+
+    deadlineLoop:
+<span class="nc bnc" id="L474" title="All 2 branches missed.">    while (System.currentTimeMillis() &lt; externalViewChangeCompletedDeadline) {</span>
+<span class="nc" id="L475">      ExternalView externalView = _helixAdmin.getResourceExternalView(_helixClusterName, tableName);</span>
+<span class="nc" id="L476">      Map&lt;String, String&gt; segmentStatsMap = externalView.getStateMap(segmentName);</span>
+<span class="nc bnc" id="L477" title="All 2 branches missed.">      if (segmentStatsMap != null) {</span>
+<span class="nc" id="L478">        LOGGER.info(&quot;Found {} instances for segment '{}' in external view&quot;, segmentStatsMap.size(), segmentName);</span>
+<span class="nc bnc" id="L479" title="All 2 branches missed.">        for (String instance : segmentStatsMap.keySet()) {</span>
+<span class="nc" id="L480">          final String segmentState = segmentStatsMap.get(instance);</span>
+
+          // jfim: Ignore segments in error state as part of checking if the external view change is reflected
+<span class="nc bnc" id="L483" title="All 2 branches missed.">          if (!segmentState.equalsIgnoreCase(targetState)) {</span>
+<span class="nc bnc" id="L484" title="All 4 branches missed.">            if (&quot;ERROR&quot;.equalsIgnoreCase(segmentState) &amp;&amp; !considerErrorStateAsDifferentFromTarget) {</span>
+              // Segment is in error and we don't consider error state as different from target, therefore continue
+            } else {
+              // Will try to read data every 500 ms, only if external view not updated.
+<span class="nc" id="L488">              Uninterruptibles.sleepUninterruptibly(DEFAULT_EXTERNAL_VIEW_UPDATE_RETRY_INTERVAL_MILLIS,</span>
+                  TimeUnit.MILLISECONDS);
+<span class="nc" id="L490">              continue deadlineLoop;</span>
+            }
+          }
+<span class="nc" id="L493">        }</span>
+
+        // All segments match with the expected external view state
+<span class="nc" id="L496">        return true;</span>
+      } else {
+        // Segment doesn't exist in EV, wait for a little bit
+<span class="nc" id="L499">        Uninterruptibles.sleepUninterruptibly(DEFAULT_EXTERNAL_VIEW_UPDATE_RETRY_INTERVAL_MILLIS,</span>
+            TimeUnit.MILLISECONDS);
+      }
+<span class="nc" id="L502">    }</span>
+
+    // Timed out
+<span class="nc" id="L505">    LOGGER.info(&quot;Timed out while waiting for segment '{}' to become '{}' in external view.&quot;, segmentName, targetState);</span>
+<span class="nc" id="L506">    return false;</span>
+  }
+
+  public PinotResourceManagerResponse updateBrokerTenant(Tenant tenant) {
+<span class="fc" id="L510">    PinotResourceManagerResponse res = new PinotResourceManagerResponse();</span>
+<span class="fc" id="L511">    String brokerTenantTag = ControllerTenantNameBuilder.getBrokerTenantNameForTenant(tenant.getTenantName());</span>
+<span class="fc" id="L512">    List&lt;String&gt; instancesInClusterWithTag =</span>
+        _helixAdmin.getInstancesInClusterWithTag(_helixClusterName, brokerTenantTag);
+<span class="fc bfc" id="L514" title="All 2 branches covered.">    if (instancesInClusterWithTag.size() &gt; tenant.getNumberOfInstances()) {</span>
+<span class="fc" id="L515">      return scaleDownBroker(tenant, res, brokerTenantTag, instancesInClusterWithTag);</span>
+    }
+<span class="pc bpc" id="L517" title="1 of 2 branches missed.">    if (instancesInClusterWithTag.size() &lt; tenant.getNumberOfInstances()) {</span>
+<span class="fc" id="L518">      return scaleUpBroker(tenant, res, brokerTenantTag, instancesInClusterWithTag);</span>
+    }
+<span class="nc" id="L520">    res.status = ResponseStatus.success;</span>
+<span class="nc" id="L521">    return res;</span>
+  }
+
+  private PinotResourceManagerResponse scaleUpBroker(Tenant tenant, PinotResourceManagerResponse res,
+      String brokerTenantTag, List&lt;String&gt; instancesInClusterWithTag) {
+<span class="fc" id="L526">    List&lt;String&gt; unTaggedInstanceList = getOnlineUnTaggedBrokerInstanceList();</span>
+<span class="fc" id="L527">    int numberOfInstancesToAdd = tenant.getNumberOfInstances() - instancesInClusterWithTag.size();</span>
+<span class="pc bpc" id="L528" title="1 of 2 branches missed.">    if (unTaggedInstanceList.size() &lt; numberOfInstancesToAdd) {</span>
+<span class="nc" id="L529">      res.status = ResponseStatus.failure;</span>
+<span class="nc" id="L530">      res.message =</span>
+          &quot;Failed to allocate broker instances to Tag : &quot; + tenant.getTenantName()
+              + &quot;, Current number of untagged broker instances : &quot; + unTaggedInstanceList.size()
+              + &quot;, Current number of tagged broker instances : &quot; + instancesInClusterWithTag.size()
+              + &quot;, Request asked number is : &quot; + tenant.getNumberOfInstances();
+<span class="nc" id="L535">      LOGGER.error(res.message);</span>
+<span class="nc" id="L536">      return res;</span>
+    }
+<span class="fc bfc" id="L538" title="All 2 branches covered.">    for (int i = 0; i &lt; numberOfInstancesToAdd; ++i) {</span>
+<span class="fc" id="L539">      String instanceName = unTaggedInstanceList.get(i);</span>
+<span class="fc" id="L540">      retagInstance(instanceName, CommonConstants.Helix.UNTAGGED_BROKER_INSTANCE, brokerTenantTag);</span>
+      // Update idealState by adding new instance to table mapping.
+<span class="fc" id="L542">      addInstanceToBrokerIdealState(brokerTenantTag, instanceName);</span>
+    }
+<span class="fc" id="L544">    res.status = ResponseStatus.success;</span>
+<span class="fc" id="L545">    return res;</span>
+  }
+
+  public PinotResourceManagerResponse rebuildBrokerResourceFromHelixTags(@Nonnull final String tableNameWithType) {
+    // Get the broker tag for this table
+    String brokerTag;
+    TenantConfig tenantConfig;
+
+    try {
+<span class="fc" id="L554">      TableConfig tableConfig = ZKMetadataProvider.getTableConfig(_propertyStore, tableNameWithType);</span>
+<span class="pc bpc" id="L555" title="1 of 2 branches missed.">      if (tableConfig == null) {</span>
+<span class="nc" id="L556">        return new PinotResourceManagerResponse(&quot;Table &quot; + tableNameWithType + &quot; does not exist&quot;, false);</span>
+      }
+<span class="fc" id="L558">      tenantConfig = tableConfig.getTenantConfig();</span>
+<span class="nc" id="L559">    } catch (Exception e) {</span>
+<span class="nc" id="L560">      LOGGER.warn(&quot;Caught exception while getting tenant config for table {}&quot;, tableNameWithType, e);</span>
+<span class="nc" id="L561">      return new PinotResourceManagerResponse(</span>
+          &quot;Failed to fetch broker tag for table &quot; + tableNameWithType + &quot; due to exception: &quot; + e.getMessage(), false);
+<span class="fc" id="L563">    }</span>
+
+<span class="fc" id="L565">    brokerTag = tenantConfig.getBroker();</span>
+
+    // Look for all instances tagged with this broker tag
+<span class="fc" id="L568">    final Set&lt;String&gt; brokerInstances = getAllInstancesForBrokerTenant(brokerTag);</span>
+
+    // If we add a new broker, we want to rebuild the broker resource.
+<span class="fc" id="L571">    HelixAdmin helixAdmin = getHelixAdmin();</span>
+<span class="fc" id="L572">    String clusterName = getHelixClusterName();</span>
+<span class="fc" id="L573">    IdealState brokerIdealState = HelixHelper.getBrokerIdealStates(helixAdmin, clusterName);</span>
+
+<span class="fc" id="L575">    Set&lt;String&gt; idealStateBrokerInstances = brokerIdealState.getInstanceSet(tableNameWithType);</span>
+
+<span class="fc bfc" id="L577" title="All 2 branches covered.">    if (idealStateBrokerInstances.equals(brokerInstances)) {</span>
+<span class="fc" id="L578">      return new PinotResourceManagerResponse(</span>
+          &quot;Broker resource is not rebuilt because ideal state is the same for table {} &quot; + tableNameWithType, false);
+    }
+
+    // Reset ideal state with the instance list
+    try {
+<span class="fc" id="L584">      HelixHelper.updateIdealState(getHelixZkManager(), CommonConstants.Helix.BROKER_RESOURCE_INSTANCE,</span>
+<span class="fc" id="L585">          new Function&lt;IdealState, IdealState&gt;() {</span>
+            @Nullable
+            @Override
+            public IdealState apply(@Nullable IdealState idealState) {
+<span class="fc" id="L589">              Map&lt;String, String&gt; instanceStateMap = idealState.getInstanceStateMap(tableNameWithType);</span>
+<span class="pc bpc" id="L590" title="1 of 2 branches missed.">              if (instanceStateMap != null) {</span>
+<span class="fc" id="L591">                instanceStateMap.clear();</span>
+              }
+
+<span class="fc bfc" id="L594" title="All 2 branches covered.">              for (String brokerInstance : brokerInstances) {</span>
+<span class="fc" id="L595">                idealState.setPartitionState(tableNameWithType, brokerInstance, BrokerOnlineOfflineStateModel.ONLINE);</span>
+<span class="fc" id="L596">              }</span>
+
+<span class="fc" id="L598">              return idealState;</span>
+            }
+          }, DEFAULT_RETRY_POLICY);
+
+<span class="fc" id="L602">      LOGGER.info(&quot;Successfully rebuilt brokerResource for table {}&quot;, tableNameWithType);</span>
+<span class="fc" id="L603">      return new PinotResourceManagerResponse(&quot;Rebuilt brokerResource for table &quot; + tableNameWithType, true);</span>
+<span class="nc" id="L604">    } catch (Exception e) {</span>
+<span class="nc" id="L605">      LOGGER.warn(&quot;Caught exception while rebuilding broker resource from Helix tags for table {}&quot;, e,</span>
+          tableNameWithType);
+<span class="nc" id="L607">      return new PinotResourceManagerResponse(</span>
+          &quot;Failed to rebuild brokerResource for table &quot; + tableNameWithType + &quot; due to exception: &quot; + e.getMessage(),
+          false);
+    }
+  }
+
+  private void addInstanceToBrokerIdealState(String brokerTenantTag, String instanceName) {
+<span class="fc" id="L614">    IdealState tableIdealState =</span>
+        _helixAdmin.getResourceIdealState(_helixClusterName, CommonConstants.Helix.BROKER_RESOURCE_INSTANCE);
+<span class="pc bpc" id="L616" title="1 of 2 branches missed.">    for (String tableNameWithType : tableIdealState.getPartitionSet()) {</span>
+<span class="nc" id="L617">      TableConfig tableConfig = ZKMetadataProvider.getTableConfig(_propertyStore, tableNameWithType);</span>
+<span class="nc" id="L618">      Preconditions.checkNotNull(tableConfig);</span>
+<span class="nc" id="L619">      String brokerTag =</span>
+          ControllerTenantNameBuilder.getBrokerTenantNameForTenant(tableConfig.getTenantConfig().getBroker());
+<span class="nc bnc" id="L621" title="All 2 branches missed.">      if (brokerTag.equals(brokerTenantTag)) {</span>
+<span class="nc" id="L622">        tableIdealState.setPartitionState(tableNameWithType, instanceName, BrokerOnlineOfflineStateModel.ONLINE);</span>
+      }
+<span class="nc" id="L624">    }</span>
+<span class="fc" id="L625">    _helixAdmin.setResourceIdealState(_helixClusterName, CommonConstants.Helix.BROKER_RESOURCE_INSTANCE,</span>
+        tableIdealState);
+<span class="fc" id="L627">  }</span>
+
+  private PinotResourceManagerResponse scaleDownBroker(Tenant tenant, PinotResourceManagerResponse res,
+      String brokerTenantTag, List&lt;String&gt; instancesInClusterWithTag) {
+<span class="fc" id="L631">    int numberBrokersToUntag = instancesInClusterWithTag.size() - tenant.getNumberOfInstances();</span>
+<span class="fc bfc" id="L632" title="All 2 branches covered.">    for (int i = 0; i &lt; numberBrokersToUntag; ++i) {</span>
+<span class="fc" id="L633">      retagInstance(instancesInClusterWithTag.get(i), brokerTenantTag, CommonConstants.Helix.UNTAGGED_BROKER_INSTANCE);</span>
+    }
+<span class="fc" id="L635">    res.status = ResponseStatus.success;</span>
+<span class="fc" id="L636">    return res;</span>
+  }
+
+  private void retagInstance(String instanceName, String oldTag, String newTag) {
+<span class="fc" id="L640">    _helixAdmin.removeInstanceTag(_helixClusterName, instanceName, oldTag);</span>
+<span class="fc" id="L641">    _helixAdmin.addInstanceTag(_helixClusterName, instanceName, newTag);</span>
+<span class="fc" id="L642">  }</span>
+
+  public PinotResourceManagerResponse updateServerTenant(Tenant serverTenant) {
+<span class="fc" id="L645">    PinotResourceManagerResponse res = new PinotResourceManagerResponse();</span>
+<span class="fc" id="L646">    String realtimeServerTag = ControllerTenantNameBuilder.getRealtimeTenantNameForTenant(serverTenant.getTenantName());</span>
+<span class="fc" id="L647">    List&lt;String&gt; taggedRealtimeServers = _helixAdmin.getInstancesInClusterWithTag(_helixClusterName, realtimeServerTag);</span>
+<span class="fc" id="L648">    String offlineServerTag = ControllerTenantNameBuilder.getOfflineTenantNameForTenant(serverTenant.getTenantName());</span>
+<span class="fc" id="L649">    List&lt;String&gt; taggedOfflineServers = _helixAdmin.getInstancesInClusterWithTag(_helixClusterName, offlineServerTag);</span>
+<span class="fc" id="L650">    Set&lt;String&gt; allServingServers = new HashSet&lt;String&gt;();</span>
+<span class="fc" id="L651">    allServingServers.addAll(taggedOfflineServers);</span>
+<span class="fc" id="L652">    allServingServers.addAll(taggedRealtimeServers);</span>
+<span class="pc bpc" id="L653" title="1 of 2 branches missed.">    boolean isCurrentTenantColocated =</span>
+        (allServingServers.size() &lt; taggedOfflineServers.size() + taggedRealtimeServers.size());
+<span class="pc bpc" id="L655" title="1 of 2 branches missed.">    if (isCurrentTenantColocated != serverTenant.isCoLocated()) {</span>
+<span class="nc" id="L656">      res.status = ResponseStatus.failure;</span>
+<span class="nc" id="L657">      res.message = &quot;Not support different colocated type request for update request: &quot; + serverTenant;</span>
+<span class="nc" id="L658">      LOGGER.error(res.message);</span>
+<span class="nc" id="L659">      return res;</span>
+    }
+<span class="pc bpc" id="L661" title="3 of 6 branches missed.">    if (serverTenant.getNumberOfInstances() &lt; allServingServers.size()</span>
+        || serverTenant.getOfflineInstances() &lt; taggedOfflineServers.size()
+        || serverTenant.getRealtimeInstances() &lt; taggedRealtimeServers.size()) {
+<span class="nc" id="L664">      return scaleDownServer(serverTenant, res, taggedRealtimeServers, taggedOfflineServers, allServingServers);</span>
+    }
+<span class="fc" id="L666">    return scaleUpServerTenant(serverTenant, res, realtimeServerTag, taggedRealtimeServers, offlineServerTag,</span>
+        taggedOfflineServers, allServingServers);
+  }
+
+  private PinotResourceManagerResponse scaleUpServerTenant(Tenant serverTenant, PinotResourceManagerResponse res,
+      String realtimeServerTag, List&lt;String&gt; taggedRealtimeServers, String offlineServerTag,
+      List&lt;String&gt; taggedOfflineServers, Set&lt;String&gt; allServingServers) {
+<span class="fc" id="L673">    int incInstances = serverTenant.getNumberOfInstances() - allServingServers.size();</span>
+<span class="fc" id="L674">    List&lt;String&gt; unTaggedInstanceList = getOnlineUnTaggedServerInstanceList();</span>
+<span class="pc bpc" id="L675" title="1 of 2 branches missed.">    if (unTaggedInstanceList.size() &lt; incInstances) {</span>
+<span class="nc" id="L676">      res.status = ResponseStatus.failure;</span>
+<span class="nc" id="L677">      res.message =</span>
+          &quot;Failed to allocate hardware resouces with tenant info: &quot; + serverTenant
+              + &quot;, Current number of untagged instances : &quot; + unTaggedInstanceList.size()
+              + &quot;, Current number of servering instances : &quot; + allServingServers.size()
+              + &quot;, Current number of tagged offline server instances : &quot; + taggedOfflineServers.size()
+              + &quot;, Current number of tagged realtime server instances : &quot; + taggedRealtimeServers.size();
+<span class="nc" id="L683">      LOGGER.error(res.message);</span>
+<span class="nc" id="L684">      return res;</span>
+    }
+<span class="pc bpc" id="L686" title="1 of 2 branches missed.">    if (serverTenant.isCoLocated()) {</span>
+<span class="nc" id="L687">      return updateColocatedServerTenant(serverTenant, res, realtimeServerTag, taggedRealtimeServers, offlineServerTag,</span>
+          taggedOfflineServers, incInstances, unTaggedInstanceList);
+    } else {
+<span class="fc" id="L690">      return updateIndependentServerTenant(serverTenant, res, realtimeServerTag, taggedRealtimeServers,</span>
+          offlineServerTag, taggedOfflineServers, incInstances, unTaggedInstanceList);
+    }
+
+  }
+
+  private PinotResourceManagerResponse updateIndependentServerTenant(Tenant serverTenant,
+      PinotResourceManagerResponse res, String realtimeServerTag, List&lt;String&gt; taggedRealtimeServers,
+      String offlineServerTag, List&lt;String&gt; taggedOfflineServers, int incInstances, List&lt;String&gt; unTaggedInstanceList) {
+<span class="fc" id="L699">    int incOffline = serverTenant.getOfflineInstances() - taggedOfflineServers.size();</span>
+<span class="fc" id="L700">    int incRealtime = serverTenant.getRealtimeInstances() - taggedRealtimeServers.size();</span>
+<span class="fc bfc" id="L701" title="All 2 branches covered.">    for (int i = 0; i &lt; incOffline; ++i) {</span>
+<span class="fc" id="L702">      retagInstance(unTaggedInstanceList.get(i), CommonConstants.Helix.UNTAGGED_SERVER_INSTANCE, offlineServerTag);</span>
+    }
+<span class="fc bfc" id="L704" title="All 2 branches covered.">    for (int i = incOffline; i &lt; incOffline + incRealtime; ++i) {</span>
+<span class="fc" id="L705">      String instanceName = unTaggedInstanceList.get(i);</span>
+<span class="fc" id="L706">      retagInstance(instanceName, CommonConstants.Helix.UNTAGGED_SERVER_INSTANCE, realtimeServerTag);</span>
+      // TODO: update idealStates &amp; instanceZkMetadata
+    }
+<span class="fc" id="L709">    res.status = ResponseStatus.success;</span>
+<span class="fc" id="L710">    return res;</span>
+  }
+
+  private PinotResourceManagerResponse updateColocatedServerTenant(Tenant serverTenant,
+      PinotResourceManagerResponse res, String realtimeServerTag, List&lt;String&gt; taggedRealtimeServers,
+      String offlineServerTag, List&lt;String&gt; taggedOfflineServers, int incInstances, List&lt;String&gt; unTaggedInstanceList) {
+<span class="nc" id="L716">    int incOffline = serverTenant.getOfflineInstances() - taggedOfflineServers.size();</span>
+<span class="nc" id="L717">    int incRealtime = serverTenant.getRealtimeInstances() - taggedRealtimeServers.size();</span>
+<span class="nc" id="L718">    taggedRealtimeServers.removeAll(taggedOfflineServers);</span>
+<span class="nc" id="L719">    taggedOfflineServers.removeAll(taggedRealtimeServers);</span>
+<span class="nc bnc" id="L720" title="All 2 branches missed.">    for (int i = 0; i &lt; incOffline; ++i) {</span>
+<span class="nc bnc" id="L721" title="All 2 branches missed.">      if (i &lt; incInstances) {</span>
+<span class="nc" id="L722">        retagInstance(unTaggedInstanceList.get(i), CommonConstants.Helix.UNTAGGED_SERVER_INSTANCE, offlineServerTag);</span>
+      } else {
+<span class="nc" id="L724">        _helixAdmin.addInstanceTag(_helixClusterName, taggedRealtimeServers.get(i - incInstances), offlineServerTag);</span>
+      }
+    }
+<span class="nc bnc" id="L727" title="All 2 branches missed.">    for (int i = incOffline; i &lt; incOffline + incRealtime; ++i) {</span>
+<span class="nc bnc" id="L728" title="All 2 branches missed.">      if (i &lt; incInstances) {</span>
+<span class="nc" id="L729">        retagInstance(unTaggedInstanceList.get(i), CommonConstants.Helix.UNTAGGED_SERVER_INSTANCE, realtimeServerTag);</span>
+        // TODO: update idealStates &amp; instanceZkMetadata
+      } else {
+<span class="nc" id="L732">        _helixAdmin.addInstanceTag(_helixClusterName, taggedOfflineServers.get(i - Math.max(incInstances, incOffline)),</span>
+            realtimeServerTag);
+        // TODO: update idealStates &amp; instanceZkMetadata
+      }
+    }
+<span class="nc" id="L737">    res.status = ResponseStatus.success;</span>
+<span class="nc" id="L738">    return res;</span>
+  }
+
+  private PinotResourceManagerResponse scaleDownServer(Tenant serverTenant, PinotResourceManagerResponse res,
+      List&lt;String&gt; taggedRealtimeServers, List&lt;String&gt; taggedOfflineServers, Set&lt;String&gt; allServingServers) {
+<span class="nc" id="L743">    res.status = ResponseStatus.failure;</span>
+<span class="nc" id="L744">    res.message =</span>
+        &quot;Not support to size down the current server cluster with tenant info: &quot; + serverTenant
+            + &quot;, Current number of servering instances : &quot; + allServingServers.size()
+            + &quot;, Current number of tagged offline server instances : &quot; + taggedOfflineServers.size()
+            + &quot;, Current number of tagged realtime server instances : &quot; + taggedRealtimeServers.size();
+<span class="nc" id="L749">    LOGGER.error(res.message);</span>
+<span class="nc" id="L750">    return res;</span>
+  }
+
+  public boolean isTenantExisted(String tenantName) {
+<span class="nc bnc" id="L754" title="All 2 branches missed.">    if (!_helixAdmin.getInstancesInClusterWithTag(_helixClusterName,</span>
+        ControllerTenantNameBuilder.getBrokerTenantNameForTenant(tenantName)).isEmpty()) {
+<span class="nc" id="L756">      return true;</span>
+    }
+<span class="nc bnc" id="L758" title="All 2 branches missed.">    if (!_helixAdmin.getInstancesInClusterWithTag(_helixClusterName,</span>
+        ControllerTenantNameBuilder.getOfflineTenantNameForTenant(tenantName)).isEmpty()) {
+<span class="nc" id="L760">      return true;</span>
+    }
+<span class="nc bnc" id="L762" title="All 2 branches missed.">    if (!_helixAdmin.getInstancesInClusterWithTag(_helixClusterName,</span>
+        ControllerTenantNameBuilder.getRealtimeTenantNameForTenant(tenantName)).isEmpty()) {
+<span class="nc" id="L764">      return true;</span>
+    }
+<span class="nc" id="L766">    return false;</span>
+  }
+
+  public boolean isBrokerTenantDeletable(String tenantName) {
+<span class="fc" id="L770">    String brokerTag = ControllerTenantNameBuilder.getBrokerTenantNameForTenant(tenantName);</span>
+<span class="fc" id="L771">    Set&lt;String&gt; taggedInstances =</span>
+        new HashSet&lt;String&gt;(_helixAdmin.getInstancesInClusterWithTag(_helixClusterName, brokerTag));
+<span class="fc" id="L773">    String brokerName = CommonConstants.Helix.BROKER_RESOURCE_INSTANCE;</span>
+<span class="fc" id="L774">    IdealState brokerIdealState = _helixAdmin.getResourceIdealState(_helixClusterName, brokerName);</span>
+<span class="pc bpc" id="L775" title="1 of 2 branches missed.">    for (String partition : brokerIdealState.getPartitionSet()) {</span>
+<span class="nc bnc" id="L776" title="All 2 branches missed.">      for (String instance : brokerIdealState.getInstanceSet(partition)) {</span>
+<span class="nc bnc" id="L777" title="All 2 branches missed.">        if (taggedInstances.contains(instance)) {</span>
+<span class="nc" id="L778">          return false;</span>
+        }
+<span class="nc" id="L780">      }</span>
+<span class="nc" id="L781">    }</span>
+<span class="fc" id="L782">    return true;</span>
+  }
+
+  public boolean isServerTenantDeletable(String tenantName) {
+<span class="fc" id="L786">    Set&lt;String&gt; taggedInstances =</span>
+        new HashSet&lt;String&gt;(_helixAdmin.getInstancesInClusterWithTag(_helixClusterName,
+            ControllerTenantNameBuilder.getOfflineTenantNameForTenant(tenantName)));
+<span class="fc" id="L789">    taggedInstances.addAll(_helixAdmin.getInstancesInClusterWithTag(_helixClusterName,</span>
+        ControllerTenantNameBuilder.getRealtimeTenantNameForTenant(tenantName)));
+<span class="fc bfc" id="L791" title="All 2 branches covered.">    for (String resourceName : getAllResources()) {</span>
+<span class="pc bpc" id="L792" title="1 of 2 branches missed.">      if (!TableNameBuilder.isTableResource(resourceName)) {</span>
+<span class="fc" id="L793">        continue;</span>
+      }
+<span class="nc" id="L795">      IdealState tableIdealState = _helixAdmin.getResourceIdealState(_helixClusterName, resourceName);</span>
+<span class="nc bnc" id="L796" title="All 2 branches missed.">      for (String partition : tableIdealState.getPartitionSet()) {</span>
+<span class="nc bnc" id="L797" title="All 2 branches missed.">        for (String instance : tableIdealState.getInstanceSet(partition)) {</span>
+<span class="nc bnc" id="L798" title="All 2 branches missed.">          if (taggedInstances.contains(instance)) {</span>
+<span class="nc" id="L799">            return false;</span>
+          }
+<span class="nc" id="L801">        }</span>
+<span class="nc" id="L802">      }</span>
+<span class="nc" id="L803">    }</span>
+<span class="fc" id="L804">    return true;</span>
+  }
+
+  public Set&lt;String&gt; getAllBrokerTenantNames() {
+<span class="fc" id="L808">    Set&lt;String&gt; tenantSet = new HashSet&lt;String&gt;();</span>
+<span class="fc" id="L809">    List&lt;String&gt; instancesInCluster = _helixAdmin.getInstancesInCluster(_helixClusterName);</span>
+<span class="fc bfc" id="L810" title="All 2 branches covered.">    for (String instanceName : instancesInCluster) {</span>
+<span class="fc" id="L811">      InstanceConfig config = _helixDataAccessor.getProperty(_keyBuilder.instanceConfig(instanceName));</span>
+<span class="fc bfc" id="L812" title="All 2 branches covered.">      for (String tag : config.getTags()) {</span>
+<span class="pc bpc" id="L813" title="1 of 6 branches missed.">        if (tag.equals(CommonConstants.Helix.UNTAGGED_BROKER_INSTANCE)</span>
+            || tag.equals(CommonConstants.Helix.UNTAGGED_SERVER_INSTANCE)
+            || tag.equals(CommonConstants.Minion.UNTAGGED_INSTANCE)) {
+<span class="nc" id="L816">          continue;</span>
+        }
+<span class="fc bfc" id="L818" title="All 2 branches covered.">        if (ControllerTenantNameBuilder.getTenantRoleFromTenantName(tag) == TenantRole.BROKER) {</span>
+<span class="fc" id="L819">          tenantSet.add(ControllerTenantNameBuilder.getExternalTenantName(tag));</span>
+        }
+<span class="fc" id="L821">      }</span>
+<span class="fc" id="L822">    }</span>
+<span class="fc" id="L823">    return tenantSet;</span>
+  }
+
+  public Set&lt;String&gt; getAllServerTenantNames() {
+<span class="fc" id="L827">    Set&lt;String&gt; tenantSet = new HashSet&lt;String&gt;();</span>
+<span class="fc" id="L828">    List&lt;String&gt; instancesInCluster = _helixAdmin.getInstancesInCluster(_helixClusterName);</span>
+<span class="fc bfc" id="L829" title="All 2 branches covered.">    for (String instanceName : instancesInCluster) {</span>
+<span class="fc" id="L830">      InstanceConfig config = _helixDataAccessor.getProperty(_keyBuilder.instanceConfig(instanceName));</span>
+<span class="fc bfc" id="L831" title="All 2 branches covered.">      for (String tag : config.getTags()) {</span>
+<span class="pc bpc" id="L832" title="1 of 6 branches missed.">        if (tag.equals(CommonConstants.Helix.UNTAGGED_BROKER_INSTANCE)</span>
+            || tag.equals(CommonConstants.Helix.UNTAGGED_SERVER_INSTANCE)
+            || tag.equals(CommonConstants.Minion.UNTAGGED_INSTANCE)) {
+<span class="nc" id="L835">          continue;</span>
+        }
+<span class="fc bfc" id="L837" title="All 2 branches covered.">        if (ControllerTenantNameBuilder.getTenantRoleFromTenantName(tag) == TenantRole.SERVER) {</span>
+<span class="fc" id="L838">          tenantSet.add(ControllerTenantNameBuilder.getExternalTenantName(tag));</span>
+        }
+<span class="fc" id="L840">      }</span>
+<span class="fc" id="L841">    }</span>
+<span class="fc" id="L842">    return tenantSet;</span>
+  }
+
+  private List&lt;String&gt; getTagsForInstance(String instanceName) {
+<span class="fc" id="L846">    InstanceConfig config = _helixDataAccessor.getProperty(_keyBuilder.instanceConfig(instanceName));</span>
+<span class="fc" id="L847">    return config.getTags();</span>
+  }
+
+  public PinotResourceManagerResponse createServerTenant(Tenant serverTenant) {
+<span class="fc" id="L851">    PinotResourceManagerResponse res = new PinotResourceManagerResponse();</span>
+<span class="fc" id="L852">    int numberOfInstances = serverTenant.getNumberOfInstances();</span>
+<span class="fc" id="L853">    List&lt;String&gt; unTaggedInstanceList = getOnlineUnTaggedServerInstanceList();</span>
+<span class="pc bpc" id="L854" title="1 of 2 branches missed.">    if (unTaggedInstanceList.size() &lt; numberOfInstances) {</span>
+<span class="nc" id="L855">      res.status = ResponseStatus.failure;</span>
+<span class="nc" id="L856">      res.message =</span>
+          &quot;Failed to allocate server instances to Tag : &quot; + serverTenant.getTenantName()
+              + &quot;, Current number of untagged server instances : &quot; + unTaggedInstanceList.size()
+              + &quot;, Request asked number is : &quot; + serverTenant.getNumberOfInstances();
+<span class="nc" id="L860">      LOGGER.error(res.message);</span>
+<span class="nc" id="L861">      return res;</span>
+    } else {
+<span class="fc bfc" id="L863" title="All 2 branches covered.">      if (serverTenant.isCoLocated()) {</span>
+<span class="fc" id="L864">        assignColocatedServerTenant(serverTenant, numberOfInstances, unTaggedInstanceList);</span>
+      } else {
+<span class="fc" id="L866">        assignIndependentServerTenant(serverTenant, numberOfInstances, unTaggedInstanceList);</span>
+      }
+    }
+<span class="fc" id="L869">    res.status = ResponseStatus.success;</span>
+<span class="fc" id="L870">    return res;</span>
+  }
+
+  private void assignIndependentServerTenant(Tenant serverTenant, int numberOfInstances,
+      List&lt;String&gt; unTaggedInstanceList) {
+<span class="fc" id="L875">    String offlineServerTag = ControllerTenantNameBuilder.getOfflineTenantNameForTenant(serverTenant.getTenantName());</span>
+<span class="fc bfc" id="L876" title="All 2 branches covered.">    for (int i = 0; i &lt; serverTenant.getOfflineInstances(); i++) {</span>
+<span class="fc" id="L877">      retagInstance(unTaggedInstanceList.get(i), CommonConstants.Helix.UNTAGGED_SERVER_INSTANCE, offlineServerTag);</span>
+    }
+<span class="fc" id="L879">    String realtimeServerTag = ControllerTenantNameBuilder.getRealtimeTenantNameForTenant(serverTenant.getTenantName());</span>
+<span class="fc bfc" id="L880" title="All 2 branches covered.">    for (int i = 0; i &lt; serverTenant.getRealtimeInstances(); i++) {</span>
+<span class="fc" id="L881">      retagInstance(unTaggedInstanceList.get(i + serverTenant.getOfflineInstances()),</span>
+          CommonConstants.Helix.UNTAGGED_SERVER_INSTANCE, realtimeServerTag);
+    }
+<span class="fc" id="L884">  }</span>
+
+  private void assignColocatedServerTenant(Tenant serverTenant, int numberOfInstances, List&lt;String&gt; unTaggedInstanceList) {
+<span class="fc" id="L887">    int cnt = 0;</span>
+<span class="fc" id="L888">    String offlineServerTag = ControllerTenantNameBuilder.getOfflineTenantNameForTenant(serverTenant.getTenantName());</span>
+<span class="fc bfc" id="L889" title="All 2 branches covered.">    for (int i = 0; i &lt; serverTenant.getOfflineInstances(); i++) {</span>
+<span class="fc" id="L890">      retagInstance(unTaggedInstanceList.get(cnt++), CommonConstants.Helix.UNTAGGED_SERVER_INSTANCE, offlineServerTag);</span>
+    }
+<span class="fc" id="L892">    String realtimeServerTag = ControllerTenantNameBuilder.getRealtimeTenantNameForTenant(serverTenant.getTenantName());</span>
+<span class="pc bpc" id="L893" title="1 of 2 branches missed.">    for (int i = 0; i &lt; serverTenant.getRealtimeInstances(); i++) {</span>
+<span class="nc" id="L894">      retagInstance(unTaggedInstanceList.get(cnt++), CommonConstants.Helix.UNTAGGED_SERVER_INSTANCE, realtimeServerTag);</span>
+<span class="nc bnc" id="L895" title="All 2 branches missed.">      if (cnt == numberOfInstances) {</span>
+<span class="nc" id="L896">        cnt = 0;</span>
+      }
+    }
+<span class="fc" id="L899">  }</span>
+
+  public PinotResourceManagerResponse createBrokerTenant(Tenant brokerTenant) {
+<span class="fc" id="L902">    PinotResourceManagerResponse res = new PinotResourceManagerResponse();</span>
+<span class="fc" id="L903">    List&lt;String&gt; unTaggedInstanceList = getOnlineUnTaggedBrokerInstanceList();</span>
+<span class="fc" id="L904">    int numberOfInstances = brokerTenant.getNumberOfInstances();</span>
+<span class="pc bpc" id="L905" title="1 of 2 branches missed.">    if (unTaggedInstanceList.size() &lt; numberOfInstances) {</span>
+<span class="nc" id="L906">      res.status = ResponseStatus.failure;</span>
+<span class="nc" id="L907">      res.message =</span>
+          &quot;Failed to allocate broker instances to Tag : &quot; + brokerTenant.getTenantName()
+              + &quot;, Current number of untagged server instances : &quot; + unTaggedInstanceList.size()
+              + &quot;, Request asked number is : &quot; + brokerTenant.getNumberOfInstances();
+<span class="nc" id="L911">      LOGGER.error(res.message);</span>
+<span class="nc" id="L912">      return res;</span>
+    }
+<span class="fc" id="L914">    String brokerTag = ControllerTenantNameBuilder.getBrokerTenantNameForTenant(brokerTenant.getTenantName());</span>
+<span class="fc bfc" id="L915" title="All 2 branches covered.">    for (int i = 0; i &lt; brokerTenant.getNumberOfInstances(); ++i) {</span>
+<span class="fc" id="L916">      retagInstance(unTaggedInstanceList.get(i), CommonConstants.Helix.UNTAGGED_BROKER_INSTANCE, brokerTag);</span>
+    }
+<span class="fc" id="L918">    res.status = ResponseStatus.success;</span>
+<span class="fc" id="L919">    return res;</span>
+
+  }
+
+  public PinotResourceManagerResponse deleteOfflineServerTenantFor(String tenantName) {
+<span class="fc" id="L924">    PinotResourceManagerResponse response = new PinotResourceManagerResponse();</span>
+<span class="fc" id="L925">    String offlineTenantTag = ControllerTenantNameBuilder.getOfflineTenantNameForTenant(tenantName);</span>
+<span class="fc" id="L926">    List&lt;String&gt; instancesInClusterWithTag =</span>
+        _helixAdmin.getInstancesInClusterWithTag(_helixClusterName, offlineTenantTag);
+<span class="fc bfc" id="L928" title="All 2 branches covered.">    for (String instanceName : instancesInClusterWithTag) {</span>
+<span class="fc" id="L929">      _helixAdmin.removeInstanceTag(_helixClusterName, instanceName, offlineTenantTag);</span>
+<span class="pc bpc" id="L930" title="1 of 2 branches missed.">      if (getTagsForInstance(instanceName).isEmpty()) {</span>
+<span class="fc" id="L931">        _helixAdmin.addInstanceTag(_helixClusterName, instanceName, CommonConstants.Helix.UNTAGGED_SERVER_INSTANCE);</span>
+      }
+<span class="fc" id="L933">    }</span>
+<span class="fc" id="L934">    response.status = ResponseStatus.success;</span>
+<span class="fc" id="L935">    return response;</span>
+  }
+
+  public PinotResourceManagerResponse deleteRealtimeServerTenantFor(String tenantName) {
+<span class="fc" id="L939">    PinotResourceManagerResponse response = new PinotResourceManagerResponse();</span>
+<span class="fc" id="L940">    String realtimeTenantTag = ControllerTenantNameBuilder.getRealtimeTenantNameForTenant(tenantName);</span>
+<span class="fc" id="L941">    List&lt;String&gt; instancesInClusterWithTag =</span>
+        _helixAdmin.getInstancesInClusterWithTag(_helixClusterName, realtimeTenantTag);
+<span class="fc bfc" id="L943" title="All 2 branches covered.">    for (String instanceName : instancesInClusterWithTag) {</span>
+<span class="fc" id="L944">      _helixAdmin.removeInstanceTag(_helixClusterName, instanceName, realtimeTenantTag);</span>
+<span class="pc bpc" id="L945" title="1 of 2 branches missed.">      if (getTagsForInstance(instanceName).isEmpty()) {</span>
+<span class="fc" id="L946">        _helixAdmin.addInstanceTag(_helixClusterName, instanceName, CommonConstants.Helix.UNTAGGED_SERVER_INSTANCE);</span>
+      }
+<span class="fc" id="L948">    }</span>
+<span class="fc" id="L949">    response.status = ResponseStatus.success;</span>
+<span class="fc" id="L950">    return response;</span>
+  }
+
+  public PinotResourceManagerResponse deleteBrokerTenantFor(String tenantName) {
+<span class="fc" id="L954">    PinotResourceManagerResponse response = new PinotResourceManagerResponse();</span>
+<span class="fc" id="L955">    String brokerTag = ControllerTenantNameBuilder.getBrokerTenantNameForTenant(tenantName);</span>
+<span class="fc" id="L956">    List&lt;String&gt; instancesInClusterWithTag = _helixAdmin.getInstancesInClusterWithTag(_helixClusterName, brokerTag);</span>
+<span class="fc bfc" id="L957" title="All 2 branches covered.">    for (String instance : instancesInClusterWithTag) {</span>
+<span class="fc" id="L958">      retagInstance(instance, brokerTag, CommonConstants.Helix.UNTAGGED_BROKER_INSTANCE);</span>
+<span class="fc" id="L959">    }</span>
+<span class="fc" id="L960">    response.status = ResponseStatus.success;</span>
+<span class="fc" id="L961">    return response;</span>
+  }
+
+  public Set&lt;String&gt; getAllInstancesForServerTenant(String tenantName) {
+<span class="fc" id="L965">    Set&lt;String&gt; instancesSet = new HashSet&lt;String&gt;();</span>
+<span class="fc" id="L966">    instancesSet.addAll(_helixAdmin.getInstancesInClusterWithTag(_helixClusterName,</span>
+        ControllerTenantNameBuilder.getOfflineTenantNameForTenant(tenantName)));
+<span class="fc" id="L968">    instancesSet.addAll(_helixAdmin.getInstancesInClusterWithTag(_helixClusterName,</span>
+        ControllerTenantNameBuilder.getRealtimeTenantNameForTenant(tenantName)));
+<span class="fc" id="L970">    return instancesSet;</span>
+  }
+
+  public Set&lt;String&gt; getAllInstancesForBrokerTenant(String tenantName) {
+<span class="fc" id="L974">    Set&lt;String&gt; instancesSet = new HashSet&lt;String&gt;();</span>
+<span class="fc" id="L975">    instancesSet.addAll(_helixAdmin.getInstancesInClusterWithTag(_helixClusterName,</span>
+        ControllerTenantNameBuilder.getBrokerTenantNameForTenant(tenantName)));
+<span class="fc" id="L977">    return instancesSet;</span>
+  }
+
+  /**
+   * API 2.0
+   */
+
+  /**
+   * Schema APIs
+   */
+  public void addOrUpdateSchema(Schema schema) throws IllegalArgumentException, IllegalAccessException {
+<span class="fc" id="L988">    ZNRecord record = SchemaUtils.toZNRecord(schema);</span>
+<span class="fc" id="L989">    String name = schema.getSchemaName();</span>
+<span class="fc" id="L990">    PinotHelixPropertyStoreZnRecordProvider propertyStoreHelper =</span>
+        PinotHelixPropertyStoreZnRecordProvider.forSchema(_propertyStore);
+<span class="fc" id="L992">    propertyStoreHelper.set(name, record);</span>
+<span class="fc" id="L993">  }</span>
+
+  /**
+   * Delete the given schema.
+   * @param schema The schema to be deleted.
+   * @return True on success, false otherwise.
+   */
+  public boolean deleteSchema(Schema schema) {
+<span class="nc bnc" id="L1001" title="All 2 branches missed.">    if (schema != null) {</span>
+<span class="nc" id="L1002">      String propertyStorePath = ZKMetadataProvider.constructPropertyStorePathForSchema(schema.getSchemaName());</span>
+<span class="nc bnc" id="L1003" title="All 2 branches missed.">      if (_propertyStore.exists(propertyStorePath, AccessOption.PERSISTENT)) {</span>
+<span class="nc" id="L1004">        _propertyStore.remove(propertyStorePath, AccessOption.PERSISTENT);</span>
+<span class="nc" id="L1005">        return true;</span>
+      }
+    }
+<span class="nc" id="L1008">    return false;</span>
+  }
+
+  @Nullable
+  public Schema getSchema(@Nonnull String schemaName) {
+<span class="fc" id="L1013">    return ZKMetadataProvider.getSchema(_propertyStore, schemaName);</span>
+  }
+
+  @Nullable
+  public Schema getTableSchema(@Nonnull String tableName) {
+<span class="nc" id="L1018">    return ZKMetadataProvider.getTableSchema(_propertyStore, tableName);</span>
+  }
+
+  public List&lt;String&gt; getSchemaNames() {
+<span class="nc" id="L1022">    return _propertyStore.getChildNames(</span>
+        PinotHelixPropertyStoreZnRecordProvider.forSchema(_propertyStore).getRelativePath(), AccessOption.PERSISTENT);
+  }
+
+  /**
+   * Table APIs
+   * @throws InvalidTableConfigException
+   * @throws TableAlreadyExistsException for offline tables only if the table already exists
+   */
+  public void addTable(@Nonnull TableConfig tableConfig) throws IOException {
+<span class="fc" id="L1032">    String tableNameWithType = tableConfig.getTableName();</span>
+    TenantConfig tenantConfig;
+<span class="fc bfc" id="L1034" title="All 2 branches covered.">    if (isSingleTenantCluster()) {</span>
+<span class="fc" id="L1035">      tenantConfig = new TenantConfig();</span>
+<span class="fc" id="L1036">      tenantConfig.setBroker(ControllerTenantNameBuilder.DEFAULT_TENANT_NAME);</span>
+<span class="fc" id="L1037">      tenantConfig.setServer(ControllerTenantNameBuilder.DEFAULT_TENANT_NAME);</span>
+<span class="fc" id="L1038">      tableConfig.setTenantConfig(tenantConfig);</span>
+    } else {
+<span class="fc" id="L1040">      tenantConfig = tableConfig.getTenantConfig();</span>
+<span class="pc bpc" id="L1041" title="2 of 4 branches missed.">      if (tenantConfig.getBroker() == null || tenantConfig.getServer() == null) {</span>
+<span class="nc" id="L1042">        throw new InvalidTableConfigException(&quot;Tenant is not configured for table: &quot; + tableNameWithType);</span>
+      }
+    }
+
+    // Check if tenant exists before creating the table
+<span class="fc" id="L1047">    TableType tableType = tableConfig.getTableType();</span>
+<span class="fc" id="L1048">    String brokerTenantName = ControllerTenantNameBuilder.getBrokerTenantNameForTenant(tenantConfig.getBroker());</span>
+<span class="fc" id="L1049">    List&lt;String&gt; brokersForTenant = _helixAdmin.getInstancesInClusterWithTag(_helixClusterName, brokerTenantName);</span>
+<span class="pc bpc" id="L1050" title="1 of 2 branches missed.">    if (brokersForTenant.isEmpty()) {</span>
+<span class="nc" id="L1051">      throw new InvalidTableConfigException(</span>
+          &quot;Broker tenant: &quot; + brokerTenantName + &quot; does not exist for table: &quot; + tableNameWithType);
+    }
+<span class="fc" id="L1054">    String serverTenantName =</span>
+        ControllerTenantNameBuilder.getTenantName(tenantConfig.getServer(), tableType.getServerType());
+<span class="pc bpc" id="L1056" title="1 of 2 branches missed.">    if (_helixAdmin.getInstancesInClusterWithTag(_helixClusterName, serverTenantName).isEmpty()) {</span>
+<span class="nc" id="L1057">      throw new InvalidTableConfigException(</span>
+          &quot;Server tenant: &quot; + serverTenantName + &quot; does not exist for table: &quot; + tableNameWithType);
+    }
+
+<span class="fc" id="L1061">    SegmentsValidationAndRetentionConfig segmentsConfig = tableConfig.getValidationConfig();</span>
+<span class="pc bpc" id="L1062" title="1 of 3 branches missed.">    switch (tableType) {</span>
+      case OFFLINE:
+<span class="fc" id="L1064">        final String offlineTableName = tableConfig.getTableName();</span>
+        // existing tooling relies on this check not existing for realtime table (to migrate to LLC)
+        // So, we avoid adding that for REALTIME just yet
+<span class="fc bfc" id="L1067" title="All 2 branches covered.">        if (getAllTables().contains(offlineTableName)) {</span>
+<span class="fc" id="L1068">          throw new TableAlreadyExistsException(&quot;Table &quot; + offlineTableName + &quot; already exists&quot;);</span>
+        }
+        // now lets build an ideal state
+<span class="fc" id="L1071">        LOGGER.info(&quot;building empty ideal state for table : &quot; + offlineTableName);</span>
+<span class="fc" id="L1072">        final IdealState offlineIdealState = PinotTableIdealStateBuilder.buildEmptyIdealStateFor(offlineTableName,</span>
+            Integer.parseInt(segmentsConfig.getReplication()));
+<span class="fc" id="L1074">        LOGGER.info(&quot;adding table via the admin&quot;);</span>
+<span class="fc" id="L1075">        _helixAdmin.addResource(_helixClusterName, offlineTableName, offlineIdealState);</span>
+<span class="fc" id="L1076">        LOGGER.info(&quot;successfully added the table : &quot; + offlineTableName + &quot; to the cluster&quot;);</span>
+
+        // lets add table configs
+<span class="fc" id="L1079">        ZKMetadataProvider.setOfflineTableConfig(_propertyStore, offlineTableName, TableConfig.toZnRecord(tableConfig));</span>
+
+<span class="fc" id="L1081">        _propertyStore.create(ZKMetadataProvider.constructPropertyStorePathForResource(offlineTableName),</span>
+            new ZNRecord(offlineTableName), AccessOption.PERSISTENT);
+
+        // If the segment assignment strategy is using replica groups, build the mapping table and
+        // store to property store.
+<span class="fc" id="L1086">        String assignmentStrategy = segmentsConfig.getSegmentAssignmentStrategy();</span>
+<span class="pc bpc" id="L1087" title="1 of 4 branches missed.">        if (assignmentStrategy != null &amp;&amp; SegmentAssignmentStrategyEnum.valueOf(assignmentStrategy)</span>
+            == SegmentAssignmentStrategyEnum.ReplicaGroupSegmentAssignmentStrategy) {
+<span class="fc" id="L1089">          PartitionToReplicaGroupMappingZKMetadata partitionMappingMetadata =</span>
+              buildPartitionToReplicaGroupMapping(offlineTableName, tableConfig);
+<span class="fc" id="L1091">          _propertyStore.set(ZKMetadataProvider.constructPropertyStorePathForInstancePartitions(offlineTableName),</span>
+              partitionMappingMetadata.toZNRecord(), AccessOption.PERSISTENT);
+<span class="fc" id="L1093">        }</span>
+
+        break;
+      case REALTIME:
+<span class="fc" id="L1097">        final String realtimeTableName = tableConfig.getTableName();</span>
+        // lets add table configs
+
+<span class="fc" id="L1100">        ZKMetadataProvider.setRealtimeTableConfig(_propertyStore, realtimeTableName,</span>
+            TableConfig.toZnRecord(tableConfig));
+        /*
+         * PinotRealtimeSegmentManager sets up watches on table and segment path. When a table gets created,
+         * it expects the INSTANCE path in propertystore to be set up so that it can get the kafka group ID and
+         * create (high-level consumer) segments for that table.
+         * So, we need to set up the instance first, before adding the table resource for HLC new table creation.
+         *
+         * For low-level consumers, the order is to create the resource first, and set up the propertystore with segments
+         * and then tweak the idealstate to add those segments.
+         *
+         * We also need to support the case when a high-level consumer already exists for a table and we are adding
+         * the low-level consumers.
+         */
+<span class="fc" id="L1114">        IndexingConfig indexingConfig = tableConfig.getIndexingConfig();</span>
+<span class="fc" id="L1115">        ensureRealtimeClusterIsSetUp(tableConfig, realtimeTableName, indexingConfig);</span>
+
+<span class="fc" id="L1117">        LOGGER.info(&quot;Successfully added or updated the table {} &quot;, realtimeTableName);</span>
+<span class="fc" id="L1118">        break;</span>
+      default:
+<span class="nc" id="L1120">        throw new InvalidTableConfigException(&quot;UnSupported table type: &quot; + tableType);</span>
+    }
+
+<span class="fc" id="L1123">    handleBrokerResource(tableNameWithType, brokersForTenant);</span>
+<span class="fc" id="L1124">  }</span>
+
+  public static class InvalidTableConfigException extends RuntimeException {
+    public InvalidTableConfigException(String message) {
+<span class="nc" id="L1128">      super(message);</span>
+<span class="nc" id="L1129">    }</span>
+
+    public InvalidTableConfigException(String message, Throwable cause) {
+<span class="nc" id="L1132">      super(message, cause);</span>
+<span class="nc" id="L1133">    }</span>
+
+    public InvalidTableConfigException(Throwable cause) {
+<span class="nc" id="L1136">      super(cause);</span>
+<span class="nc" id="L1137">    }</span>
+  }
+
+  public static class TableAlreadyExistsException extends RuntimeException {
+    public TableAlreadyExistsException(String message) {
+<span class="fc" id="L1142">      super(message);</span>
+<span class="fc" id="L1143">    }</span>
+    public TableAlreadyExistsException(String message, Throwable cause) {
+<span class="nc" id="L1145">      super(message, cause);</span>
+<span class="nc" id="L1146">    }</span>
+  }
+
+  private void ensureRealtimeClusterIsSetUp(TableConfig config, String realtimeTableName,
+      IndexingConfig indexingConfig) {
+<span class="fc" id="L1151">    KafkaStreamMetadata kafkaStreamMetadata = new KafkaStreamMetadata(indexingConfig.getStreamConfigs());</span>
+<span class="fc" id="L1152">    IdealState idealState = _helixAdmin.getResourceIdealState(_helixClusterName, realtimeTableName);</span>
+
+<span class="pc bpc" id="L1154" title="1 of 2 branches missed.">    if (kafkaStreamMetadata.hasHighLevelKafkaConsumerType()) {</span>
+<span class="pc bpc" id="L1155" title="1 of 2 branches missed.">     if (kafkaStreamMetadata.hasSimpleKafkaConsumerType()) {</span>
+       // We may be adding on low-level, or creating both.
+<span class="nc bnc" id="L1157" title="All 2 branches missed.">       if (idealState == null) {</span>
+         // Need to create both. Create high-level consumer first.
+<span class="nc" id="L1159">         createHelixEntriesForHighLevelConsumer(config, realtimeTableName, idealState);</span>
+<span class="nc" id="L1160">         idealState = _helixAdmin.getResourceIdealState(_helixClusterName, realtimeTableName);</span>
+<span class="nc" id="L1161">         LOGGER.info(&quot;Configured new HLC for table {}&quot;, realtimeTableName);</span>
+       }
+       // Fall through to create low-level consumers
+     } else {
+       // Only high-level consumer specified in the config.
+<span class="fc" id="L1166">       createHelixEntriesForHighLevelConsumer(config, realtimeTableName, idealState);</span>
+       // Clean up any LLC table if they are present
+<span class="fc" id="L1168">       PinotLLCRealtimeSegmentManager.getInstance().cleanupLLC(realtimeTableName);</span>
+     }
+    }
+
+    // Either we have only low-level consumer, or both.
+<span class="pc bpc" id="L1173" title="1 of 2 branches missed.">    if (kafkaStreamMetadata.hasSimpleKafkaConsumerType()) {</span>
+      // Will either create idealstate entry, or update the IS entry with new segments
+      // (unless there are low-level segments already present)
+<span class="nc" id="L1176">      final String llcKafkaPartitionAssignmentPath = ZKMetadataProvider.constructPropertyStorePathForKafkaPartitions(</span>
+          realtimeTableName);
+<span class="nc bnc" id="L1178" title="All 2 branches missed.">      if(!_propertyStore.exists(llcKafkaPartitionAssignmentPath, AccessOption.PERSISTENT)) {</span>
+<span class="nc" id="L1179">        PinotTableIdealStateBuilder.buildLowLevelRealtimeIdealStateFor(realtimeTableName, config, _helixAdmin,</span>
+            _helixClusterName, _helixZkManager, idealState);
+<span class="nc" id="L1181">        LOGGER.info(&quot;Successfully added Helix entries for low-level consumers for {} &quot;, realtimeTableName);</span>
+      } else {
+<span class="nc" id="L1183">        LOGGER.info(&quot;LLC is already set up for table {}, not configuring again&quot;, realtimeTableName);</span>
+      }
+    }
+<span class="fc" id="L1186">  }</span>
+
+  private void createHelixEntriesForHighLevelConsumer(TableConfig config, String realtimeTableName,
+      IdealState idealState) {
+<span class="fc bfc" id="L1190" title="All 2 branches covered.">    if (idealState == null) {</span>
+<span class="fc" id="L1191">      idealState = PinotTableIdealStateBuilder</span>
+          .buildInitialHighLevelRealtimeIdealStateFor(realtimeTableName, config, _helixAdmin, _helixClusterName,
+              _propertyStore);
+<span class="fc" id="L1194">      LOGGER.info(&quot;Adding helix resource with empty HLC IdealState for {}&quot;, realtimeTableName);</span>
+<span class="fc" id="L1195">      _helixAdmin.addResource(_helixClusterName, realtimeTableName, idealState);</span>
+    } else {
+      // TODO jfim: We get in this block if we're trying to add a HLC or it already exists. If it doesn't already exist, we need to set instance configs properly (which is done in buildInitialHighLevelRealtimeIdealState, surprisingly enough). For now, do nothing.
+<span class="fc" id="L1198">      LOGGER.info(&quot;Not reconfiguring HLC for table {}&quot;, realtimeTableName);</span>
+    }
+<span class="fc" id="L1200">    LOGGER.info(&quot;Successfully created empty ideal state for  high level consumer for {} &quot;, realtimeTableName);</span>
+    // Finally, create the propertystore entry that will trigger watchers to create segments
+<span class="fc" id="L1202">    String tablePropertyStorePath = ZKMetadataProvider.constructPropertyStorePathForResource(realtimeTableName);</span>
+<span class="fc bfc" id="L1203" title="All 2 branches covered.">    if (!_propertyStore.exists(tablePropertyStorePath, AccessOption.PERSISTENT)) {</span>
+<span class="fc" id="L1204">      _propertyStore.create(tablePropertyStorePath, new ZNRecord(realtimeTableName), AccessOption.PERSISTENT);</span>
+    }
+<span class="fc" id="L1206">  }</span>
+
+  public void setExistingTableConfig(TableConfig config, String tableNameWithType, TableType type)
+      throws IOException {
+<span class="fc bfc" id="L1210" title="All 2 branches covered.">    if (type == TableType.REALTIME) {</span>
+<span class="fc" id="L1211">      ZKMetadataProvider.setRealtimeTableConfig(_propertyStore, tableNameWithType, TableConfig.toZnRecord(config));</span>
+<span class="fc" id="L1212">      ensureRealtimeClusterIsSetUp(config, tableNameWithType, config.getIndexingConfig());</span>
+<span class="pc bpc" id="L1213" title="1 of 2 branches missed.">    } else if (type == TableType.OFFLINE) {</span>
+<span class="fc" id="L1214">      ZKMetadataProvider.setOfflineTableConfig(_propertyStore, tableNameWithType, TableConfig.toZnRecord(config));</span>
+<span class="fc" id="L1215">      IdealState idealState = _helixAdmin.getResourceIdealState(_helixClusterName, tableNameWithType);</span>
+<span class="fc" id="L1216">      final String configReplication = config.getValidationConfig().getReplication();</span>
+<span class="pc bpc" id="L1217" title="2 of 4 branches missed.">      if (configReplication != null &amp;&amp; !config.getValidationConfig().getReplication()</span>
+          .equals(idealState.getReplicas())) {
+<span class="nc" id="L1219">        HelixHelper.updateIdealState(_helixZkManager, tableNameWithType, new Function&lt;IdealState, IdealState&gt;() {</span>
+          @Nullable
+          @Override
+          public IdealState apply(@Nullable IdealState idealState) {
+<span class="nc" id="L1223">            idealState.setReplicas(configReplication);</span>
+<span class="nc" id="L1224">            return idealState;</span>
+          }
+        }, RetryPolicies.exponentialBackoffRetryPolicy(5, 1000L, 1.2f));
+      }
+    }
+<span class="fc" id="L1229">  }</span>
+
+  public void updateMetadataConfigFor(String tableName, TableType type, TableCustomConfig newConfigs)
+      throws Exception {
+<span class="nc" id="L1233">    String tableNameWithType = TableNameBuilder.forType(type).tableNameWithType(tableName);</span>
+<span class="nc" id="L1234">    TableConfig tableConfig = ZKMetadataProvider.getTableConfig(_propertyStore, tableNameWithType);</span>
+<span class="nc bnc" id="L1235" title="All 2 branches missed.">    if (tableConfig == null) {</span>
+<span class="nc" id="L1236">      throw new RuntimeException(&quot;Table: &quot; + tableName + &quot; of type: &quot; + type + &quot; does not exist&quot;);</span>
+    }
+<span class="nc" id="L1238">    tableConfig.setCustomConfig(newConfigs);</span>
+<span class="nc" id="L1239">    setExistingTableConfig(tableConfig, tableNameWithType, type);</span>
+<span class="nc" id="L1240">  }</span>
+
+  public void updateSegmentsValidationAndRetentionConfigFor(String tableName, TableType type,
+      SegmentsValidationAndRetentionConfig newConfigs)
+      throws Exception {
+<span class="nc" id="L1245">    String tableNameWithType = TableNameBuilder.forType(type).tableNameWithType(tableName);</span>
+<span class="nc" id="L1246">    TableConfig tableConfig = ZKMetadataProvider.getTableConfig(_propertyStore, tableNameWithType);</span>
+<span class="nc bnc" id="L1247" title="All 2 branches missed.">    if (tableConfig == null) {</span>
+<span class="nc" id="L1248">      throw new RuntimeException(&quot;Table: &quot; + tableName + &quot; of type: &quot; + type + &quot; does not exist&quot;);</span>
+    }
+<span class="nc" id="L1250">    tableConfig.setValidationConfig(newConfigs);</span>
+<span class="nc" id="L1251">    setExistingTableConfig(tableConfig, tableNameWithType, type);</span>
+<span class="nc" id="L1252">  }</span>
+
+  public void updateIndexingConfigFor(String tableName, TableType type, IndexingConfig newConfigs)
+      throws Exception {
+<span class="nc" id="L1256">    String tableNameWithType = TableNameBuilder.forType(type).tableNameWithType(tableName);</span>
+<span class="nc" id="L1257">    TableConfig tableConfig = ZKMetadataProvider.getTableConfig(_propertyStore, tableNameWithType);</span>
+<span class="nc bnc" id="L1258" title="All 2 branches missed.">    if (tableConfig == null) {</span>
+<span class="nc" id="L1259">      throw new RuntimeException(&quot;Table: &quot; + tableName + &quot; of type: &quot; + type + &quot; does not exist&quot;);</span>
+    }
+<span class="nc" id="L1261">    tableConfig.setIndexingConfig(newConfigs);</span>
+<span class="nc" id="L1262">    setExistingTableConfig(tableConfig, tableNameWithType, type);</span>
+
+<span class="nc bnc" id="L1264" title="All 2 branches missed.">    if (type == TableType.REALTIME) {</span>
+<span class="nc" id="L1265">      ensureRealtimeClusterIsSetUp(tableConfig, tableName, newConfigs);</span>
+    }
+<span class="nc" id="L1267">  }</span>
+
+  private void handleBrokerResource(@Nonnull final String tableName, @Nonnull final List&lt;String&gt; brokersForTenant) {
+<span class="fc" id="L1270">    LOGGER.info(&quot;Updating BrokerResource IdealState for table: {}&quot;, tableName);</span>
+<span class="fc" id="L1271">    HelixHelper.updateIdealState(_helixZkManager, CommonConstants.Helix.BROKER_RESOURCE_INSTANCE,</span>
+<span class="fc" id="L1272">        new Function&lt;IdealState, IdealState&gt;() {</span>
+          @Override
+          public IdealState apply(@Nullable IdealState idealState) {
+<span class="fc" id="L1275">            Preconditions.checkNotNull(idealState);</span>
+<span class="fc bfc" id="L1276" title="All 2 branches covered.">            for (String broker : brokersForTenant) {</span>
+<span class="fc" id="L1277">              idealState.setPartitionState(tableName, broker, BrokerOnlineOfflineStateModel.ONLINE);</span>
+<span class="fc" id="L1278">            }</span>
+<span class="fc" id="L1279">            return idealState;</span>
+          }
+        }, RetryPolicies.exponentialBackoffRetryPolicy(5, 500L, 2.0f));
+<span class="fc" id="L1282">  }</span>
+
+  public void deleteOfflineTable(String tableName) {
+<span class="fc" id="L1285">    String offlineTableName = TableNameBuilder.OFFLINE.tableNameWithType(tableName);</span>
+
+    // Remove the table from brokerResource
+<span class="fc" id="L1288">    HelixHelper.removeResourceFromBrokerIdealState(_helixZkManager, offlineTableName);</span>
+
+    // Drop the table
+<span class="pc bpc" id="L1291" title="1 of 2 branches missed.">    if (_helixAdmin.getResourcesInCluster(_helixClusterName).contains(offlineTableName)) {</span>
+<span class="fc" id="L1292">      _helixAdmin.dropResource(_helixClusterName, offlineTableName);</span>
+    }
+
+    // Remove all segments for the table
+<span class="fc" id="L1296">    _segmentDeletionManager.removeSegmentsFromStore(offlineTableName, getSegmentsFor(offlineTableName));</span>
+<span class="fc" id="L1297">    ZKMetadataProvider.removeResourceSegmentsFromPropertyStore(_propertyStore, offlineTableName);</span>
+
+    // Remove table config
+<span class="fc" id="L1300">    ZKMetadataProvider.removeResourceConfigFromPropertyStore(_propertyStore, offlineTableName);</span>
+<span class="fc" id="L1301">  }</span>
+
+  public void deleteRealtimeTable(String tableName) {
+<span class="fc" id="L1304">    String realtimeTableName = TableNameBuilder.REALTIME.tableNameWithType(tableName);</span>
+
+    // Remove the table from brokerResource
+<span class="fc" id="L1307">    HelixHelper.removeResourceFromBrokerIdealState(_helixZkManager, realtimeTableName);</span>
+
+    // Cache the state and drop the table
+<span class="fc" id="L1310">    Set&lt;String&gt; instancesForTable = null;</span>
+<span class="pc bpc" id="L1311" title="1 of 2 branches missed.">    if (_helixAdmin.getResourcesInCluster(_helixClusterName).contains(realtimeTableName)) {</span>
+<span class="nc" id="L1312">      instancesForTable = getAllInstancesForTable(realtimeTableName);</span>
+<span class="nc" id="L1313">      _helixAdmin.dropResource(_helixClusterName, realtimeTableName);</span>
+    }
+
+    // Remove all segments for the table
+<span class="fc" id="L1317">    _segmentDeletionManager.removeSegmentsFromStore(realtimeTableName, getSegmentsFor(realtimeTableName));</span>
+<span class="fc" id="L1318">    ZKMetadataProvider.removeResourceSegmentsFromPropertyStore(_propertyStore, realtimeTableName);</span>
+
+    // Remove table config
+<span class="fc" id="L1321">    ZKMetadataProvider.removeResourceConfigFromPropertyStore(_propertyStore, realtimeTableName);</span>
+
+    // Remove Kafka partition assignment for LLC table
+<span class="fc" id="L1324">    ZKMetadataProvider.removeKafkaPartitionAssignmentFromPropertyStore(_propertyStore, realtimeTableName);</span>
+
+    // Remove groupId/PartitionId mapping for HLC table
+<span class="pc bpc" id="L1327" title="1 of 2 branches missed.">    if (instancesForTable != null) {</span>
+<span class="nc bnc" id="L1328" title="All 2 branches missed.">      for (String instance : instancesForTable) {</span>
+<span class="nc" id="L1329">        InstanceZKMetadata instanceZKMetadata = ZKMetadataProvider.getInstanceZKMetadata(_propertyStore, instance);</span>
+<span class="nc bnc" id="L1330" title="All 2 branches missed.">        if (instanceZKMetadata != null) {</span>
+<span class="nc" id="L1331">          instanceZKMetadata.removeResource(realtimeTableName);</span>
+<span class="nc" id="L1332">          ZKMetadataProvider.setInstanceZKMetadata(_propertyStore, instanceZKMetadata);</span>
+        }
+<span class="nc" id="L1334">      }</span>
+    }
+<span class="fc" id="L1336">  }</span>
+
+  /**
+   * Build the partition mapping table that maps a tuple of (partition number, replica group number) to a list of
+   * servers. Two important configurations are explained below.
+   *
+   * - 'numInstancesPerPartition': this number decides the number of servers within a replica group.
+   *
+   * - 'partitionColumn': this configuration decides whether to use the table or partition level replica groups.
+   *
+   * @param tableName: Name of table
+   * @param tableConfig: Configuration for table
+   * @return Partition mapping table from the given configuration
+   */
+  private PartitionToReplicaGroupMappingZKMetadata buildPartitionToReplicaGroupMapping(String tableName,
+      TableConfig tableConfig) {
+
+    // Fetch the server instances for the table.
+<span class="fc" id="L1354">    List&lt;String&gt; servers = getServerInstancesForTable(tableName, TableType.OFFLINE);</span>
+
+    // Fetch information required to build the mapping table from the table configuration.
+<span class="fc" id="L1357">    ReplicaGroupStrategyConfig replicaGroupStrategyConfig = tableConfig.getValidationConfig().getReplicaGroupStrategyConfig();</span>
+<span class="fc" id="L1358">    String partitionColumn = replicaGroupStrategyConfig.getPartitionColumn();</span>
+<span class="fc" id="L1359">    int numInstancesPerPartition = replicaGroupStrategyConfig.getNumInstancesPerPartition();</span>
+
+    // If we do not have the partition column configuration, we assume to use the table level replica groups,
+    // which is equivalent to have the same partition number for all segments (i.e. 1 partition).
+<span class="fc" id="L1363">    int numPartitions = 1;</span>
+<span class="fc bfc" id="L1364" title="All 2 branches covered.">    if (partitionColumn != null) {</span>
+<span class="fc" id="L1365">      numPartitions = tableConfig.getIndexingConfig().getSegmentPartitionConfig().getNumPartitions(partitionColumn);</span>
+    }
+<span class="fc" id="L1367">    int numReplicas = tableConfig.getValidationConfig().getReplicationNumber();</span>
+<span class="fc" id="L1368">    int numServers = servers.size();</span>
+
+    // Enforcing disjoint server sets for each replica group.
+<span class="pc bpc" id="L1371" title="1 of 2 branches missed.">    if (numInstancesPerPartition * numReplicas &gt; numServers) {</span>
+<span class="nc" id="L1372">      throw new UnsupportedOperationException(&quot;Replica group aware segment assignment assumes that servers in &quot;</span>
+          + &quot;each replica group are disjoint. Check the configurations to see if the following inequality holds. &quot;
+          + &quot;'numInstancePerPartition' * 'numReplicas' &lt;= 'totalServerNumbers'&quot; );
+    }
+
+    // Creating a mapping table
+    PartitionToReplicaGroupMappingZKMetadata
+<span class="fc" id="L1379">        partitionToReplicaGroupMapping = new PartitionToReplicaGroupMappingZKMetadata();</span>
+<span class="fc" id="L1380">    partitionToReplicaGroupMapping.setTableName(tableName);</span>
+
+<span class="fc" id="L1382">    Collections.sort(servers);</span>
+<span class="fc bfc" id="L1383" title="All 2 branches covered.">    for (int partitionId = 0; partitionId &lt; numPartitions; partitionId++) {</span>
+      // If the configuration contains partition column information, we use the segment level replica groups.
+<span class="fc bfc" id="L1385" title="All 2 branches covered.">      if (numPartitions != 1) {</span>
+<span class="fc" id="L1386">        Collections.shuffle(servers);</span>
+      }
+<span class="fc bfc" id="L1388" title="All 2 branches covered.">      for (int i = 0; i &lt; numInstancesPerPartition * numReplicas; i++) {</span>
+<span class="fc" id="L1389">        int groupId = i / numInstancesPerPartition;</span>
+<span class="fc" id="L1390">        partitionToReplicaGroupMapping.addInstanceToReplicaGroup(partitionId, groupId, servers.get(i));</span>
+      }
+    }
+<span class="fc" id="L1393">    return partitionToReplicaGroupMapping;</span>
+  }
+
+  /**
+   * Toggle the status of the table between OFFLINE and ONLINE.
+   *
+   * @param tableName: Name of the table for which to toggle the status.
+   * @param status: True for ONLINE and False for OFFLINE.
+   * @return
+   */
+  public PinotResourceManagerResponse toggleTableState(String tableName, boolean status) {
+<span class="nc bnc" id="L1404" title="All 2 branches missed.">    if (!_helixAdmin.getResourcesInCluster(_helixClusterName).contains(tableName)) {</span>
+<span class="nc" id="L1405">      return new PinotResourceManagerResponse(&quot;Error: Table &quot; + tableName + &quot; not found.&quot;, false);</span>
+    }
+<span class="nc" id="L1407">    _helixAdmin.enableResource(_helixClusterName, tableName, status);</span>
+
+    // If enabling a resource, also reset segments in error state for that resource
+<span class="nc" id="L1410">    boolean resetSuccessful = false;</span>
+<span class="nc bnc" id="L1411" title="All 2 branches missed.">    if (status) {</span>
+      try {
+<span class="nc" id="L1413">        _helixAdmin.resetResource(_helixClusterName, Collections.singletonList(tableName));</span>
+<span class="nc" id="L1414">        resetSuccessful = true;</span>
+<span class="nc" id="L1415">      } catch (HelixException e) {</span>
+<span class="nc" id="L1416">        LOGGER.warn(&quot;Caught exception while resetting resource {}, ignoring.&quot;, e, tableName);</span>
+<span class="nc" id="L1417">      }</span>
+    }
+
+<span class="nc bnc" id="L1420" title="All 2 branches missed.">    return (status) ? new PinotResourceManagerResponse(&quot;Table &quot; + tableName + &quot; successfully enabled. (reset success = &quot; + resetSuccessful + &quot;)&quot;, true)</span>
+        : new PinotResourceManagerResponse(&quot;Table &quot; + tableName + &quot; successfully disabled.&quot;, true);
+  }
+
+  /**
+   * Drop the table from helix cluster.
+   *
+   * @param tableName: Name of table to be dropped.
+   * @return
+   */
+  public PinotResourceManagerResponse dropTable(String tableName) {
+<span class="nc bnc" id="L1431" title="All 2 branches missed.">    if (!_helixAdmin.getResourcesInCluster(_helixClusterName).contains(tableName)) {</span>
+<span class="nc" id="L1432">      return new PinotResourceManagerResponse(&quot;Error: Table &quot; + tableName + &quot; not found.&quot;, false);</span>
+    }
+
+<span class="nc bnc" id="L1435" title="All 2 branches missed.">    if (getSegmentsFor(tableName).size() != 0) {</span>
+<span class="nc" id="L1436">      return new PinotResourceManagerResponse(&quot;Error: Table &quot; + tableName + &quot; has segments, drop them first.&quot;, false);</span>
+    }
+
+<span class="nc" id="L1439">    _helixAdmin.dropResource(_helixClusterName, tableName);</span>
+
+    // remove from property store
+<span class="nc" id="L1442">    ZKMetadataProvider.removeResourceSegmentsFromPropertyStore(getPropertyStore(), tableName);</span>
+<span class="nc" id="L1443">    ZKMetadataProvider.removeResourceConfigFromPropertyStore(getPropertyStore(), tableName);</span>
+
+<span class="nc" id="L1445">    return new PinotResourceManagerResponse(&quot;Table &quot; + tableName + &quot; successfully dropped.&quot;, true);</span>
+  }
+
+  private Set&lt;String&gt; getAllInstancesForTable(String tableName) {
+<span class="nc" id="L1449">    Set&lt;String&gt; instanceSet = new HashSet&lt;String&gt;();</span>
+<span class="nc" id="L1450">    IdealState tableIdealState = _helixAdmin.getResourceIdealState(_helixClusterName, tableName);</span>
+<span class="nc bnc" id="L1451" title="All 2 branches missed.">    for (String partition : tableIdealState.getPartitionSet()) {</span>
+<span class="nc" id="L1452">      instanceSet.addAll(tableIdealState.getInstanceSet(partition));</span>
+<span class="nc" id="L1453">    }</span>
+<span class="nc" id="L1454">    return instanceSet;</span>
+  }
+
+  public void addNewSegment(@Nonnull SegmentMetadata segmentMetadata, @Nonnull String downloadUrl) {
+<span class="fc" id="L1458">    String segmentName = segmentMetadata.getName();</span>
+<span class="fc" id="L1459">    String offlineTableName = TableNameBuilder.OFFLINE.tableNameWithType(segmentMetadata.getTableName());</span>
+
+    // NOTE: must first set the segment ZK metadata before trying to update ideal state because server will need the
+    // segment ZK metadata to download and load the segment
+<span class="fc" id="L1463">    OfflineSegmentZKMetadata offlineSegmentZKMetadata = new OfflineSegmentZKMetadata();</span>
+<span class="fc" id="L1464">    offlineSegmentZKMetadata = ZKMetadataUtils.updateSegmentMetadata(offlineSegmentZKMetadata, segmentMetadata);</span>
+<span class="fc" id="L1465">    offlineSegmentZKMetadata.setDownloadUrl(downloadUrl);</span>
+<span class="fc" id="L1466">    offlineSegmentZKMetadata.setPushTime(System.currentTimeMillis());</span>
+<span class="pc bpc" id="L1467" title="1 of 2 branches missed.">    if (!ZKMetadataProvider.setOfflineSegmentZKMetadata(_propertyStore, offlineSegmentZKMetadata)) {</span>
+<span class="nc" id="L1468">      throw new RuntimeException(</span>
+          &quot;Failed to set segment ZK metadata for table: &quot; + offlineTableName + &quot;, segment: &quot; + segmentName);
+    }
+<span class="fc" id="L1471">    LOGGER.info(&quot;Added segment: {} of table: {} to property store&quot;, segmentName, offlineTableName);</span>
+
+<span class="fc" id="L1473">    addNewOfflineSegment(segmentMetadata);</span>
+<span class="fc" id="L1474">    LOGGER.info(&quot;Added segment: {} of table: {} to ideal state&quot;, segmentName, offlineTableName);</span>
+<span class="fc" id="L1475">  }</span>
+
+  public ZNRecord getSegmentMetadataZnRecord(String tableNameWithType, String segmentName) {
+<span class="fc" id="L1478">    return ZKMetadataProvider.getZnRecord(_propertyStore,</span>
+        ZKMetadataProvider.constructPropertyStorePathForSegment(tableNameWithType, segmentName));
+  }
+
+  public boolean updateZkMetadata(@Nonnull OfflineSegmentZKMetadata segmentMetadata, int expectedVersion) {
+<span class="fc" id="L1483">    return ZKMetadataProvider.setOfflineSegmentZKMetadata(_propertyStore, segmentMetadata, expectedVersion);</span>
+  }
+
+  public boolean updateZkMetadata(@Nonnull OfflineSegmentZKMetadata segmentMetadata) {
+<span class="fc" id="L1487">    return ZKMetadataProvider.setOfflineSegmentZKMetadata(_propertyStore, segmentMetadata);</span>
+  }
+
+  public void refreshSegment(@Nonnull SegmentMetadata segmentMetadata,
+      @Nonnull OfflineSegmentZKMetadata offlineSegmentZKMetadata, @Nonnull String downloadUrl) {
+<span class="fc" id="L1492">    String offlineTableName = TableNameBuilder.OFFLINE.tableNameWithType(segmentMetadata.getTableName());</span>
+<span class="fc" id="L1493">    String segmentName = segmentMetadata.getName();</span>
+
+    // NOTE: must first set the segment ZK metadata before trying to refresh because server will pick up the
+    // latest segment ZK metadata and compare with local segment metadata to decide whether to download the new
+    // segment or load from local
+<span class="fc" id="L1498">    offlineSegmentZKMetadata = ZKMetadataUtils.updateSegmentMetadata(offlineSegmentZKMetadata, segmentMetadata);</span>
+<span class="fc" id="L1499">    offlineSegmentZKMetadata.setDownloadUrl(downloadUrl);</span>
+<span class="fc" id="L1500">    offlineSegmentZKMetadata.setRefreshTime(System.currentTimeMillis());</span>
+<span class="pc bpc" id="L1501" title="1 of 2 branches missed.">    if (!ZKMetadataProvider.setOfflineSegmentZKMetadata(_propertyStore, offlineSegmentZKMetadata)) {</span>
+<span class="nc" id="L1502">      throw new RuntimeException(</span>
+          &quot;Failed to update ZK metadata for segment: &quot; + segmentName + &quot; of table: &quot; + offlineTableName);
+    }
+<span class="fc" id="L1505">    LOGGER.info(&quot;Updated segment: {} of table: {} to property store&quot;, segmentName, offlineTableName);</span>
+
+<span class="pc bpc" id="L1507" title="1 of 2 branches missed.">    if (shouldSendMessage(offlineSegmentZKMetadata)) {</span>
+      // Send a message to the servers to update the segment.
+      // We return success even if we are not able to send messages (which can happen if no servers are alive).
+      // For segment validation errors we would have returned earlier.
+<span class="fc" id="L1511">      sendSegmentRefreshMessage(offlineSegmentZKMetadata);</span>
+    } else {
+      // Go through the ONLINE-&gt;OFFLINE-&gt;ONLINE state transition to update the segment
+<span class="nc bnc" id="L1514" title="All 2 branches missed.">      if (!updateExistedSegment(offlineSegmentZKMetadata)) {</span>
+<span class="nc" id="L1515">        LOGGER.error(&quot;Failed to refresh segment: {} of table: {} by the ONLINE-&gt;OFFLINE-&gt;ONLINE state transition&quot;,</span>
+            segmentName, offlineTableName);
+      }
+    }
+<span class="fc" id="L1519">  }</span>
+
+  public int reloadAllSegments(@Nonnull String tableNameWithType) {
+<span class="nc" id="L1522">    LOGGER.info(&quot;Sending reload message for table: {}&quot;, tableNameWithType);</span>
+
+<span class="nc" id="L1524">    Criteria recipientCriteria = new Criteria();</span>
+<span class="nc" id="L1525">    recipientCriteria.setRecipientInstanceType(InstanceType.PARTICIPANT);</span>
+<span class="nc" id="L1526">    recipientCriteria.setInstanceName(&quot;%&quot;);</span>
+<span class="nc" id="L1527">    recipientCriteria.setResource(tableNameWithType);</span>
+<span class="nc" id="L1528">    recipientCriteria.setSessionSpecific(true);</span>
+<span class="nc" id="L1529">    SegmentReloadMessage segmentReloadMessage = new SegmentReloadMessage(tableNameWithType, null);</span>
+<span class="nc" id="L1530">    ClusterMessagingService messagingService = _helixZkManager.getMessagingService();</span>
+
+    // Infinite timeout on the recipient
+<span class="nc" id="L1533">    int timeoutMs = -1;</span>
+<span class="nc" id="L1534">    int numMessagesSent = messagingService.send(recipientCriteria, segmentReloadMessage, null, timeoutMs);</span>
+<span class="nc bnc" id="L1535" title="All 2 branches missed.">    if (numMessagesSent &gt; 0) {</span>
+<span class="nc" id="L1536">      LOGGER.info(&quot;Sent {} reload messages for table: {}&quot;, numMessagesSent, tableNameWithType);</span>
+    } else {
+<span class="nc" id="L1538">      LOGGER.warn(&quot;No reload message sent for table: {}&quot;, tableNameWithType);</span>
+    }
+
+<span class="nc" id="L1541">    return numMessagesSent;</span>
+  }
+
+  public int reloadSegment(@Nonnull String tableNameWithType, @Nonnull String segmentName) {
+<span class="nc" id="L1545">    LOGGER.info(&quot;Sending reload message for segment: {} in table: {}&quot;, segmentName, tableNameWithType);</span>
+
+<span class="nc" id="L1547">    Criteria recipientCriteria = new Criteria();</span>
+<span class="nc" id="L1548">    recipientCriteria.setRecipientInstanceType(InstanceType.PARTICIPANT);</span>
+<span class="nc" id="L1549">    recipientCriteria.setInstanceName(&quot;%&quot;);</span>
+<span class="nc" id="L1550">    recipientCriteria.setResource(tableNameWithType);</span>
+<span class="nc" id="L1551">    recipientCriteria.setPartition(segmentName);</span>
+<span class="nc" id="L1552">    recipientCriteria.setSessionSpecific(true);</span>
+<span class="nc" id="L1553">    SegmentReloadMessage segmentReloadMessage = new SegmentReloadMessage(tableNameWithType, segmentName);</span>
+<span class="nc" id="L1554">    ClusterMessagingService messagingService = _helixZkManager.getMessagingService();</span>
+
+    // Infinite timeout on the recipient
+<span class="nc" id="L1557">    int timeoutMs = -1;</span>
+<span class="nc" id="L1558">    int numMessagesSent = messagingService.send(recipientCriteria, segmentReloadMessage, null, timeoutMs);</span>
+<span class="nc bnc" id="L1559" title="All 2 branches missed.">    if (numMessagesSent &gt; 0) {</span>
+<span class="nc" id="L1560">      LOGGER.info(&quot;Sent {} reload messages for segment: {} in table: {}&quot;, numMessagesSent, segmentName,</span>
+          tableNameWithType);
+    } else {
+<span class="nc" id="L1563">      LOGGER.warn(&quot;No reload message sent for segment: {} in table: {}&quot;, segmentName, tableNameWithType);</span>
+    }
+<span class="nc" id="L1565">    return numMessagesSent;</span>
+  }
+
+  // Check to see if the table has been explicitly configured to NOT use messageBasedRefresh.
+  private boolean shouldSendMessage(OfflineSegmentZKMetadata segmentZKMetadata) {
+<span class="fc" id="L1570">    final String rawTableName = segmentZKMetadata.getTableName();</span>
+<span class="fc" id="L1571">    TableConfig tableConfig = ZKMetadataProvider.getOfflineTableConfig(_propertyStore, rawTableName);</span>
+<span class="fc" id="L1572">    TableCustomConfig customConfig = tableConfig.getCustomConfig();</span>
+<span class="pc bpc" id="L1573" title="1 of 2 branches missed.">    if (customConfig != null) {</span>
+<span class="fc" id="L1574">      Map&lt;String, String&gt; customConfigMap = customConfig.getCustomConfigs();</span>
+<span class="pc bpc" id="L1575" title="1 of 2 branches missed.">      if (customConfigMap != null) {</span>
+<span class="pc bpc" id="L1576" title="3 of 4 branches missed.">        if (customConfigMap.containsKey(TableCustomConfig.MESSAGE_BASED_REFRESH_KEY) &amp;&amp;</span>
+            ! Boolean.valueOf(customConfigMap.get(TableCustomConfig.MESSAGE_BASED_REFRESH_KEY))) {
+<span class="nc" id="L1578">          return false;</span>
+        }
+      }
+    }
+<span class="fc" id="L1582">    return true;</span>
+  }
+
+  /**
+   * Attempt to send a message to refresh the new segment. We do not wait for any acknowledgements.
+   * The message is sent as session-specific, so if a new zk session is created (e.g. server restarts)
+   * it will not get the message.
+   *
+   * @param segmentZKMetadata is the metadata of the newly arrived segment.
+   */
+  // NOTE: method should be thread-safe
+  private void sendSegmentRefreshMessage(OfflineSegmentZKMetadata segmentZKMetadata) {
+<span class="fc" id="L1594">    final String segmentName = segmentZKMetadata.getSegmentName();</span>
+<span class="fc" id="L1595">    final String rawTableName = segmentZKMetadata.getTableName();</span>
+<span class="fc" id="L1596">    final String offlineTableName = TableNameBuilder.OFFLINE.tableNameWithType(rawTableName);</span>
+<span class="fc" id="L1597">    final int timeoutMs = -1; // Infinite timeout on the recipient.</span>
+
+<span class="fc" id="L1599">    SegmentRefreshMessage refreshMessage =</span>
+        new SegmentRefreshMessage(offlineTableName, segmentName, segmentZKMetadata.getCrc());
+
+<span class="fc" id="L1602">    Criteria recipientCriteria = new Criteria();</span>
+<span class="fc" id="L1603">    recipientCriteria.setRecipientInstanceType(InstanceType.PARTICIPANT);</span>
+<span class="fc" id="L1604">    recipientCriteria.setInstanceName(&quot;%&quot;);</span>
+<span class="fc" id="L1605">    recipientCriteria.setResource(offlineTableName);</span>
+<span class="fc" id="L1606">    recipientCriteria.setPartition(segmentName);</span>
+<span class="fc" id="L1607">    recipientCriteria.setSessionSpecific(true);</span>
+
+<span class="fc" id="L1609">    ClusterMessagingService messagingService = _helixZkManager.getMessagingService();</span>
+<span class="fc" id="L1610">    LOGGER.info(&quot;Sending refresh message for segment {} of table {}:{} to recipients {}&quot;, segmentName,</span>
+        rawTableName, refreshMessage, recipientCriteria);
+    // Helix sets the timeoutMs argument specified in 'send' call as the processing timeout of the message.
+<span class="fc" id="L1613">    int nMsgsSent = messagingService.send(recipientCriteria, refreshMessage, null, timeoutMs);</span>
+<span class="pc bpc" id="L1614" title="1 of 2 branches missed.">    if (nMsgsSent &gt; 0) {</span>
+      // TODO Would be nice if we can get the name of the instances to which messages were sent.
+<span class="nc" id="L1616">      LOGGER.info(&quot;Sent {} msgs to refresh segment {} of table {}&quot;, nMsgsSent, segmentName, rawTableName);</span>
+    } else {
+      // May be the case when none of the servers are up yet. That is OK, because when they come up they will get the
+      // new version of the segment.
+<span class="fc" id="L1620">      LOGGER.warn(&quot;Unable to send segment refresh message for {} of table {}, nMsgs={}&quot;, segmentName, offlineTableName,</span>
+          nMsgsSent);
+    }
+<span class="fc" id="L1623">  }</span>
+
+  /**
+   * Helper method to add the passed in offline segment to the helix cluster.
+   * - Gets the segment name and the table name from the passed in segment meta-data.
+   * - Identifies the instance set onto which the segment needs to be added, based on
+   *   segment assignment strategy and replicas in the table config in the property-store.
+   * - Updates ideal state such that the new segment is assigned to required set of instances as per
+   *    the segment assignment strategy and replicas.
+   *
+   * @param segmentMetadata Meta-data for the segment, used to access segmentName and tableName.
+   */
+  // NOTE: method should be thread-safe
+  private void addNewOfflineSegment(SegmentMetadata segmentMetadata) {
+<span class="fc" id="L1637">    String offlineTableName = TableNameBuilder.OFFLINE.tableNameWithType(segmentMetadata.getTableName());</span>
+<span class="fc" id="L1638">    String segmentName = segmentMetadata.getName();</span>
+
+    // Assign new segment to instances
+<span class="fc" id="L1641">    TableConfig offlineTableConfig = ZKMetadataProvider.getOfflineTableConfig(_propertyStore, offlineTableName);</span>
+<span class="fc" id="L1642">    Preconditions.checkNotNull(offlineTableConfig);</span>
+<span class="fc" id="L1643">    int numReplicas = Integer.parseInt(offlineTableConfig.getValidationConfig().getReplication());</span>
+<span class="fc" id="L1644">    String serverTenant =</span>
+        ControllerTenantNameBuilder.getOfflineTenantNameForTenant(offlineTableConfig.getTenantConfig().getServer());
+<span class="fc" id="L1646">    SegmentAssignmentStrategy segmentAssignmentStrategy = SegmentAssignmentStrategyFactory.getSegmentAssignmentStrategy(</span>
+        offlineTableConfig.getValidationConfig().getSegmentAssignmentStrategy());
+<span class="fc" id="L1648">    List&lt;String&gt; assignedInstances =</span>
+        segmentAssignmentStrategy.getAssignedInstances(_helixAdmin, _propertyStore, _helixClusterName, segmentMetadata,
+            numReplicas, serverTenant);
+
+<span class="fc" id="L1652">    HelixHelper.addSegmentToIdealState(_helixZkManager, offlineTableName, segmentName, assignedInstances);</span>
+<span class="fc" id="L1653">  }</span>
+
+  private boolean updateExistedSegment(SegmentZKMetadata segmentZKMetadata) {
+    final String tableName;
+<span class="nc bnc" id="L1657" title="All 2 branches missed.">    if (segmentZKMetadata instanceof RealtimeSegmentZKMetadata) {</span>
+<span class="nc" id="L1658">      tableName = TableNameBuilder.REALTIME.tableNameWithType(segmentZKMetadata.getTableName());</span>
+    } else {
+<span class="nc" id="L1660">      tableName = TableNameBuilder.OFFLINE.tableNameWithType(segmentZKMetadata.getTableName());</span>
+    }
+<span class="nc" id="L1662">    final String segmentName = segmentZKMetadata.getSegmentName();</span>
+
+<span class="nc" id="L1664">    HelixDataAccessor helixDataAccessor = _helixZkManager.getHelixDataAccessor();</span>
+<span class="nc" id="L1665">    PropertyKey idealStatePropertyKey = _keyBuilder.idealStates(tableName);</span>
+
+    // Set all partitions to offline to unload them from the servers
+    boolean updateSuccessful;
+    do {
+<span class="nc" id="L1670">      final IdealState idealState = _helixAdmin.getResourceIdealState(_helixClusterName, tableName);</span>
+<span class="nc" id="L1671">      final Set&lt;String&gt; instanceSet = idealState.getInstanceSet(segmentName);</span>
+<span class="nc bnc" id="L1672" title="All 4 branches missed.">      if (instanceSet == null || instanceSet.size() == 0) {</span>
+        // We are trying to refresh a segment, but there are no instances currently assigned for fielding this segment.
+        // When those instances do come up, the segment will be uploaded correctly, so return success but log a warning.
+<span class="nc" id="L1675">        LOGGER.warn(&quot;No instances as yet for segment {}, table {}&quot;, segmentName, tableName);</span>
+<span class="nc" id="L1676">        return true;</span>
+      }
+<span class="nc bnc" id="L1678" title="All 2 branches missed.">      for (final String instance : instanceSet) {</span>
+<span class="nc" id="L1679">        idealState.setPartitionState(segmentName, instance, &quot;OFFLINE&quot;);</span>
+<span class="nc" id="L1680">      }</span>
+<span class="nc" id="L1681">      updateSuccessful = helixDataAccessor.updateProperty(idealStatePropertyKey, idealState);</span>
+<span class="nc bnc" id="L1682" title="All 2 branches missed.">    } while (!updateSuccessful);</span>
+
+    // Check that the ideal state has been written to ZK
+<span class="nc" id="L1685">    IdealState updatedIdealState = _helixAdmin.getResourceIdealState(_helixClusterName, tableName);</span>
+<span class="nc" id="L1686">    Map&lt;String, String&gt; instanceStateMap = updatedIdealState.getInstanceStateMap(segmentName);</span>
+<span class="nc bnc" id="L1687" title="All 2 branches missed.">    for (String state : instanceStateMap.values()) {</span>
+<span class="nc bnc" id="L1688" title="All 2 branches missed.">      if (!&quot;OFFLINE&quot;.equals(state)) {</span>
+<span class="nc" id="L1689">        LOGGER.error(&quot;Failed to write OFFLINE ideal state!&quot;);</span>
+<span class="nc" id="L1690">        return false;</span>
+      }
+<span class="nc" id="L1692">    }</span>
+
+    // Wait until the partitions are offline in the external view
+<span class="nc" id="L1695">    LOGGER.info(&quot;Wait until segment - &quot; + segmentName + &quot; to be OFFLINE in ExternalView&quot;);</span>
+<span class="nc bnc" id="L1696" title="All 2 branches missed.">    if (!ifExternalViewChangeReflectedForState(tableName, segmentName, &quot;OFFLINE&quot;,</span>
+        _externalViewOnlineToOfflineTimeoutMillis, false)) {
+<span class="nc" id="L1698">      LOGGER.error(</span>
+          &quot;External view for segment {} did not reflect the ideal state of OFFLINE within the {} ms time limit&quot;,
+          segmentName, _externalViewOnlineToOfflineTimeoutMillis);
+<span class="nc" id="L1701">      return false;</span>
+    }
+
+    // Set all partitions to online so that they load the new segment data
+    do {
+<span class="nc" id="L1706">      final IdealState idealState = _helixAdmin.getResourceIdealState(_helixClusterName, tableName);</span>
+<span class="nc" id="L1707">      final Set&lt;String&gt; instanceSet = idealState.getInstanceSet(segmentName);</span>
+<span class="nc" id="L1708">      LOGGER.info(&quot;Found {} instances for segment '{}', in ideal state&quot;, instanceSet.size(), segmentName);</span>
+<span class="nc bnc" id="L1709" title="All 2 branches missed.">      for (final String instance : instanceSet) {</span>
+<span class="nc" id="L1710">        idealState.setPartitionState(segmentName, instance, &quot;ONLINE&quot;);</span>
+<span class="nc" id="L1711">        LOGGER.info(&quot;Setting Ideal State for segment '{}' to ONLINE for instance '{}'&quot;, segmentName, instance);</span>
+<span class="nc" id="L1712">      }</span>
+<span class="nc" id="L1713">      updateSuccessful = helixDataAccessor.updateProperty(idealStatePropertyKey, idealState);</span>
+<span class="nc bnc" id="L1714" title="All 2 branches missed.">    } while (!updateSuccessful);</span>
+
+    // Check that the ideal state has been written to ZK
+<span class="nc" id="L1717">    updatedIdealState = _helixAdmin.getResourceIdealState(_helixClusterName, tableName);</span>
+<span class="nc" id="L1718">    instanceStateMap = updatedIdealState.getInstanceStateMap(segmentName);</span>
+<span class="nc" id="L1719">    LOGGER.info(&quot;Found {} instances for segment '{}', after updating ideal state&quot;, instanceStateMap.size(), segmentName);</span>
+<span class="nc bnc" id="L1720" title="All 2 branches missed.">    for (String state : instanceStateMap.values()) {</span>
+<span class="nc bnc" id="L1721" title="All 2 branches missed.">      if (!&quot;ONLINE&quot;.equals(state)) {</span>
+<span class="nc" id="L1722">        LOGGER.error(&quot;Failed to write ONLINE ideal state!&quot;);</span>
+<span class="nc" id="L1723">        return false;</span>
+      }
+<span class="nc" id="L1725">    }</span>
+
+<span class="nc" id="L1727">    LOGGER.info(&quot;Refresh is done for segment - &quot; + segmentName);</span>
+<span class="nc" id="L1728">    return true;</span>
+  }
+
+  public Map&lt;String, List&lt;String&gt;&gt; getInstanceToSegmentsInATableMap(String tableName) {
+<span class="nc" id="L1732">    Map&lt;String, List&lt;String&gt;&gt; instancesToSegmentsMap = new HashMap&lt;String, List&lt;String&gt;&gt;();</span>
+<span class="nc" id="L1733">    IdealState is = _helixAdmin.getResourceIdealState(_helixClusterName, tableName);</span>
+<span class="nc" id="L1734">    Set&lt;String&gt; segments = is.getPartitionSet();</span>
+
+<span class="nc bnc" id="L1736" title="All 2 branches missed.">    for (String segment : segments) {</span>
+<span class="nc" id="L1737">      Set&lt;String&gt; instances = is.getInstanceSet(segment);</span>
+<span class="nc bnc" id="L1738" title="All 2 branches missed.">      for (String instance : instances) {</span>
+<span class="nc bnc" id="L1739" title="All 2 branches missed.">        if (instancesToSegmentsMap.containsKey(instance)) {</span>
+<span class="nc" id="L1740">          instancesToSegmentsMap.get(instance).add(segment);</span>
+        } else {
+<span class="nc" id="L1742">          List&lt;String&gt; a = new ArrayList&lt;String&gt;();</span>
+<span class="nc" id="L1743">          a.add(segment);</span>
+<span class="nc" id="L1744">          instancesToSegmentsMap.put(instance, a);</span>
+        }
+<span class="nc" id="L1746">      }</span>
+<span class="nc" id="L1747">    }</span>
+
+<span class="nc" id="L1749">    return instancesToSegmentsMap;</span>
+  }
+
+  public synchronized Map&lt;String, String&gt; getSegmentsCrcForTable(String tableName) {
+    // Get the segment list for this table
+<span class="fc" id="L1754">    IdealState is = _helixAdmin.getResourceIdealState(_helixClusterName, tableName);</span>
+<span class="fc" id="L1755">    List&lt;String&gt; segmentList = new ArrayList&lt;&gt;(is.getPartitionSet());</span>
+
+    // Make a list of segment metadata for the given table
+<span class="fc" id="L1758">    List&lt;String&gt; segmentMetadataPaths = new ArrayList&lt;&gt;(segmentList.size());</span>
+<span class="fc bfc" id="L1759" title="All 2 branches covered.">    for (String segmentName : segmentList) {</span>
+<span class="fc" id="L1760">      segmentMetadataPaths.add(buildPathForSegmentMetadata(tableName, segmentName));</span>
+<span class="fc" id="L1761">    }</span>
+
+    // Initialize cache if it is the first time to process the table.
+<span class="fc bfc" id="L1764" title="All 2 branches covered.">    if (!_segmentCrcMap.containsKey(tableName)) {</span>
+<span class="fc" id="L1765">      _lastKnownSegmentMetadataVersionMap.put(tableName, new HashMap&lt;String, Integer&gt;());</span>
+<span class="fc" id="L1766">      _segmentCrcMap.put(tableName, new HashMap&lt;String, Long&gt;());</span>
+    }
+
+    // Get ZNode stats for all segment metadata
+<span class="fc" id="L1770">    Stat[] metadataStats = _propertyStore.getStats(segmentMetadataPaths, AccessOption.PERSISTENT);</span>
+
+    // Update the crc information for segments that are updated
+<span class="fc bfc" id="L1773" title="All 2 branches covered.">    for (int i = 0; i &lt; metadataStats.length; i++) {</span>
+<span class="fc" id="L1774">      String currentSegment = segmentList.get(i);</span>
+<span class="fc" id="L1775">      Stat metadataStat = metadataStats[i];</span>
+      // metadataStat can be null in some cases:
+      // 1. SegmentZkMetadata is somehow missing due to system inconsistency.
+      // 2. A segment is deleted after we fetch the list from idealstate and before reaching this part of the code.
+<span class="pc bpc" id="L1779" title="1 of 2 branches missed.">      if (metadataStat != null) {</span>
+<span class="fc" id="L1780">        int currentVersion = metadataStat.getVersion();</span>
+<span class="fc bfc" id="L1781" title="All 2 branches covered.">        if (_lastKnownSegmentMetadataVersionMap.get(tableName).containsKey(currentSegment)) {</span>
+<span class="fc" id="L1782">          int lastKnownVersion = _lastKnownSegmentMetadataVersionMap.get(tableName).get(currentSegment);</span>
+<span class="pc bpc" id="L1783" title="1 of 2 branches missed.">          if (lastKnownVersion != currentVersion) {</span>
+<span class="nc" id="L1784">            updateSegmentMetadataCrc(tableName, currentSegment, currentVersion);</span>
+          }
+<span class="fc" id="L1786">        } else {</span>
+          // not in version map because it's the first time to fetch this segment metadata
+<span class="fc" id="L1788">          updateSegmentMetadataCrc(tableName, currentSegment, currentVersion);</span>
+        }
+      }
+    }
+
+    // Clean up the cache for the segments no longer exist.
+<span class="fc" id="L1794">    Set&lt;String&gt; segmentsSet = is.getPartitionSet();</span>
+<span class="fc" id="L1795">    Iterator&lt;Map.Entry&lt;String,Long&gt;&gt; iter = _segmentCrcMap.get(tableName).entrySet().iterator();</span>
+<span class="fc bfc" id="L1796" title="All 2 branches covered.">    while (iter.hasNext()) {</span>
+<span class="fc" id="L1797">      Map.Entry&lt;String, Long&gt; entry = iter.next();</span>
+<span class="fc" id="L1798">      String segmentName = entry.getKey();</span>
+<span class="fc bfc" id="L1799" title="All 2 branches covered.">      if (!segmentsSet.contains(segmentName)) {</span>
+<span class="fc" id="L1800">        iter.remove();</span>
+<span class="fc" id="L1801">        _lastKnownSegmentMetadataVersionMap.get(tableName).remove(segmentName);</span>
+      }
+<span class="fc" id="L1803">    }</span>
+
+    // Create crc information
+<span class="fc" id="L1806">    Map&lt;String, String&gt; resultCrcMap = new HashMap&lt;&gt;();</span>
+<span class="fc bfc" id="L1807" title="All 2 branches covered.">    for (String segment : segmentList) {</span>
+<span class="fc" id="L1808">      resultCrcMap.put(segment, String.valueOf(_segmentCrcMap.get(tableName).get(segment)));</span>
+<span class="fc" id="L1809">    }</span>
+
+<span class="fc" id="L1811">    return resultCrcMap;</span>
+  }
+
+  private void updateSegmentMetadataCrc(String tableName, String segmentName, int currentVersion) {
+<span class="fc" id="L1815">    OfflineSegmentZKMetadata offlineSegmentZKMetadata =</span>
+        ZKMetadataProvider.getOfflineSegmentZKMetadata(_propertyStore, tableName, segmentName);
+
+<span class="fc" id="L1818">    _lastKnownSegmentMetadataVersionMap.get(tableName).put(segmentName, currentVersion);</span>
+<span class="fc" id="L1819">    _segmentCrcMap.get(tableName).put(segmentName, offlineSegmentZKMetadata.getCrc());</span>
+<span class="fc" id="L1820">  }</span>
+
+  public String buildPathForSegmentMetadata(String tableName, String segmentName) {
+<span class="fc" id="L1823">    return &quot;/SEGMENTS/&quot; + tableName +  &quot;/&quot; + segmentName;</span>
+  }
+
+  /**
+   * Toggle the status of segment between ONLINE (enable = true) and OFFLINE (enable = FALSE).
+   *
+   * @param tableName: Name of table to which the segment belongs.
+   * @param segments: List of segment for which to toggle the status.
+   * @param enable: True for ONLINE, False for OFFLINE.
+   * @param timeoutInSeconds Time out for toggling segment state.
+   * @return
+   */
+  public PinotResourceManagerResponse toggleSegmentState(String tableName, List&lt;String&gt; segments, boolean enable,
+      long timeoutInSeconds) {
+<span class="nc bnc" id="L1837" title="All 2 branches missed.">    String status = (enable) ? &quot;ONLINE&quot; : &quot;OFFLINE&quot;;</span>
+
+<span class="nc" id="L1839">    HelixDataAccessor helixDataAccessor = _helixZkManager.getHelixDataAccessor();</span>
+<span class="nc" id="L1840">    PropertyKey idealStatePropertyKey = _keyBuilder.idealStates(tableName);</span>
+
+    boolean updateSuccessful;
+<span class="nc" id="L1843">    boolean externalViewUpdateSuccessful = true;</span>
+<span class="nc" id="L1844">    long deadline = System.currentTimeMillis() + 1000 * timeoutInSeconds;</span>
+
+    // Set all partitions to offline to unload them from the servers
+    do {
+<span class="nc" id="L1848">      final IdealState idealState = _helixAdmin.getResourceIdealState(_helixClusterName, tableName);</span>
+
+<span class="nc bnc" id="L1850" title="All 2 branches missed.">      for (String segmentName : segments) {</span>
+<span class="nc" id="L1851">        final Set&lt;String&gt; instanceSet = idealState.getInstanceSet(segmentName);</span>
+<span class="nc bnc" id="L1852" title="All 4 branches missed.">        if (instanceSet == null || instanceSet.isEmpty()) {</span>
+<span class="nc" id="L1853">          return new PinotResourceManagerResponse(&quot;Segment &quot; + segmentName + &quot; not found.&quot;, false);</span>
+        }
+<span class="nc bnc" id="L1855" title="All 2 branches missed.">        for (final String instance : instanceSet) {</span>
+<span class="nc" id="L1856">          idealState.setPartitionState(segmentName, instance, status);</span>
+<span class="nc" id="L1857">        }</span>
+<span class="nc" id="L1858">      }</span>
+<span class="nc" id="L1859">      updateSuccessful = helixDataAccessor.updateProperty(idealStatePropertyKey, idealState);</span>
+<span class="nc bnc" id="L1860" title="All 4 branches missed.">    } while (!updateSuccessful &amp;&amp; (System.currentTimeMillis() &lt;= deadline));</span>
+
+    // Check that the ideal state has been updated.
+<span class="nc" id="L1863">    LOGGER.info(&quot;Ideal state successfully updated, waiting to update external view&quot;);</span>
+<span class="nc" id="L1864">    IdealState updatedIdealState = _helixAdmin.getResourceIdealState(_helixClusterName, tableName);</span>
+<span class="nc bnc" id="L1865" title="All 2 branches missed.">    for (String segmentName : segments) {</span>
+<span class="nc" id="L1866">      Map&lt;String, String&gt; instanceStateMap = updatedIdealState.getInstanceStateMap(segmentName);</span>
+<span class="nc bnc" id="L1867" title="All 2 branches missed.">      for (String state : instanceStateMap.values()) {</span>
+<span class="nc bnc" id="L1868" title="All 2 branches missed.">        if (!status.equals(state)) {</span>
+<span class="nc" id="L1869">          return new PinotResourceManagerResponse(&quot;Error: Failed to update Ideal state when setting status &quot; +</span>
+              status + &quot; for segment &quot; + segmentName, false);
+        }
+<span class="nc" id="L1872">      }</span>
+
+      // Wait until the partitions are offline in the external view
+<span class="nc bnc" id="L1875" title="All 2 branches missed.">      if (!ifExternalViewChangeReflectedForState(tableName, segmentName, status, (timeoutInSeconds * 1000),</span>
+          true)) {
+<span class="nc" id="L1877">        externalViewUpdateSuccessful = false;</span>
+      }
+<span class="nc" id="L1879">    }</span>
+
+<span class="nc bnc" id="L1881" title="All 2 branches missed.">    return (externalViewUpdateSuccessful) ? new PinotResourceManagerResponse((&quot;Success: Segment(s) &quot; + &quot; now &quot; + status), true) :</span>
+        new PinotResourceManagerResponse(&quot;Error: Timed out. External view not completely updated&quot;, false);
+  }
+
+  public boolean hasRealtimeTable(String tableName) {
+<span class="fc" id="L1886">    String actualTableName = tableName + &quot;_REALTIME&quot;;</span>
+<span class="fc" id="L1887">    return getAllTables().contains(actualTableName);</span>
+  }
+
+  public boolean hasOfflineTable(String tableName) {
+<span class="fc" id="L1891">    String actualTableName = tableName + &quot;_OFFLINE&quot;;</span>
+<span class="fc" id="L1892">    return getAllTables().contains(actualTableName);</span>
+  }
+
+  /**
+   * Get the table config for the given table name with type suffix.
+   *
+   * @param tableNameWithType Table name with type suffix
+   * @return Table config
+   */
+  @Nullable
+  public TableConfig getTableConfig(@Nonnull String tableNameWithType) {
+<span class="fc" id="L1903">    return ZKMetadataProvider.getTableConfig(_propertyStore, tableNameWithType);</span>
+  }
+
+  /**
+   * Get the offline table config for the given table name.
+   *
+   * @param tableName Table name with or without type suffix
+   * @return Table config
+   */
+  @Nullable
+  public TableConfig getOfflineTableConfig(@Nonnull String tableName) {
+<span class="fc" id="L1914">    return ZKMetadataProvider.getOfflineTableConfig(_propertyStore, tableName);</span>
+  }
+
+  /**
+   * Get the realtime table config for the given table name.
+   *
+   * @param tableName Table name with or without type suffix
+   * @return Table config
+   */
+  @Nullable
+  public TableConfig getRealtimeTableConfig(@Nonnull String tableName) {
+<span class="fc" id="L1925">    return ZKMetadataProvider.getRealtimeTableConfig(_propertyStore, tableName);</span>
+  }
+
+  /**
+   * Get the table config for the given table name and table type.
+   *
+   * @param tableName Table name with or without type suffix
+   * @return Table config
+   */
+  @Nullable
+  public TableConfig getTableConfig(@Nonnull String tableName, @Nonnull TableType tableType) {
+<span class="fc bfc" id="L1936" title="All 2 branches covered.">    if (tableType == TableType.OFFLINE) {</span>
+<span class="fc" id="L1937">      return getOfflineTableConfig(tableName);</span>
+    } else {
+<span class="fc" id="L1939">      return getRealtimeTableConfig(tableName);</span>
+    }
+  }
+
+  public List&lt;String&gt; getServerInstancesForTable(String tableName, TableType tableType) {
+<span class="fc" id="L1944">    TableConfig tableConfig = getTableConfig(tableName, tableType);</span>
+<span class="fc" id="L1945">    String serverTenantName =</span>
+        ControllerTenantNameBuilder.getTenantName(tableConfig.getTenantConfig().getServer(), tableType.getServerType());
+<span class="fc" id="L1947">    List&lt;String&gt; serverInstances = _helixAdmin.getInstancesInClusterWithTag(_helixClusterName, serverTenantName);</span>
+<span class="fc" id="L1948">    return serverInstances;</span>
+  }
+
+  public List&lt;String&gt; getBrokerInstancesForTable(String tableName, TableType tableType) {
+<span class="nc" id="L1952">    TableConfig tableConfig = getTableConfig(tableName, tableType);</span>
+<span class="nc" id="L1953">    String brokerTenantName =</span>
+        ControllerTenantNameBuilder.getBrokerTenantNameForTenant(tableConfig.getTenantConfig().getBroker());
+<span class="nc" id="L1955">    List&lt;String&gt; serverInstances = _helixAdmin.getInstancesInClusterWithTag(_helixClusterName, brokerTenantName);</span>
+<span class="nc" id="L1956">    return serverInstances;</span>
+  }
+
+  public PinotResourceManagerResponse enableInstance(String instanceName) {
+<span class="fc" id="L1960">    return toggleInstance(instanceName, true, 10);</span>
+  }
+
+  public PinotResourceManagerResponse disableInstance(String instanceName) {
+<span class="fc" id="L1964">    return toggleInstance(instanceName, false, 10);</span>
+  }
+
+  /**
+   * Check if an instance can safely dropped from helix cluster. Instance should not be dropped if:
+   * - It is a live instance.
+   * - Any idealstate includes the instance.
+   *
+   * @param instanceName: Name of the instance to be dropped.
+   * @return
+   */
+  public boolean isInstanceDroppable(String instanceName) {
+    // Check if this instance is live
+<span class="nc" id="L1977">    HelixDataAccessor helixDataAccessor = _helixZkManager.getHelixDataAccessor();</span>
+<span class="nc" id="L1978">    LiveInstance liveInstance = helixDataAccessor.getProperty(_keyBuilder.liveInstance(instanceName));</span>
+<span class="nc bnc" id="L1979" title="All 2 branches missed.">    if (liveInstance != null) {</span>
+<span class="nc" id="L1980">      return false;</span>
+    }
+
+    // Check if any idealstate contains information on this instance
+<span class="nc bnc" id="L1984" title="All 2 branches missed.">    for (String resourceName : getAllResources()) {</span>
+<span class="nc" id="L1985">      IdealState resourceIdealState = _helixAdmin.getResourceIdealState(_helixClusterName, resourceName);</span>
+<span class="nc bnc" id="L1986" title="All 2 branches missed.">      for (String partition : resourceIdealState.getPartitionSet()) {</span>
+<span class="nc bnc" id="L1987" title="All 2 branches missed.">        for (String instance : resourceIdealState.getInstanceSet(partition)) {</span>
+<span class="nc bnc" id="L1988" title="All 2 branches missed.">          if (instance.equals(instanceName)) {</span>
+<span class="nc" id="L1989">            return false;</span>
+          }
+<span class="nc" id="L1991">        }</span>
+<span class="nc" id="L1992">      }</span>
+<span class="nc" id="L1993">    }</span>
+<span class="nc" id="L1994">    return true;</span>
+  }
+
+  /**
+   * Drop the instance from helix cluster. Instance will not be dropped if:
+   *
+   * @param instanceName: Name of the instance to be dropped.
+   * @return
+   */
+  public PinotResourceManagerResponse dropInstance(final String instanceName) {
+    // Delete '/INSTANCES/&lt;server_name&gt;'
+    try {
+<span class="nc" id="L2006">      final String instancePath = &quot;/&quot; + _helixClusterName + &quot;/INSTANCES/&quot; + instanceName;</span>
+<span class="nc" id="L2007">      DEFAULT_RETRY_POLICY.attempt(new Callable&lt;Boolean&gt;() {</span>
+        @Override
+        public Boolean call()
+            throws Exception {
+<span class="nc" id="L2011">          return _helixDataAccessor.getBaseDataAccessor().remove(instancePath, AccessOption.PERSISTENT);</span>
+        }
+      });
+<span class="nc" id="L2014">    } catch (Exception e) {</span>
+<span class="nc" id="L2015">      return new PinotResourceManagerResponse(&quot;Failed to erase /INSTANCES/&quot; + instanceName, false);</span>
+<span class="nc" id="L2016">    }</span>
+
+    // Delete '/CONFIGS/PARTICIPANT/&lt;server_name&gt;'
+    try {
+<span class="nc" id="L2020">      DEFAULT_RETRY_POLICY.attempt(new Callable&lt;Boolean&gt;() {</span>
+        @Override
+        public Boolean call() throws Exception {
+<span class="nc" id="L2023">          PropertyKey instanceKey = _keyBuilder.instanceConfig(instanceName);</span>
+<span class="nc" id="L2024">          return _helixDataAccessor.removeProperty(instanceKey);</span>
+        }
+      });
+<span class="nc" id="L2027">    } catch (Exception e) {</span>
+<span class="nc" id="L2028">      return new PinotResourceManagerResponse(&quot;Failed to erase /CONFIGS/PARTICIPANT/&quot; + instanceName</span>
+          + &quot; Make sure to erase /CONFIGS/PARTICIPANT/&quot; + instanceName  + &quot; manually since /INSTANCES/&quot; + instanceName
+          + &quot; has already been removed.&quot;, false);
+<span class="nc" id="L2031">    }</span>
+
+<span class="nc" id="L2033">    return new PinotResourceManagerResponse(&quot;Instance &quot; + instanceName + &quot; dropped.&quot;, true);</span>
+  }
+
+  /**
+   * Toggle the status of an Instance between OFFLINE and ONLINE.
+   * Keeps checking until ideal-state is successfully updated or times out.
+   *
+   * @param instanceName: Name of Instance for which the status needs to be toggled.
+   * @param toggle: 'True' for ONLINE 'False' for OFFLINE.
+   * @param timeOutInSeconds: Time-out for setting ideal-state.
+   * @return
+   */
+  public PinotResourceManagerResponse toggleInstance(String instanceName, boolean toggle, int timeOutInSeconds) {
+<span class="pc bpc" id="L2046" title="1 of 2 branches missed.">    if (!instanceExists(instanceName)) {</span>
+<span class="nc" id="L2047">      return new PinotResourceManagerResponse(&quot;Instance &quot; + instanceName + &quot; does not exist.&quot;, false);</span>
+    }
+
+<span class="fc" id="L2050">    _helixAdmin.enableInstance(_helixClusterName, instanceName, toggle);</span>
+<span class="fc" id="L2051">    long deadline = System.currentTimeMillis() + 1000 * timeOutInSeconds;</span>
+<span class="fc" id="L2052">    boolean toggleSucceed = false;</span>
+<span class="fc bfc" id="L2053" title="All 2 branches covered.">    String beforeToggleStates =</span>
+        (toggle) ? SegmentOnlineOfflineStateModel.OFFLINE : SegmentOnlineOfflineStateModel.ONLINE;
+
+<span class="pc bpc" id="L2056" title="1 of 2 branches missed.">    while (System.currentTimeMillis() &lt; deadline) {</span>
+<span class="fc" id="L2057">      toggleSucceed = true;</span>
+<span class="fc" id="L2058">      PropertyKey liveInstanceKey = _keyBuilder.liveInstance(instanceName);</span>
+<span class="fc" id="L2059">      LiveInstance liveInstance = _helixDataAccessor.getProperty(liveInstanceKey);</span>
+<span class="pc bpc" id="L2060" title="1 of 2 branches missed.">      if (liveInstance == null) {</span>
+<span class="nc bnc" id="L2061" title="All 2 branches missed.">        if (toggle) {</span>
+<span class="nc" id="L2062">          return PinotResourceManagerResponse.FAILURE_RESPONSE;</span>
+        } else {
+<span class="nc" id="L2064">          return PinotResourceManagerResponse.SUCCESS_RESPONSE;</span>
+        }
+      }
+<span class="fc" id="L2067">      PropertyKey instanceCurrentStatesKey =</span>
+          _keyBuilder.currentStates(instanceName, liveInstance.getSessionId());
+<span class="fc" id="L2069">      List&lt;CurrentState&gt; instanceCurrentStates = _helixDataAccessor.getChildValues(instanceCurrentStatesKey);</span>
+<span class="pc bpc" id="L2070" title="1 of 2 branches missed.">      if (instanceCurrentStates == null) {</span>
+<span class="nc" id="L2071">        return PinotResourceManagerResponse.SUCCESS_RESPONSE;</span>
+      } else {
+<span class="fc bfc" id="L2073" title="All 2 branches covered.">        for (CurrentState currentState : instanceCurrentStates) {</span>
+<span class="fc bfc" id="L2074" title="All 2 branches covered.">          for (String state : currentState.getPartitionStateMap().values()) {</span>
+<span class="fc bfc" id="L2075" title="All 2 branches covered.">            if (beforeToggleStates.equals(state)) {</span>
+<span class="fc" id="L2076">              toggleSucceed = false;</span>
+            }
+<span class="fc" id="L2078">          }</span>
+<span class="fc" id="L2079">        }</span>
+      }
+<span class="fc bfc" id="L2081" title="All 2 branches covered.">      if (toggleSucceed) {</span>
+<span class="fc bfc" id="L2082" title="All 2 branches covered.">        return (toggle) ? new PinotResourceManagerResponse(&quot;Instance &quot; + instanceName + &quot; enabled.&quot;, true)</span>
+            : new PinotResourceManagerResponse(&quot;Instance &quot; + instanceName + &quot; disabled.&quot;, true);
+      } else {
+        try {
+<span class="fc" id="L2086">          Thread.sleep(500);</span>
+<span class="nc" id="L2087">        } catch (InterruptedException e) {</span>
+<span class="fc" id="L2088">        }</span>
+      }
+<span class="fc" id="L2090">    }</span>
+<span class="nc" id="L2091">    return new PinotResourceManagerResponse(&quot;Instance enable/disable failed, timeout.&quot;, false);</span>
+  }
+
+  @Nonnull
+  public ZNRecord rebalanceTable(final String rawTableName, boolean dryRun, TableType tableType) {
+<span class="nc" id="L2096">    TableConfig tableConfig = getTableConfig(rawTableName, tableType);</span>
+    int targetNumReplicas;
+<span class="nc bnc" id="L2098" title="All 2 branches missed.">    if (tableType == TableType.REALTIME) {</span>
+<span class="nc" id="L2099">      String replicasString = tableConfig.getValidationConfig().getReplicasPerPartition();</span>
+      try {
+<span class="nc" id="L2101">        targetNumReplicas = Integer.parseInt(replicasString);</span>
+<span class="nc" id="L2102">      } catch (Exception e) {</span>
+<span class="nc" id="L2103">        throw new RuntimeException(&quot;Invalid value for replicasPerPartition:'&quot; + replicasString + &quot;'&quot;, e);</span>
+<span class="nc" id="L2104">      }</span>
+<span class="nc" id="L2105">    } else {</span>
+<span class="nc" id="L2106">      targetNumReplicas = Integer.parseInt(tableConfig.getValidationConfig().getReplication());</span>
+    }
+<span class="nc" id="L2108">    final String tenantName = tableConfig.getTenantConfig().getServer();</span>
+<span class="nc" id="L2109">    final String tableNameWithType = TableNameBuilder.forType(tableType).tableNameWithType(rawTableName);</span>
+
+    IdealState newIdealState;
+<span class="nc bnc" id="L2112" title="All 2 branches missed.">    if (dryRun) {</span>
+<span class="nc" id="L2113">      IdealState idealState = _helixAdmin.getResourceIdealState(_helixClusterName, tableNameWithType);</span>
+<span class="nc" id="L2114">      newIdealState = getRebalancedIdealState(idealState, targetNumReplicas, tableNameWithType, tenantName);</span>
+<span class="nc" id="L2115">    } else {</span>
+<span class="nc" id="L2116">      newIdealState = rebalanceResource(targetNumReplicas, tableNameWithType, tenantName);</span>
+    }
+<span class="nc" id="L2118">    return newIdealState.getRecord();</span>
+  }
+
+  private IdealState rebalanceResource(final int targetNumReplicas, final String tableNameWithType, final String tenantName) {
+<span class="nc" id="L2122">    HelixHelper.updateIdealState(_helixZkManager, tableNameWithType, new Function&lt;IdealState, IdealState&gt;() {</span>
+      @Nullable
+      @Override
+      public IdealState apply(@Nullable IdealState idealState) {
+<span class="nc" id="L2126">        return getRebalancedIdealState(idealState, targetNumReplicas, tableNameWithType, tenantName);</span>
+      }
+    }, RetryPolicies.exponentialBackoffRetryPolicy(5, 1000, 2.0f));
+
+<span class="nc" id="L2130">    return  _helixAdmin.getResourceIdealState(_helixClusterName, tableNameWithType);</span>
+  }
+
+  private IdealState getRebalancedIdealState(IdealState idealState, final int targetNumReplicas, final String tableNameWithType, final String tenantName) {
+<span class="fc" id="L2134">    int numReplicasInIdealState = Integer.parseInt(idealState.getReplicas());</span>
+<span class="fc" id="L2135">    final TableType tableType = TableNameBuilder.getTableTypeFromTableName(tableNameWithType);</span>
+<span class="fc" id="L2136">    List&lt;Map.Entry&lt;String, Map&lt;String,String&gt;&gt;&gt; removedEntries = new LinkedList&lt;&gt;();</span>
+<span class="fc bfc" id="L2137" title="All 2 branches covered.">    if (numReplicasInIdealState &gt; targetNumReplicas) {</span>
+      // We need to reduce the number of replicas per helix partition.
+<span class="fc bfc" id="L2139" title="All 2 branches covered.">      for (String segmentId : idealState.getPartitionSet()) {</span>
+<span class="fc" id="L2140">        Map&lt;String, String&gt; instanceStateMap = idealState.getInstanceStateMap(segmentId);</span>
+<span class="pc bpc" id="L2141" title="1 of 2 branches missed.">        if (instanceStateMap.size() &gt; targetNumReplicas) {</span>
+<span class="fc" id="L2142">          Set&lt;String&gt; keys = instanceStateMap.keySet();</span>
+<span class="fc bfc" id="L2143" title="All 2 branches covered.">          while (instanceStateMap.size() &gt; targetNumReplicas) {</span>
+<span class="fc" id="L2144">            instanceStateMap.remove(keys.iterator().next());</span>
+          }
+<span class="pc bnc" id="L2146" title="All 2 branches missed.">        } else if (instanceStateMap.size() &lt; targetNumReplicas) {</span>
+<span class="nc" id="L2147">          LOGGER.warn(&quot;Table {}, segment {} has {} replicas, less than {} (requested number of replicas&quot;,</span>
+              idealState.getResourceName(), segmentId, instanceStateMap.size(), targetNumReplicas);
+        }
+<span class="fc" id="L2150">      }</span>
+    } else {
+<span class="fc" id="L2152">      final Map&lt;String, Map&lt;String, String&gt;&gt; mapFields = idealState.getRecord().getMapFields();</span>
+<span class="fc bfc" id="L2153" title="All 2 branches covered.">      if (tableType == TableType.REALTIME) {</span>
+<span class="fc" id="L2154">        removeSegmentsNotBalancable(mapFields, removedEntries);</span>
+      }
+
+      // Number of replicas is either the same or higher, so invoke Helix rebalancer.
+<span class="fc" id="L2158">      LinkedHashMap&lt;String, Integer&gt; states = new LinkedHashMap&lt;&gt;();</span>
+<span class="fc" id="L2159">      List&lt;String&gt; partitions = Lists.newArrayList(idealState.getPartitionSet());</span>
+<span class="fc" id="L2160">      states.put(&quot;OFFLINE&quot;, 0);</span>
+<span class="fc" id="L2161">      states.put(&quot;ONLINE&quot;, targetNumReplicas);</span>
+<span class="fc" id="L2162">      Set&lt;String&gt; currentHosts = new HashSet&lt;&gt;();</span>
+<span class="fc bfc" id="L2163" title="All 2 branches covered.">      for (String segment : mapFields.keySet()) {</span>
+<span class="fc" id="L2164">        currentHosts.addAll(mapFields.get(segment).keySet());</span>
+<span class="fc" id="L2165">      }</span>
+<span class="fc" id="L2166">      AutoRebalanceStrategy rebalanceStrategy = new AutoRebalanceStrategy(tableNameWithType, partitions, states);</span>
+
+<span class="fc" id="L2168">      String serverTenant = ControllerTenantNameBuilder.getTenantName(tenantName, tableType.getServerType());</span>
+<span class="fc" id="L2169">      List&lt;String&gt; instancesInClusterWithTag = _helixAdmin.getInstancesInClusterWithTag(_helixClusterName, serverTenant);</span>
+<span class="fc" id="L2170">      List&lt;String&gt; enabledInstancesWithTag =</span>
+          HelixHelper.getEnabledInstancesWithTag(_helixAdmin, _helixClusterName, serverTenant);
+<span class="fc" id="L2172">      LOGGER.info(&quot;Current nodes for table {}: {}&quot;, tableNameWithType, currentHosts);</span>
+<span class="fc" id="L2173">      LOGGER.info(&quot;New nodes for table {}: {}&quot;, tableNameWithType, instancesInClusterWithTag);</span>
+<span class="fc" id="L2174">      LOGGER.info(&quot;Enabled nodes for table: {}&quot;, tableNameWithType, enabledInstancesWithTag);</span>
+<span class="fc" id="L2175">      ZNRecord newZnRecord =</span>
+          rebalanceStrategy.computePartitionAssignment(instancesInClusterWithTag, enabledInstancesWithTag,
+              mapFields, new ClusterDataCache());
+<span class="fc" id="L2178">      final Map&lt;String, Map&lt;String, String&gt;&gt; newMapping = newZnRecord.getMapFields();</span>
+<span class="fc bfc" id="L2179" title="All 2 branches covered.">      for (Map.Entry&lt;String, Map&lt;String, String&gt;&gt; entry : newMapping.entrySet()) {</span>
+<span class="fc" id="L2180">        idealState.setInstanceStateMap(entry.getKey(), entry.getValue());</span>
+<span class="fc" id="L2181">      }</span>
+      // If we removed any entries, add them back here
+<span class="fc bfc" id="L2183" title="All 2 branches covered.">      for (Map.Entry&lt;String, Map&lt;String, String&gt;&gt; entry: removedEntries) {</span>
+<span class="fc" id="L2184">        idealState.setInstanceStateMap(entry.getKey(), entry.getValue());</span>
+<span class="fc" id="L2185">      }</span>
+    }
+<span class="fc" id="L2187">    idealState.setReplicas(Integer.toString(targetNumReplicas));</span>
+<span class="fc" id="L2188">    return idealState;</span>
+  }
+
+  // Keep only those segments that are LLC and in ONLINE state.
+  private void removeSegmentsNotBalancable(Map&lt;String, Map&lt;String, String&gt;&gt; mapFields, List&lt;Map.Entry&lt;String, Map&lt;String, String&gt;&gt;&gt; removedEntries) {
+    // Keep only those segments that are LLC and in ONLINE state.
+<span class="fc" id="L2194">    Iterator&lt;Map.Entry&lt;String, Map&lt;String, String&gt;&gt;&gt; it = mapFields.entrySet().iterator();</span>
+<span class="fc bfc" id="L2195" title="All 2 branches covered.">    while (it.hasNext()) {</span>
+<span class="fc" id="L2196">      Map.Entry&lt;String, Map&lt;String, String&gt;&gt; entry = it.next();</span>
+<span class="fc" id="L2197">      final String segmentName = entry.getKey();</span>
+<span class="fc" id="L2198">      boolean keep = false;</span>
+<span class="fc bfc" id="L2199" title="All 2 branches covered.">      if (SegmentName.isLowLevelConsumerSegmentName(segmentName)) {</span>
+        // Check the states. If any of the instances are ONLINE, then we keep the segment for rebalancing,
+        // Otherwise, we remove it, and add it back after helix re-balances the segments.
+<span class="fc" id="L2202">        Map&lt;String, String&gt; stateMap = entry.getValue();</span>
+<span class="fc bfc" id="L2203" title="All 2 branches covered.">        for (String state : stateMap.values()) {</span>
+<span class="fc bfc" id="L2204" title="All 2 branches covered.">          if (state.equals(SegmentOnlineOfflineStateModel.ONLINE)) {</span>
+<span class="fc" id="L2205">            keep = true;</span>
+<span class="fc" id="L2206">            break;</span>
+          }
+<span class="fc" id="L2208">        }</span>
+      }
+<span class="fc bfc" id="L2210" title="All 2 branches covered.">      if (!keep) {</span>
+<span class="fc" id="L2211">        removedEntries.add(entry);</span>
+<span class="fc" id="L2212">        it.remove();</span>
+      }
+<span class="fc" id="L2214">    }</span>
+<span class="pc bpc" id="L2215" title="1 of 2 branches missed.">    if (mapFields.isEmpty()) {</span>
+      // Nothing to do, let the user know via an exception (ideally a status, but...)
+<span class="nc" id="L2217">      throw new RuntimeException(&quot;No LLC partitions in ONLINE state in this table&quot;);</span>
+    }
+<span class="fc" id="L2219">  }</span>
+
+  /**
+   * Check if an Instance exists in the Helix cluster.
+   *
+   * @param instanceName: Name of instance to check.
+   * @return True if instance exists in the Helix cluster, False otherwise.
+   */
+  public boolean instanceExists(String instanceName) {
+<span class="fc" id="L2228">    HelixDataAccessor helixDataAccessor = _helixZkManager.getHelixDataAccessor();</span>
+<span class="fc" id="L2229">    InstanceConfig config = helixDataAccessor.getProperty(_keyBuilder.instanceConfig(instanceName));</span>
+<span class="fc bfc" id="L2230" title="All 2 branches covered.">    return (config != null);</span>
+  }
+
+  public boolean isSingleTenantCluster() {
+<span class="fc" id="L2234">    return _isSingleTenantCluster;</span>
+  }
+
+  /**
+   * Computes the broker nodes that are untagged and free to be used.
+   * @return List of online untagged broker instances.
+   */
+  public List&lt;String&gt; getOnlineUnTaggedBrokerInstanceList() {
+
+<span class="fc" id="L2243">    final List&lt;String&gt; instanceList =</span>
+            _helixAdmin.getInstancesInClusterWithTag(_helixClusterName, CommonConstants.Helix.UNTAGGED_BROKER_INSTANCE);
+<span class="fc" id="L2245">    final List&lt;String&gt; liveInstances = _helixDataAccessor.getChildNames(_keyBuilder.liveInstances());</span>
+<span class="fc" id="L2246">    instanceList.retainAll(liveInstances);</span>
+<span class="fc" id="L2247">    return instanceList;</span>
+  }
+
+  /**
+   * Computes the server nodes that are untagged and free to be used.
+   * @return List of untagged online server instances.
+   */
+  public List&lt;String&gt; getOnlineUnTaggedServerInstanceList() {
+<span class="fc" id="L2255">    final List&lt;String&gt; instanceList =</span>
+            _helixAdmin.getInstancesInClusterWithTag(_helixClusterName, CommonConstants.Helix.UNTAGGED_SERVER_INSTANCE);
+<span class="fc" id="L2257">    final List&lt;String&gt; liveInstances = _helixDataAccessor.getChildNames(_keyBuilder.liveInstances());</span>
+<span class="fc" id="L2258">    instanceList.retainAll(liveInstances);</span>
+<span class="fc" id="L2259">    return instanceList;</span>
+  }
+
+  public List&lt;String&gt; getOnlineInstanceList() {
+<span class="nc" id="L2263">    return _helixDataAccessor.getChildNames(_keyBuilder.liveInstances());</span>
+  }
+
+  /**
+   * Provides admin endpoints for the provided data instances
+   * @param instances instances for which to read endpoints
+   * @return returns map of instances to their admin endpoints.
+   * The return value is a bimap because admin instances are typically used for
+   * http requests. So, on response, we need mapping from the endpoint to the
+   * server instances. With BiMap, both mappings are easily available
+   */
+  public @Nonnull
+  BiMap&lt;String, String&gt; getDataInstanceAdminEndpoints(@Nonnull Set&lt;String&gt; instances) {
+<span class="fc" id="L2276">    Preconditions.checkNotNull(instances);</span>
+<span class="fc" id="L2277">    BiMap&lt;String, String&gt; endpointToInstance = HashBiMap.create(instances.size());</span>
+<span class="fc bfc" id="L2278" title="All 2 branches covered.">    for (String instance : instances) {</span>
+<span class="fc" id="L2279">      InstanceConfig helixInstanceConfig = getHelixInstanceConfig(instance);</span>
+<span class="fc" id="L2280">      ZNRecord record = helixInstanceConfig.getRecord();</span>
+<span class="fc" id="L2281">      String[] hostnameSplit = helixInstanceConfig.getHostName().split(&quot;_&quot;);</span>
+<span class="pc bpc" id="L2282" title="1 of 2 branches missed.">      Preconditions.checkState(hostnameSplit.length &gt;= 2);</span>
+<span class="fc" id="L2283">      String port = record.getSimpleField(CommonConstants.Helix.Instance.ADMIN_PORT_KEY);</span>
+<span class="fc" id="L2284">      endpointToInstance.put(instance, hostnameSplit[1] + &quot;:&quot; + port);</span>
+<span class="fc" id="L2285">    }</span>
+<span class="fc" id="L2286">    return endpointToInstance;</span>
+  }
+
+  /*
+   * Uncomment and use for testing on a real cluster
+
+  public static void main(String[] args) throws Exception {
+    final String testZk = &quot;test1.zk.com:12345/pinot-cluster&quot;;
+    final String realZk = &quot;test2.zk.com:12345/pinot-cluster&quot;;
+    final String zkURL = realZk;
+    final String clusterName = &quot;mpSprintDemoCluster&quot;;
+    final String helixClusterName = clusterName;
+    final String controllerInstanceId = &quot;local-hostname&quot;;
+    final String localDiskDir = &quot;/var/tmp/Controller&quot;;
+    final long externalViewOnlineToOfflineTimeoutMillis = 100L;
+    final boolean isSingleTenantCluster = false;
+    final boolean isUpdateStateModel = false;
+    MetricsRegistry metricsRegistry = new MetricsRegistry();
+    final boolean dryRun = true;
+    final String tableName = &quot;testTable&quot;;
+    final TableType tableType = TableType.OFFLINE;
+
+    PinotHelixResourceManager helixResourceManager =
+        new PinotHelixResourceManager(zkURL, helixClusterName, controllerInstanceId, localDiskDir,
+            externalViewOnlineToOfflineTimeoutMillis, isSingleTenantCluster, isUpdateStateModel);
+    helixResourceManager.start();
+    ZNRecord record = helixResourceManager.rebalanceTable(tableName, dryRun, tableType);
+    ObjectMapper mapper = new ObjectMapper();
+    System.out.println(mapper.writerWithDefaultPrettyPrinter().writeValueAsString(record));
+  }
+   */
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

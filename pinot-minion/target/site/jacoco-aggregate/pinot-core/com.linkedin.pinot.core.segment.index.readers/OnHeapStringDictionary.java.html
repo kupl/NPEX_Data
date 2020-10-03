@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>OnHeapStringDictionary.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-minion</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.segment.index.readers</a> &gt; <span class="el_source">OnHeapStringDictionary.java</span></div><h1>OnHeapStringDictionary.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.segment.index.readers;
+
+import com.linkedin.pinot.core.segment.memory.PinotDataBuffer;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
+
+
+/**
+ * Implementation of String dictionary that cache all values on-heap.
+ * &lt;p&gt;This is useful for String columns that:
+ * &lt;ul&gt;
+ *   &lt;li&gt;Has low cardinality string dictionary where memory footprint on-heap is acceptably small&lt;/li&gt;
+ *   &lt;li&gt;Is heavily queried&lt;/li&gt;
+ * &lt;/ul&gt;
+ * &lt;p&gt;This helps avoid creation of String from byte[], which is expensive as well as creates garbage.
+ */
+public class OnHeapStringDictionary extends OnHeapDictionary {
+  private final byte _paddingByte;
+  private final String[] _unpaddedStrings;
+  private final String[] _paddedStrings;
+  private final Map&lt;String, Integer&gt; _paddedStringToIdMap;
+  private final Map&lt;String, Integer&gt; _unPaddedStringToIdMap;
+
+  public OnHeapStringDictionary(PinotDataBuffer dataBuffer, int length, int numBytesPerValue, byte paddingByte) {
+<span class="fc" id="L41">    super(dataBuffer, length, numBytesPerValue, paddingByte);</span>
+
+<span class="fc" id="L43">    _paddingByte = paddingByte;</span>
+<span class="fc" id="L44">    byte[] buffer = new byte[numBytesPerValue];</span>
+<span class="fc" id="L45">    _unpaddedStrings = new String[length];</span>
+<span class="fc" id="L46">    _unPaddedStringToIdMap = new HashMap&lt;&gt;(length);</span>
+
+<span class="fc bfc" id="L48" title="All 2 branches covered.">    for (int i = 0; i &lt; length; i++) {</span>
+<span class="fc" id="L49">      _unpaddedStrings[i] = getUnpaddedString(i, buffer);</span>
+<span class="fc" id="L50">      _unPaddedStringToIdMap.put(_unpaddedStrings[i], i);</span>
+    }
+
+<span class="pc bpc" id="L53" title="1 of 2 branches missed.">    if (paddingByte == 0) {</span>
+<span class="fc" id="L54">      _paddedStrings = null;</span>
+<span class="fc" id="L55">      _paddedStringToIdMap = null;</span>
+    } else {
+<span class="nc" id="L57">      _paddedStrings = new String[length];</span>
+<span class="nc" id="L58">      _paddedStringToIdMap = new HashMap&lt;&gt;(length);</span>
+
+<span class="nc bnc" id="L60" title="All 2 branches missed.">      for (int i = 0; i &lt; length; i++) {</span>
+<span class="nc" id="L61">        _paddedStrings[i] = getPaddedString(i, buffer);</span>
+<span class="nc" id="L62">        _paddedStringToIdMap.put(_paddedStrings[i], i);</span>
+      }
+    }
+<span class="fc" id="L65">  }</span>
+
+  @Override
+  public int indexOf(Object rawValue) {
+<span class="pc bpc" id="L69" title="1 of 2 branches missed.">    Map&lt;String, Integer&gt; stringToIdMap = (_paddingByte == 0) ? _unPaddedStringToIdMap : _paddedStringToIdMap;</span>
+<span class="fc" id="L70">    Integer index = stringToIdMap.get(rawValue);</span>
+<span class="pc bpc" id="L71" title="1 of 2 branches missed.">    return (index != null) ? index : -1;</span>
+  }
+
+  @Override
+  public int insertionIndexOf(Object rawValue) {
+<span class="pc bpc" id="L76" title="1 of 2 branches missed.">    if (_paddingByte == 0) {</span>
+<span class="fc" id="L77">      Integer id = _unPaddedStringToIdMap.get(rawValue);</span>
+<span class="fc bfc" id="L78" title="All 2 branches covered.">      return (id != null) ? id : Arrays.binarySearch(_unpaddedStrings, rawValue);</span>
+    } else {
+<span class="nc" id="L80">      String paddedValue = addPadding((String) rawValue);</span>
+<span class="nc" id="L81">      return Arrays.binarySearch(_paddedStrings, paddedValue);</span>
+    }
+  }
+
+  @Override
+  public String get(int dictId) {
+<span class="fc" id="L87">    return _unpaddedStrings[dictId];</span>
+  }
+
+  @Override
+  public String getStringValue(int dictId) {
+<span class="fc" id="L92">    return _unpaddedStrings[dictId];</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

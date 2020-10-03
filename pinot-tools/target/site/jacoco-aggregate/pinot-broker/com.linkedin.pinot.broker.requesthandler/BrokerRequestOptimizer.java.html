@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>BrokerRequestOptimizer.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-tools</a> &gt; <a href="../index.html" class="el_bundle">pinot-broker</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.broker.requesthandler</a> &gt; <span class="el_source">BrokerRequestOptimizer.java</span></div><h1>BrokerRequestOptimizer.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.broker.requesthandler;
+
+import com.linkedin.pinot.common.request.BrokerRequest;
+import com.linkedin.pinot.common.request.FilterQuery;
+import com.linkedin.pinot.common.utils.request.FilterQueryTree;
+import com.linkedin.pinot.common.utils.request.RequestUtils;
+import java.util.Arrays;
+import java.util.List;
+
+
+<span class="fc" id="L26">public class BrokerRequestOptimizer {</span>
+<span class="fc" id="L27">  private static final List&lt;? extends FilterQueryTreeOptimizer&gt; FILTER_QUERY_TREE_OPTIMIZERS = Arrays.asList(</span>
+      new FlattenNestedPredicatesFilterQueryTreeOptimizer(),
+      new MultipleOrEqualitiesToInClauseFilterQueryTreeOptimizer(),
+      new RangeMergeOptimizer()
+  );
+
+  /**
+   * Optimizes the given broker request.
+   *
+   * @param brokerRequest BrokerRequest that is to be optimized
+   * @param timeColumn Time column for the table
+   * @return An optimized request
+   */
+  public BrokerRequest optimize(BrokerRequest brokerRequest, String timeColumn) {
+<span class="fc" id="L41">    OptimizationFlags optimizationFlags = OptimizationFlags.getOptimizationFlags(brokerRequest);</span>
+<span class="fc" id="L42">    optimizeFilterQueryTree(brokerRequest, timeColumn, optimizationFlags);</span>
+
+<span class="fc" id="L44">    return brokerRequest;</span>
+  }
+
+  /**
+   * Optimizes the filter query tree of a broker request in place.
+   * @param brokerRequest The broker request to optimize
+   * @param timeColumn time column
+   */
+  private void optimizeFilterQueryTree(BrokerRequest brokerRequest, String timeColumn,
+      OptimizationFlags optimizationFlags) {
+<span class="fc" id="L54">    FilterQueryTree filterQueryTree = null;</span>
+<span class="fc" id="L55">    FilterQuery q = brokerRequest.getFilterQuery();</span>
+
+<span class="pc bpc" id="L57" title="2 of 4 branches missed.">    if (q == null || brokerRequest.getFilterSubQueryMap() == null) {</span>
+<span class="nc" id="L58">      return;</span>
+    }
+
+<span class="fc" id="L61">    filterQueryTree = RequestUtils.buildFilterQuery(q.getId(), brokerRequest.getFilterSubQueryMap().getFilterQueryMap());</span>
+<span class="fc" id="L62">    FilterQueryOptimizerRequest.FilterQueryOptimizerRequestBuilder builder =</span>
+        new FilterQueryOptimizerRequest.FilterQueryOptimizerRequestBuilder();
+
+<span class="fc" id="L65">    FilterQueryOptimizerRequest request = builder.setFilterQueryTree(filterQueryTree).setTimeColumn(timeColumn).build();</span>
+<span class="pc bpc" id="L66" title="1 of 2 branches missed.">    if (optimizationFlags == null) {</span>
+<span class="fc bfc" id="L67" title="All 2 branches covered.">      for (FilterQueryTreeOptimizer filterQueryTreeOptimizer : FILTER_QUERY_TREE_OPTIMIZERS) {</span>
+<span class="fc" id="L68">        filterQueryTree = filterQueryTreeOptimizer.optimize(request);</span>
+<span class="fc" id="L69">        request.setFilterQueryTree(filterQueryTree); // Optimizers may return a new tree instead of in-place optimization</span>
+<span class="fc" id="L70">      }</span>
+    } else {
+<span class="nc bnc" id="L72" title="All 2 branches missed.">      if (optimizationFlags.isOptimizationEnabled(&quot;filterQueryTree&quot;)) {</span>
+<span class="nc bnc" id="L73" title="All 2 branches missed.">        for (FilterQueryTreeOptimizer filterQueryTreeOptimizer : FILTER_QUERY_TREE_OPTIMIZERS) {</span>
+<span class="nc bnc" id="L74" title="All 2 branches missed.">          if (optimizationFlags.isOptimizationEnabled(filterQueryTreeOptimizer.getOptimizationName())) {</span>
+<span class="nc" id="L75">            filterQueryTree = filterQueryTreeOptimizer.optimize(request);</span>
+<span class="nc" id="L76">            request.setFilterQueryTree(filterQueryTree); // Optimizers may return a new tree instead of in-place optimization</span>
+          }
+<span class="nc" id="L78">        }</span>
+      }
+    }
+
+<span class="fc" id="L82">    RequestUtils.generateFilterFromTree(filterQueryTree, brokerRequest);</span>
+<span class="fc" id="L83">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

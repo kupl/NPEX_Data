@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>MultipleOrEqualitiesToInClauseFilterQueryTreeOptimizer.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-perf</a> &gt; <a href="../index.html" class="el_bundle">pinot-broker</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.broker.requesthandler</a> &gt; <span class="el_source">MultipleOrEqualitiesToInClauseFilterQueryTreeOptimizer.java</span></div><h1>MultipleOrEqualitiesToInClauseFilterQueryTreeOptimizer.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.broker.requesthandler;
+
+import com.google.common.base.Splitter;
+import com.linkedin.pinot.common.request.FilterOperator;
+import com.linkedin.pinot.common.utils.StringUtil;
+import com.linkedin.pinot.common.utils.request.FilterQueryTree;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
+
+
+/**
+ * Optimizer that collapses multiple OR clauses to IN clauses. For example, &lt;code&gt;a = 1 OR a = 2 OR a =
+ * 3&lt;/code&gt; gets turned to &lt;code&gt;a IN (1, 2, 3)&lt;/code&gt;.
+ */
+<span class="fc" id="L37">public class MultipleOrEqualitiesToInClauseFilterQueryTreeOptimizer extends FilterQueryTreeOptimizer {</span>
+  @Override
+  public FilterQueryTree optimize(FilterQueryOptimizerRequest request) {
+<span class="fc" id="L40">    return optimize(request.getFilterQueryTree(), null);</span>
+  }
+
+  private FilterQueryTree optimize(FilterQueryTree filterQueryTree, FilterQueryTree parent) {
+<span class="fc bfc" id="L44" title="All 2 branches covered.">    if (filterQueryTree.getOperator() == FilterOperator.OR) {</span>
+<span class="fc" id="L45">      Map&lt;String, Set&lt;String&gt;&gt; columnToValues = new HashMap&lt;&gt;();</span>
+<span class="fc" id="L46">      List&lt;FilterQueryTree&gt; nonEqualityOperators = new ArrayList&lt;&gt;();</span>
+
+      // Collect all equality/in values and non-equality operators
+<span class="fc" id="L49">      boolean containsDuplicates = collectChildOperators(filterQueryTree, columnToValues, nonEqualityOperators);</span>
+
+      // If we have at least one column to return
+<span class="fc bfc" id="L52" title="All 2 branches covered.">      if (!columnToValues.isEmpty()) {</span>
+        // We can eliminate the OR node if there is only one column with multiple values
+<span class="fc bfc" id="L54" title="All 4 branches covered.">        if (columnToValues.size() == 1 &amp;&amp; nonEqualityOperators.isEmpty()) {</span>
+<span class="fc" id="L55">          Map.Entry&lt;String, Set&lt;String&gt;&gt; columnAndValues = columnToValues.entrySet().iterator().next();</span>
+
+<span class="fc" id="L57">          return buildFilterQueryTreeForColumnAndValues(columnAndValues);</span>
+        }
+
+        // Check if we need to rebuild the predicate
+<span class="fc" id="L61">        boolean rebuildRequired = isRebuildRequired(columnToValues, containsDuplicates);</span>
+
+<span class="fc bfc" id="L63" title="All 2 branches covered.">        if (!rebuildRequired) {</span>
+          // No mutation needed, so just return the same tree
+<span class="fc" id="L65">          return filterQueryTree;</span>
+        } else {
+          // Rebuild the predicates
+<span class="fc" id="L68">          return rebuildFilterPredicate(columnToValues, nonEqualityOperators);</span>
+        }
+      }
+<span class="fc bfc" id="L71" title="All 2 branches covered.">    } else if (filterQueryTree.getChildren() != null){</span>
+      // Optimize the child nodes, if any
+<span class="fc" id="L73">      applyOptimizationToChildNodes(filterQueryTree);</span>
+    }
+
+<span class="fc" id="L76">    return filterQueryTree;</span>
+  }
+
+  private void applyOptimizationToChildNodes(FilterQueryTree filterQueryTree) {
+<span class="fc" id="L80">    Iterator&lt;FilterQueryTree&gt; childTreeIterator = filterQueryTree.getChildren().iterator();</span>
+<span class="fc" id="L81">    List&lt;FilterQueryTree&gt; childrenToAdd = null;</span>
+
+<span class="fc bfc" id="L83" title="All 2 branches covered.">    while (childTreeIterator.hasNext()) {</span>
+<span class="fc" id="L84">      FilterQueryTree childQueryTree = childTreeIterator.next();</span>
+<span class="fc" id="L85">      FilterQueryTree optimizedChildQueryTree = optimize(childQueryTree, filterQueryTree);</span>
+<span class="fc bfc" id="L86" title="All 2 branches covered.">      if (childQueryTree != optimizedChildQueryTree) {</span>
+<span class="fc" id="L87">        childTreeIterator.remove();</span>
+<span class="pc bpc" id="L88" title="1 of 2 branches missed.">        if (childrenToAdd == null) {</span>
+<span class="fc" id="L89">          childrenToAdd = new ArrayList&lt;&gt;();</span>
+        }
+<span class="fc" id="L91">        childrenToAdd.add(optimizedChildQueryTree);</span>
+      }
+<span class="fc" id="L93">    }</span>
+
+<span class="fc bfc" id="L95" title="All 2 branches covered.">    if (childrenToAdd != null) {</span>
+<span class="fc" id="L96">      filterQueryTree.getChildren().addAll(childrenToAdd);</span>
+    }
+<span class="fc" id="L98">  }</span>
+
+  private boolean collectChildOperators(FilterQueryTree filterQueryTree, Map&lt;String, Set&lt;String&gt;&gt; columnToValues,
+      List&lt;FilterQueryTree&gt; nonEqualityOperators) {
+<span class="fc" id="L102">    boolean containsDuplicates = false;</span>
+
+<span class="fc bfc" id="L104" title="All 2 branches covered.">    for (FilterQueryTree childQueryTree : filterQueryTree.getChildren()) {</span>
+<span class="fc bfc" id="L105" title="All 4 branches covered.">      if (childQueryTree.getOperator() == FilterOperator.EQUALITY || childQueryTree.getOperator() == FilterOperator.IN) {</span>
+<span class="fc" id="L106">        List&lt;String&gt; childValues = valueDoubleTabListToElements(childQueryTree.getValue());</span>
+
+<span class="fc bfc" id="L108" title="All 2 branches covered.">        if (!columnToValues.containsKey(childQueryTree.getColumn())) {</span>
+<span class="fc" id="L109">          TreeSet&lt;String&gt; value = new TreeSet&lt;&gt;(childValues);</span>
+<span class="fc" id="L110">          columnToValues.put(childQueryTree.getColumn(), value);</span>
+<span class="pc bpc" id="L111" title="2 of 4 branches missed.">          if (!containsDuplicates &amp;&amp; value.size() != childValues.size()) {</span>
+<span class="nc" id="L112">            containsDuplicates = true;</span>
+          }
+<span class="fc" id="L114">        } else {</span>
+<span class="fc" id="L115">           Set&lt;String&gt; currentValues = columnToValues.get(childQueryTree.getColumn());</span>
+<span class="fc bfc" id="L116" title="All 2 branches covered.">          for (String childValue : childValues) {</span>
+<span class="pc bpc" id="L117" title="1 of 4 branches missed.">            if (!containsDuplicates &amp;&amp; currentValues.contains(childValue)) {</span>
+<span class="fc" id="L118">              containsDuplicates = true;</span>
+            } else {
+<span class="fc" id="L120">              currentValues.add(childValue);</span>
+            }
+<span class="fc" id="L122">          }</span>
+        }
+<span class="fc" id="L124">      } else {</span>
+<span class="fc" id="L125">        nonEqualityOperators.add(childQueryTree);</span>
+      }
+<span class="fc" id="L127">    }</span>
+
+<span class="fc" id="L129">    return containsDuplicates;</span>
+  }
+
+  private boolean isRebuildRequired(Map&lt;String, Set&lt;String&gt;&gt; columnToValues, boolean containsDuplicates) {
+    // We need to rebuild the predicate if there were duplicate values detected (eg. a = 1 OR a = 1) or if there is
+    // more than one value for a column (eg. a = 1 OR a = 2)
+<span class="fc" id="L135">    boolean rebuildRequired = containsDuplicates;</span>
+
+<span class="pc bpc" id="L137" title="1 of 2 branches missed.">    if (!rebuildRequired) {</span>
+<span class="fc bfc" id="L138" title="All 2 branches covered.">      for (Set&lt;String&gt; columnValues : columnToValues.values()) {</span>
+<span class="fc bfc" id="L139" title="All 2 branches covered.">        if (1 &lt; columnValues.size()) {</span>
+<span class="fc" id="L140">          rebuildRequired = true;</span>
+<span class="fc" id="L141">          break;</span>
+        }
+<span class="fc" id="L143">      }</span>
+    }
+<span class="fc" id="L145">    return rebuildRequired;</span>
+  }
+
+  private FilterQueryTree rebuildFilterPredicate(Map&lt;String, Set&lt;String&gt;&gt; columnToValues,
+      List&lt;FilterQueryTree&gt; nonEqualityOperators) {
+<span class="fc" id="L150">    ArrayList&lt;FilterQueryTree&gt; newChildren = new ArrayList&lt;&gt;();</span>
+<span class="fc bfc" id="L151" title="All 2 branches covered.">    for (Map.Entry&lt;String, Set&lt;String&gt;&gt; columnAndValues : columnToValues.entrySet()) {</span>
+<span class="fc" id="L152">      newChildren.add(buildFilterQueryTreeForColumnAndValues(columnAndValues));</span>
+<span class="fc" id="L153">    }</span>
+<span class="fc" id="L154">    newChildren.addAll(nonEqualityOperators);</span>
+<span class="fc" id="L155">    return new FilterQueryTree(null, null, FilterOperator.OR, newChildren);</span>
+  }
+
+  private FilterQueryTree buildFilterQueryTreeForColumnAndValues(Map.Entry&lt;String, Set&lt;String&gt;&gt; columnAndValues) {
+    // If there's only one value, turn it into an equality, otherwise turn it into an IN clause
+<span class="fc bfc" id="L160" title="All 2 branches covered.">    if (columnAndValues.getValue().size() == 1) {</span>
+<span class="fc" id="L161">      return new FilterQueryTree(columnAndValues.getKey(),</span>
+          elementListToDoubleTabSingletonList(columnAndValues.getValue()), FilterOperator.EQUALITY, null);
+    } else {
+<span class="fc" id="L164">      return new FilterQueryTree(columnAndValues.getKey(),</span>
+          elementListToDoubleTabSingletonList(columnAndValues.getValue()), FilterOperator.IN, null);
+    }
+  }
+
+  private List&lt;String&gt; elementListToDoubleTabSingletonList(Collection&lt;String&gt; elementList) {
+<span class="fc" id="L170">    return Collections.singletonList(StringUtil.join(&quot;\t\t&quot;, elementList.toArray(new String[elementList.size()])));</span>
+  }
+
+  private List&lt;String&gt; valueDoubleTabListToElements(List&lt;String&gt; doubleTabSeparatedElements) {
+<span class="fc" id="L174">    Splitter valueSplitter = Splitter.on(&quot;\t\t&quot;);</span>
+<span class="fc" id="L175">    List&lt;String&gt; valueElements = new ArrayList&lt;&gt;();</span>
+
+<span class="fc bfc" id="L177" title="All 2 branches covered.">    for (String value : doubleTabSeparatedElements) {</span>
+<span class="fc" id="L178">      valueElements.addAll(valueSplitter.splitToList(value));</span>
+<span class="fc" id="L179">    }</span>
+
+<span class="fc" id="L181">    return valueElements;</span>
+  }
+
+  private List&lt;String&gt; valueDoubleTabListToElements(String doubleTabSeparatedElements) {
+<span class="nc" id="L185">    Splitter valueSplitter = Splitter.on(&quot;\t\t&quot;);</span>
+<span class="nc" id="L186">    return valueSplitter.splitToList(doubleTabSeparatedElements);</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

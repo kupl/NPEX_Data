@@ -1,0 +1,375 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>ZKMetadataProvider.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-perf</a> &gt; <a href="../index.html" class="el_bundle">pinot-common</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.common.metadata</a> &gt; <span class="el_source">ZKMetadataProvider.java</span></div><h1>ZKMetadataProvider.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.common.metadata;
+
+import com.linkedin.pinot.common.config.TableConfig;
+import com.linkedin.pinot.common.config.TableNameBuilder;
+import com.linkedin.pinot.common.data.Schema;
+import com.linkedin.pinot.common.metadata.instance.InstanceZKMetadata;
+import com.linkedin.pinot.common.metadata.segment.LLCRealtimeSegmentZKMetadata;
+import com.linkedin.pinot.common.metadata.segment.OfflineSegmentZKMetadata;
+import com.linkedin.pinot.common.metadata.segment.PartitionToReplicaGroupMappingZKMetadata;
+import com.linkedin.pinot.common.metadata.segment.RealtimeSegmentZKMetadata;
+import com.linkedin.pinot.common.utils.CommonConstants;
+import com.linkedin.pinot.common.utils.SchemaUtils;
+import com.linkedin.pinot.common.utils.SegmentName;
+import com.linkedin.pinot.common.utils.StringUtil;
+import java.util.ArrayList;
+import java.util.List;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+import org.I0Itec.zkclient.exception.ZkBadVersionException;
+import org.apache.helix.AccessOption;
+import org.apache.helix.ZNRecord;
+import org.apache.helix.store.zk.ZkHelixPropertyStore;
+import org.apache.zookeeper.data.Stat;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+public class ZKMetadataProvider {
+<span class="nc" id="L44">  private ZKMetadataProvider() {</span>
+<span class="nc" id="L45">  }</span>
+
+<span class="fc" id="L47">  private static final Logger LOGGER = LoggerFactory.getLogger(ZKMetadataProvider.class);</span>
+  private static final String CLUSTER_TENANT_ISOLATION_ENABLED_KEY = &quot;tenantIsolationEnabled&quot;;
+  private static final String PROPERTYSTORE_SEGMENTS_PREFIX = &quot;/SEGMENTS&quot;;
+  private static final String PROPERTYSTORE_SCHEMAS_PREFIX = &quot;/SCHEMAS&quot;;
+  private static final String PROPERTYSTORE_KAFKA_PARTITIONS_PREFIX = &quot;/KAFKA_PARTITIONS&quot;;
+  private static final String PROPERTYSTORE_INSTANCE_PARTITIONS_PREFIX = &quot;/INSTANCE_PARTITIONS&quot;;
+  private static final String PROPERTYSTORE_TABLE_CONFIGS_PREFIX = &quot;/CONFIGS/TABLE&quot;;
+  private static final String PROPERTYSTORE_INSTANCE_CONFIGS_PREFIX = &quot;/CONFIGS/INSTANCE&quot;;
+  private static final String PROPERTYSTORE_CLUSTER_CONFIGS_PREFIX = &quot;/CONFIGS/CLUSTER&quot;;
+
+  public static void setRealtimeTableConfig(ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore, String realtimeTableName, ZNRecord znRecord) {
+<span class="fc" id="L58">    propertyStore.set(constructPropertyStorePathForResourceConfig(realtimeTableName), znRecord, AccessOption.PERSISTENT);</span>
+<span class="fc" id="L59">  }</span>
+
+  public static void setOfflineTableConfig(ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore, String offlineTableName, ZNRecord znRecord) {
+<span class="fc" id="L62">    propertyStore.set(constructPropertyStorePathForResourceConfig(offlineTableName), znRecord, AccessOption.PERSISTENT);</span>
+<span class="fc" id="L63">  }</span>
+
+  public static void setInstanceZKMetadata(ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore, InstanceZKMetadata instanceZKMetadata) {
+<span class="fc" id="L66">    ZNRecord znRecord = instanceZKMetadata.toZNRecord();</span>
+<span class="fc" id="L67">    propertyStore.set(StringUtil.join(&quot;/&quot;, PROPERTYSTORE_INSTANCE_CONFIGS_PREFIX, instanceZKMetadata.getId()), znRecord, AccessOption.PERSISTENT);</span>
+<span class="fc" id="L68">  }</span>
+
+  public static InstanceZKMetadata getInstanceZKMetadata(ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore, String instanceId) {
+<span class="fc" id="L71">    ZNRecord znRecord = propertyStore.get(StringUtil.join(&quot;/&quot;, PROPERTYSTORE_INSTANCE_CONFIGS_PREFIX, instanceId), null,</span>
+        AccessOption.PERSISTENT);
+<span class="fc bfc" id="L73" title="All 2 branches covered.">    if (znRecord == null) {</span>
+<span class="fc" id="L74">      return null;</span>
+    }
+<span class="fc" id="L76">    return new InstanceZKMetadata(znRecord);</span>
+  }
+
+  public static String constructPropertyStorePathForSegment(String resourceName, String segmentName) {
+<span class="fc" id="L80">    return StringUtil.join(&quot;/&quot;, PROPERTYSTORE_SEGMENTS_PREFIX, resourceName, segmentName);</span>
+  }
+
+  public static String constructPropertyStorePathForSchema(String schemaName) {
+<span class="fc" id="L84">    return StringUtil.join(&quot;/&quot;, PROPERTYSTORE_SCHEMAS_PREFIX, schemaName);</span>
+  }
+
+  public static String constructPropertyStorePathForKafkaPartitions(String realtimeTableName) {
+<span class="fc" id="L88">    return StringUtil.join(&quot;/&quot;, PROPERTYSTORE_KAFKA_PARTITIONS_PREFIX, realtimeTableName);</span>
+  }
+
+  public static String constructPropertyStorePathForInstancePartitions(String offlineTableName) {
+<span class="fc" id="L92">    return StringUtil.join(&quot;/&quot;, PROPERTYSTORE_INSTANCE_PARTITIONS_PREFIX, offlineTableName);</span>
+  }
+
+  public static String constructPropertyStorePathForResource(String resourceName) {
+<span class="fc" id="L96">    return StringUtil.join(&quot;/&quot;, PROPERTYSTORE_SEGMENTS_PREFIX, resourceName);</span>
+  }
+
+  public static String constructPropertyStorePathForResourceConfig(String resourceName) {
+<span class="fc" id="L100">    return StringUtil.join(&quot;/&quot;, PROPERTYSTORE_TABLE_CONFIGS_PREFIX, resourceName);</span>
+  }
+
+  public static String constructPropertyStorePathForControllerConfig(String controllerConfigKey) {
+<span class="fc" id="L104">    return StringUtil.join(&quot;/&quot;, PROPERTYSTORE_CLUSTER_CONFIGS_PREFIX, controllerConfigKey);</span>
+  }
+
+  public static boolean isSegmentExisted(ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore, String resourceNameForResource, String segmentName) {
+<span class="nc" id="L108">    return propertyStore.exists(constructPropertyStorePathForSegment(resourceNameForResource, segmentName),</span>
+        AccessOption.PERSISTENT);
+  }
+
+  public static void removeResourceSegmentsFromPropertyStore(ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore, String resourceName) {
+<span class="fc" id="L113">    String propertyStorePath = constructPropertyStorePathForResource(resourceName);</span>
+<span class="fc bfc" id="L114" title="All 2 branches covered.">    if (propertyStore.exists(propertyStorePath, AccessOption.PERSISTENT)) {</span>
+<span class="fc" id="L115">      propertyStore.remove(propertyStorePath, AccessOption.PERSISTENT);</span>
+    }
+<span class="fc" id="L117">  }</span>
+
+  public static void removeResourceConfigFromPropertyStore(ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore, String resourceName) {
+<span class="fc" id="L120">    String propertyStorePath = constructPropertyStorePathForResourceConfig(resourceName);</span>
+<span class="fc bfc" id="L121" title="All 2 branches covered.">    if (propertyStore.exists(propertyStorePath, AccessOption.PERSISTENT)) {</span>
+<span class="fc" id="L122">      propertyStore.remove(propertyStorePath, AccessOption.PERSISTENT);</span>
+    }
+<span class="fc" id="L124">  }</span>
+
+  public static void removeKafkaPartitionAssignmentFromPropertyStore(ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore, String realtimeTableName) {
+<span class="fc" id="L127">    String propertyStorePath = constructPropertyStorePathForKafkaPartitions(realtimeTableName);</span>
+<span class="fc bfc" id="L128" title="All 2 branches covered.">    if (propertyStore.exists(propertyStorePath, AccessOption.PERSISTENT)) {</span>
+<span class="fc" id="L129">      propertyStore.remove(propertyStorePath, AccessOption.PERSISTENT);</span>
+    }
+<span class="fc" id="L131">  }</span>
+
+  public static void removeInstancePartitionAssignmentFromPropertyStore(ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore, String offlineTableName) {
+<span class="nc" id="L134">    String propertyStorePath = constructPropertyStorePathForInstancePartitions(offlineTableName);</span>
+<span class="nc bnc" id="L135" title="All 2 branches missed.">    if (propertyStore.exists(propertyStorePath, AccessOption.PERSISTENT)) {</span>
+<span class="nc" id="L136">      propertyStore.remove(propertyStorePath, AccessOption.PERSISTENT);</span>
+    }
+<span class="nc" id="L138">  }</span>
+
+  public static void setInstancePartitionAssignmentFromPropertyStore(ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore,
+      PartitionToReplicaGroupMappingZKMetadata partitionMappingZKMetadata) {
+<span class="fc" id="L142">    propertyStore.set(constructPropertyStorePathForInstancePartitions(</span>
+        TableNameBuilder.OFFLINE.tableNameWithType(partitionMappingZKMetadata.getTableName())),
+        partitionMappingZKMetadata.toZNRecord(), AccessOption.PERSISTENT);
+<span class="fc" id="L145">  }</span>
+
+  public static boolean setOfflineSegmentZKMetadata(ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore,
+      OfflineSegmentZKMetadata offlineSegmentZKMetadata, int expectedVersion) {
+    // NOTE: Helix will throw ZkBadVersionException if version does not match
+    try {
+<span class="fc" id="L151">      return propertyStore.set(constructPropertyStorePathForSegment(</span>
+          TableNameBuilder.OFFLINE.tableNameWithType(offlineSegmentZKMetadata.getTableName()),
+          offlineSegmentZKMetadata.getSegmentName()), offlineSegmentZKMetadata.toZNRecord(), expectedVersion,
+          AccessOption.PERSISTENT);
+<span class="fc" id="L155">    } catch (ZkBadVersionException e) {</span>
+<span class="fc" id="L156">      return false;</span>
+    }
+  }
+
+  public static boolean setOfflineSegmentZKMetadata(ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore,
+      OfflineSegmentZKMetadata offlineSegmentZKMetadata) {
+<span class="fc" id="L162">    return propertyStore.set(constructPropertyStorePathForSegment(</span>
+        TableNameBuilder.OFFLINE.tableNameWithType(offlineSegmentZKMetadata.getTableName()),
+        offlineSegmentZKMetadata.getSegmentName()), offlineSegmentZKMetadata.toZNRecord(), AccessOption.PERSISTENT);
+  }
+
+  public static boolean setRealtimeSegmentZKMetadata(ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore,
+      RealtimeSegmentZKMetadata realtimeSegmentZKMetadata) {
+<span class="fc" id="L169">    return propertyStore.set(constructPropertyStorePathForSegment(</span>
+        TableNameBuilder.REALTIME.tableNameWithType(realtimeSegmentZKMetadata.getTableName()),
+        realtimeSegmentZKMetadata.getSegmentName()), realtimeSegmentZKMetadata.toZNRecord(), AccessOption.PERSISTENT);
+  }
+
+  @Nullable
+  public static ZNRecord getZnRecord(@Nonnull ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore, @Nonnull String path) {
+<span class="fc" id="L176">    Stat stat = new Stat();</span>
+<span class="fc" id="L177">    ZNRecord znRecord = propertyStore.get(path, stat, AccessOption.PERSISTENT);</span>
+<span class="fc bfc" id="L178" title="All 2 branches covered.">    if (znRecord != null) {</span>
+<span class="fc" id="L179">      znRecord.setCreationTime(stat.getCtime());</span>
+<span class="fc" id="L180">      znRecord.setModifiedTime(stat.getMtime());</span>
+<span class="fc" id="L181">      znRecord.setVersion(stat.getVersion());</span>
+    }
+<span class="fc" id="L183">    return znRecord;</span>
+  }
+
+  @Nullable
+  public static OfflineSegmentZKMetadata getOfflineSegmentZKMetadata(
+      @Nonnull ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore, @Nonnull String tableName, @Nonnull String segmentName) {
+<span class="fc" id="L189">    String offlineTableName = TableNameBuilder.OFFLINE.tableNameWithType(tableName);</span>
+<span class="fc" id="L190">    ZNRecord znRecord = propertyStore.get(constructPropertyStorePathForSegment(offlineTableName, segmentName), null,</span>
+        AccessOption.PERSISTENT);
+<span class="pc bpc" id="L192" title="1 of 2 branches missed.">    if (znRecord == null) {</span>
+<span class="nc" id="L193">      return null;</span>
+    }
+<span class="fc" id="L195">    return new OfflineSegmentZKMetadata(znRecord);</span>
+  }
+
+  @Nullable
+  public static RealtimeSegmentZKMetadata getRealtimeSegmentZKMetadata(
+      @Nonnull ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore, @Nonnull String tableName, @Nonnull String segmentName) {
+<span class="fc" id="L201">    String realtimeTableName = TableNameBuilder.REALTIME.tableNameWithType(tableName);</span>
+<span class="fc" id="L202">    ZNRecord znRecord = propertyStore.get(constructPropertyStorePathForSegment(realtimeTableName, segmentName), null,</span>
+        AccessOption.PERSISTENT);
+    // It is possible that the segment metadata has just been deleted due to retention.
+<span class="fc bfc" id="L205" title="All 2 branches covered.">    if (znRecord == null) {</span>
+<span class="fc" id="L206">      return null;</span>
+    }
+<span class="fc bfc" id="L208" title="All 2 branches covered.">    if (SegmentName.isHighLevelConsumerSegmentName(segmentName)) {</span>
+<span class="fc" id="L209">      return new RealtimeSegmentZKMetadata(znRecord);</span>
+    } else {
+<span class="fc" id="L211">      return new LLCRealtimeSegmentZKMetadata(znRecord);</span>
+    }
+  }
+
+  @Nullable
+  public static PartitionToReplicaGroupMappingZKMetadata getPartitionToReplicaGroupMappingZKMedata(
+      @Nonnull ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore, @Nonnull String tableName) {
+    // Segment Assignment Strategy is triggered only for offline table.
+<span class="fc" id="L219">    String offlineTableName = TableNameBuilder.OFFLINE.tableNameWithType(tableName);</span>
+<span class="fc" id="L220">    ZNRecord znRecord = propertyStore.get(constructPropertyStorePathForInstancePartitions(offlineTableName), null,</span>
+        AccessOption.PERSISTENT);
+<span class="pc bpc" id="L222" title="1 of 2 branches missed.">    if (znRecord == null) {</span>
+<span class="nc" id="L223">      return null;</span>
+    }
+<span class="fc" id="L225">    return new PartitionToReplicaGroupMappingZKMetadata(znRecord);</span>
+  }
+
+  @Nullable
+  public static TableConfig getTableConfig(@Nonnull ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore,
+      @Nonnull String tableNameWithType) {
+<span class="fc" id="L231">    ZNRecord znRecord = propertyStore.get(constructPropertyStorePathForResourceConfig(tableNameWithType), null,</span>
+        AccessOption.PERSISTENT);
+<span class="fc bfc" id="L233" title="All 2 branches covered.">    if (znRecord == null) {</span>
+<span class="fc" id="L234">      return null;</span>
+    }
+    try {
+<span class="fc" id="L237">      return TableConfig.fromZnRecord(znRecord);</span>
+<span class="nc" id="L238">    } catch (Exception e) {</span>
+<span class="nc" id="L239">      LOGGER.error(&quot;Caught exception while getting table configuration for table: {}&quot;, tableNameWithType, e);</span>
+<span class="nc" id="L240">      return null;</span>
+    }
+  }
+
+  @Nullable
+  public static TableConfig getOfflineTableConfig(@Nonnull ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore,
+      @Nonnull String tableName) {
+<span class="fc" id="L247">    return getTableConfig(propertyStore, TableNameBuilder.OFFLINE.tableNameWithType(tableName));</span>
+  }
+
+  @Nullable
+  public static TableConfig getRealtimeTableConfig(@Nonnull ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore,
+      @Nonnull String tableName) {
+<span class="fc" id="L253">    return getTableConfig(propertyStore, TableNameBuilder.REALTIME.tableNameWithType(tableName));</span>
+  }
+
+  @Nullable
+  public static Schema getSchema(@Nonnull ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore, @Nonnull String schemaName) {
+    try {
+<span class="fc" id="L259">      ZNRecord schemaZNRecord =</span>
+          propertyStore.get(constructPropertyStorePathForSchema(schemaName), null, AccessOption.PERSISTENT);
+<span class="fc bfc" id="L261" title="All 2 branches covered.">      if (schemaZNRecord == null) {</span>
+<span class="fc" id="L262">        return null;</span>
+      }
+<span class="fc" id="L264">      return SchemaUtils.fromZNRecord(schemaZNRecord);</span>
+<span class="nc" id="L265">    } catch (Exception e) {</span>
+<span class="nc" id="L266">      LOGGER.error(&quot;Caught exception while getting schema: {}&quot;, schemaName, e);</span>
+<span class="nc" id="L267">      return null;</span>
+    }
+  }
+
+  /**
+   * Get the schema associated with the given table name.
+   *
+   * @param propertyStore Helix property store
+   * @param tableName Table name with or without type suffix.
+   * @return Schema associated with the given table name.
+   */
+  @Nullable
+  public static Schema getTableSchema(@Nonnull ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore,
+      @Nonnull String tableName) {
+<span class="fc" id="L281">    String rawTableName = TableNameBuilder.extractRawTableName(tableName);</span>
+<span class="fc" id="L282">    Schema schema = getSchema(propertyStore, rawTableName);</span>
+<span class="fc bfc" id="L283" title="All 2 branches covered.">    if (schema != null) {</span>
+<span class="fc" id="L284">      return schema;</span>
+    }
+
+    // For backward compatible where schema name is not the same as raw table name
+<span class="fc" id="L288">    CommonConstants.Helix.TableType tableType = TableNameBuilder.getTableTypeFromTableName(tableName);</span>
+    // Try to fetch realtime schema first
+<span class="pc bpc" id="L290" title="1 of 4 branches missed.">    if (tableType == null || tableType == CommonConstants.Helix.TableType.REALTIME) {</span>
+<span class="fc" id="L291">      TableConfig realtimeTableConfig = getRealtimeTableConfig(propertyStore, tableName);</span>
+<span class="pc bpc" id="L292" title="1 of 2 branches missed.">      if (realtimeTableConfig != null) {</span>
+<span class="fc" id="L293">        schema = getSchema(propertyStore, realtimeTableConfig.getValidationConfig().getSchemaName());</span>
+      }
+    }
+    // Try to fetch offline schema if realtime schema does not exist
+<span class="pc bpc" id="L297" title="2 of 6 branches missed.">    if (schema == null &amp;&amp;  (tableType == null || tableType == CommonConstants.Helix.TableType.OFFLINE)) {</span>
+<span class="fc" id="L298">      schema = getSchema(propertyStore, TableNameBuilder.OFFLINE.tableNameWithType(tableName));</span>
+    }
+<span class="fc bfc" id="L300" title="All 2 branches covered.">    if (schema != null) {</span>
+<span class="fc" id="L301">      LOGGER.warn(&quot;Schema name does not match raw table name, schema name: {}, raw table name: {}&quot;,</span>
+          schema.getSchemaName(), TableNameBuilder.extractRawTableName(tableName));
+    }
+<span class="fc" id="L304">    return schema;</span>
+  }
+
+  public static List&lt;OfflineSegmentZKMetadata&gt; getOfflineSegmentZKMetadataListForTable(
+      ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore, String tableName) {
+<span class="fc" id="L309">    List&lt;OfflineSegmentZKMetadata&gt; resultList = new ArrayList&lt;&gt;();</span>
+<span class="pc bpc" id="L310" title="1 of 2 branches missed.">    if (propertyStore == null) {</span>
+<span class="nc" id="L311">      return resultList;</span>
+    }
+<span class="fc" id="L313">    String offlineTableName = TableNameBuilder.OFFLINE.tableNameWithType(tableName);</span>
+<span class="fc bfc" id="L314" title="All 2 branches covered.">    if (propertyStore.exists(constructPropertyStorePathForResource(offlineTableName), AccessOption.PERSISTENT)) {</span>
+<span class="fc" id="L315">      List&lt;ZNRecord&gt; znRecordList =</span>
+          propertyStore.getChildren(constructPropertyStorePathForResource(offlineTableName), null,
+              AccessOption.PERSISTENT);
+<span class="pc bpc" id="L318" title="1 of 2 branches missed.">      if (znRecordList != null) {</span>
+<span class="fc bfc" id="L319" title="All 2 branches covered.">        for (ZNRecord record : znRecordList) {</span>
+<span class="fc" id="L320">          resultList.add(new OfflineSegmentZKMetadata(record));</span>
+<span class="fc" id="L321">        }</span>
+      }
+    }
+<span class="fc" id="L324">    return resultList;</span>
+  }
+
+  public static List&lt;RealtimeSegmentZKMetadata&gt; getRealtimeSegmentZKMetadataListForTable(
+      ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore, String resourceName) {
+<span class="fc" id="L329">    List&lt;RealtimeSegmentZKMetadata&gt; resultList = new ArrayList&lt;&gt;();</span>
+<span class="pc bpc" id="L330" title="1 of 2 branches missed.">    if (propertyStore == null) {</span>
+<span class="nc" id="L331">      return resultList;</span>
+    }
+<span class="fc" id="L333">    String realtimeTableName = TableNameBuilder.REALTIME.tableNameWithType(resourceName);</span>
+<span class="fc bfc" id="L334" title="All 2 branches covered.">    if (propertyStore.exists(constructPropertyStorePathForResource(realtimeTableName), AccessOption.PERSISTENT)) {</span>
+<span class="fc" id="L335">      List&lt;ZNRecord&gt; znRecordList =</span>
+          propertyStore.getChildren(constructPropertyStorePathForResource(realtimeTableName), null,
+              AccessOption.PERSISTENT);
+<span class="pc bpc" id="L338" title="1 of 2 branches missed.">      if (znRecordList != null) {</span>
+<span class="fc bfc" id="L339" title="All 2 branches covered.">        for (ZNRecord record : znRecordList) {</span>
+<span class="fc" id="L340">          resultList.add(new RealtimeSegmentZKMetadata(record));</span>
+<span class="fc" id="L341">        }</span>
+      }
+    }
+<span class="fc" id="L344">    return resultList;</span>
+  }
+
+  public static void setClusterTenantIsolationEnabled(ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore, boolean isSingleTenantCluster) {
+    final ZNRecord znRecord;
+<span class="fc" id="L349">    final String path = constructPropertyStorePathForControllerConfig(CLUSTER_TENANT_ISOLATION_ENABLED_KEY);</span>
+
+<span class="fc bfc" id="L351" title="All 2 branches covered.">    if (!propertyStore.exists(path, AccessOption.PERSISTENT)) {</span>
+<span class="fc" id="L352">      znRecord = new ZNRecord(CLUSTER_TENANT_ISOLATION_ENABLED_KEY);</span>
+    } else {
+<span class="fc" id="L354">      znRecord = propertyStore.get(path, null, AccessOption.PERSISTENT);</span>
+    }
+
+<span class="fc" id="L357">    znRecord.setBooleanField(CLUSTER_TENANT_ISOLATION_ENABLED_KEY, isSingleTenantCluster);</span>
+<span class="fc" id="L358">    propertyStore.set(path, znRecord, AccessOption.PERSISTENT);</span>
+<span class="fc" id="L359">  }</span>
+
+  public static Boolean getClusterTenantIsolationEnabled(ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore) {
+<span class="fc" id="L362">    String controllerConfigPath = constructPropertyStorePathForControllerConfig(CLUSTER_TENANT_ISOLATION_ENABLED_KEY);</span>
+<span class="pc bpc" id="L363" title="1 of 2 branches missed.">    if (propertyStore.exists(controllerConfigPath, AccessOption.PERSISTENT)) {</span>
+<span class="fc" id="L364">      ZNRecord znRecord = propertyStore.get(controllerConfigPath, null, AccessOption.PERSISTENT);</span>
+<span class="pc bpc" id="L365" title="1 of 2 branches missed.">      if (znRecord.getSimpleFields().keySet().contains(CLUSTER_TENANT_ISOLATION_ENABLED_KEY)) {</span>
+<span class="fc" id="L366">        return znRecord.getBooleanField(CLUSTER_TENANT_ISOLATION_ENABLED_KEY, true);</span>
+      } else {
+<span class="nc" id="L368">        return true;</span>
+      }
+    } else {
+<span class="nc" id="L371">      return true;</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

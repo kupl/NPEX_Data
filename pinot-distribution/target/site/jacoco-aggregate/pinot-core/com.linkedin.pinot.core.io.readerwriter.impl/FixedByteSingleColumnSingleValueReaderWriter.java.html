@@ -1,0 +1,266 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>FixedByteSingleColumnSingleValueReaderWriter.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.io.readerwriter.impl</a> &gt; <span class="el_source">FixedByteSingleColumnSingleValueReaderWriter.java</span></div><h1>FixedByteSingleColumnSingleValueReaderWriter.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.io.readerwriter.impl;
+
+import com.linkedin.pinot.core.io.reader.impl.FixedByteSingleValueMultiColReader;
+import com.linkedin.pinot.core.io.readerwriter.BaseSingleColumnSingleValueReaderWriter;
+import com.linkedin.pinot.core.io.readerwriter.PinotDataBufferMemoryManager;
+import com.linkedin.pinot.core.io.writer.impl.FixedByteSingleValueMultiColWriter;
+import com.linkedin.pinot.core.segment.memory.PinotDataBuffer;
+import java.io.Closeable;
+import java.io.IOException;
+import java.nio.ByteOrder;
+import java.util.ArrayList;
+import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * This class implements reader as well as writer interfaces for fixed-byte single column and single value data.
+ * &lt;ul&gt;
+ *   &lt;li&gt; Auto expands memory allocation on-demand. &lt;/li&gt;
+ *   &lt;li&gt; Supports random reads and writes. &lt;/li&gt;
+ *   &lt;li&gt; Callers should ensure they are only reading row that were written, as allocated but not written rows
+ *   are not guaranteed to have a deterministic value. &lt;/li&gt;
+ * &lt;/ul&gt;
+ */
+public class FixedByteSingleColumnSingleValueReaderWriter extends BaseSingleColumnSingleValueReaderWriter {
+<span class="fc" id="L42">  private static final Logger LOGGER = LoggerFactory.getLogger(FixedByteSingleColumnSingleValueReaderWriter.class);</span>
+
+<span class="fc" id="L44">  private List&lt;WriterWithOffset&gt; _writers = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L45">  private List&lt;ReaderWithOffset&gt; _readers = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L46">  private List&lt;PinotDataBuffer&gt; _dataBuffers = new ArrayList&lt;&gt;();</span>
+
+  private final long _chunkSizeInBytes;
+  private final int _numRowsPerChunk;
+  private final int _columnSizesInBytes;
+
+  private final PinotDataBufferMemoryManager _memoryManager;
+  private final String _allocationContext;
+<span class="fc" id="L54">  private int _capacityInRows = 0;</span>
+
+  /**
+   * @param numRowsPerChunk Number of rows to pack in one chunk before a new chunk is created.
+   * @param columnSizesInBytes Size of column value in bytes.
+   * @param memoryManager Memory manager to be used for allocating memory.
+   * @param allocationContext Allocation allocationContext.
+   */
+  public FixedByteSingleColumnSingleValueReaderWriter(int numRowsPerChunk, int columnSizesInBytes,
+<span class="fc" id="L63">      PinotDataBufferMemoryManager memoryManager, String allocationContext) {</span>
+<span class="fc" id="L64">    _chunkSizeInBytes = numRowsPerChunk * columnSizesInBytes;</span>
+<span class="fc" id="L65">    _numRowsPerChunk = numRowsPerChunk;</span>
+<span class="fc" id="L66">    _columnSizesInBytes = columnSizesInBytes;</span>
+<span class="fc" id="L67">    _memoryManager = memoryManager;</span>
+<span class="fc" id="L68">    _allocationContext = allocationContext;</span>
+<span class="fc" id="L69">    addBuffer();</span>
+<span class="fc" id="L70">  }</span>
+
+  @Override
+  public void close()
+      throws IOException {
+<span class="fc bfc" id="L75" title="All 2 branches covered.">    for (ReaderWithOffset reader : _readers) {</span>
+<span class="fc" id="L76">      reader.close();</span>
+<span class="fc" id="L77">    }</span>
+<span class="fc bfc" id="L78" title="All 2 branches covered.">    for (WriterWithOffset writer : _writers) {</span>
+<span class="fc" id="L79">      writer.close();</span>
+<span class="fc" id="L80">    }</span>
+<span class="fc bfc" id="L81" title="All 2 branches covered.">    for (PinotDataBuffer buffer : _dataBuffers) {</span>
+<span class="fc" id="L82">      buffer.close();</span>
+<span class="fc" id="L83">    }</span>
+<span class="fc" id="L84">  }</span>
+
+  @Override
+  public void setInt(int row, int i) {
+<span class="fc" id="L88">    addBufferIfNeeded(row);</span>
+<span class="fc" id="L89">    getWriterForRow(row).setInt(row, i);</span>
+<span class="fc" id="L90">  }</span>
+
+  @Override
+  public void setLong(int row, long l) {
+<span class="fc" id="L94">    addBufferIfNeeded(row);</span>
+<span class="fc" id="L95">    getWriterForRow(row).setLong(row, l);</span>
+<span class="fc" id="L96">  }</span>
+
+  @Override
+  public void setFloat(int row, float f) {
+<span class="fc" id="L100">    addBufferIfNeeded(row);</span>
+<span class="fc" id="L101">    getWriterForRow(row).setFloat(row, f);</span>
+<span class="fc" id="L102">  }</span>
+
+  @Override
+  public void setDouble(int row, double d) {
+<span class="fc" id="L106">    addBufferIfNeeded(row);</span>
+<span class="fc" id="L107">    getWriterForRow(row).setDouble(row, d);</span>
+<span class="fc" id="L108">  }</span>
+
+  private WriterWithOffset getWriterForRow(int row) {
+<span class="fc" id="L111">    return _writers.get(getBufferId(row));</span>
+  }
+
+  @Override
+  public int getInt(int row) {
+<span class="fc" id="L116">    int bufferId = getBufferId(row);</span>
+<span class="fc" id="L117">    return _readers.get(bufferId).getInt(row);</span>
+  }
+
+  @Override
+  public long getLong(int row) {
+<span class="fc" id="L122">    int bufferId = getBufferId(row);</span>
+<span class="fc" id="L123">    return _readers.get(bufferId).getLong(row);</span>
+  }
+
+  @Override
+  public float getFloat(int row) {
+<span class="fc" id="L128">    int bufferId = getBufferId(row);</span>
+<span class="fc" id="L129">    return _readers.get(bufferId).getFloat(row);</span>
+  }
+
+  @Override
+  public double getDouble(int row) {
+<span class="fc" id="L134">    int bufferId = getBufferId(row);</span>
+<span class="fc" id="L135">    return _readers.get(bufferId).getDouble(row);</span>
+  }
+
+  @Override
+  public void readValues(int[] rows, int rowStartPos, int rowSize, int[] values, int valuesStartPos) {
+    /*
+     * TODO
+     * If we assume that the row IDs in 'rows' is sorted, then we can write logic to move values from one reader
+     * at a time, identifying the rows in sequence that belong to the same block. This logic is more complex, but may
+     * perform better in the sorted case.
+     *
+     * An alternative is to not have multiple _dataBuffers, but just copy the values from one buffer to next as we
+     * increase the number of rows.
+     */
+<span class="fc bfc" id="L149" title="All 2 branches covered.">    if (_readers.size() == 1) {</span>
+<span class="fc" id="L150">      _readers.get(0).getReader().readIntValues(rows, 0, rowStartPos, rowSize, values, valuesStartPos);</span>
+    } else {
+<span class="fc bfc" id="L152" title="All 2 branches covered.">      for (int rowIter = rowStartPos, valueIter = valuesStartPos; rowIter &lt; rowStartPos + rowSize;</span>
+<span class="fc" id="L153">          rowIter++, valueIter++) {</span>
+<span class="fc" id="L154">        int row = rows[rowIter];</span>
+<span class="fc" id="L155">        int bufferId = getBufferId(row);</span>
+<span class="fc" id="L156">        values[valueIter] = _readers.get(bufferId).getInt(row);</span>
+      }
+    }
+<span class="fc" id="L159">  }</span>
+
+  private int getBufferId(int row) {
+<span class="fc" id="L162">    return row / _numRowsPerChunk;</span>
+  }
+
+  private void addBuffer() {
+<span class="fc" id="L166">    LOGGER.info(&quot;Allocating {} bytes for: {}&quot;, _chunkSizeInBytes, _allocationContext);</span>
+<span class="fc" id="L167">    PinotDataBuffer buffer = _memoryManager.allocate(_chunkSizeInBytes, _allocationContext);</span>
+<span class="fc" id="L168">    _capacityInRows += _numRowsPerChunk;</span>
+
+<span class="fc" id="L170">    buffer.order(ByteOrder.nativeOrder());</span>
+<span class="fc" id="L171">    _dataBuffers.add(buffer);</span>
+
+<span class="fc" id="L173">    FixedByteSingleValueMultiColReader reader =</span>
+        new FixedByteSingleValueMultiColReader(buffer, _numRowsPerChunk, new int[]{_columnSizesInBytes});
+<span class="fc" id="L175">    FixedByteSingleValueMultiColWriter writer =</span>
+        new FixedByteSingleValueMultiColWriter(buffer, _numRowsPerChunk, /*cols=*/1, new int[]{_columnSizesInBytes});
+
+<span class="fc" id="L178">    final int startRowId = _numRowsPerChunk * (_dataBuffers.size() - 1);</span>
+<span class="fc" id="L179">    _writers.add(new WriterWithOffset(writer, startRowId));</span>
+<span class="fc" id="L180">    _readers.add(new ReaderWithOffset(reader, startRowId));</span>
+<span class="fc" id="L181">  }</span>
+
+  /**
+   * Helper class that encapsulates writer and global startRowId.
+   */
+  private void addBufferIfNeeded(int row) {
+<span class="fc bfc" id="L187" title="All 2 branches covered.">    if (row &gt;= _capacityInRows) {</span>
+
+      // Adding _chunkSizeInBytes in the numerator for rounding up. +1 because rows are 0-based index.
+<span class="fc" id="L190">      long buffersNeeded = (row + 1 - _capacityInRows + _numRowsPerChunk) / _numRowsPerChunk;</span>
+<span class="fc bfc" id="L191" title="All 2 branches covered.">      for (int i = 0; i &lt; buffersNeeded; i++) {</span>
+<span class="fc" id="L192">        addBuffer();</span>
+      }
+    }
+<span class="fc" id="L195">  }</span>
+
+  private static class WriterWithOffset implements Closeable {
+    final FixedByteSingleValueMultiColWriter _writer;
+    final int _startRowId;
+
+<span class="fc" id="L201">    private WriterWithOffset(FixedByteSingleValueMultiColWriter writer, int startRowId) {</span>
+<span class="fc" id="L202">      _writer = writer;</span>
+<span class="fc" id="L203">      _startRowId = startRowId;</span>
+<span class="fc" id="L204">    }</span>
+
+    @Override
+    public void close() {
+<span class="fc" id="L208">      _writer.close();</span>
+<span class="fc" id="L209">    }</span>
+
+    public void setInt(int row, int value) {
+<span class="fc" id="L212">      _writer.setInt(row - _startRowId, 0, value);</span>
+<span class="fc" id="L213">    }</span>
+
+    public void setLong(int row, long value) {
+<span class="fc" id="L216">      _writer.setLong(row - _startRowId, 0, value);</span>
+<span class="fc" id="L217">    }</span>
+
+    public void setFloat(int row, float value) {
+<span class="fc" id="L220">      _writer.setFloat(row - _startRowId, 0, value);</span>
+<span class="fc" id="L221">    }</span>
+
+    public void setDouble(int row, double value) {
+<span class="fc" id="L224">      _writer.setDouble(row - _startRowId, 0, value);</span>
+<span class="fc" id="L225">    }</span>
+  }
+
+  /**
+   * Helper class that encapsulates reader and global startRowId.
+   */
+  private static class ReaderWithOffset implements Closeable {
+    final FixedByteSingleValueMultiColReader _reader;
+    final int _startRowId;
+
+<span class="fc" id="L235">    private ReaderWithOffset(FixedByteSingleValueMultiColReader reader, int startRowId) {</span>
+<span class="fc" id="L236">      _reader = reader;</span>
+<span class="fc" id="L237">      _startRowId = startRowId;</span>
+<span class="fc" id="L238">    }</span>
+
+    @Override
+    public void close() {
+<span class="fc" id="L242">      _reader.close();</span>
+<span class="fc" id="L243">    }</span>
+
+    public int getInt(int row) {
+<span class="fc" id="L246">      return _reader.getInt(row - _startRowId, 0);</span>
+    }
+
+    public long getLong(int row) {
+<span class="fc" id="L250">      return _reader.getLong(row - _startRowId, 0);</span>
+    }
+
+    public float getFloat(int row) {
+<span class="fc" id="L254">      return _reader.getFloat(row - _startRowId, 0);</span>
+    }
+
+    public double getDouble(int row) {
+<span class="fc" id="L258">      return _reader.getDouble(row - _startRowId, 0);</span>
+    }
+
+    public FixedByteSingleValueMultiColReader getReader() {
+<span class="fc" id="L262">      return _reader;</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

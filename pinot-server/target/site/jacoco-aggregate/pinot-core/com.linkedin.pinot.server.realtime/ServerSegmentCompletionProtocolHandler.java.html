@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>ServerSegmentCompletionProtocolHandler.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-server</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.server.realtime</a> &gt; <span class="el_source">ServerSegmentCompletionProtocolHandler.java</span></div><h1>ServerSegmentCompletionProtocolHandler.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.linkedin.pinot.server.realtime;
+
+import com.linkedin.pinot.common.protocols.SegmentCompletionProtocol;
+import com.linkedin.pinot.common.utils.ClientSSLContextGenerator;
+import com.linkedin.pinot.common.utils.CommonConstants;
+import com.linkedin.pinot.common.utils.FileUploadDownloadClient;
+import com.linkedin.pinot.core.query.utils.Pair;
+import java.io.File;
+import java.net.URI;
+import javax.net.ssl.SSLContext;
+import org.apache.commons.configuration.Configuration;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * A class that handles sending segment completion protocol requests to the controller and getting
+ * back responses
+ */
+public class ServerSegmentCompletionProtocolHandler {
+<span class="fc" id="L36">  private static Logger LOGGER = LoggerFactory.getLogger(ServerSegmentCompletionProtocolHandler.class);</span>
+  private static final int SEGMENT_UPLOAD_REQUEST_TIMEOUT_MS = 30_000;
+  private static final int OTHER_REQUESTS_TIMEOUT = 5_000;
+  private static final String HTTPS_PROTOCOL = &quot;https&quot;;
+  private static final String HTTP_PROTOCOL = &quot;http&quot;;
+
+  private static final String CONFIG_OF_CONTROLLER_HTTPS_ENABLED = &quot;enabled&quot;;
+  private static final String CONFIG_OF_CONTROLLER_HTTPS_PORT = &quot;controller.port&quot;;
+
+<span class="fc" id="L45">  private static Integer _controllerHttpsPort = null;</span>
+
+  private final String _instanceId;
+  private final FileUploadDownloadClient _fileUploadDownloadClient;
+  private static SSLContext _sslContext;
+
+  public static void init(Configuration uploaderConfig) {
+<span class="nc" id="L52">    Configuration httpsConfig = uploaderConfig.subset(HTTPS_PROTOCOL);</span>
+<span class="nc bnc" id="L53" title="All 2 branches missed.">    if (httpsConfig.getBoolean(CONFIG_OF_CONTROLLER_HTTPS_ENABLED, false)) {</span>
+<span class="nc" id="L54">      _sslContext = new ClientSSLContextGenerator(httpsConfig.subset(CommonConstants.PREFIX_OF_SSL_SUBSET)).generate();</span>
+<span class="nc" id="L55">      _controllerHttpsPort = httpsConfig.getInt(CONFIG_OF_CONTROLLER_HTTPS_PORT);</span>
+    }
+<span class="nc" id="L57">  }</span>
+
+<span class="fc" id="L59">  public ServerSegmentCompletionProtocolHandler(String instanceId) {</span>
+<span class="fc" id="L60">    _instanceId = instanceId;</span>
+<span class="pc bpc" id="L61" title="1 of 2 branches missed.">    if (_sslContext != null) {</span>
+<span class="nc" id="L62">      _fileUploadDownloadClient = new FileUploadDownloadClient(_sslContext);</span>
+    } else {
+<span class="fc" id="L64">      _fileUploadDownloadClient = new FileUploadDownloadClient();</span>
+    }
+<span class="fc" id="L66">  }</span>
+
+  public SegmentCompletionProtocol.Response segmentCommitStart(long offset, final String segmentName) {
+<span class="nc" id="L69">    SegmentCompletionProtocol.Request.Params params = new SegmentCompletionProtocol.Request.Params();</span>
+<span class="nc" id="L70">    params.withInstanceId(_instanceId).withOffset(offset).withSegmentName(segmentName);</span>
+<span class="nc" id="L71">    SegmentCompletionProtocol.SegmentCommitStartRequest request = new SegmentCompletionProtocol.SegmentCommitStartRequest(params);</span>
+<span class="nc" id="L72">    String url = createSegmentCompletionUrl(request);</span>
+<span class="nc bnc" id="L73" title="All 2 branches missed.">    if (url == null) {</span>
+<span class="nc" id="L74">      return SegmentCompletionProtocol.RESP_NOT_SENT;</span>
+    }
+<span class="nc" id="L76">    return sendRequest(url);</span>
+  }
+
+  // TODO We need to make this work with trusted certificates if the VIP is using https.
+  public SegmentCompletionProtocol.Response segmentCommitUpload(long offset, final String segmentName, final File segmentTarFile,
+      final String controllerVipUrl) {
+<span class="nc" id="L82">    SegmentCompletionProtocol.Request.Params params = new SegmentCompletionProtocol.Request.Params();</span>
+<span class="nc" id="L83">    params.withInstanceId(_instanceId).withOffset(offset).withSegmentName(segmentName);</span>
+<span class="nc" id="L84">    SegmentCompletionProtocol.SegmentCommitUploadRequest request = new SegmentCompletionProtocol.SegmentCommitUploadRequest(params);</span>
+
+    String hostPort;
+    String protocol;
+    try {
+<span class="nc" id="L89">      URI uri = URI.create(controllerVipUrl);</span>
+<span class="nc" id="L90">      protocol = uri.getScheme();</span>
+<span class="nc" id="L91">      hostPort = uri.getAuthority();</span>
+<span class="nc" id="L92">    } catch (Exception e) {</span>
+<span class="nc" id="L93">      throw new RuntimeException(&quot;Could not make URI&quot;, e);</span>
+<span class="nc" id="L94">    }</span>
+<span class="nc" id="L95">    String url = request.getUrl(hostPort, protocol);</span>
+<span class="nc" id="L96">    return uploadSegment(url, segmentName, segmentTarFile);</span>
+  }
+
+  public SegmentCompletionProtocol.Response segmentCommitEnd(long offset, final String segmentName, String segmentLocation,
+      long memoryUsedBytes) {
+<span class="nc" id="L101">    SegmentCompletionProtocol.Request.Params params = new SegmentCompletionProtocol.Request.Params();</span>
+<span class="nc" id="L102">    params.withInstanceId(_instanceId).withOffset(offset).withSegmentName(segmentName)</span>
+        .withSegmentLocation(segmentLocation).withMemoryUsedBytes(memoryUsedBytes);
+<span class="nc" id="L104">    SegmentCompletionProtocol.SegmentCommitEndRequest request = new SegmentCompletionProtocol.SegmentCommitEndRequest(params);</span>
+<span class="nc" id="L105">    String url = createSegmentCompletionUrl(request);</span>
+<span class="nc bnc" id="L106" title="All 2 branches missed.">    if (url == null) {</span>
+<span class="nc" id="L107">      return SegmentCompletionProtocol.RESP_NOT_SENT;</span>
+    }
+<span class="nc" id="L109">    return sendRequest(url);</span>
+  }
+
+  public SegmentCompletionProtocol.Response segmentCommit(long offset, final String segmentName, long memoryUsedBytes,
+      final File segmentTarFile) {
+<span class="nc" id="L114">    SegmentCompletionProtocol.Request.Params params = new SegmentCompletionProtocol.Request.Params();</span>
+<span class="nc" id="L115">    params.withInstanceId(_instanceId).withOffset(offset).withSegmentName(segmentName).withMemoryUsedBytes(memoryUsedBytes);</span>
+<span class="nc" id="L116">    SegmentCompletionProtocol.SegmentCommitRequest request = new SegmentCompletionProtocol.SegmentCommitRequest(params);</span>
+<span class="nc" id="L117">    String url = createSegmentCompletionUrl(request);</span>
+<span class="nc bnc" id="L118" title="All 2 branches missed.">    if (url == null) {</span>
+<span class="nc" id="L119">      return SegmentCompletionProtocol.RESP_NOT_SENT;</span>
+    }
+
+<span class="nc" id="L122">    return uploadSegment(url, segmentName, segmentTarFile);</span>
+  }
+
+  public SegmentCompletionProtocol.Response extendBuildTime(SegmentCompletionProtocol.Request.Params params) {
+<span class="nc" id="L126">    params.withInstanceId(_instanceId);</span>
+<span class="nc" id="L127">    SegmentCompletionProtocol.ExtendBuildTimeRequest request = new SegmentCompletionProtocol.ExtendBuildTimeRequest(params);</span>
+<span class="nc" id="L128">    String url = createSegmentCompletionUrl(request);</span>
+<span class="nc" id="L129">    return sendRequest(url);</span>
+  }
+
+  public SegmentCompletionProtocol.Response segmentConsumed(SegmentCompletionProtocol.Request.Params params) {
+<span class="nc" id="L133">    params.withInstanceId(_instanceId);</span>
+<span class="nc" id="L134">    SegmentCompletionProtocol.SegmentConsumedRequest request = new SegmentCompletionProtocol.SegmentConsumedRequest(params);</span>
+<span class="nc" id="L135">    String url = createSegmentCompletionUrl(request);</span>
+<span class="nc bnc" id="L136" title="All 2 branches missed.">    if (url == null) {</span>
+<span class="nc" id="L137">      return SegmentCompletionProtocol.RESP_NOT_SENT;</span>
+    }
+<span class="nc" id="L139">    return sendRequest(url);</span>
+  }
+
+  public SegmentCompletionProtocol.Response segmentStoppedConsuming(SegmentCompletionProtocol.Request.Params params) {
+<span class="nc" id="L143">    params.withInstanceId(_instanceId);</span>
+<span class="nc" id="L144">    SegmentCompletionProtocol.SegmentStoppedConsuming request = new SegmentCompletionProtocol.SegmentStoppedConsuming(params);</span>
+<span class="nc" id="L145">    String url = createSegmentCompletionUrl(request);</span>
+<span class="nc bnc" id="L146" title="All 2 branches missed.">    if (url == null) {</span>
+<span class="nc" id="L147">      return SegmentCompletionProtocol.RESP_NOT_SENT;</span>
+    }
+<span class="nc" id="L149">    return sendRequest(url);</span>
+  }
+
+
+  private String createSegmentCompletionUrl(SegmentCompletionProtocol.Request request) {
+<span class="nc" id="L154">    ControllerLeaderLocator leaderLocator = ControllerLeaderLocator.getInstance();</span>
+<span class="nc" id="L155">    final Pair&lt;String, Integer&gt; leaderHostPort = leaderLocator.getControllerLeader();</span>
+<span class="nc bnc" id="L156" title="All 2 branches missed.">    if (leaderHostPort == null) {</span>
+<span class="nc" id="L157">      LOGGER.warn(&quot;No leader found while trying to send {}&quot;, request.toString());</span>
+<span class="nc" id="L158">      return null;</span>
+    }
+<span class="nc" id="L160">    String protocol = HTTP_PROTOCOL;</span>
+<span class="nc bnc" id="L161" title="All 2 branches missed.">    if (_controllerHttpsPort != null) {</span>
+<span class="nc" id="L162">      leaderHostPort.setSecond(_controllerHttpsPort);</span>
+<span class="nc" id="L163">      protocol = HTTPS_PROTOCOL;</span>
+    }
+
+<span class="nc" id="L166">    return request.getUrl(leaderHostPort.getFirst() + &quot;:&quot; + leaderHostPort.getSecond(), protocol);</span>
+  }
+
+  private SegmentCompletionProtocol.Response sendRequest(String url) {
+    try {
+<span class="nc" id="L171">      String responseStr = _fileUploadDownloadClient.sendSegmentCompletionProtocolRequest(url, OTHER_REQUESTS_TIMEOUT);</span>
+<span class="nc" id="L172">      return new SegmentCompletionProtocol.Response(responseStr);</span>
+<span class="nc" id="L173">    } catch (Exception e) {</span>
+      // Catch all exceptions, we want the protocol to handle the case assuming the request was never sent.
+<span class="nc" id="L175">      LOGGER.error(&quot;Could not send request {}&quot;, url, e);</span>
+    }
+<span class="nc" id="L177">    return SegmentCompletionProtocol.RESP_NOT_SENT;</span>
+  }
+
+  private SegmentCompletionProtocol.Response uploadSegment(String url, final String segmentName, final File segmentTarFile) {
+    try {
+<span class="nc" id="L182">      String responseStr = _fileUploadDownloadClient.uploadSegment(url, segmentName, segmentTarFile, SEGMENT_UPLOAD_REQUEST_TIMEOUT_MS);</span>
+<span class="nc" id="L183">      return new SegmentCompletionProtocol.Response(responseStr);</span>
+<span class="nc" id="L184">    } catch (Exception e) {</span>
+      // Catch all exceptions, we want the protocol to handle the case assuming the request was never sent.
+<span class="nc" id="L186">      LOGGER.error(&quot;Could not send request {}&quot;, url, e);</span>
+    }
+<span class="nc" id="L188">    return SegmentCompletionProtocol.RESP_NOT_SENT;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

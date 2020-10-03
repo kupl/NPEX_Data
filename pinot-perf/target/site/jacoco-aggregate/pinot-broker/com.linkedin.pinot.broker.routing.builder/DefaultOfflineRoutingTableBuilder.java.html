@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>DefaultOfflineRoutingTableBuilder.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-perf</a> &gt; <a href="../index.html" class="el_bundle">pinot-broker</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.broker.routing.builder</a> &gt; <span class="el_source">DefaultOfflineRoutingTableBuilder.java</span></div><h1>DefaultOfflineRoutingTableBuilder.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.broker.routing.builder;
+
+import com.linkedin.pinot.broker.routing.RoutingTableLookupRequest;
+import com.linkedin.pinot.common.config.TableConfig;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import org.apache.commons.configuration.Configuration;
+import org.apache.helix.ZNRecord;
+import org.apache.helix.model.ExternalView;
+import org.apache.helix.model.InstanceConfig;
+import org.apache.helix.store.zk.ZkHelixPropertyStore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * Create a given number of routing tables based on random selections from ExternalView.
+ */
+<span class="fc" id="L36">public class DefaultOfflineRoutingTableBuilder extends BaseRoutingTableBuilder {</span>
+<span class="fc" id="L37">  private static final Logger LOGGER = LoggerFactory.getLogger(DefaultOfflineRoutingTableBuilder.class);</span>
+
+  private RoutingTableBuilder _largeClusterRoutingTableBuilder;
+  private RoutingTableBuilder _smallClusterRoutingTableBuilder;
+
+  // Set variable as volatile so all threads can get the up-to-date routing table builder
+  private volatile RoutingTableBuilder _routingTableBuilder;
+
+<span class="fc" id="L45">  private int _minServerCountForLargeCluster = 30;</span>
+<span class="fc" id="L46">  private int _minReplicaCountForLargeCluster = 4;</span>
+
+  @Override
+  public void init(Configuration configuration, TableConfig tableConfig, ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore) {
+<span class="fc" id="L50">    _largeClusterRoutingTableBuilder = new LargeClusterRoutingTableBuilder();</span>
+<span class="fc" id="L51">    _smallClusterRoutingTableBuilder = new BalancedRandomRoutingTableBuilder();</span>
+<span class="pc bpc" id="L52" title="1 of 2 branches missed.">    if (configuration.containsKey(&quot;minServerCountForLargeCluster&quot;)) {</span>
+<span class="nc" id="L53">      final String minServerCountForLargeCluster = configuration.getString(&quot;minServerCountForLargeCluster&quot;);</span>
+      try {
+<span class="nc" id="L55">        _minServerCountForLargeCluster = Integer.parseInt(minServerCountForLargeCluster);</span>
+<span class="nc" id="L56">        LOGGER.info(&quot;Using large cluster min server count of {}&quot;, _minServerCountForLargeCluster);</span>
+<span class="nc" id="L57">      } catch (Exception e) {</span>
+<span class="nc" id="L58">        LOGGER.warn(</span>
+            &quot;Could not get the large cluster min server count from configuration value {}, keeping default value {}&quot;,
+            minServerCountForLargeCluster, _minServerCountForLargeCluster, e);
+<span class="nc" id="L61">      }</span>
+<span class="nc" id="L62">    } else {</span>
+<span class="fc" id="L63">      LOGGER.info(&quot;Using default value for large cluster min server count of {}&quot;, _minServerCountForLargeCluster);</span>
+    }
+
+<span class="pc bpc" id="L66" title="1 of 2 branches missed.">    if (configuration.containsKey(&quot;minReplicaCountForLargeCluster&quot;)) {</span>
+<span class="nc" id="L67">      final String minReplicaCountForLargeCluster = configuration.getString(&quot;minReplicaCountForLargeCluster&quot;);</span>
+      try {
+<span class="nc" id="L69">        _minReplicaCountForLargeCluster = Integer.parseInt(minReplicaCountForLargeCluster);</span>
+<span class="nc" id="L70">        LOGGER.info(&quot;Using large cluster min replica count of {}&quot;, _minReplicaCountForLargeCluster);</span>
+<span class="nc" id="L71">      } catch (Exception e) {</span>
+<span class="nc" id="L72">        LOGGER.warn(</span>
+            &quot;Could not get the large cluster min replica count from configuration value {}, keeping default value {}&quot;,
+            minReplicaCountForLargeCluster, _minReplicaCountForLargeCluster, e);
+<span class="nc" id="L75">      }</span>
+<span class="nc" id="L76">    } else {</span>
+<span class="fc" id="L77">      LOGGER.info(&quot;Using default value for large cluster min replica count of {}&quot;, _minReplicaCountForLargeCluster);</span>
+    }
+
+<span class="fc" id="L80">    _largeClusterRoutingTableBuilder.init(configuration, tableConfig, propertyStore);</span>
+<span class="fc" id="L81">    _smallClusterRoutingTableBuilder.init(configuration, tableConfig, propertyStore);</span>
+<span class="fc" id="L82">  }</span>
+
+  @Override
+  public void computeRoutingTableFromExternalView(String tableName, ExternalView externalView,
+      List&lt;InstanceConfig&gt; instanceConfigs) {
+<span class="pc bpc" id="L87" title="1 of 2 branches missed.">    if (isLargeCluster(externalView)) {</span>
+<span class="nc" id="L88">      _largeClusterRoutingTableBuilder.computeRoutingTableFromExternalView(tableName, externalView, instanceConfigs);</span>
+<span class="nc" id="L89">      _routingTableBuilder = _largeClusterRoutingTableBuilder;</span>
+    } else {
+<span class="fc" id="L91">      _smallClusterRoutingTableBuilder.computeRoutingTableFromExternalView(tableName, externalView, instanceConfigs);</span>
+<span class="fc" id="L92">      _routingTableBuilder = _smallClusterRoutingTableBuilder;</span>
+    }
+<span class="fc" id="L94">  }</span>
+
+  private boolean isLargeCluster(ExternalView externalView) {
+    // Check if the number of replicas is sufficient to treat it as a large cluster
+<span class="fc" id="L98">    final String helixReplicaCount = externalView.getRecord().getSimpleField(&quot;REPLICAS&quot;);</span>
+    final int replicaCount;
+
+    try {
+<span class="fc" id="L102">      replicaCount = Integer.parseInt(helixReplicaCount);</span>
+<span class="fc" id="L103">    } catch (Exception e) {</span>
+<span class="fc" id="L104">      LOGGER.warn(&quot;Failed to parse the replica count ({}) from external view of table {}&quot;, helixReplicaCount,</span>
+          externalView.getResourceName());
+<span class="fc" id="L106">      return false;</span>
+<span class="fc" id="L107">    }</span>
+
+<span class="pc bpc" id="L109" title="1 of 2 branches missed.">    if (replicaCount &lt; _minReplicaCountForLargeCluster) {</span>
+<span class="fc" id="L110">      return false;</span>
+    }
+
+    // Check if the server count is high enough to count as a large cluster
+<span class="nc" id="L114">    final Set&lt;String&gt; instanceSet = new HashSet&lt;&gt;();</span>
+<span class="nc bnc" id="L115" title="All 2 branches missed.">    for (String partition : externalView.getPartitionSet()) {</span>
+<span class="nc" id="L116">      instanceSet.addAll(externalView.getStateMap(partition).keySet());</span>
+<span class="nc" id="L117">    }</span>
+
+<span class="nc bnc" id="L119" title="All 2 branches missed.">    return _minServerCountForLargeCluster &lt;= instanceSet.size();</span>
+  }
+
+  @Override
+  public Map&lt;String, List&lt;String&gt;&gt; getRoutingTable(RoutingTableLookupRequest request) {
+<span class="fc" id="L124">    return _routingTableBuilder.getRoutingTable(request);</span>
+  }
+
+  @Override
+  public List&lt;Map&lt;String, List&lt;String&gt;&gt;&gt; getRoutingTables() {
+<span class="fc" id="L129">    return _routingTableBuilder.getRoutingTables();</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

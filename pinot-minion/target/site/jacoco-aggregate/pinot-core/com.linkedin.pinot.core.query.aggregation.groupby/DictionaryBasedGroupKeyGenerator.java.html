@@ -1,0 +1,849 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>DictionaryBasedGroupKeyGenerator.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-minion</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.query.aggregation.groupby</a> &gt; <span class="el_source">DictionaryBasedGroupKeyGenerator.java</span></div><h1>DictionaryBasedGroupKeyGenerator.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.query.aggregation.groupby;
+
+import com.linkedin.pinot.core.common.BlockMetadata;
+import com.linkedin.pinot.core.common.BlockValSet;
+import com.linkedin.pinot.core.operator.blocks.TransformBlock;
+import com.linkedin.pinot.core.segment.index.readers.Dictionary;
+import it.unimi.dsi.fastutil.ints.Int2IntMap;
+import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
+import it.unimi.dsi.fastutil.longs.Long2IntMap;
+import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
+import it.unimi.dsi.fastutil.objects.Object2IntMap;
+import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
+import it.unimi.dsi.fastutil.objects.ObjectIterator;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.NoSuchElementException;
+import javax.annotation.Nonnull;
+
+
+/**
+ * Class for generating group keys (groupId-stringKey pair) for a given list of dictionary encoded group-by columns.
+ * &lt;p&gt;The maximum number of possible group keys is the cardinality product of all the group-by columns.
+ * &lt;p&gt;The raw key is generated from the dictionary ids of the group-by columns.
+ * &lt;ul&gt;
+ *   &lt;li&gt;
+ *     If the maximum number of possible group keys is less than a threshold (10K), directly use the raw key as the
+ *     group id. (ARRAY_BASED)
+ *   &lt;/li&gt;
+ *   &lt;li&gt;
+ *     If the maximum number of possible group keys is larger than the threshold, but still fit into integer, generate
+ *     integer raw keys and map them onto contiguous group ids. (INT_MAP_BASED)
+ *   &lt;/li&gt;
+ *   &lt;li&gt;
+ *     If the maximum number of possible group keys cannot fit into than integer, but still fit into long, generate long
+ *     raw keys and map them onto contiguous group ids. (LONG_MAP_BASED)
+ *   &lt;/li&gt;
+ *   &lt;li&gt;
+ *     If the maximum number of possible group keys cannot fit into long, use int arrays as the raw keys to store the
+ *     dictionary ids of all the group-by columns and map them onto contiguous group ids. (ARRAY_MAP_BASED)
+ *   &lt;/li&gt;
+ * &lt;/ul&gt;
+ * &lt;p&gt;All the logic is maintained internally, and to the outside world, the group ids are always int type.
+ */
+// TODO: Revisit to make trimming work. Currently trimming is disabled
+public class DictionaryBasedGroupKeyGenerator implements GroupKeyGenerator {
+  private final int _numGroupByColumns;
+  private final String[] _groupByColumns;
+  private final int[] _cardinalities;
+  private final boolean[] _isSingleValueColumn;
+  private final Dictionary[] _dictionaries;
+  private final BlockValSet[] _blockValSets;
+
+  // The first dimension is the index of group-by column
+  // Reusable buffer for single-value column dictionary ids per block
+  private final int[][] _singleValueDictIds;
+  // Reusable buffer for multi-value column dictionary ids per document
+  private final int[][] _multiValueDictIds;
+  // Reusable buffer for number of values in multi-value column per document
+  private final int[] _numValues;
+
+  private final int _globalGroupIdUpperBound;
+  private final RawKeyHolder _rawKeyHolder;
+
+//  // The following data structures are used for trimming group keys.
+//  // TODO: the key will be contiguous so we should use array here.
+//  // Reverse mapping for trimming group keys
+//  private Int2LongOpenHashMap _idToGroupKey;
+//
+//  // Reverse mapping from KeyIds to groupKeys. purgeGroupKeys takes an array of keyIds to remove,
+//  // this map tracks keyIds to groupKeys, to serve the purging.
+//  private Int2ObjectOpenHashMap&lt;IntArrayList&gt; _idToArrayGroupKey;
+//
+//  // Enum to reflect if trimming of group keys is ON or OFF. Once ON, we need to start tracking
+//  // the keyIds that are removed.
+//  private enum TrimMode {
+//    OFF,
+//    ON
+//  }
+//  private TrimMode _trimMode;
+
+  /**
+   * Constructor for the class. Initializes data members (reusable arrays).
+   *
+   * @param transformBlock Transform block for which to generate group keys
+   * @param groupByColumns Group-by columns
+   * @param arrayBasedThreshold Threshold for array based result holder
+   */
+  public DictionaryBasedGroupKeyGenerator(TransformBlock transformBlock, String[] groupByColumns,
+<span class="fc" id="L104">      int arrayBasedThreshold) {</span>
+<span class="fc" id="L105">    _numGroupByColumns = groupByColumns.length;</span>
+<span class="fc" id="L106">    _groupByColumns = groupByColumns;</span>
+
+<span class="fc" id="L108">    _cardinalities = new int[_numGroupByColumns];</span>
+<span class="fc" id="L109">    _isSingleValueColumn = new boolean[_numGroupByColumns];</span>
+<span class="fc" id="L110">    _dictionaries = new Dictionary[_numGroupByColumns];</span>
+<span class="fc" id="L111">    _blockValSets = new BlockValSet[_numGroupByColumns];</span>
+<span class="fc" id="L112">    _singleValueDictIds = new int[_numGroupByColumns][];</span>
+<span class="fc" id="L113">    _multiValueDictIds = new int[_numGroupByColumns][];</span>
+<span class="fc" id="L114">    _numValues = new int[_numGroupByColumns];</span>
+
+<span class="fc" id="L116">    long cardinalityProduct = 1L;</span>
+<span class="fc" id="L117">    boolean longOverflow = false;</span>
+<span class="fc bfc" id="L118" title="All 2 branches covered.">    for (int i = 0; i &lt; _numGroupByColumns; i++) {</span>
+<span class="fc" id="L119">      BlockMetadata blockMetadata = transformBlock.getBlockMetadata(groupByColumns[i]);</span>
+<span class="fc" id="L120">      _dictionaries[i] = blockMetadata.getDictionary();</span>
+<span class="fc" id="L121">      int cardinality = _dictionaries[i].length();</span>
+<span class="fc" id="L122">      _cardinalities[i] = cardinality;</span>
+<span class="fc bfc" id="L123" title="All 2 branches covered.">      if (!longOverflow) {</span>
+<span class="fc bfc" id="L124" title="All 2 branches covered.">        if (cardinalityProduct &gt; Long.MAX_VALUE / cardinality) {</span>
+<span class="fc" id="L125">          longOverflow = true;</span>
+        } else {
+<span class="fc" id="L127">          cardinalityProduct *= cardinality;</span>
+        }
+      }
+
+<span class="fc bfc" id="L131" title="All 2 branches covered.">      if (blockMetadata.isSingleValue()) {</span>
+<span class="fc" id="L132">        _isSingleValueColumn[i] = true;</span>
+      } else {
+<span class="fc" id="L134">        _multiValueDictIds[i] = new int[blockMetadata.getMaxNumberOfMultiValues()];</span>
+      }
+    }
+
+<span class="fc bfc" id="L138" title="All 2 branches covered.">    if (longOverflow) {</span>
+<span class="fc" id="L139">      _globalGroupIdUpperBound = Integer.MAX_VALUE;</span>
+<span class="fc" id="L140">      _rawKeyHolder = new ArrayMapBasedHolder();</span>
+    } else {
+<span class="fc bfc" id="L142" title="All 2 branches covered.">      if (cardinalityProduct &gt; Integer.MAX_VALUE) {</span>
+<span class="fc" id="L143">        _globalGroupIdUpperBound = Integer.MAX_VALUE;</span>
+<span class="fc" id="L144">        _rawKeyHolder = new LongMapBasedHolder();</span>
+      } else {
+<span class="fc" id="L146">        _globalGroupIdUpperBound = (int) cardinalityProduct;</span>
+<span class="fc bfc" id="L147" title="All 2 branches covered.">        if (cardinalityProduct &gt; arrayBasedThreshold) {</span>
+<span class="fc" id="L148">          _rawKeyHolder = new IntMapBasedHolder();</span>
+        } else {
+<span class="fc" id="L150">          _rawKeyHolder = new ArrayBasedHolder();</span>
+        }
+      }
+    }
+<span class="fc" id="L154">  }</span>
+
+  /**
+   * {@inheritDoc}
+   */
+  @Override
+  public int getGlobalGroupKeyUpperBound() {
+<span class="fc" id="L161">    return _globalGroupIdUpperBound;</span>
+  }
+
+  /**
+   * {@inheritDoc}
+   */
+  @Override
+  public void generateKeysForBlock(TransformBlock transformBlock, int[] outGroupIds) {
+    // Fetch dictionary ids in the given block for all group-by columns
+<span class="fc bfc" id="L170" title="All 2 branches covered.">    for (int i = 0; i &lt; _numGroupByColumns; i++) {</span>
+<span class="fc" id="L171">      BlockValSet blockValueSet = transformBlock.getBlockValueSet(_groupByColumns[i]);</span>
+<span class="fc" id="L172">      _singleValueDictIds[i] = blockValueSet.getDictionaryIds();</span>
+    }
+
+<span class="fc" id="L175">    _rawKeyHolder.processSingleValue(transformBlock.getNumDocs(), outGroupIds);</span>
+<span class="fc" id="L176">  }</span>
+
+  /**
+   * {@inheritDoc}
+   */
+  @Override
+  public void generateKeysForBlock(TransformBlock transformBlock, int[][] outGroupIds) {
+<span class="fc" id="L183">    int length = transformBlock.getNumDocs();</span>
+<span class="fc" id="L184">    int[] docIdSet = transformBlock.getDocIdSetBlock().getDocIdSet();</span>
+
+<span class="fc bfc" id="L186" title="All 2 branches covered.">    for (int i = 0; i &lt; _numGroupByColumns; i++) {</span>
+<span class="fc" id="L187">      BlockValSet blockValueSet = transformBlock.getBlockValueSet(_groupByColumns[i]);</span>
+<span class="fc bfc" id="L188" title="All 2 branches covered.">      if (_isSingleValueColumn[i]) {</span>
+        // Fetch dictionary ids in the given block for all single value group-by columns
+<span class="fc" id="L190">        _singleValueDictIds[i] = blockValueSet.getDictionaryIds();</span>
+      } else {
+        // Cache block value set for all multi-value group-by columns
+<span class="fc" id="L193">        _blockValSets[i] = blockValueSet;</span>
+      }
+    }
+
+<span class="fc bfc" id="L197" title="All 2 branches covered.">    for (int i = 0; i &lt; length; i++) {</span>
+<span class="fc" id="L198">      int docId = docIdSet[i];</span>
+<span class="fc bfc" id="L199" title="All 2 branches covered.">      for (int j = 0; j &lt; _numGroupByColumns; j++) {</span>
+<span class="fc bfc" id="L200" title="All 2 branches covered.">        if (!_isSingleValueColumn[j]) {</span>
+<span class="fc" id="L201">          _numValues[j] = _blockValSets[j].getDictionaryIdsForDocId(docId, _multiValueDictIds[j]);</span>
+        }
+      }
+<span class="fc" id="L204">      outGroupIds[i] = _rawKeyHolder.processMultiValue(i);</span>
+    }
+<span class="fc" id="L206">  }</span>
+
+  /**
+   * {@inheritDoc}
+   */
+  @Override
+  public int getCurrentGroupKeyUpperBound() {
+<span class="fc" id="L213">    return _rawKeyHolder.getGroupIdUpperBound();</span>
+  }
+
+  /**
+   * {@inheritDoc}
+   */
+  @Override
+  public Iterator&lt;GroupKey&gt; getUniqueGroupKeys() {
+<span class="fc" id="L221">    return _rawKeyHolder.iterator();</span>
+  }
+
+  /**
+   * {@inheritDoc}
+   */
+  @Override
+  public void purgeKeys(int[] keyIdsToPurge) {
+    // TODO: Make trimming work
+<span class="fc" id="L230">  }</span>
+
+  private interface RawKeyHolder extends Iterable&lt;GroupKey&gt; {
+
+    /**
+     * Process a block of documents for all single-value group-by columns case.
+     *
+     * @param numDocs Number of documents inside the block
+     * @param outGroupIds Buffer for group id results
+     */
+    void processSingleValue(int numDocs, @Nonnull int[] outGroupIds);
+
+    /**
+     * Process a single document for case with multi-value group-by columns.
+     *
+     * @param index Index in block
+     * @return Array of group ids for the given document id
+     */
+    @Nonnull
+    int[] processMultiValue(int index);
+
+    /**
+     * Get the upper bound of group id (exclusive) inside the holder.
+     *
+     * @return Upper bound of group id inside the holder
+     */
+    int getGroupIdUpperBound();
+  }
+
+<span class="fc" id="L259">  private class ArrayBasedHolder implements RawKeyHolder {</span>
+    // TODO: using bitmap might better
+<span class="fc" id="L261">    private final boolean[] _flags = new boolean[_globalGroupIdUpperBound];</span>
+
+    @Override
+    public void processSingleValue(int numDocs, @Nonnull int[] outGroupIds) {
+<span class="fc bfc" id="L265" title="All 2 branches covered.">      for (int i = 0; i &lt; numDocs; i++) {</span>
+<span class="fc" id="L266">        int groupId = 0;</span>
+<span class="fc bfc" id="L267" title="All 2 branches covered.">        for (int j = _numGroupByColumns - 1; j &gt;= 0; j--) {</span>
+<span class="fc" id="L268">          groupId = groupId * _cardinalities[j] + _singleValueDictIds[j][i];</span>
+        }
+<span class="fc" id="L270">        outGroupIds[i] = groupId;</span>
+<span class="fc" id="L271">        _flags[groupId] = true;</span>
+      }
+<span class="fc" id="L273">    }</span>
+
+    @Nonnull
+    @Override
+    public int[] processMultiValue(int index) {
+<span class="fc" id="L278">      int[] groupIds = getIntRawKeys(index);</span>
+<span class="fc bfc" id="L279" title="All 2 branches covered.">      for (int groupId : groupIds) {</span>
+<span class="fc" id="L280">        _flags[groupId] = true;</span>
+      }
+<span class="fc" id="L282">      return groupIds;</span>
+    }
+
+    @Override
+    public int getGroupIdUpperBound() {
+<span class="fc" id="L287">      return _globalGroupIdUpperBound;</span>
+    }
+
+    @Nonnull
+    @Override
+    public Iterator&lt;GroupKey&gt; iterator() {
+<span class="fc" id="L293">      return new Iterator&lt;GroupKey&gt;() {</span>
+        private int _currentGroupId;
+<span class="fc" id="L295">        private final GroupKey _groupKey = new GroupKey();</span>
+
+        @Override
+        public boolean hasNext() {
+<span class="fc bfc" id="L299" title="All 4 branches covered.">          while (_currentGroupId &lt; _globalGroupIdUpperBound &amp;&amp; !_flags[_currentGroupId]) {</span>
+<span class="fc" id="L300">            _currentGroupId++;</span>
+          }
+<span class="fc bfc" id="L302" title="All 2 branches covered.">          return _currentGroupId &lt; _globalGroupIdUpperBound;</span>
+        }
+
+        @Override
+        public GroupKey next() {
+<span class="pc bpc" id="L307" title="1 of 2 branches missed.">          if (!hasNext()) {</span>
+<span class="nc" id="L308">            throw new NoSuchElementException();</span>
+          }
+<span class="fc" id="L310">          _groupKey._groupId = _currentGroupId;</span>
+<span class="fc" id="L311">          _groupKey._stringKey = getGroupKey(_currentGroupId);</span>
+<span class="fc" id="L312">          _currentGroupId++;</span>
+<span class="fc" id="L313">          return _groupKey;</span>
+        }
+
+        @Override
+        public void remove() {
+<span class="nc" id="L318">          throw new UnsupportedOperationException();</span>
+        }
+      };
+    }
+  }
+
+  private class IntMapBasedHolder implements RawKeyHolder {
+<span class="fc" id="L325">    private final Int2IntOpenHashMap _rawKeyToGroupIdMap = new Int2IntOpenHashMap();</span>
+
+<span class="fc" id="L327">    public IntMapBasedHolder() {</span>
+<span class="fc" id="L328">      _rawKeyToGroupIdMap.defaultReturnValue(INVALID_ID);</span>
+<span class="fc" id="L329">    }</span>
+
+    @Override
+    public void processSingleValue(int numDocs, @Nonnull int[] outGroupIds) {
+<span class="fc bfc" id="L333" title="All 2 branches covered.">      for (int i = 0; i &lt; numDocs; i++) {</span>
+<span class="fc" id="L334">        int rawKey = 0;</span>
+<span class="fc bfc" id="L335" title="All 2 branches covered.">        for (int j = _numGroupByColumns - 1; j &gt;= 0; j--) {</span>
+<span class="fc" id="L336">          rawKey = rawKey * _cardinalities[j] + _singleValueDictIds[j][i];</span>
+        }
+<span class="fc" id="L338">        outGroupIds[i] = getGroupId(rawKey);</span>
+      }
+<span class="fc" id="L340">    }</span>
+
+    @Nonnull
+    @Override
+    public int[] processMultiValue(int index) {
+<span class="fc" id="L345">      int[] groupIds = getIntRawKeys(index);</span>
+
+      // Convert raw keys to group ids
+<span class="fc" id="L348">      int length = groupIds.length;</span>
+<span class="fc bfc" id="L349" title="All 2 branches covered.">      for (int i = 0; i &lt; length; i++) {</span>
+<span class="fc" id="L350">        groupIds[i] = getGroupId(groupIds[i]);</span>
+      }
+
+<span class="fc" id="L353">      return groupIds;</span>
+    }
+
+    private int getGroupId(int rawKey) {
+<span class="fc" id="L357">      int groupId = _rawKeyToGroupIdMap.get(rawKey);</span>
+<span class="fc bfc" id="L358" title="All 2 branches covered.">      if (groupId == INVALID_ID) {</span>
+<span class="fc" id="L359">        groupId = _rawKeyToGroupIdMap.size();</span>
+<span class="fc" id="L360">        _rawKeyToGroupIdMap.put(rawKey, groupId);</span>
+      }
+<span class="fc" id="L362">      return groupId;</span>
+    }
+
+    @Override
+    public int getGroupIdUpperBound() {
+<span class="fc" id="L367">      return _rawKeyToGroupIdMap.size();</span>
+    }
+
+    @Nonnull
+    @Override
+    public Iterator&lt;GroupKey&gt; iterator() {
+<span class="fc" id="L373">      return new Iterator&lt;GroupKey&gt;() {</span>
+<span class="fc" id="L374">        private final ObjectIterator&lt;Int2IntMap.Entry&gt; _iterator = _rawKeyToGroupIdMap.int2IntEntrySet().fastIterator();</span>
+<span class="fc" id="L375">        private final GroupKey _groupKey = new GroupKey();</span>
+
+        @Override
+        public boolean hasNext() {
+<span class="fc" id="L379">          return _iterator.hasNext();</span>
+        }
+
+        @Override
+        public GroupKey next() {
+<span class="fc" id="L384">          Int2IntMap.Entry entry = _iterator.next();</span>
+<span class="fc" id="L385">          _groupKey._groupId = entry.getIntValue();</span>
+<span class="fc" id="L386">          _groupKey._stringKey = getGroupKey(entry.getIntKey());</span>
+<span class="fc" id="L387">          return _groupKey;</span>
+        }
+
+        @Override
+        public void remove() {
+<span class="nc" id="L392">          throw new UnsupportedOperationException();</span>
+        }
+      };
+    }
+  }
+
+  /**
+   * Helper method to calculate raw keys that can fit into integer for the given index.
+   *
+   * @param index Index in block
+   * @return Array of integer raw keys
+   */
+  @SuppressWarnings(&quot;Duplicates&quot;)
+  private int[] getIntRawKeys(int index) {
+<span class="fc" id="L406">    int[] rawKeys = null;</span>
+
+    // Specialize single multi-value group-by column case
+<span class="fc bfc" id="L409" title="All 2 branches covered.">    if (_numGroupByColumns == 1) {</span>
+<span class="fc" id="L410">      rawKeys = Arrays.copyOf(_multiValueDictIds[0], _numValues[0]);</span>
+    } else {
+      // Before having to transform to array, use single value raw key for better performance
+<span class="fc" id="L413">      int rawKey = 0;</span>
+
+<span class="fc bfc" id="L415" title="All 2 branches covered.">      for (int i = _numGroupByColumns - 1; i &gt;= 0; i--) {</span>
+<span class="fc" id="L416">        int cardinality = _cardinalities[i];</span>
+<span class="fc" id="L417">        boolean isSingleValueColumn = _isSingleValueColumn[i];</span>
+<span class="fc" id="L418">        int numValues = _numValues[i];</span>
+<span class="fc" id="L419">        int[] multiValueDictIds = _multiValueDictIds[i];</span>
+
+        // Specialize multi-value column with only one value inside
+<span class="fc bfc" id="L422" title="All 4 branches covered.">        if (isSingleValueColumn || numValues == 1) {</span>
+          int dictId;
+<span class="fc bfc" id="L424" title="All 2 branches covered.">          if (isSingleValueColumn) {</span>
+<span class="fc" id="L425">            dictId = _singleValueDictIds[i][index];</span>
+          } else {
+<span class="fc" id="L427">            dictId = multiValueDictIds[0];</span>
+          }
+<span class="fc bfc" id="L429" title="All 2 branches covered.">          if (rawKeys == null) {</span>
+<span class="fc" id="L430">            rawKey = rawKey * cardinality + dictId;</span>
+          } else {
+<span class="fc" id="L432">            int length = rawKeys.length;</span>
+<span class="fc bfc" id="L433" title="All 2 branches covered.">            for (int j = 0; j &lt; length; j++) {</span>
+<span class="fc" id="L434">              rawKeys[j] = rawKeys[j] * cardinality + dictId;</span>
+            }
+          }
+<span class="fc" id="L437">        } else {</span>
+<span class="fc bfc" id="L438" title="All 2 branches covered.">          if (rawKeys == null) {</span>
+<span class="fc" id="L439">            rawKeys = new int[numValues];</span>
+<span class="fc bfc" id="L440" title="All 2 branches covered.">            for (int j = 0; j &lt; numValues; j++) {</span>
+<span class="fc" id="L441">              int dictId = multiValueDictIds[j];</span>
+<span class="fc" id="L442">              rawKeys[j] = rawKey * cardinality + dictId;</span>
+            }
+          } else {
+<span class="fc" id="L445">            int currentLength = rawKeys.length;</span>
+<span class="fc" id="L446">            int newLength = currentLength * numValues;</span>
+<span class="fc" id="L447">            int[] newRawKeys = new int[newLength];</span>
+<span class="fc bfc" id="L448" title="All 2 branches covered.">            for (int j = 0; j &lt; numValues; j++) {</span>
+<span class="fc" id="L449">              int startOffset = j * currentLength;</span>
+<span class="fc" id="L450">              System.arraycopy(rawKeys, 0, newRawKeys, startOffset, currentLength);</span>
+<span class="fc" id="L451">              int dictId = multiValueDictIds[j];</span>
+<span class="fc" id="L452">              int endOffset = startOffset + currentLength;</span>
+<span class="fc bfc" id="L453" title="All 2 branches covered.">              for (int k = startOffset; k &lt; endOffset; k++) {</span>
+<span class="fc" id="L454">                newRawKeys[k] = newRawKeys[k] * cardinality + dictId;</span>
+              }
+            }
+<span class="fc" id="L457">            rawKeys = newRawKeys;</span>
+          }
+        }
+      }
+
+<span class="fc bfc" id="L462" title="All 2 branches covered.">      if (rawKeys == null) {</span>
+<span class="fc" id="L463">        rawKeys = new int[]{rawKey};</span>
+      }
+    }
+
+<span class="fc" id="L467">    return rawKeys;</span>
+  }
+
+  /**
+   * Helper method to get group key from raw key.
+   *
+   * @param rawKey Integer raw key
+   * @return String group key
+   */
+  private String getGroupKey(int rawKey) {
+    // Specialize single group-by column case
+<span class="fc bfc" id="L478" title="All 2 branches covered.">    if (_numGroupByColumns == 1) {</span>
+<span class="fc" id="L479">      return _dictionaries[0].get(rawKey).toString();</span>
+    } else {
+<span class="fc" id="L481">      int cardinality = _cardinalities[0];</span>
+<span class="fc" id="L482">      StringBuilder groupKeyBuilder = new StringBuilder(_dictionaries[0].get(rawKey % cardinality).toString());</span>
+<span class="fc" id="L483">      rawKey /= cardinality;</span>
+<span class="fc bfc" id="L484" title="All 2 branches covered.">      for (int i = 1; i &lt; _numGroupByColumns; i++) {</span>
+<span class="fc" id="L485">        groupKeyBuilder.append(AggregationGroupByTrimmingService.GROUP_KEY_DELIMITER);</span>
+<span class="fc" id="L486">        cardinality = _cardinalities[i];</span>
+<span class="fc" id="L487">        groupKeyBuilder.append(_dictionaries[i].get(rawKey % cardinality));</span>
+<span class="fc" id="L488">        rawKey /= cardinality;</span>
+      }
+<span class="fc" id="L490">      return groupKeyBuilder.toString();</span>
+    }
+  }
+
+  private class LongMapBasedHolder implements RawKeyHolder {
+<span class="fc" id="L495">    private final Long2IntOpenHashMap _rawKeyToGroupIdMap = new Long2IntOpenHashMap();</span>
+
+<span class="fc" id="L497">    public LongMapBasedHolder() {</span>
+<span class="fc" id="L498">      _rawKeyToGroupIdMap.defaultReturnValue(INVALID_ID);</span>
+<span class="fc" id="L499">    }</span>
+
+    @Override
+    public void processSingleValue(int numDocs, @Nonnull int[] outGroupIds) {
+<span class="fc bfc" id="L503" title="All 2 branches covered.">      for (int i = 0; i &lt; numDocs; i++) {</span>
+<span class="fc" id="L504">        long rawKey = 0L;</span>
+<span class="fc bfc" id="L505" title="All 2 branches covered.">        for (int j = _numGroupByColumns - 1; j &gt;= 0; j--) {</span>
+<span class="fc" id="L506">          rawKey = rawKey * _cardinalities[j] + _singleValueDictIds[j][i];</span>
+        }
+<span class="fc" id="L508">        outGroupIds[i] = getGroupId(rawKey);</span>
+      }
+<span class="fc" id="L510">    }</span>
+
+    @Nonnull
+    @Override
+    public int[] processMultiValue(int index) {
+<span class="fc" id="L515">      long[] rawKeys = getLongRawKeys(index);</span>
+<span class="fc" id="L516">      int length = rawKeys.length;</span>
+<span class="fc" id="L517">      int[] groupIds = new int[length];</span>
+<span class="fc bfc" id="L518" title="All 2 branches covered.">      for (int i = 0; i &lt; length; i++) {</span>
+<span class="fc" id="L519">        groupIds[i] = getGroupId(rawKeys[i]);</span>
+      }
+<span class="fc" id="L521">      return groupIds;</span>
+    }
+
+    private int getGroupId(long rawKey) {
+<span class="fc" id="L525">      int groupId = _rawKeyToGroupIdMap.get(rawKey);</span>
+<span class="fc bfc" id="L526" title="All 2 branches covered.">      if (groupId == INVALID_ID) {</span>
+<span class="fc" id="L527">        groupId = _rawKeyToGroupIdMap.size();</span>
+<span class="fc" id="L528">        _rawKeyToGroupIdMap.put(rawKey, groupId);</span>
+      }
+<span class="fc" id="L530">      return groupId;</span>
+    }
+
+    @Override
+    public int getGroupIdUpperBound() {
+<span class="fc" id="L535">      return _rawKeyToGroupIdMap.size();</span>
+    }
+
+    @Nonnull
+    @Override
+    public Iterator&lt;GroupKey&gt; iterator() {
+<span class="fc" id="L541">      return new Iterator&lt;GroupKey&gt;() {</span>
+<span class="fc" id="L542">        private final ObjectIterator&lt;Long2IntMap.Entry&gt; _iterator =</span>
+            _rawKeyToGroupIdMap.long2IntEntrySet().fastIterator();
+<span class="fc" id="L544">        private final GroupKey _groupKey = new GroupKey();</span>
+
+        @Override
+        public boolean hasNext() {
+<span class="fc" id="L548">          return _iterator.hasNext();</span>
+        }
+
+        @Override
+        public GroupKey next() {
+<span class="fc" id="L553">          Long2IntMap.Entry entry = _iterator.next();</span>
+<span class="fc" id="L554">          _groupKey._groupId = entry.getIntValue();</span>
+<span class="fc" id="L555">          _groupKey._stringKey = getGroupKey(entry.getLongKey());</span>
+<span class="fc" id="L556">          return _groupKey;</span>
+        }
+
+        @Override
+        public void remove() {
+<span class="nc" id="L561">          throw new UnsupportedOperationException();</span>
+        }
+      };
+    }
+  }
+
+  /**
+   * Helper method to calculate raw keys that can fit into integer for the given index.
+   *
+   * @param index Index in block
+   * @return Array of long raw keys
+   */
+  @SuppressWarnings(&quot;Duplicates&quot;)
+  private long[] getLongRawKeys(int index) {
+<span class="fc" id="L575">    long[] rawKeys = null;</span>
+
+    // Before having to transform to array, use single value raw key for better performance
+<span class="fc" id="L578">    long rawKey = 0;</span>
+
+<span class="fc bfc" id="L580" title="All 2 branches covered.">    for (int i = _numGroupByColumns - 1; i &gt;= 0; i--) {</span>
+<span class="fc" id="L581">      int cardinality = _cardinalities[i];</span>
+<span class="fc" id="L582">      boolean isSingleValueColumn = _isSingleValueColumn[i];</span>
+<span class="fc" id="L583">      int numValues = _numValues[i];</span>
+<span class="fc" id="L584">      int[] multiValueDictIds = _multiValueDictIds[i];</span>
+
+      // Specialize multi-value column with only one value inside
+<span class="fc bfc" id="L587" title="All 4 branches covered.">      if (isSingleValueColumn || numValues == 1) {</span>
+        int dictId;
+<span class="fc bfc" id="L589" title="All 2 branches covered.">        if (isSingleValueColumn) {</span>
+<span class="fc" id="L590">          dictId = _singleValueDictIds[i][index];</span>
+        } else {
+<span class="fc" id="L592">          dictId = multiValueDictIds[0];</span>
+        }
+<span class="fc bfc" id="L594" title="All 2 branches covered.">        if (rawKeys == null) {</span>
+<span class="fc" id="L595">          rawKey = rawKey * cardinality + dictId;</span>
+        } else {
+<span class="fc" id="L597">          int length = rawKeys.length;</span>
+<span class="fc bfc" id="L598" title="All 2 branches covered.">          for (int j = 0; j &lt; length; j++) {</span>
+<span class="fc" id="L599">            rawKeys[j] = rawKeys[j] * cardinality + dictId;</span>
+          }
+        }
+<span class="fc" id="L602">      } else {</span>
+<span class="fc bfc" id="L603" title="All 2 branches covered.">        if (rawKeys == null) {</span>
+<span class="fc" id="L604">          rawKeys = new long[numValues];</span>
+<span class="fc bfc" id="L605" title="All 2 branches covered.">          for (int j = 0; j &lt; numValues; j++) {</span>
+<span class="fc" id="L606">            int dictId = multiValueDictIds[j];</span>
+<span class="fc" id="L607">            rawKeys[j] = rawKey * cardinality + dictId;</span>
+          }
+        } else {
+<span class="fc" id="L610">          int currentLength = rawKeys.length;</span>
+<span class="fc" id="L611">          int newLength = currentLength * numValues;</span>
+<span class="fc" id="L612">          long[] newRawKeys = new long[newLength];</span>
+<span class="fc bfc" id="L613" title="All 2 branches covered.">          for (int j = 0; j &lt; numValues; j++) {</span>
+<span class="fc" id="L614">            int startOffset = j * currentLength;</span>
+<span class="fc" id="L615">            System.arraycopy(rawKeys, 0, newRawKeys, startOffset, currentLength);</span>
+<span class="fc" id="L616">            int dictId = multiValueDictIds[j];</span>
+<span class="fc" id="L617">            int endOffset = startOffset + currentLength;</span>
+<span class="fc bfc" id="L618" title="All 2 branches covered.">            for (int k = startOffset; k &lt; endOffset; k++) {</span>
+<span class="fc" id="L619">              newRawKeys[k] = newRawKeys[k] * cardinality + dictId;</span>
+            }
+          }
+<span class="fc" id="L622">          rawKeys = newRawKeys;</span>
+        }
+      }
+    }
+
+<span class="fc bfc" id="L627" title="All 2 branches covered.">    if (rawKeys == null) {</span>
+<span class="fc" id="L628">      return new long[]{rawKey};</span>
+    } else {
+<span class="fc" id="L630">      return rawKeys;</span>
+    }
+  }
+
+  /**
+   * Helper method to get group key from raw key.
+   *
+   * @param rawKey Long raw key
+   * @return String group key
+   */
+  private String getGroupKey(long rawKey) {
+<span class="fc" id="L641">    int cardinality = _cardinalities[0];</span>
+<span class="fc" id="L642">    StringBuilder groupKeyBuilder = new StringBuilder(_dictionaries[0].get((int) (rawKey % cardinality)).toString());</span>
+<span class="fc" id="L643">    rawKey /= cardinality;</span>
+<span class="fc bfc" id="L644" title="All 2 branches covered.">    for (int i = 1; i &lt; _numGroupByColumns; i++) {</span>
+<span class="fc" id="L645">      groupKeyBuilder.append(AggregationGroupByTrimmingService.GROUP_KEY_DELIMITER);</span>
+<span class="fc" id="L646">      cardinality = _cardinalities[i];</span>
+<span class="fc" id="L647">      groupKeyBuilder.append(_dictionaries[i].get((int) (rawKey % cardinality)));</span>
+<span class="fc" id="L648">      rawKey /= cardinality;</span>
+    }
+<span class="fc" id="L650">    return groupKeyBuilder.toString();</span>
+  }
+
+  private class ArrayMapBasedHolder implements RawKeyHolder {
+<span class="fc" id="L654">    private final Object2IntOpenHashMap&lt;IntArray&gt; _rawKeyToGroupIdMap = new Object2IntOpenHashMap&lt;&gt;();</span>
+
+<span class="fc" id="L656">    public ArrayMapBasedHolder() {</span>
+<span class="fc" id="L657">      _rawKeyToGroupIdMap.defaultReturnValue(INVALID_ID);</span>
+<span class="fc" id="L658">    }</span>
+
+    @Override
+    public void processSingleValue(int numDocs, @Nonnull int[] outGroupIds) {
+<span class="fc bfc" id="L662" title="All 2 branches covered.">      for (int i = 0; i &lt; numDocs; i++) {</span>
+<span class="fc" id="L663">        int[] dictIds = new int[_numGroupByColumns];</span>
+<span class="fc bfc" id="L664" title="All 2 branches covered.">        for (int j = 0; j &lt; _numGroupByColumns; j++) {</span>
+<span class="fc" id="L665">          dictIds[j] = _singleValueDictIds[j][i];</span>
+        }
+<span class="fc" id="L667">        outGroupIds[i] = getGroupId(new IntArray(dictIds));</span>
+      }
+<span class="fc" id="L669">    }</span>
+
+    @Nonnull
+    @Override
+    public int[] processMultiValue(int index) {
+<span class="fc" id="L674">      IntArray[] rawKeys = getIntArrayRawKeys(index);</span>
+<span class="fc" id="L675">      int length = rawKeys.length;</span>
+<span class="fc" id="L676">      int[] groupIds = new int[length];</span>
+<span class="fc bfc" id="L677" title="All 2 branches covered.">      for (int i = 0; i &lt; length; i++) {</span>
+<span class="fc" id="L678">        groupIds[i] = getGroupId(rawKeys[i]);</span>
+      }
+<span class="fc" id="L680">      return groupIds;</span>
+    }
+
+    private int getGroupId(IntArray rawKey) {
+<span class="fc" id="L684">      int groupId = _rawKeyToGroupIdMap.getInt(rawKey);</span>
+<span class="fc bfc" id="L685" title="All 2 branches covered.">      if (groupId == INVALID_ID) {</span>
+<span class="fc" id="L686">        groupId = _rawKeyToGroupIdMap.size();</span>
+<span class="fc" id="L687">        _rawKeyToGroupIdMap.put(rawKey, groupId);</span>
+      }
+<span class="fc" id="L689">      return groupId;</span>
+    }
+
+    @Override
+    public int getGroupIdUpperBound() {
+<span class="fc" id="L694">      return _rawKeyToGroupIdMap.size();</span>
+    }
+
+    @Nonnull
+    @Override
+    public Iterator&lt;GroupKey&gt; iterator() {
+<span class="fc" id="L700">      return new Iterator&lt;GroupKey&gt;() {</span>
+<span class="fc" id="L701">        private final ObjectIterator&lt;Object2IntMap.Entry&lt;IntArray&gt;&gt; _iterator =</span>
+            _rawKeyToGroupIdMap.object2IntEntrySet().fastIterator();
+<span class="fc" id="L703">        private final GroupKey _groupKey = new GroupKey();</span>
+
+        @Override
+        public boolean hasNext() {
+<span class="fc" id="L707">          return _iterator.hasNext();</span>
+        }
+
+        @Override
+        public GroupKey next() {
+<span class="fc" id="L712">          Object2IntMap.Entry&lt;IntArray&gt; entry = _iterator.next();</span>
+<span class="fc" id="L713">          _groupKey._groupId = entry.getIntValue();</span>
+<span class="fc" id="L714">          _groupKey._stringKey = getGroupKey(entry.getKey());</span>
+<span class="fc" id="L715">          return _groupKey;</span>
+        }
+
+        @Override
+        public void remove() {
+<span class="nc" id="L720">          throw new UnsupportedOperationException();</span>
+        }
+      };
+    }
+  }
+
+  /**
+   * Helper method to calculate raw keys that can fit into integer for the given index.
+   *
+   * @param index Index in block
+   * @return Array of IntArray raw keys
+   */
+  @SuppressWarnings(&quot;Duplicates&quot;)
+  private IntArray[] getIntArrayRawKeys(int index) {
+<span class="fc" id="L734">    IntArray[] rawKeys = null;</span>
+
+    // Before having to transform to array, use single value raw key for better performance
+<span class="fc" id="L737">    int[] dictIds = new int[_numGroupByColumns];</span>
+
+<span class="fc bfc" id="L739" title="All 2 branches covered.">    for (int i = 0; i &lt; _numGroupByColumns; i++) {</span>
+<span class="fc" id="L740">      boolean isSingleValueColumn = _isSingleValueColumn[i];</span>
+<span class="fc" id="L741">      int numValues = _numValues[i];</span>
+<span class="fc" id="L742">      int[] multiValueDictIds = _multiValueDictIds[i];</span>
+
+      // Specialize multi-value column with only one value inside
+<span class="fc bfc" id="L745" title="All 4 branches covered.">      if (isSingleValueColumn || numValues == 1) {</span>
+        int dictId;
+<span class="fc bfc" id="L747" title="All 2 branches covered.">        if (isSingleValueColumn) {</span>
+<span class="fc" id="L748">          dictId = _singleValueDictIds[i][index];</span>
+        } else {
+<span class="fc" id="L750">          dictId = multiValueDictIds[0];</span>
+        }
+<span class="fc bfc" id="L752" title="All 2 branches covered.">        if (rawKeys == null) {</span>
+<span class="fc" id="L753">          dictIds[i] = dictId;</span>
+        } else {
+<span class="fc bfc" id="L755" title="All 2 branches covered.">          for (IntArray rawKey : rawKeys) {</span>
+<span class="fc" id="L756">            rawKey._elements[i] = dictId;</span>
+          }
+        }
+<span class="fc" id="L759">      } else {</span>
+<span class="fc bfc" id="L760" title="All 2 branches covered.">        if (rawKeys == null) {</span>
+<span class="fc" id="L761">          rawKeys = new IntArray[numValues];</span>
+<span class="fc bfc" id="L762" title="All 2 branches covered.">          for (int j = 0; j &lt; numValues; j++) {</span>
+<span class="fc" id="L763">            int dictId = multiValueDictIds[j];</span>
+<span class="fc" id="L764">            rawKeys[j] = new IntArray(dictIds.clone());</span>
+<span class="fc" id="L765">            rawKeys[j]._elements[i] = dictId;</span>
+          }
+        } else {
+<span class="fc" id="L768">          int currentLength = rawKeys.length;</span>
+<span class="fc" id="L769">          int newLength = currentLength * numValues;</span>
+<span class="fc" id="L770">          IntArray[] newRawKeys = new IntArray[newLength];</span>
+<span class="fc" id="L771">          System.arraycopy(rawKeys, 0, newRawKeys, 0, currentLength);</span>
+<span class="fc bfc" id="L772" title="All 2 branches covered.">          for (int j = 1; j &lt; numValues; j++) {</span>
+<span class="fc" id="L773">            int offset = j * currentLength;</span>
+<span class="fc bfc" id="L774" title="All 2 branches covered.">            for (int k = 0; k &lt; currentLength; k++) {</span>
+<span class="fc" id="L775">              newRawKeys[offset + k] = new IntArray(rawKeys[k]._elements.clone());</span>
+            }
+          }
+<span class="fc bfc" id="L778" title="All 2 branches covered.">          for (int j = 0; j &lt; numValues; j++) {</span>
+<span class="fc" id="L779">            int startOffset = j * currentLength;</span>
+<span class="fc" id="L780">            int dictId = multiValueDictIds[j];</span>
+<span class="fc" id="L781">            int endOffset = startOffset + currentLength;</span>
+<span class="fc bfc" id="L782" title="All 2 branches covered.">            for (int k = startOffset; k &lt; endOffset; k++) {</span>
+<span class="fc" id="L783">              newRawKeys[k]._elements[i] = dictId;</span>
+            }
+          }
+<span class="fc" id="L786">          rawKeys = newRawKeys;</span>
+        }
+      }
+    }
+
+<span class="fc bfc" id="L791" title="All 2 branches covered.">    if (rawKeys == null) {</span>
+<span class="fc" id="L792">      return new IntArray[]{new IntArray(dictIds)};</span>
+    } else {
+<span class="fc" id="L794">      return rawKeys;</span>
+    }
+  }
+
+  /**
+   * Helper method to get group key from raw key.
+   *
+   * @param rawKey IntArray raw key
+   * @return String group key
+   */
+  private String getGroupKey(IntArray rawKey) {
+<span class="fc" id="L805">    StringBuilder groupKeyBuilder = new StringBuilder(_dictionaries[0].get(rawKey._elements[0]).toString());</span>
+<span class="fc bfc" id="L806" title="All 2 branches covered.">    for (int i = 1; i &lt; _numGroupByColumns; i++) {</span>
+<span class="fc" id="L807">      groupKeyBuilder.append(AggregationGroupByTrimmingService.GROUP_KEY_DELIMITER);</span>
+<span class="fc" id="L808">      groupKeyBuilder.append(_dictionaries[i].get(rawKey._elements[i]));</span>
+    }
+<span class="fc" id="L810">    return groupKeyBuilder.toString();</span>
+  }
+
+  /**
+   * Drop un-necessary checks for highest performance.
+   */
+  private static class IntArray {
+    public int[] _elements;
+
+<span class="fc" id="L819">    public IntArray(int[] elements) {</span>
+<span class="fc" id="L820">      _elements = elements;</span>
+<span class="fc" id="L821">    }</span>
+
+    @Override
+    public int hashCode() {
+<span class="fc" id="L825">      int result = 1;</span>
+<span class="fc bfc" id="L826" title="All 2 branches covered.">      for (int element : _elements) {</span>
+<span class="fc" id="L827">        result = 31 * result + element;</span>
+      }
+<span class="fc" id="L829">      return result;</span>
+    }
+
+    @SuppressWarnings(&quot;EqualsWhichDoesntCheckParameterClass&quot;)
+    @Override
+    public boolean equals(Object obj) {
+<span class="fc" id="L835">      int[] that = ((IntArray) obj)._elements;</span>
+<span class="fc" id="L836">      int length = _elements.length;</span>
+<span class="pc bpc" id="L837" title="1 of 2 branches missed.">      if (length != that.length) {</span>
+<span class="nc" id="L838">        return false;</span>
+      }
+<span class="fc bfc" id="L840" title="All 2 branches covered.">      for (int i = 0; i &lt; length; i++) {</span>
+<span class="fc bfc" id="L841" title="All 2 branches covered.">        if (_elements[i] != that[i]) {</span>
+<span class="fc" id="L842">          return false;</span>
+        }
+      }
+<span class="fc" id="L845">      return true;</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

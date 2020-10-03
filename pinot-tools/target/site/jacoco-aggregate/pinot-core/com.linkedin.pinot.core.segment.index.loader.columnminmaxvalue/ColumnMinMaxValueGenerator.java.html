@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>ColumnMinMaxValueGenerator.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-tools</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.segment.index.loader.columnminmaxvalue</a> &gt; <span class="el_source">ColumnMinMaxValueGenerator.java</span></div><h1>ColumnMinMaxValueGenerator.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.segment.index.loader.columnminmaxvalue;
+
+import com.clearspring.analytics.util.Preconditions;
+import com.linkedin.pinot.common.data.FieldSpec;
+import com.linkedin.pinot.common.data.Schema;
+import com.linkedin.pinot.core.segment.creator.impl.SegmentColumnarIndexCreator;
+import com.linkedin.pinot.core.segment.index.ColumnMetadata;
+import com.linkedin.pinot.core.segment.index.SegmentMetadataImpl;
+import com.linkedin.pinot.core.segment.index.readers.DoubleDictionary;
+import com.linkedin.pinot.core.segment.index.readers.FloatDictionary;
+import com.linkedin.pinot.core.segment.index.readers.IntDictionary;
+import com.linkedin.pinot.core.segment.index.readers.LongDictionary;
+import com.linkedin.pinot.core.segment.index.readers.StringDictionary;
+import com.linkedin.pinot.core.segment.memory.PinotDataBuffer;
+import com.linkedin.pinot.core.segment.store.ColumnIndexType;
+import com.linkedin.pinot.core.segment.store.SegmentDirectory;
+import org.apache.commons.configuration.PropertiesConfiguration;
+
+
+public class ColumnMinMaxValueGenerator {
+  private final SegmentMetadataImpl _segmentMetadata;
+  private final PropertiesConfiguration _segmentProperties;
+  private final SegmentDirectory.Writer _segmentWriter;
+  private final ColumnMinMaxValueGeneratorMode _columnMinMaxValueGeneratorMode;
+
+  private boolean _minMaxValueAdded;
+
+  public ColumnMinMaxValueGenerator(SegmentMetadataImpl segmentMetadata, SegmentDirectory.Writer segmentWriter,
+<span class="fc" id="L44">      ColumnMinMaxValueGeneratorMode columnMinMaxValueGeneratorMode) {</span>
+<span class="fc" id="L45">    _segmentMetadata = segmentMetadata;</span>
+<span class="fc" id="L46">    _segmentProperties = segmentMetadata.getSegmentMetadataPropertiesConfiguration();</span>
+<span class="fc" id="L47">    _segmentWriter = segmentWriter;</span>
+<span class="fc" id="L48">    _columnMinMaxValueGeneratorMode = columnMinMaxValueGeneratorMode;</span>
+<span class="fc" id="L49">  }</span>
+
+  public void addColumnMinMaxValue() throws Exception {
+<span class="pc bpc" id="L52" title="1 of 2 branches missed.">    Preconditions.checkState(_columnMinMaxValueGeneratorMode != ColumnMinMaxValueGeneratorMode.NONE);</span>
+
+<span class="fc" id="L54">    Schema schema = _segmentMetadata.getSchema();</span>
+
+    // Process time column
+<span class="fc" id="L57">    String timeColumnName = schema.getTimeColumnName();</span>
+<span class="fc bfc" id="L58" title="All 2 branches covered.">    if (timeColumnName != null) {</span>
+<span class="fc" id="L59">      addColumnMinMaxValueForColumn(timeColumnName);</span>
+    }
+<span class="fc bfc" id="L61" title="All 2 branches covered.">    if (_columnMinMaxValueGeneratorMode == ColumnMinMaxValueGeneratorMode.TIME) {</span>
+<span class="fc" id="L62">      saveMetadata();</span>
+<span class="fc" id="L63">      return;</span>
+    }
+
+    // Process dimension columns
+<span class="fc bfc" id="L67" title="All 2 branches covered.">    for (String dimensionColumnName : schema.getDimensionNames()) {</span>
+<span class="fc" id="L68">      addColumnMinMaxValueForColumn(dimensionColumnName);</span>
+<span class="fc" id="L69">    }</span>
+<span class="fc bfc" id="L70" title="All 2 branches covered.">    if (_columnMinMaxValueGeneratorMode == ColumnMinMaxValueGeneratorMode.NON_METRIC) {</span>
+<span class="fc" id="L71">      saveMetadata();</span>
+<span class="fc" id="L72">      return;</span>
+    }
+
+    // Process metric columns
+<span class="fc bfc" id="L76" title="All 2 branches covered.">    for (String metricColumnName : schema.getMetricNames()) {</span>
+<span class="fc" id="L77">      addColumnMinMaxValueForColumn(metricColumnName);</span>
+<span class="fc" id="L78">    }</span>
+<span class="fc" id="L79">    saveMetadata();</span>
+<span class="fc" id="L80">  }</span>
+
+  private void addColumnMinMaxValueForColumn(String columnName) throws Exception {
+    // Skip column without dictionary or with min/max value already set
+<span class="fc" id="L84">    ColumnMetadata columnMetadata = _segmentMetadata.getColumnMetadataFor(columnName);</span>
+<span class="pc bpc" id="L85" title="1 of 4 branches missed.">    if ((!columnMetadata.hasDictionary()) || (columnMetadata.getMinValue() != null)) {</span>
+<span class="fc" id="L86">      return;</span>
+    }
+
+<span class="fc" id="L89">    PinotDataBuffer dictionaryBuffer = _segmentWriter.getIndexFor(columnName, ColumnIndexType.DICTIONARY);</span>
+<span class="fc" id="L90">    FieldSpec.DataType dataType = columnMetadata.getDataType();</span>
+<span class="fc" id="L91">    int length = columnMetadata.getCardinality();</span>
+<span class="pc bpc" id="L92" title="3 of 6 branches missed.">    switch (dataType) {</span>
+      case INT:
+<span class="pc" id="L94">        try (IntDictionary intDictionary = new IntDictionary(dictionaryBuffer, length)) {</span>
+<span class="fc" id="L95">          SegmentColumnarIndexCreator.addColumnMinMaxValueInfo(_segmentProperties, columnName,</span>
+              intDictionary.getStringValue(0), intDictionary.getStringValue(length - 1));
+<span class="pc bpc" id="L97" title="6 of 8 branches missed.">        }</span>
+<span class="fc" id="L98">        break;</span>
+      case LONG:
+<span class="pc" id="L100">        try (LongDictionary longDictionary = new LongDictionary(dictionaryBuffer, length)) {</span>
+<span class="fc" id="L101">          SegmentColumnarIndexCreator.addColumnMinMaxValueInfo(_segmentProperties, columnName,</span>
+              longDictionary.getStringValue(0), longDictionary.getStringValue(length - 1));
+<span class="pc bpc" id="L103" title="6 of 8 branches missed.">        }</span>
+<span class="fc" id="L104">        break;</span>
+      case FLOAT:
+<span class="nc" id="L106">        try (FloatDictionary floatDictionary = new FloatDictionary(dictionaryBuffer, length)) {</span>
+<span class="nc" id="L107">          SegmentColumnarIndexCreator.addColumnMinMaxValueInfo(_segmentProperties, columnName,</span>
+              floatDictionary.getStringValue(0), floatDictionary.getStringValue(length - 1));
+<span class="nc bnc" id="L109" title="All 8 branches missed.">        }</span>
+<span class="nc" id="L110">        break;</span>
+      case DOUBLE:
+<span class="nc" id="L112">        try (DoubleDictionary doubleDictionary = new DoubleDictionary(dictionaryBuffer, length)) {</span>
+<span class="nc" id="L113">          SegmentColumnarIndexCreator.addColumnMinMaxValueInfo(_segmentProperties, columnName,</span>
+              doubleDictionary.getStringValue(0), doubleDictionary.getStringValue(length - 1));
+<span class="nc bnc" id="L115" title="All 8 branches missed.">        }</span>
+<span class="nc" id="L116">        break;</span>
+      case STRING:
+<span class="pc" id="L118">        try (StringDictionary stringDictionary = new StringDictionary(dictionaryBuffer, length,</span>
+            columnMetadata.getStringColumnMaxLength(), (byte) columnMetadata.getPaddingCharacter())) {
+<span class="fc" id="L120">          SegmentColumnarIndexCreator.addColumnMinMaxValueInfo(_segmentProperties, columnName, stringDictionary.get(0),</span>
+              stringDictionary.get(length - 1));
+<span class="pc bpc" id="L122" title="6 of 8 branches missed.">        }</span>
+<span class="fc" id="L123">        break;</span>
+      default:
+<span class="nc" id="L125">        throw new IllegalStateException(&quot;Unsupported data type: &quot; + dataType + &quot; for column: &quot; + columnName);</span>
+    }
+
+<span class="fc" id="L128">    _minMaxValueAdded = true;</span>
+<span class="fc" id="L129">  }</span>
+
+  private void saveMetadata() throws Exception {
+<span class="fc bfc" id="L132" title="All 2 branches covered.">    if (_minMaxValueAdded) {</span>
+<span class="fc" id="L133">      _segmentProperties.save();</span>
+    }
+<span class="fc" id="L135">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

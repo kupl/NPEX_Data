@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>BalanceNumSegmentAssignmentStrategy.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-perf</a> &gt; <a href="../index.html" class="el_bundle">pinot-controller</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.controller.helix.core.sharding</a> &gt; <span class="el_source">BalanceNumSegmentAssignmentStrategy.java</span></div><h1>BalanceNumSegmentAssignmentStrategy.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.controller.helix.core.sharding;
+
+import com.linkedin.pinot.common.config.TableNameBuilder;
+import com.linkedin.pinot.common.segment.SegmentMetadata;
+import com.linkedin.pinot.common.utils.ControllerTenantNameBuilder;
+import com.linkedin.pinot.common.utils.Pairs;
+import com.linkedin.pinot.common.utils.Pairs.Number2ObjectPair;
+import com.linkedin.pinot.common.utils.helix.HelixHelper;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.PriorityQueue;
+import org.apache.helix.HelixAdmin;
+import org.apache.helix.ZNRecord;
+import org.apache.helix.model.IdealState;
+import org.apache.helix.store.zk.ZkHelixPropertyStore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * Assigns a segment to the instance that has least number of segments.
+ */
+<span class="fc" id="L41">public class BalanceNumSegmentAssignmentStrategy implements SegmentAssignmentStrategy {</span>
+<span class="fc" id="L42">  private static final Logger LOGGER = LoggerFactory.getLogger(BalanceNumSegmentAssignmentStrategy.class);</span>
+
+  @Override
+  public List&lt;String&gt; getAssignedInstances(HelixAdmin helixAdmin, ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore,
+      String helixClusterName, SegmentMetadata segmentMetadata, int numReplicas, String tenantName) {
+<span class="fc" id="L47">    String offlineTableName = TableNameBuilder.OFFLINE.tableNameWithType(segmentMetadata.getTableName());</span>
+<span class="fc" id="L48">    String serverTenantName = ControllerTenantNameBuilder.getOfflineTenantNameForTenant(tenantName);</span>
+
+<span class="fc" id="L50">    List&lt;String&gt; selectedInstances = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L51">    Map&lt;String, Integer&gt; currentNumSegmentsPerInstanceMap = new HashMap&lt;&gt;();</span>
+<span class="fc" id="L52">    List&lt;String&gt; allTaggedInstances =</span>
+        HelixHelper.getEnabledInstancesWithTag(helixAdmin, helixClusterName, serverTenantName);
+
+<span class="fc bfc" id="L55" title="All 2 branches covered.">    for (String instance : allTaggedInstances) {</span>
+<span class="fc" id="L56">      currentNumSegmentsPerInstanceMap.put(instance, 0);</span>
+<span class="fc" id="L57">    }</span>
+
+    // Count number of segments assigned to each instance
+<span class="fc" id="L60">    IdealState idealState = helixAdmin.getResourceIdealState(helixClusterName, offlineTableName);</span>
+<span class="pc bpc" id="L61" title="1 of 2 branches missed.">    if (idealState != null) {</span>
+<span class="fc bfc" id="L62" title="All 2 branches covered.">      for (String partitionName : idealState.getPartitionSet()) {</span>
+<span class="fc" id="L63">        Map&lt;String, String&gt; instanceToStateMap = idealState.getInstanceStateMap(partitionName);</span>
+<span class="pc bpc" id="L64" title="1 of 2 branches missed.">        if (instanceToStateMap != null) {</span>
+<span class="fc bfc" id="L65" title="All 2 branches covered.">          for (String instanceName : instanceToStateMap.keySet()) {</span>
+<span class="pc bpc" id="L66" title="1 of 2 branches missed.">            if (currentNumSegmentsPerInstanceMap.containsKey(instanceName)) {</span>
+<span class="fc" id="L67">              currentNumSegmentsPerInstanceMap.put(instanceName,</span>
+                  currentNumSegmentsPerInstanceMap.get(instanceName) + 1);
+            }
+            // else, ignore. Do not add servers, that are not tagged, to the map
+            // By this approach, new segments will not be allotted to the server if tags changed
+<span class="fc" id="L72">          }</span>
+        }
+<span class="fc" id="L74">      }</span>
+    }
+
+    // Select up to numReplicas instances with the fewest segments assigned
+<span class="fc" id="L78">    PriorityQueue&lt;Number2ObjectPair&lt;String&gt;&gt; priorityQueue =</span>
+        new PriorityQueue&lt;&gt;(numReplicas, Pairs.getDescendingnumber2ObjectPairComparator());
+<span class="fc bfc" id="L80" title="All 2 branches covered.">    for (String key : currentNumSegmentsPerInstanceMap.keySet()) {</span>
+<span class="fc" id="L81">      priorityQueue.add(new Number2ObjectPair&lt;&gt;(currentNumSegmentsPerInstanceMap.get(key), key));</span>
+<span class="fc bfc" id="L82" title="All 2 branches covered.">      if (priorityQueue.size() &gt; numReplicas) {</span>
+<span class="fc" id="L83">        priorityQueue.poll();</span>
+      }
+<span class="fc" id="L85">    }</span>
+
+<span class="fc bfc" id="L87" title="All 2 branches covered.">    while (!priorityQueue.isEmpty()) {</span>
+<span class="fc" id="L88">      selectedInstances.add(priorityQueue.poll().getB());</span>
+    }
+
+<span class="fc" id="L91">    LOGGER.info(&quot;Segment assignment result for : &quot; + segmentMetadata.getName() + &quot;, in resource : &quot;</span>
+        + segmentMetadata.getTableName() + &quot;, selected instances: &quot; + Arrays.toString(selectedInstances.toArray()));
+<span class="fc" id="L93">    return selectedInstances;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

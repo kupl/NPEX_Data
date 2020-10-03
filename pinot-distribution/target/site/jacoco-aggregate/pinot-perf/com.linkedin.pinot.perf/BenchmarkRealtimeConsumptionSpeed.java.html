@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>BenchmarkRealtimeConsumptionSpeed.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-perf</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.perf</a> &gt; <span class="el_source">BenchmarkRealtimeConsumptionSpeed.java</span></div><h1>BenchmarkRealtimeConsumptionSpeed.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.perf;
+
+import com.google.common.util.concurrent.Uninterruptibles;
+import com.linkedin.pinot.common.utils.KafkaStarterUtils;
+import com.linkedin.pinot.common.utils.TarGzCompressionUtils;
+import com.linkedin.pinot.integration.tests.ClusterIntegrationTestUtils;
+import com.linkedin.pinot.integration.tests.RealtimeClusterIntegrationTest;
+import com.linkedin.pinot.util.TestUtils;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Random;
+import java.util.concurrent.TimeUnit;
+import kafka.server.KafkaServerStartable;
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+
+/**
+ * Benchmark that writes a configurable amount of rows in Kafka and checks how much time it takes to consume all of
+ * them.
+ */
+<span class="nc" id="L38">public class BenchmarkRealtimeConsumptionSpeed extends RealtimeClusterIntegrationTest {</span>
+  private static final int ROW_COUNT = 100_000;
+  private static final int ROW_COUNT_FOR_SEGMENT_FLUSH = 10_000;
+  private static final long TIMEOUT_MILLIS = 20 * 60 * 1000L; // Twenty minutes
+<span class="nc" id="L42">  private final File _tmpDir = new File(&quot;/tmp/&quot; + getHelixClusterName());</span>
+  private static final int SEGMENT_COUNT = 1;
+<span class="nc" id="L44">  private static final Random RANDOM = new Random(123456L);</span>
+
+  public static void main(String[] args) {
+    try {
+<span class="nc" id="L48">      new BenchmarkRealtimeConsumptionSpeed().runBenchmark();</span>
+<span class="nc" id="L49">    } catch (Exception e) {</span>
+<span class="nc" id="L50">      System.exit(-1);</span>
+<span class="nc" id="L51">    }</span>
+<span class="nc" id="L52">    System.exit(0);</span>
+<span class="nc" id="L53">  }</span>
+
+  private void runBenchmark() throws Exception {
+    // Start ZK and Kafka
+<span class="nc" id="L57">    startZk();</span>
+<span class="nc" id="L58">    KafkaServerStartable kafkaStarter = KafkaStarterUtils</span>
+        .startServer(KafkaStarterUtils.DEFAULT_KAFKA_PORT, KafkaStarterUtils.DEFAULT_BROKER_ID,
+            KafkaStarterUtils.DEFAULT_ZK_STR, KafkaStarterUtils.getDefaultKafkaConfiguration());
+
+    // Create Kafka topic
+<span class="nc" id="L63">    KafkaStarterUtils.createTopic(getKafkaTopic(), KafkaStarterUtils.DEFAULT_ZK_STR, 10);</span>
+
+    // Unpack data (needed to get the Avro schema)
+<span class="nc" id="L66">    TarGzCompressionUtils.unTar(</span>
+        new File(TestUtils.getFileFromResourceUrl(RealtimeClusterIntegrationTest.class.getClassLoader()
+            .getResource(&quot;On_Time_On_Time_Performance_2014_100k_subset_nonulls.tar.gz&quot;))), _tmpDir);
+
+<span class="nc" id="L70">    _tmpDir.mkdirs();</span>
+<span class="nc" id="L71">    final List&lt;File&gt; avroFiles = new ArrayList&lt;File&gt;(SEGMENT_COUNT);</span>
+<span class="nc bnc" id="L72" title="All 2 branches missed.">    for (int segmentNumber = 1; segmentNumber &lt;= SEGMENT_COUNT; ++segmentNumber) {</span>
+<span class="nc" id="L73">      avroFiles.add(new File(_tmpDir.getPath() + &quot;/On_Time_On_Time_Performance_2014_&quot; + segmentNumber + &quot;.avro&quot;));</span>
+    }
+
+    // Start the Pinot cluster
+<span class="nc" id="L77">    startController();</span>
+<span class="nc" id="L78">    startBroker();</span>
+<span class="nc" id="L79">    startServer();</span>
+
+    // Create realtime table
+<span class="nc" id="L82">    setUpTable(avroFiles.get(0));</span>
+
+    // Wait a couple of seconds for all Helix state transitions to happen
+<span class="nc" id="L85">    Uninterruptibles.sleepUninterruptibly(5, TimeUnit.SECONDS);</span>
+
+    // Generate ROW_COUNT rows and write them into Kafka
+<span class="nc" id="L88">    new Thread() {</span>
+      @Override
+      public void run() {
+        try {
+<span class="nc" id="L92">          ClusterIntegrationTestUtils.pushRandomAvroIntoKafka(avroFiles.get(0), KafkaStarterUtils.DEFAULT_KAFKA_BROKER,</span>
+              getKafkaTopic(), ROW_COUNT, getMaxNumKafkaMessagesPerBatch(), getKafkaMessageHeader(), getPartitionColumn());
+<span class="nc" id="L94">        } catch (Exception e) {</span>
+          // Ignored
+<span class="nc" id="L96">        }</span>
+<span class="nc" id="L97">      }</span>
+    }.start();
+
+    // Count how many seconds it takes for select count(*) to match with ROW_COUNT
+<span class="nc" id="L101">    long startTime = System.currentTimeMillis();</span>
+
+<span class="nc" id="L103">    int pinotRecordCount = -1;</span>
+<span class="nc" id="L104">    long timeAfterTimeout = System.currentTimeMillis() + TIMEOUT_MILLIS;</span>
+    do {
+<span class="nc" id="L106">      Thread.sleep(500L);</span>
+
+      // Run the query
+      try {
+<span class="nc" id="L110">        JSONObject response = postQuery(&quot;select count(*) from mytable&quot;);</span>
+<span class="nc" id="L111">        JSONArray aggregationResultsArray = response.getJSONArray(&quot;aggregationResults&quot;);</span>
+<span class="nc" id="L112">        JSONObject firstAggregationResult = aggregationResultsArray.getJSONObject(0);</span>
+<span class="nc" id="L113">        String pinotValue = firstAggregationResult.getString(&quot;value&quot;);</span>
+<span class="nc" id="L114">        pinotRecordCount = Integer.parseInt(pinotValue);</span>
+<span class="nc" id="L115">      } catch (Exception e) {</span>
+        // Ignore
+<span class="nc" id="L117">        continue;</span>
+<span class="nc" id="L118">      }</span>
+
+<span class="nc" id="L120">      System.out.println(&quot;Pinot record count: &quot; + pinotRecordCount);</span>
+<span class="nc bnc" id="L121" title="All 2 branches missed.">      if (timeAfterTimeout &lt; System.currentTimeMillis()) {</span>
+<span class="nc" id="L122">        throw new RuntimeException(&quot;Timeout exceeded!&quot;);</span>
+      }
+<span class="nc bnc" id="L124" title="All 2 branches missed.">    } while (ROW_COUNT != pinotRecordCount);</span>
+
+<span class="nc" id="L126">    long endTime = System.currentTimeMillis();</span>
+
+<span class="nc" id="L128">    System.out.println(&quot;Consumed &quot; + ROW_COUNT + &quot; rows in &quot; + (endTime - startTime) / 1000.0 + &quot; seconds&quot;);</span>
+<span class="nc" id="L129">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

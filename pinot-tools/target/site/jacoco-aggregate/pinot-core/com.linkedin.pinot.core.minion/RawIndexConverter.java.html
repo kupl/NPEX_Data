@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>RawIndexConverter.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-tools</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.minion</a> &gt; <span class="el_source">RawIndexConverter.java</span></div><h1>RawIndexConverter.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.minion;
+
+import com.linkedin.pinot.common.data.FieldSpec;
+import com.linkedin.pinot.common.data.MetricFieldSpec;
+import com.linkedin.pinot.common.data.Schema;
+import com.linkedin.pinot.common.segment.ReadMode;
+import com.linkedin.pinot.core.common.BlockSingleValIterator;
+import com.linkedin.pinot.core.common.DataSource;
+import com.linkedin.pinot.core.indexsegment.IndexSegment;
+import com.linkedin.pinot.core.indexsegment.columnar.ColumnarSegmentLoader;
+import com.linkedin.pinot.core.indexsegment.generator.SegmentVersion;
+import com.linkedin.pinot.core.io.compression.ChunkCompressorFactory;
+import com.linkedin.pinot.core.segment.creator.SingleValueRawIndexCreator;
+import com.linkedin.pinot.core.segment.creator.impl.SegmentColumnarIndexCreator;
+import com.linkedin.pinot.core.segment.creator.impl.SegmentIndexCreationDriverImpl;
+import com.linkedin.pinot.core.segment.creator.impl.V1Constants;
+import com.linkedin.pinot.core.segment.index.ColumnMetadata;
+import com.linkedin.pinot.core.segment.index.SegmentMetadataImpl;
+import com.linkedin.pinot.core.segment.index.loader.IndexLoadingConfig;
+import com.linkedin.pinot.core.segment.index.readers.Dictionary;
+import com.linkedin.pinot.core.util.CrcUtils;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+import org.apache.commons.configuration.PropertiesConfiguration;
+import org.apache.commons.io.FileUtils;
+import org.apache.commons.lang.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * The &lt;code&gt;RawIndexConverter&lt;/code&gt; class takes a segment and converts the dictionary-based indexes inside the segment
+ * into raw indexes.
+ * &lt;ul&gt;
+ *   &lt;li&gt;
+ *     If columns to convert are specified, check whether their dictionary-based indexes exist and convert them.
+ *   &lt;/li&gt;
+ *   &lt;li&gt;
+ *     If not specified, for each metric column, calculate the size of dictionary-based index and uncompressed raw
+ *     index. If the size of raw index is smaller or equal to (size of dictionary-based index * CONVERSION_THRESHOLD),
+ *     convert it.
+ *   &lt;/li&gt;
+ * &lt;/ul&gt;
+ * &lt;p&gt;After the conversion, add &quot;rawIndex&quot; into the segment metadata &quot;optimizations&quot; field.
+ */
+public class RawIndexConverter {
+<span class="nc" id="L65">  private static final Logger LOGGER = LoggerFactory.getLogger(RawIndexConverter.class);</span>
+
+  // Threshold for the ratio of uncompressed raw index size and dictionary-based index size to trigger conversion
+  private static final int CONVERSION_THRESHOLD = 4;
+
+  // BITS_PER_ELEMENT is not applicable for raw index
+  private static final int BITS_PER_ELEMENT_FOR_RAW_INDEX = -1;
+
+  private final IndexSegment _originalIndexSegment;
+  private final SegmentMetadataImpl _originalSegmentMetadata;
+  private final File _convertedIndexDir;
+  private final PropertiesConfiguration _convertedProperties;
+  private final String _columnsToConvert;
+
+  /**
+   * NOTE: original segment should be in V1 format.
+   * TODO: support V3 format
+   */
+  public RawIndexConverter(@Nonnull File originalIndexDir, @Nonnull File convertedIndexDir,
+<span class="nc" id="L84">      @Nullable String columnsToConvert) throws Exception {</span>
+<span class="nc" id="L85">    FileUtils.copyDirectory(originalIndexDir, convertedIndexDir);</span>
+<span class="nc" id="L86">    IndexLoadingConfig indexLoadingConfig = new IndexLoadingConfig();</span>
+<span class="nc" id="L87">    indexLoadingConfig.setSegmentVersion(SegmentVersion.v1);</span>
+<span class="nc" id="L88">    indexLoadingConfig.setReadMode(ReadMode.mmap);</span>
+<span class="nc" id="L89">    _originalIndexSegment = ColumnarSegmentLoader.load(originalIndexDir, indexLoadingConfig);</span>
+<span class="nc" id="L90">    _originalSegmentMetadata = (SegmentMetadataImpl) _originalIndexSegment.getSegmentMetadata();</span>
+<span class="nc" id="L91">    _convertedIndexDir = convertedIndexDir;</span>
+<span class="nc" id="L92">    _convertedProperties =</span>
+        new PropertiesConfiguration(new File(_convertedIndexDir, V1Constants.MetadataKeys.METADATA_FILE_NAME));
+<span class="nc" id="L94">    _columnsToConvert = columnsToConvert;</span>
+<span class="nc" id="L95">  }</span>
+
+  public boolean convert() throws Exception {
+<span class="nc" id="L98">    String segmentName = _originalSegmentMetadata.getName();</span>
+<span class="nc" id="L99">    String tableName = _originalSegmentMetadata.getTableName();</span>
+<span class="nc" id="L100">    LOGGER.info(&quot;Start converting segment: {} in table: {}&quot;, segmentName, tableName);</span>
+
+<span class="nc" id="L102">    List&lt;FieldSpec&gt; columnsToConvert = new ArrayList&lt;&gt;();</span>
+<span class="nc" id="L103">    Schema schema = _originalSegmentMetadata.getSchema();</span>
+<span class="nc bnc" id="L104" title="All 2 branches missed.">    if (_columnsToConvert == null) {</span>
+<span class="nc" id="L105">      LOGGER.info(&quot;Columns to convert are not specified, check each metric column&quot;);</span>
+<span class="nc bnc" id="L106" title="All 2 branches missed.">      for (MetricFieldSpec metricFieldSpec : schema.getMetricFieldSpecs()) {</span>
+<span class="nc bnc" id="L107" title="All 4 branches missed.">        if (_originalSegmentMetadata.hasDictionary(metricFieldSpec.getName()) &amp;&amp; shouldConvertColumn(metricFieldSpec)) {</span>
+<span class="nc" id="L108">          columnsToConvert.add(metricFieldSpec);</span>
+        }
+<span class="nc" id="L110">      }</span>
+    } else {
+<span class="nc" id="L112">      LOGGER.info(&quot;Columns to convert: {}&quot;, _columnsToConvert);</span>
+<span class="nc bnc" id="L113" title="All 2 branches missed.">      for (String columnToConvert : StringUtils.split(_columnsToConvert, ',')) {</span>
+<span class="nc" id="L114">        FieldSpec fieldSpec = schema.getFieldSpecFor(columnToConvert);</span>
+<span class="nc bnc" id="L115" title="All 2 branches missed.">        if (fieldSpec == null) {</span>
+<span class="nc" id="L116">          LOGGER.warn(&quot;Skip converting column: {} because is does not exist in the schema&quot;);</span>
+<span class="nc" id="L117">          continue;</span>
+        }
+<span class="nc bnc" id="L119" title="All 2 branches missed.">        if (!fieldSpec.isSingleValueField()) {</span>
+<span class="nc" id="L120">          LOGGER.warn(&quot;Skip converting column: {} because it's a multi-value column&quot;);</span>
+<span class="nc" id="L121">          continue;</span>
+        }
+<span class="nc bnc" id="L123" title="All 2 branches missed.">        if (!_originalSegmentMetadata.hasDictionary(columnToConvert)) {</span>
+<span class="nc" id="L124">          LOGGER.warn(&quot;Skip converting column: {} because its index is not dictionary-based&quot;);</span>
+<span class="nc" id="L125">          continue;</span>
+        }
+<span class="nc" id="L127">        columnsToConvert.add(fieldSpec);</span>
+      }
+    }
+
+<span class="nc bnc" id="L131" title="All 2 branches missed.">    if (columnsToConvert.isEmpty()) {</span>
+<span class="nc" id="L132">      LOGGER.info(&quot;No column converted for segment: {} in table: {}&quot;, segmentName, tableName);</span>
+<span class="nc" id="L133">      return false;</span>
+    } else {
+      // Convert columns
+<span class="nc bnc" id="L136" title="All 2 branches missed.">      for (FieldSpec columnToConvert : columnsToConvert) {</span>
+<span class="nc" id="L137">        convertColumn(columnToConvert);</span>
+<span class="nc" id="L138">      }</span>
+<span class="nc" id="L139">      _convertedProperties.save();</span>
+
+      // Update creation metadata with new computed CRC and original segment creation time
+<span class="nc" id="L142">      SegmentIndexCreationDriverImpl.persistCreationMeta(_convertedIndexDir,</span>
+          CrcUtils.forAllFilesInFolder(_convertedIndexDir).computeCrc(),
+          _originalSegmentMetadata.getIndexCreationTime());
+
+<span class="nc" id="L146">      LOGGER.info(&quot;{} columns converted for segment: {} in table: {}&quot;, columnsToConvert.size(), segmentName, tableName);</span>
+<span class="nc" id="L147">      return true;</span>
+    }
+  }
+
+  private boolean shouldConvertColumn(FieldSpec fieldSpec) {
+<span class="nc" id="L152">    String columnName = fieldSpec.getName();</span>
+<span class="nc" id="L153">    FieldSpec.DataType dataType = fieldSpec.getDataType();</span>
+<span class="nc" id="L154">    int numTotalDocs = _originalSegmentMetadata.getTotalDocs();</span>
+<span class="nc" id="L155">    ColumnMetadata columnMetadata = _originalSegmentMetadata.getColumnMetadataFor(columnName);</span>
+
+<span class="nc" id="L157">    int cardinality = columnMetadata.getCardinality();</span>
+
+    // In bits
+    int lengthOfEachEntry;
+<span class="nc bnc" id="L161" title="All 2 branches missed.">    if (dataType.equals(FieldSpec.DataType.STRING)) {</span>
+<span class="nc" id="L162">      lengthOfEachEntry = columnMetadata.getStringColumnMaxLength() * Byte.SIZE;</span>
+    } else {
+<span class="nc" id="L164">      lengthOfEachEntry = dataType.size() * Byte.SIZE;</span>
+    }
+<span class="nc" id="L166">    long dictionaryBasedIndexSize =</span>
+        (long) numTotalDocs * columnMetadata.getBitsPerElement() + (long) cardinality * lengthOfEachEntry;
+<span class="nc" id="L168">    long rawIndexSize = (long) numTotalDocs * lengthOfEachEntry;</span>
+<span class="nc" id="L169">    LOGGER.info(</span>
+        &quot;For column: {}, size of dictionary based index: {} bits, size of raw index (without compression): {} bits&quot;,
+        columnName, dictionaryBasedIndexSize, rawIndexSize);
+
+<span class="nc bnc" id="L173" title="All 2 branches missed.">    return rawIndexSize &lt;= dictionaryBasedIndexSize * CONVERSION_THRESHOLD;</span>
+  }
+
+  private void convertColumn(FieldSpec fieldSpec) throws Exception {
+<span class="nc" id="L177">    String columnName = fieldSpec.getName();</span>
+<span class="nc" id="L178">    LOGGER.info(&quot;Converting column: {}&quot;, columnName);</span>
+
+    // Delete dictionary and existing indexes
+<span class="nc" id="L181">    FileUtils.deleteQuietly(new File(_convertedIndexDir, columnName + V1Constants.Dict.FILE_EXTENSION));</span>
+<span class="nc" id="L182">    FileUtils.deleteQuietly(</span>
+        new File(_convertedIndexDir, columnName + V1Constants.Indexes.UNSORTED_SV_FORWARD_INDEX_FILE_EXTENSION));
+<span class="nc" id="L184">    FileUtils.deleteQuietly(</span>
+        new File(_convertedIndexDir, columnName + V1Constants.Indexes.SORTED_SV_FORWARD_INDEX_FILE_EXTENSION));
+<span class="nc" id="L186">    FileUtils.deleteQuietly(</span>
+        new File(_convertedIndexDir, columnName + V1Constants.Indexes.BITMAP_INVERTED_INDEX_FILE_EXTENSION));
+
+    // Create the raw index
+<span class="nc" id="L190">    DataSource dataSource = _originalIndexSegment.getDataSource(columnName);</span>
+<span class="nc" id="L191">    Dictionary dictionary = dataSource.getDictionary();</span>
+<span class="nc" id="L192">    FieldSpec.DataType dataType = fieldSpec.getDataType();</span>
+<span class="nc" id="L193">    int lengthOfLongestEntry = _originalSegmentMetadata.getColumnMetadataFor(columnName).getStringColumnMaxLength();</span>
+<span class="nc" id="L194">    try (SingleValueRawIndexCreator rawIndexCreator = SegmentColumnarIndexCreator.getRawIndexCreatorForColumn(</span>
+        _convertedIndexDir, ChunkCompressorFactory.CompressionType.SNAPPY, columnName, dataType,
+        _originalSegmentMetadata.getTotalDocs(), lengthOfLongestEntry)) {
+<span class="nc" id="L197">      BlockSingleValIterator iterator = (BlockSingleValIterator) dataSource.nextBlock().getBlockValueSet().iterator();</span>
+<span class="nc" id="L198">      int docId = 0;</span>
+<span class="nc bnc" id="L199" title="All 2 branches missed.">      while (iterator.hasNext()) {</span>
+<span class="nc" id="L200">        int dictId = iterator.nextIntVal();</span>
+<span class="nc" id="L201">        rawIndexCreator.index(docId++, dictionary.get(dictId));</span>
+<span class="nc" id="L202">      }</span>
+<span class="nc bnc" id="L203" title="All 8 branches missed.">    }</span>
+
+    // Update the segment metadata
+<span class="nc" id="L206">    _convertedProperties.setProperty(</span>
+        V1Constants.MetadataKeys.Column.getKeyFor(columnName, V1Constants.MetadataKeys.Column.HAS_DICTIONARY), false);
+<span class="nc" id="L208">    _convertedProperties.setProperty(</span>
+        V1Constants.MetadataKeys.Column.getKeyFor(columnName, V1Constants.MetadataKeys.Column.BITS_PER_ELEMENT),
+        BITS_PER_ELEMENT_FOR_RAW_INDEX);
+<span class="nc" id="L211">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

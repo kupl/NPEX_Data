@@ -1,0 +1,624 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>SegmentMetadataImpl.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-minion</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.segment.index</a> &gt; <span class="el_source">SegmentMetadataImpl.java</span></div><h1>SegmentMetadataImpl.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.segment.index;
+
+import com.google.common.base.Preconditions;
+import com.linkedin.pinot.common.data.MetricFieldSpec;
+import com.linkedin.pinot.common.data.Schema;
+import com.linkedin.pinot.common.metadata.segment.RealtimeSegmentZKMetadata;
+import com.linkedin.pinot.common.segment.SegmentMetadata;
+import com.linkedin.pinot.common.segment.StarTreeMetadata;
+import com.linkedin.pinot.common.utils.time.TimeUtils;
+import com.linkedin.pinot.core.indexsegment.generator.SegmentVersion;
+import com.linkedin.pinot.core.segment.creator.impl.V1Constants;
+import com.linkedin.pinot.core.segment.store.SegmentDirectoryPaths;
+import com.linkedin.pinot.startree.hll.HllConstants;
+import java.io.DataInputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.lang.reflect.Field;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TimeZone;
+import java.util.concurrent.TimeUnit;
+import javax.annotation.Nullable;
+import org.apache.commons.configuration.ConfigurationException;
+import org.apache.commons.configuration.PropertiesConfiguration;
+import org.apache.commons.lang.StringEscapeUtils;
+import org.codehaus.jackson.map.ObjectMapper;
+import org.joda.time.Duration;
+import org.joda.time.Interval;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import static com.linkedin.pinot.core.segment.creator.impl.V1Constants.*;
+import static com.linkedin.pinot.core.segment.creator.impl.V1Constants.MetadataKeys.*;
+import static com.linkedin.pinot.core.segment.creator.impl.V1Constants.MetadataKeys.Segment.*;
+
+
+public class SegmentMetadataImpl implements SegmentMetadata {
+<span class="fc" id="L65">  private static final Logger LOGGER = LoggerFactory.getLogger(SegmentMetadataImpl.class);</span>
+
+  private final PropertiesConfiguration _segmentMetadataPropertiesConfiguration;
+  private final Map&lt;String, ColumnMetadata&gt; _columnMetadataMap;
+  private String _segmentName;
+  private final Set&lt;String&gt; _allColumns;
+  private final Schema _schema;
+  private final String _indexDir;
+<span class="fc" id="L73">  private long _crc = Long.MIN_VALUE;</span>
+<span class="fc" id="L74">  private long _creationTime = Long.MIN_VALUE;</span>
+  private String _timeColumn;
+  private TimeUnit _timeUnit;
+  private Interval _timeInterval;
+  private Duration _timeGranularity;
+<span class="fc" id="L79">  private long _pushTime = Long.MIN_VALUE;</span>
+<span class="fc" id="L80">  private long _refreshTime = Long.MIN_VALUE;</span>
+  private SegmentVersion _segmentVersion;
+  private boolean _hasStarTree;
+<span class="fc" id="L83">  private StarTreeMetadata _starTreeMetadata = null;</span>
+  private String _creatorName;
+<span class="fc" id="L85">  private char _paddingCharacter = V1Constants.Str.DEFAULT_STRING_PAD_CHAR;</span>
+<span class="fc" id="L86">  private int _hllLog2m = HllConstants.DEFAULT_LOG2M;</span>
+<span class="fc" id="L87">  private final Map&lt;String, String&gt; _hllDerivedColumnMap = new HashMap&lt;&gt;();</span>
+  private int _totalDocs;
+  private int _totalRawDocs;
+  private long _segmentStartTime;
+  private long _segmentEndTime;
+
+  /**
+   * Load segment metadata in any segment version.
+   * &lt;p&gt;Index directory passed in should be top level segment directory.
+   * &lt;p&gt;If segment metadata file exists in multiple segment version, load the one in highest segment version.
+   */
+<span class="fc" id="L98">  public SegmentMetadataImpl(File indexDir) throws ConfigurationException, IOException {</span>
+<span class="fc" id="L99">    File metadataFile = SegmentDirectoryPaths.findMetadataFile(indexDir);</span>
+<span class="fc" id="L100">    Preconditions.checkNotNull(metadataFile, &quot;Cannot find segment metadata file under directory: %s&quot;, indexDir);</span>
+
+<span class="fc" id="L102">    _segmentMetadataPropertiesConfiguration = new PropertiesConfiguration(metadataFile);</span>
+<span class="fc" id="L103">    _columnMetadataMap = new HashMap&lt;&gt;();</span>
+<span class="fc" id="L104">    _allColumns = new HashSet&lt;&gt;();</span>
+<span class="fc" id="L105">    _schema = new Schema();</span>
+<span class="fc" id="L106">    _indexDir = indexDir.getPath();</span>
+
+<span class="fc" id="L108">    init();</span>
+<span class="fc" id="L109">    File creationMetaFile = SegmentDirectoryPaths.findCreationMetaFile(indexDir);</span>
+<span class="fc bfc" id="L110" title="All 2 branches covered.">    if (creationMetaFile != null) {</span>
+<span class="fc" id="L111">      loadCreationMeta(creationMetaFile);</span>
+    }
+
+<span class="fc" id="L114">    setTimeInfo();</span>
+<span class="fc" id="L115">    _totalDocs = _segmentMetadataPropertiesConfiguration.getInt(V1Constants.MetadataKeys.Segment.SEGMENT_TOTAL_DOCS);</span>
+<span class="fc" id="L116">    _totalRawDocs =</span>
+        _segmentMetadataPropertiesConfiguration.getInt(V1Constants.MetadataKeys.Segment.SEGMENT_TOTAL_RAW_DOCS,
+            _totalDocs);
+<span class="fc" id="L119">  }</span>
+
+<span class="fc" id="L121">  public SegmentMetadataImpl(RealtimeSegmentZKMetadata segmentMetadata, Schema schema) {</span>
+<span class="fc" id="L122">    _segmentMetadataPropertiesConfiguration = new PropertiesConfiguration();</span>
+<span class="fc" id="L123">    _segmentMetadataPropertiesConfiguration.addProperty(Segment.SEGMENT_CREATOR_VERSION, null);</span>
+<span class="fc" id="L124">    _segmentMetadataPropertiesConfiguration.addProperty(Segment.SEGMENT_PADDING_CHARACTER,</span>
+        V1Constants.Str.DEFAULT_STRING_PAD_CHAR);
+<span class="fc" id="L126">    _segmentMetadataPropertiesConfiguration.addProperty(V1Constants.MetadataKeys.Segment.SEGMENT_START_TIME,</span>
+        Long.toString(segmentMetadata.getStartTime()));
+<span class="fc" id="L128">    _segmentMetadataPropertiesConfiguration.addProperty(V1Constants.MetadataKeys.Segment.SEGMENT_END_TIME,</span>
+        Long.toString(segmentMetadata.getEndTime()));
+<span class="fc" id="L130">    _segmentMetadataPropertiesConfiguration.addProperty(V1Constants.MetadataKeys.Segment.TABLE_NAME,</span>
+        segmentMetadata.getTableName());
+
+<span class="fc" id="L133">    TimeUnit timeUnit = segmentMetadata.getTimeUnit();</span>
+<span class="pc bpc" id="L134" title="1 of 2 branches missed.">    if (timeUnit != null) {</span>
+<span class="nc" id="L135">      _segmentMetadataPropertiesConfiguration.addProperty(V1Constants.MetadataKeys.Segment.TIME_UNIT,</span>
+          timeUnit.toString());
+    } else {
+<span class="fc" id="L138">      _segmentMetadataPropertiesConfiguration.addProperty(V1Constants.MetadataKeys.Segment.TIME_UNIT, null);</span>
+    }
+
+<span class="fc" id="L141">    _segmentMetadataPropertiesConfiguration.addProperty(Segment.SEGMENT_TOTAL_DOCS, segmentMetadata.getTotalRawDocs());</span>
+
+<span class="fc" id="L143">    _crc = segmentMetadata.getCrc();</span>
+<span class="fc" id="L144">    _creationTime = segmentMetadata.getCreationTime();</span>
+<span class="fc" id="L145">    setTimeInfo();</span>
+<span class="fc" id="L146">    _columnMetadataMap = null;</span>
+<span class="fc" id="L147">    _segmentName = segmentMetadata.getSegmentName();</span>
+<span class="fc" id="L148">    _allColumns = schema.getColumnNames();</span>
+<span class="fc" id="L149">    _schema = schema;</span>
+<span class="fc" id="L150">    _indexDir = null;</span>
+<span class="fc" id="L151">    _totalDocs = _segmentMetadataPropertiesConfiguration.getInt(V1Constants.MetadataKeys.Segment.SEGMENT_TOTAL_DOCS);</span>
+<span class="fc" id="L152">    _totalRawDocs =</span>
+        _segmentMetadataPropertiesConfiguration.getInt(V1Constants.MetadataKeys.Segment.SEGMENT_TOTAL_RAW_DOCS,
+            _totalDocs);
+<span class="fc" id="L155">  }</span>
+
+  public PropertiesConfiguration getSegmentMetadataPropertiesConfiguration() {
+<span class="fc" id="L158">    return _segmentMetadataPropertiesConfiguration;</span>
+  }
+
+  /**
+   * Helper method to set time related information:
+   * &lt;ul&gt;
+   *   &lt;li&gt; Time column Name. &lt;/li&gt;
+   *   &lt;li&gt; Tine Unit. &lt;/li&gt;
+   *   &lt;li&gt; Time Interval. &lt;/li&gt;
+   *   &lt;li&gt; Start and End time. &lt;/li&gt;
+   * &lt;/ul&gt;
+   */
+  private void setTimeInfo() {
+<span class="fc" id="L171">    _timeColumn = _segmentMetadataPropertiesConfiguration.getString(Segment.TIME_COLUMN_NAME);</span>
+<span class="pc bpc" id="L172" title="1 of 6 branches missed.">    if (_segmentMetadataPropertiesConfiguration.containsKey(V1Constants.MetadataKeys.Segment.SEGMENT_START_TIME)</span>
+        &amp;&amp; _segmentMetadataPropertiesConfiguration.containsKey(V1Constants.MetadataKeys.Segment.SEGMENT_END_TIME)
+        &amp;&amp; _segmentMetadataPropertiesConfiguration.containsKey(V1Constants.MetadataKeys.Segment.TIME_UNIT)) {
+
+      try {
+<span class="fc" id="L177">        _timeUnit = TimeUtils.timeUnitFromString(_segmentMetadataPropertiesConfiguration.getString(TIME_UNIT));</span>
+<span class="fc" id="L178">        _timeGranularity = new Duration(_timeUnit.toMillis(1));</span>
+<span class="fc" id="L179">        String startTimeString =</span>
+            _segmentMetadataPropertiesConfiguration.getString(V1Constants.MetadataKeys.Segment.SEGMENT_START_TIME);
+<span class="fc" id="L181">        String endTimeString =</span>
+            _segmentMetadataPropertiesConfiguration.getString(V1Constants.MetadataKeys.Segment.SEGMENT_END_TIME);
+<span class="fc" id="L183">        _segmentStartTime = Long.parseLong(startTimeString);</span>
+<span class="fc" id="L184">        _segmentEndTime = Long.parseLong(endTimeString);</span>
+<span class="fc" id="L185">        _timeInterval = new Interval(_timeUnit.toMillis(_segmentStartTime), _timeUnit.toMillis(_segmentEndTime));</span>
+<span class="nc" id="L186">      } catch (Exception e) {</span>
+<span class="nc" id="L187">        LOGGER.warn(&quot;Caught exception while setting time interval and granularity&quot;, e);</span>
+<span class="nc" id="L188">        _timeInterval = null;</span>
+<span class="nc" id="L189">        _timeGranularity = null;</span>
+<span class="nc" id="L190">        _segmentStartTime = Long.MAX_VALUE;</span>
+<span class="nc" id="L191">        _segmentEndTime = Long.MIN_VALUE;</span>
+<span class="fc" id="L192">      }</span>
+    }
+<span class="fc" id="L194">  }</span>
+
+  private void loadCreationMeta(File crcFile) throws IOException {
+<span class="pc bpc" id="L197" title="1 of 2 branches missed.">    if (crcFile.exists()) {</span>
+<span class="fc" id="L198">      final DataInputStream ds = new DataInputStream(new FileInputStream(crcFile));</span>
+<span class="fc" id="L199">      _crc = ds.readLong();</span>
+<span class="fc" id="L200">      _creationTime = ds.readLong();</span>
+<span class="fc" id="L201">      ds.close();</span>
+    }
+<span class="fc" id="L203">  }</span>
+
+  public Set&lt;String&gt; getAllColumns() {
+<span class="fc" id="L206">    return _allColumns;</span>
+  }
+
+  private void init() {
+<span class="fc bfc" id="L210" title="All 2 branches covered.">    if (_segmentMetadataPropertiesConfiguration.containsKey(Segment.SEGMENT_CREATOR_VERSION)) {</span>
+<span class="fc" id="L211">      _creatorName = _segmentMetadataPropertiesConfiguration.getString(Segment.SEGMENT_CREATOR_VERSION);</span>
+    }
+
+<span class="fc bfc" id="L214" title="All 2 branches covered.">    if (_segmentMetadataPropertiesConfiguration.containsKey(Segment.SEGMENT_PADDING_CHARACTER)) {</span>
+<span class="fc" id="L215">      String padding = _segmentMetadataPropertiesConfiguration.getString(Segment.SEGMENT_PADDING_CHARACTER);</span>
+<span class="fc" id="L216">      _paddingCharacter = StringEscapeUtils.unescapeJava(padding).charAt(0);</span>
+    }
+
+<span class="fc" id="L219">    String versionString =</span>
+        _segmentMetadataPropertiesConfiguration.getString(V1Constants.MetadataKeys.Segment.SEGMENT_VERSION,
+            SegmentVersion.v1.toString());
+<span class="fc" id="L222">    _segmentVersion = SegmentVersion.valueOf(versionString);</span>
+
+<span class="fc" id="L224">    final Iterator&lt;String&gt; metrics =</span>
+        _segmentMetadataPropertiesConfiguration.getList(V1Constants.MetadataKeys.Segment.METRICS).iterator();
+<span class="fc bfc" id="L226" title="All 2 branches covered.">    while (metrics.hasNext()) {</span>
+<span class="fc" id="L227">      final String columnName = metrics.next();</span>
+<span class="fc bfc" id="L228" title="All 2 branches covered.">      if (columnName.trim().length() &gt; 0) {</span>
+<span class="fc" id="L229">        _allColumns.add(columnName);</span>
+      }
+<span class="fc" id="L231">    }</span>
+
+<span class="fc" id="L233">    final Iterator&lt;String&gt; dimensions =</span>
+        _segmentMetadataPropertiesConfiguration.getList(V1Constants.MetadataKeys.Segment.DIMENSIONS).iterator();
+<span class="fc bfc" id="L235" title="All 2 branches covered.">    while (dimensions.hasNext()) {</span>
+<span class="fc" id="L236">      final String columnName = dimensions.next();</span>
+<span class="fc bfc" id="L237" title="All 2 branches covered.">      if (columnName.trim().length() &gt; 0) {</span>
+<span class="fc" id="L238">        _allColumns.add(columnName);</span>
+      }
+<span class="fc" id="L240">    }</span>
+
+<span class="fc" id="L242">    final Iterator&lt;String&gt; unknowns =</span>
+        _segmentMetadataPropertiesConfiguration.getList(V1Constants.MetadataKeys.Segment.UNKNOWN_COLUMNS).iterator();
+<span class="pc bpc" id="L244" title="1 of 2 branches missed.">    while (unknowns.hasNext()) {</span>
+<span class="nc" id="L245">      final String columnName = unknowns.next();</span>
+<span class="nc bnc" id="L246" title="All 2 branches missed.">      if (columnName.trim().length() &gt; 0) {</span>
+<span class="nc" id="L247">        _allColumns.add(columnName);</span>
+      }
+<span class="nc" id="L249">    }</span>
+
+<span class="fc" id="L251">    final Iterator&lt;String&gt; timeStamps =</span>
+        _segmentMetadataPropertiesConfiguration.getList(V1Constants.MetadataKeys.Segment.TIME_COLUMN_NAME).iterator();
+<span class="fc bfc" id="L253" title="All 2 branches covered.">    while (timeStamps.hasNext()) {</span>
+<span class="fc" id="L254">      final String columnName = timeStamps.next();</span>
+<span class="fc bfc" id="L255" title="All 2 branches covered.">      if (columnName.trim().length() &gt; 0) {</span>
+<span class="fc" id="L256">        _allColumns.add(columnName);</span>
+      }
+<span class="fc" id="L258">    }</span>
+
+<span class="fc" id="L260">    final Iterator&lt;String&gt; dateTime =</span>
+        _segmentMetadataPropertiesConfiguration.getList(V1Constants.MetadataKeys.Segment.DATETIME_COLUMNS).iterator();
+<span class="fc bfc" id="L262" title="All 2 branches covered.">    while (dateTime.hasNext()) {</span>
+<span class="fc" id="L263">      final String columnName = dateTime.next();</span>
+<span class="pc bpc" id="L264" title="1 of 2 branches missed.">      if (columnName.trim().length() &gt; 0) {</span>
+<span class="nc" id="L265">        _allColumns.add(columnName);</span>
+      }
+<span class="fc" id="L267">    }</span>
+    // Set segment name.
+<span class="fc" id="L269">    _segmentName = _segmentMetadataPropertiesConfiguration.getString(Segment.SEGMENT_NAME);</span>
+
+    // Set hll log2m.
+<span class="fc" id="L272">    _hllLog2m = _segmentMetadataPropertiesConfiguration.getInt(Segment.SEGMENT_HLL_LOG2M, HllConstants.DEFAULT_LOG2M);</span>
+
+    // Build column metadata map, schema and hll derived column map.
+<span class="fc bfc" id="L275" title="All 2 branches covered.">    for (String column : _allColumns) {</span>
+<span class="fc" id="L276">      ColumnMetadata columnMetadata =</span>
+          ColumnMetadata.fromPropertiesConfiguration(column, _segmentMetadataPropertiesConfiguration);
+<span class="fc" id="L278">      _columnMetadataMap.put(column, columnMetadata);</span>
+<span class="fc" id="L279">      _schema.addField(columnMetadata.getFieldSpec());</span>
+<span class="fc bfc" id="L280" title="All 2 branches covered.">      if (columnMetadata.getDerivedMetricType() == MetricFieldSpec.DerivedMetricType.HLL) {</span>
+<span class="fc" id="L281">        _hllDerivedColumnMap.put(columnMetadata.getOriginColumnName(), columnMetadata.getColumnName());</span>
+      }
+<span class="fc" id="L283">    }</span>
+
+    // Build star-tree metadata.
+<span class="fc" id="L286">    _hasStarTree = _segmentMetadataPropertiesConfiguration.getBoolean(MetadataKeys.StarTree.STAR_TREE_ENABLED, false);</span>
+<span class="fc bfc" id="L287" title="All 2 branches covered.">    if (_hasStarTree) {</span>
+<span class="fc" id="L288">      initStarTreeMetadata();</span>
+    }
+<span class="fc" id="L290">  }</span>
+
+  /**
+   * Reads and initializes the star tree metadata from segment metadata properties.
+   */
+  private void initStarTreeMetadata() {
+<span class="fc" id="L296">    _starTreeMetadata = new StarTreeMetadata();</span>
+
+    // Set the splitOrder
+<span class="fc" id="L299">    Iterator&lt;String&gt; iterator =</span>
+        _segmentMetadataPropertiesConfiguration.getList(MetadataKeys.StarTree.STAR_TREE_SPLIT_ORDER).iterator();
+<span class="fc" id="L301">    List&lt;String&gt; splitOrder = new ArrayList&lt;String&gt;();</span>
+<span class="fc bfc" id="L302" title="All 2 branches covered.">    while (iterator.hasNext()) {</span>
+<span class="fc" id="L303">      final String splitColumn = iterator.next();</span>
+<span class="fc" id="L304">      splitOrder.add(splitColumn);</span>
+<span class="fc" id="L305">    }</span>
+<span class="fc" id="L306">    _starTreeMetadata.setDimensionsSplitOrder(splitOrder);</span>
+
+    // Set dimensions for which star node creation is to be skipped.
+<span class="fc" id="L309">    iterator = _segmentMetadataPropertiesConfiguration.getList(</span>
+        MetadataKeys.StarTree.STAR_TREE_SKIP_STAR_NODE_CREATION_FOR_DIMENSIONS).iterator();
+<span class="fc" id="L311">    List&lt;String&gt; skipStarNodeCreationForDimensions = new ArrayList&lt;String&gt;();</span>
+<span class="fc bfc" id="L312" title="All 2 branches covered.">    while (iterator.hasNext()) {</span>
+<span class="fc" id="L313">      final String column = iterator.next();</span>
+<span class="fc" id="L314">      skipStarNodeCreationForDimensions.add(column);</span>
+<span class="fc" id="L315">    }</span>
+<span class="fc" id="L316">    _starTreeMetadata.setSkipStarNodeCreationForDimensions(skipStarNodeCreationForDimensions);</span>
+
+    // Set dimensions for which to skip materialization.
+<span class="fc" id="L319">    iterator = _segmentMetadataPropertiesConfiguration.getList(</span>
+        MetadataKeys.StarTree.STAR_TREE_SKIP_MATERIALIZATION_FOR_DIMENSIONS).iterator();
+<span class="fc" id="L321">    List&lt;String&gt; skipMaterializationForDimensions = new ArrayList&lt;String&gt;();</span>
+
+<span class="fc bfc" id="L323" title="All 2 branches covered.">    while (iterator.hasNext()) {</span>
+<span class="fc" id="L324">      final String column = iterator.next();</span>
+<span class="fc" id="L325">      skipMaterializationForDimensions.add(column);</span>
+<span class="fc" id="L326">    }</span>
+<span class="fc" id="L327">    _starTreeMetadata.setSkipMaterializationForDimensions(skipMaterializationForDimensions);</span>
+
+    // Set the maxLeafRecords
+<span class="fc" id="L330">    String maxLeafRecordsString =</span>
+        _segmentMetadataPropertiesConfiguration.getString(MetadataKeys.StarTree.STAR_TREE_MAX_LEAF_RECORDS);
+<span class="pc bpc" id="L332" title="1 of 2 branches missed.">    if (maxLeafRecordsString != null) {</span>
+<span class="fc" id="L333">      _starTreeMetadata.setMaxLeafRecords(Integer.parseInt(maxLeafRecordsString));</span>
+    }
+
+    // Skip skip materialization cardinality.
+<span class="fc" id="L337">    String skipMaterializationCardinalityString = _segmentMetadataPropertiesConfiguration.getString(</span>
+        MetadataKeys.StarTree.STAR_TREE_SKIP_MATERIALIZATION_CARDINALITY);
+<span class="pc bpc" id="L339" title="1 of 2 branches missed.">    if (skipMaterializationCardinalityString != null) {</span>
+<span class="fc" id="L340">      _starTreeMetadata.setSkipMaterializationCardinality(Integer.parseInt(skipMaterializationCardinalityString));</span>
+    }
+<span class="fc" id="L342">  }</span>
+
+  public ColumnMetadata getColumnMetadataFor(String column) {
+<span class="fc" id="L345">    return _columnMetadataMap.get(column);</span>
+  }
+
+  public Map&lt;String, ColumnMetadata&gt; getColumnMetadataMap() {
+<span class="fc" id="L349">    return _columnMetadataMap;</span>
+  }
+
+  @Override
+  public String getTableName() {
+<span class="fc" id="L354">    return (String) _segmentMetadataPropertiesConfiguration.getProperty(V1Constants.MetadataKeys.Segment.TABLE_NAME);</span>
+  }
+
+  @Override
+  public String getTimeColumn() {
+<span class="nc" id="L359">    return _timeColumn;</span>
+  }
+
+  @Override
+  public long getStartTime() {
+<span class="fc" id="L364">    return _segmentStartTime;</span>
+  }
+
+  @Override
+  public long getEndTime() {
+<span class="fc" id="L369">    return _segmentEndTime;</span>
+  }
+
+  @Override
+  public TimeUnit getTimeUnit() {
+<span class="nc" id="L374">    return _timeUnit;</span>
+  }
+
+  @Override
+  public Duration getTimeGranularity() {
+<span class="nc" id="L379">    return _timeGranularity;</span>
+  }
+
+  @Override
+  public Interval getTimeInterval() {
+<span class="fc" id="L384">    return _timeInterval;</span>
+  }
+
+  @Override
+  public String getCrc() {
+<span class="fc" id="L389">    return String.valueOf(_crc);</span>
+  }
+
+  @Override
+  public String getVersion() {
+<span class="fc" id="L394">    return _segmentVersion.toString();</span>
+  }
+
+  public SegmentVersion getSegmentVersion() {
+<span class="fc" id="L398">    return _segmentVersion;</span>
+  }
+
+  @Override
+  public Schema getSchema() {
+<span class="fc" id="L403">    return _schema;</span>
+  }
+
+  @Override
+  public String getShardingKey() {
+<span class="nc" id="L408">    return null;</span>
+  }
+
+  @Override
+  public int getTotalDocs() {
+<span class="fc" id="L413">    return _totalDocs;</span>
+  }
+
+  @Override
+  public int getTotalRawDocs() {
+<span class="fc" id="L418">    return _totalRawDocs;</span>
+  }
+
+  @Override
+  public String getIndexDir() {
+<span class="nc" id="L423">    return _indexDir;</span>
+  }
+
+  @Override
+  public String getName() {
+<span class="fc" id="L428">    return _segmentName;</span>
+  }
+
+  @Override
+  public String toString() {
+<span class="nc" id="L433">    final StringBuilder result = new StringBuilder();</span>
+<span class="nc" id="L434">    final String newLine = System.getProperty(&quot;line.separator&quot;);</span>
+
+<span class="nc" id="L436">    result.append(this.getClass().getName());</span>
+<span class="nc" id="L437">    result.append(&quot; Object {&quot;);</span>
+<span class="nc" id="L438">    result.append(newLine);</span>
+
+    // determine fields declared in this class only (no fields of superclass)
+<span class="nc" id="L441">    final Field[] fields = this.getClass().getDeclaredFields();</span>
+
+    // print field names paired with their values
+<span class="nc bnc" id="L444" title="All 2 branches missed.">    for (final Field field : fields) {</span>
+<span class="nc" id="L445">      result.append(&quot;  &quot;);</span>
+      try {
+<span class="nc" id="L447">        result.append(field.getName());</span>
+<span class="nc" id="L448">        result.append(&quot;: &quot;);</span>
+        // requires access to private field:
+<span class="nc" id="L450">        result.append(field.get(this));</span>
+<span class="nc" id="L451">      } catch (final IllegalAccessException ex) {</span>
+<span class="nc bnc" id="L452" title="All 2 branches missed.">        if (LOGGER.isWarnEnabled()) {</span>
+<span class="nc" id="L453">          LOGGER.warn(&quot;Caught exception while trying to access field {}&quot;, field, ex);</span>
+        }
+<span class="nc" id="L455">        result.append(&quot;ERROR&quot;);</span>
+<span class="nc" id="L456">      }</span>
+<span class="nc" id="L457">      result.append(newLine);</span>
+    }
+<span class="nc" id="L459">    result.append(&quot;}&quot;);</span>
+
+<span class="nc" id="L461">    return result.toString();</span>
+  }
+
+  @Override
+  public long getIndexCreationTime() {
+<span class="fc" id="L466">    return _creationTime;</span>
+  }
+
+  @Override
+  public long getPushTime() {
+<span class="fc" id="L471">    return _pushTime;</span>
+  }
+
+  @Override
+  public long getRefreshTime() {
+<span class="nc" id="L476">    return _refreshTime;</span>
+  }
+
+  @Override
+  public boolean hasDictionary(String columnName) {
+<span class="fc" id="L481">    return _columnMetadataMap.get(columnName).hasDictionary();</span>
+  }
+
+  @Override
+  public boolean close() {
+<span class="nc" id="L486">    return false;</span>
+  }
+
+  @Override
+  public boolean hasStarTree() {
+<span class="fc" id="L491">    return _hasStarTree;</span>
+  }
+
+  @Nullable
+  @Override
+  public StarTreeMetadata getStarTreeMetadata() {
+<span class="fc" id="L497">    return _starTreeMetadata;</span>
+  }
+
+  @Override
+  public String getForwardIndexFileName(String column) {
+<span class="fc" id="L502">    ColumnMetadata columnMetadata = getColumnMetadataFor(column);</span>
+<span class="fc" id="L503">    StringBuilder fileNameBuilder = new StringBuilder(column);</span>
+    // starting v2 we will append the forward index files with version
+    // if (!SegmentVersion.v1.toString().equalsIgnoreCase(segmentVersion)) {
+    // fileNameBuilder.append(&quot;_&quot;).append(segmentVersion);
+    // }
+<span class="fc bfc" id="L508" title="All 2 branches covered.">    if (columnMetadata.isSingleValue()) {</span>
+<span class="fc bfc" id="L509" title="All 2 branches covered.">      if (!columnMetadata.hasDictionary()) {</span>
+<span class="fc" id="L510">        fileNameBuilder.append(V1Constants.Indexes.RAW_SV_FORWARD_INDEX_FILE_EXTENSION);</span>
+<span class="fc bfc" id="L511" title="All 2 branches covered.">      } else if (columnMetadata.isSorted()) {</span>
+<span class="fc" id="L512">        fileNameBuilder.append(V1Constants.Indexes.SORTED_SV_FORWARD_INDEX_FILE_EXTENSION);</span>
+      } else {
+<span class="fc" id="L514">        fileNameBuilder.append(V1Constants.Indexes.UNSORTED_SV_FORWARD_INDEX_FILE_EXTENSION);</span>
+      }
+    } else {
+<span class="fc" id="L517">      fileNameBuilder.append(V1Constants.Indexes.UNSORTED_MV_FORWARD_INDEX_FILE_EXTENSION);</span>
+    }
+<span class="fc" id="L519">    return fileNameBuilder.toString();</span>
+  }
+
+  @Override
+  public String getDictionaryFileName(String column) {
+<span class="fc" id="L524">    return column + V1Constants.Dict.FILE_EXTENSION;</span>
+  }
+
+  @Override
+  public String getBitmapInvertedIndexFileName(String column) {
+<span class="fc" id="L529">    return column + V1Constants.Indexes.BITMAP_INVERTED_INDEX_FILE_EXTENSION;</span>
+  }
+
+  @Nullable
+  @Override
+  public String getCreatorName() {
+<span class="fc" id="L535">    return _creatorName;</span>
+  }
+
+  @Override
+  public char getPaddingCharacter() {
+<span class="fc" id="L540">    return _paddingCharacter;</span>
+  }
+
+  @Override
+  public int getHllLog2m() {
+<span class="fc" id="L545">    return _hllLog2m;</span>
+  }
+
+  @Nullable
+  @Override
+  public String getDerivedColumn(String column, MetricFieldSpec.DerivedMetricType derivedMetricType) {
+<span class="pc bpc" id="L551" title="1 of 2 branches missed.">    switch (derivedMetricType) {</span>
+      case HLL:
+<span class="fc" id="L553">        return _hllDerivedColumnMap.get(column);</span>
+      default:
+<span class="nc" id="L555">        throw new IllegalArgumentException();</span>
+    }
+  }
+
+  /**
+   * Converts segment metadata to json
+   * @param columnFilter list only  the columns in the set. Lists all the columns if
+   *                     the parameter value is null
+   * @return json representation of segment metadata
+   */
+  public JSONObject toJson(@Nullable Set&lt;String&gt; columnFilter) throws JSONException {
+<span class="fc" id="L566">    JSONObject rootMeta = new JSONObject();</span>
+    try {
+<span class="fc" id="L568">      rootMeta.put(&quot;segmentName&quot;, _segmentName);</span>
+<span class="pc bpc" id="L569" title="1 of 2 branches missed.">      rootMeta.put(&quot;schemaName&quot;, _schema != null ? _schema.getSchemaName() : JSONObject.NULL);</span>
+<span class="fc" id="L570">      rootMeta.put(&quot;crc&quot;, _crc);</span>
+<span class="fc" id="L571">      rootMeta.put(&quot;creationTimeMillis&quot;, _creationTime);</span>
+<span class="fc" id="L572">      TimeZone timeZone = TimeZone.getTimeZone(&quot;UTC&quot;);</span>
+<span class="fc" id="L573">      DateFormat dateFormat = new SimpleDateFormat(&quot;yyyy-MM-dd'T'HH:mm:ss:SSS' UTC'&quot;);</span>
+<span class="fc" id="L574">      dateFormat.setTimeZone(timeZone);</span>
+<span class="pc bpc" id="L575" title="1 of 2 branches missed.">      String creationTimeStr = _creationTime != Long.MIN_VALUE ? dateFormat.format(new Date(_creationTime)) : &quot;&quot;;</span>
+<span class="fc" id="L576">      rootMeta.put(&quot;creationTimeReadable&quot;, creationTimeStr);</span>
+<span class="pc bpc" id="L577" title="1 of 2 branches missed.">      rootMeta.put(&quot;timeGranularitySec&quot;, _timeGranularity != null ? _timeGranularity.getStandardSeconds() : null);</span>
+<span class="pc bpc" id="L578" title="1 of 2 branches missed.">      if (_timeInterval == null) {</span>
+<span class="nc" id="L579">        rootMeta.put(&quot;startTimeMillis&quot;, (String) null);</span>
+<span class="nc" id="L580">        rootMeta.put(&quot;startTimeReadable&quot;, &quot;null&quot;);</span>
+<span class="nc" id="L581">        rootMeta.put(&quot;endTimeMillis&quot;, (String) null);</span>
+<span class="nc" id="L582">        rootMeta.put(&quot;endTimeReadable&quot;, &quot;null&quot;);</span>
+      } else {
+<span class="fc" id="L584">        rootMeta.put(&quot;startTimeMillis&quot;, _timeInterval.getStartMillis());</span>
+<span class="fc" id="L585">        rootMeta.put(&quot;startTimeReadable&quot;, _timeInterval.getStart().toString());</span>
+<span class="fc" id="L586">        rootMeta.put(&quot;endTimeMillis&quot;, _timeInterval.getEndMillis());</span>
+<span class="fc" id="L587">        rootMeta.put(&quot;endTimeReadable&quot;, _timeInterval.getEnd().toString());</span>
+      }
+
+<span class="fc" id="L590">      rootMeta.put(&quot;pushTimeMillis&quot;, _pushTime);</span>
+<span class="pc bpc" id="L591" title="1 of 2 branches missed.">      String pushTimeStr = _pushTime != Long.MIN_VALUE ? dateFormat.format(new Date(_pushTime)) : &quot;&quot;;</span>
+<span class="fc" id="L592">      rootMeta.put(&quot;pushTimeReadable&quot;, pushTimeStr);</span>
+
+<span class="fc" id="L594">      rootMeta.put(&quot;refreshTimeMillis&quot;, _refreshTime);</span>
+<span class="pc bpc" id="L595" title="1 of 2 branches missed.">      String refreshTimeStr = _refreshTime != Long.MIN_VALUE ? dateFormat.format(new Date(_refreshTime)) : &quot;&quot;;</span>
+<span class="fc" id="L596">      rootMeta.put(&quot;refreshTimeReadable&quot;, refreshTimeStr);</span>
+
+<span class="fc" id="L598">      rootMeta.put(&quot;segmentVersion&quot;, _segmentVersion.toString());</span>
+<span class="fc" id="L599">      rootMeta.put(&quot;hasStarTree&quot;, hasStarTree());</span>
+<span class="pc bpc" id="L600" title="1 of 2 branches missed.">      rootMeta.put(&quot;creatorName&quot;, _creatorName == null ? JSONObject.NULL : _creatorName);</span>
+<span class="fc" id="L601">      rootMeta.put(&quot;paddingCharacter&quot;, String.valueOf(_paddingCharacter));</span>
+<span class="fc" id="L602">      rootMeta.put(&quot;hllLog2m&quot;, _hllLog2m);</span>
+
+<span class="fc" id="L604">      JSONArray columnsJson = new JSONArray();</span>
+<span class="fc" id="L605">      ObjectMapper mapper = new ObjectMapper();</span>
+
+<span class="fc bfc" id="L607" title="All 2 branches covered.">      for (String column : _allColumns) {</span>
+<span class="pc bpc" id="L608" title="3 of 4 branches missed.">        if (columnFilter != null &amp;&amp; !columnFilter.contains(column)) {</span>
+<span class="nc" id="L609">          continue;</span>
+        }
+<span class="fc" id="L611">        ColumnMetadata columnMetadata = _columnMetadataMap.get(column);</span>
+<span class="fc" id="L612">        JSONObject columnJson = new JSONObject(mapper.writeValueAsString(columnMetadata));</span>
+<span class="fc" id="L613">        columnsJson.put(columnJson);</span>
+<span class="fc" id="L614">      }</span>
+
+<span class="fc" id="L616">      rootMeta.put(&quot;columns&quot;, columnsJson);</span>
+<span class="fc" id="L617">      return rootMeta;</span>
+<span class="nc" id="L618">    } catch (Exception e) {</span>
+<span class="nc" id="L619">      LOGGER.error(&quot;Failed to convert field to json for segment: {}&quot;, _segmentName, e);</span>
+<span class="nc" id="L620">      throw new RuntimeException(&quot;Failed to convert segment metadata to json&quot;, e);</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

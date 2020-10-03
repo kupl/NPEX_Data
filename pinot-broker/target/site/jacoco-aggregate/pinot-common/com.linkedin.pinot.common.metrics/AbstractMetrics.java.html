@@ -1,0 +1,435 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>AbstractMetrics.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-broker</a> &gt; <a href="../index.html" class="el_bundle">pinot-common</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.common.metrics</a> &gt; <span class="el_source">AbstractMetrics.java</span></div><h1>AbstractMetrics.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.common.metrics;
+
+import com.linkedin.pinot.common.Utils;
+import com.linkedin.pinot.common.request.BrokerRequest;
+import com.yammer.metrics.core.MetricName;
+import com.yammer.metrics.core.MetricsRegistry;
+import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import org.antlr.v4.runtime.misc.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * Common code for metrics implementations.
+ *
+ */
+public abstract class AbstractMetrics&lt;QP extends AbstractMetrics.QueryPhase, M extends AbstractMetrics.Meter, G extends
+    AbstractMetrics.Gauge, T extends AbstractMetrics.Timer&gt; {
+
+<span class="fc" id="L39">  private static final Logger LOGGER = LoggerFactory.getLogger(AbstractMetrics.class);</span>
+
+  protected final String _metricPrefix;
+
+  protected final MetricsRegistry _metricsRegistry;
+
+  private final Class _clazz;
+
+<span class="fc" id="L47">  private final Map&lt;String, AtomicLong&gt; _gaugeValues = new ConcurrentHashMap&lt;String, AtomicLong&gt;();</span>
+
+  protected final boolean _global;
+
+  public AbstractMetrics(String metricPrefix, MetricsRegistry metricsRegistry, Class clazz) {
+<span class="fc" id="L52">    this(metricPrefix, metricsRegistry, clazz, false);</span>
+<span class="fc" id="L53">  }</span>
+
+<span class="fc" id="L55">  public AbstractMetrics(String metricPrefix, MetricsRegistry metricsRegistry, Class clazz, boolean global) {</span>
+<span class="fc" id="L56">    _metricPrefix = metricPrefix;</span>
+<span class="fc" id="L57">    _metricsRegistry = metricsRegistry;</span>
+<span class="fc" id="L58">    _clazz = clazz;</span>
+<span class="fc" id="L59">    _global = global;</span>
+
+<span class="fc" id="L61">  }</span>
+
+  public interface QueryPhase {
+    String getQueryPhaseName();
+  }
+
+  public interface Meter {
+    String getMeterName();
+
+    String getUnit();
+
+    boolean isGlobal();
+  }
+
+  public interface Gauge {
+    String getGaugeName();
+
+    String getUnit();
+
+    boolean isGlobal();
+  }
+
+  public interface Timer {
+    String getTimerName();
+
+    boolean isGlobal();
+  }
+
+  /**
+   * Logs the timing of a query phase.
+   *
+   * @param request The broker request associated with this query
+   * @param phase The query phase for which to log time
+   * @param nanos The number of nanoseconds that the phase execution took to complete
+   */
+  public void addPhaseTiming(@Nullable final BrokerRequest request, final QP phase, final long nanos) {
+<span class="fc" id="L97">    final String fullTimerName = buildMetricName(request, phase.getQueryPhaseName());</span>
+<span class="fc" id="L98">    addValueToTimer(fullTimerName, nanos, TimeUnit.NANOSECONDS);</span>
+<span class="fc" id="L99">  }</span>
+
+  public void addPhaseTiming(String tableName, QP phase, long nanos) {
+<span class="nc" id="L102">    String fullTimerName = _metricPrefix + getTableName(tableName) + &quot;.&quot; + phase.getQueryPhaseName();</span>
+<span class="nc" id="L103">    addValueToTimer(fullTimerName, nanos, TimeUnit.NANOSECONDS);</span>
+<span class="nc" id="L104">  }</span>
+
+  /**
+   * Logs the timing for a table
+   *
+   * @param tableName The table associated with this timer
+   * @param timer The name of timer
+   * @param duration The log time duration time value
+   * @param timeUnit The log time duration time unit
+   */
+  public void addTimedTableValue(final String tableName, T timer, final long duration, final TimeUnit timeUnit) {
+<span class="nc" id="L115">    final String fullTimerName = _metricPrefix + getTableName(tableName) + &quot;.&quot; + timer.getTimerName();</span>
+<span class="nc" id="L116">    addValueToTimer(fullTimerName, duration, timeUnit);</span>
+<span class="nc" id="L117">  }</span>
+
+  /**
+   * Logs the timing for a global timer
+   */
+  public void addTimedValue(T timer, final long duration, final TimeUnit timeUnit) {
+<span class="fc" id="L123">    final String fullTimerName = _metricPrefix + timer.getTimerName();</span>
+<span class="fc" id="L124">    addValueToTimer(fullTimerName, duration, timeUnit);</span>
+<span class="fc" id="L125">  }</span>
+
+  /**
+   * Logs the timing for a metric
+   *
+   * @param fullTimerName The full name of timer
+   * @param duration The log time duration time value
+   * @param timeUnit The log time duration time unit
+   */
+  private void addValueToTimer(String fullTimerName, final long duration, final TimeUnit timeUnit) {
+<span class="fc" id="L135">    final MetricName metricName = new MetricName(_clazz, fullTimerName);</span>
+<span class="fc" id="L136">    com.yammer.metrics.core.Timer timer =</span>
+        MetricsHelper.newTimer(_metricsRegistry, metricName, TimeUnit.MILLISECONDS, TimeUnit.SECONDS);
+<span class="fc" id="L138">    MetricsHelper.newTimer(_metricsRegistry, metricName, TimeUnit.MILLISECONDS, TimeUnit.SECONDS).update(duration,</span>
+        timeUnit);
+<span class="fc" id="L140">  }</span>
+
+  /**
+   * Builds a complete metric name, of the form prefix.resource.metric
+   *
+   * @param request The broker request containing all the information
+   * @param metricName The metric name to register
+   * @return The complete metric name
+   */
+  private String buildMetricName(@Nullable BrokerRequest request, String metricName) {
+<span class="pc bpc" id="L150" title="1 of 6 branches missed.">    if (request != null &amp;&amp; request.getQuerySource() != null &amp;&amp; request.getQuerySource().getTableName() != null) {</span>
+<span class="fc" id="L151">      return _metricPrefix + getTableName(request.getQuerySource().getTableName()) + &quot;.&quot; + metricName;</span>
+    } else {
+<span class="fc" id="L153">      return _metricPrefix + &quot;unknown.&quot; + metricName;</span>
+    }
+  }
+
+  /**
+   * Logs the time taken to complete the given callable.
+   *
+   * @param request The broker request associated with this query
+   * @param phase The query phase
+   * @param callable The callable to execute
+   * @param &lt;T&gt; The return type of the callable
+   * @return The return value of the callable passed as a parameter
+   * @throws Exception The exception thrown by the callable
+   */
+  public &lt;T&gt; T timeQueryPhase(final BrokerRequest request, final QP phase, final Callable&lt;T&gt; callable) throws Exception {
+<span class="nc" id="L168">    long startTime = System.nanoTime();</span>
+<span class="nc" id="L169">    T returnValue = callable.call();</span>
+<span class="nc" id="L170">    long totalNanos = System.nanoTime() - startTime;</span>
+
+<span class="nc" id="L172">    addPhaseTiming(request, phase, totalNanos);</span>
+<span class="nc" id="L173">    LOGGER.debug(&quot; Phase: {} took {}ms&quot;, phase, TimeUnit.MILLISECONDS.convert(totalNanos, TimeUnit.NANOSECONDS));</span>
+<span class="nc" id="L174">    return returnValue;</span>
+  }
+
+  /**
+   * Logs a value to a meter.
+   *
+   * @param meter The meter to use
+   * @param unitCount The number of units to add to the meter
+   */
+  public void addMeteredGlobalValue(final M meter, final long unitCount) {
+<span class="fc" id="L184">    addMeteredGlobalValue(meter, unitCount, null);</span>
+<span class="fc" id="L185">  }</span>
+
+  /**
+   * Logs a value to a meter.
+   *
+   * @param meter The meter to use
+   * @param unitCount The number of units to add to the meter
+   * @param reusedMeter The meter to reuse
+   */
+  public com.yammer.metrics.core.Meter addMeteredGlobalValue(final M meter, final long unitCount, com.yammer.metrics.core.Meter reusedMeter) {
+<span class="pc bpc" id="L195" title="1 of 2 branches missed.">    if (reusedMeter != null) {</span>
+<span class="nc" id="L196">      reusedMeter.mark(unitCount);</span>
+<span class="nc" id="L197">      return reusedMeter;</span>
+    } else {
+      final String fullMeterName;
+<span class="fc" id="L200">      String meterName = meter.getMeterName();</span>
+<span class="fc" id="L201">      fullMeterName = _metricPrefix + meterName;</span>
+<span class="fc" id="L202">      final MetricName metricName = new MetricName(_clazz, fullMeterName);</span>
+
+<span class="fc" id="L204">      final com.yammer.metrics.core.Meter newMeter =</span>
+          MetricsHelper.newMeter(_metricsRegistry, metricName, meter.getUnit(), TimeUnit.SECONDS);
+<span class="fc" id="L206">      newMeter.mark(unitCount);</span>
+<span class="fc" id="L207">      return newMeter;</span>
+    }
+  }
+
+  /**
+   * Logs a value to a table-level meter.
+   *
+   * @param tableName The table name
+   * @param meter The meter to use
+   * @param unitCount The number of units to add to the meter
+   */
+  public void addMeteredTableValue(final String tableName, final M meter, final long unitCount) {
+<span class="fc" id="L219">    addMeteredTableValue(tableName, meter, unitCount, null);</span>
+<span class="fc" id="L220">  }</span>
+
+  /**
+   * Logs a value to a table-level meter.
+   * @param tableName The table name
+   * @param meter The meter to use
+   * @param unitCount The number of units to add to the meter
+   * @param reusedMeter The meter to reuse
+   */
+  public com.yammer.metrics.core.Meter addMeteredTableValue(final String tableName, final M meter, final long unitCount, com.yammer.metrics.core.Meter reusedMeter) {
+<span class="pc bpc" id="L230" title="1 of 2 branches missed.">    if (reusedMeter != null) {</span>
+<span class="nc" id="L231">      reusedMeter.mark(unitCount);</span>
+<span class="nc" id="L232">      return reusedMeter;</span>
+    } else {
+      final String fullMeterName;
+<span class="fc" id="L235">      String meterName = meter.getMeterName();</span>
+<span class="fc" id="L236">      fullMeterName = _metricPrefix + getTableName(tableName) + &quot;.&quot; + meterName;</span>
+<span class="fc" id="L237">      final MetricName metricName = new MetricName(_clazz, fullMeterName);</span>
+
+<span class="fc" id="L239">      final com.yammer.metrics.core.Meter newMeter =</span>
+          MetricsHelper.newMeter(_metricsRegistry, metricName, meter.getUnit(), TimeUnit.SECONDS);
+<span class="fc" id="L241">      newMeter.mark(unitCount);</span>
+<span class="fc" id="L242">      return newMeter;</span>
+    }
+  }
+
+  public com.yammer.metrics.core.Meter getMeteredTableValue(final String tableName, final M meter) {
+    final String fullMeterName;
+<span class="nc" id="L248">    String meterName = meter.getMeterName();</span>
+<span class="nc" id="L249">    fullMeterName = _metricPrefix + getTableName(tableName) + &quot;.&quot; + meterName;</span>
+<span class="nc" id="L250">    final MetricName metricName = new MetricName(_clazz, fullMeterName);</span>
+
+<span class="nc" id="L252">    return MetricsHelper.newMeter(_metricsRegistry, metricName, meter.getUnit(), TimeUnit.SECONDS);</span>
+  }
+
+  /**
+   * Logs a value to a meter for a specific query.
+   *
+   * @param request The broker request associated with this query
+   * @param meter The meter to use
+   * @param unitCount The number of units to add to the meter
+   */
+  public void addMeteredQueryValue(final BrokerRequest request, final M meter, final long unitCount) {
+    final String fullMeterName;
+<span class="nc" id="L264">    String meterName = meter.getMeterName();</span>
+<span class="nc bnc" id="L265" title="All 2 branches missed.">    if (request != null) {</span>
+<span class="nc" id="L266">      fullMeterName = buildMetricName(request, meterName);</span>
+    } else {
+<span class="nc" id="L268">      fullMeterName = _metricPrefix + meterName;</span>
+    }
+<span class="nc" id="L270">    final MetricName metricName = new MetricName(_clazz, fullMeterName);</span>
+<span class="nc" id="L271">    MetricsHelper.newMeter(_metricsRegistry, metricName, meter.getUnit(), TimeUnit.SECONDS).mark(unitCount);</span>
+<span class="nc" id="L272">  }</span>
+
+  /**
+   * Logs a value to a table gauge.
+   *
+   * @param tableName The table name
+   * @param gauge The gauge to use
+   * @param unitCount The number of units to add to the gauge
+   */
+  public void addValueToTableGauge(final String tableName, final G gauge, final long unitCount) {
+    final String fullGaugeName;
+<span class="fc" id="L283">    String gaugeName = gauge.getGaugeName();</span>
+<span class="fc" id="L284">    fullGaugeName = gaugeName + &quot;.&quot; + getTableName(tableName);</span>
+
+<span class="fc bfc" id="L286" title="All 2 branches covered.">    if (!_gaugeValues.containsKey(fullGaugeName)) {</span>
+<span class="fc" id="L287">      synchronized (_gaugeValues) {</span>
+<span class="pc bpc" id="L288" title="1 of 2 branches missed.">        if(!_gaugeValues.containsKey(fullGaugeName)) {</span>
+<span class="fc" id="L289">          _gaugeValues.put(fullGaugeName, new AtomicLong(unitCount));</span>
+<span class="fc" id="L290">          addCallbackGauge(fullGaugeName, new Callable&lt;Long&gt;() {</span>
+            @Override
+            public Long call() throws Exception {
+<span class="nc" id="L293">              return _gaugeValues.get(fullGaugeName).get();</span>
+            }
+          });
+        } else {
+<span class="nc" id="L297">          _gaugeValues.get(fullGaugeName).addAndGet(unitCount);</span>
+        }
+<span class="pc" id="L299">      }</span>
+    } else {
+<span class="fc" id="L301">      _gaugeValues.get(fullGaugeName).addAndGet(unitCount);</span>
+    }
+<span class="fc" id="L303">  }</span>
+
+  /**
+   * Sets the value of a table gauge.
+   *
+   * @param tableName The table name
+   * @param gauge The gauge to use
+   * @param value The value to set the gauge to
+   */
+  public void setValueOfTableGauge(final String tableName, final G gauge, final long value) {
+    final String fullGaugeName;
+<span class="fc" id="L314">    String gaugeName = gauge.getGaugeName();</span>
+<span class="fc" id="L315">    fullGaugeName = gaugeName + &quot;.&quot; + getTableName(tableName);</span>
+
+<span class="fc bfc" id="L317" title="All 2 branches covered.">    if (!_gaugeValues.containsKey(fullGaugeName)) {</span>
+<span class="fc" id="L318">      synchronized (_gaugeValues) {</span>
+<span class="pc bpc" id="L319" title="1 of 2 branches missed.">        if(!_gaugeValues.containsKey(fullGaugeName)) {</span>
+<span class="fc" id="L320">          _gaugeValues.put(fullGaugeName, new AtomicLong(value));</span>
+<span class="fc" id="L321">          addCallbackGauge(fullGaugeName, new Callable&lt;Long&gt;() {</span>
+            @Override
+            public Long call() throws Exception {
+<span class="nc" id="L324">              return _gaugeValues.get(fullGaugeName).get();</span>
+            }
+          });
+        } else {
+<span class="nc" id="L328">          _gaugeValues.get(fullGaugeName).set(value);</span>
+        }
+<span class="pc" id="L330">      }</span>
+    } else {
+<span class="fc" id="L332">      _gaugeValues.get(fullGaugeName).set(value);</span>
+    }
+<span class="fc" id="L334">  }</span>
+
+  /**
+   * Sets the value of a global  gauge.
+   *
+   * @param gauge The gauge to use
+   * @param value The value to set the gauge to
+   */
+  public void setValueOfGlobalGauge(final G gauge, final long value) {
+    final String fullGaugeName;
+<span class="fc" id="L344">    final String gaugeName = gauge.getGaugeName();</span>
+
+<span class="pc bpc" id="L346" title="1 of 2 branches missed.">    if (!_gaugeValues.containsKey(gaugeName)) {</span>
+<span class="fc" id="L347">      synchronized (_gaugeValues) {</span>
+<span class="pc bpc" id="L348" title="1 of 2 branches missed.">        if(!_gaugeValues.containsKey(gaugeName)) {</span>
+<span class="fc" id="L349">          _gaugeValues.put(gaugeName, new AtomicLong(value));</span>
+<span class="fc" id="L350">          addCallbackGauge(gaugeName, new Callable&lt;Long&gt;() {</span>
+            @Override
+            public Long call() throws Exception {
+<span class="nc" id="L353">              return _gaugeValues.get(gaugeName).get();</span>
+            }
+          });
+        } else {
+<span class="nc" id="L357">          _gaugeValues.get(gaugeName).set(value);</span>
+        }
+<span class="pc" id="L359">      }</span>
+    } else {
+<span class="nc" id="L361">      _gaugeValues.get(gaugeName).set(value);</span>
+    }
+<span class="fc" id="L363">  }</span>
+
+  /**
+   * Gets the value of a table gauge.
+   *
+   * @param tableName The table name
+   * @param gauge The gauge to use
+   */
+  public long getValueOfTableGauge(final String tableName, final G gauge) {
+    final String fullGaugeName;
+<span class="fc" id="L373">    String gaugeName = gauge.getGaugeName();</span>
+<span class="fc" id="L374">    fullGaugeName = gaugeName + &quot;.&quot; + getTableName(tableName);</span>
+
+<span class="fc bfc" id="L376" title="All 2 branches covered.">    if (!_gaugeValues.containsKey(fullGaugeName)) {</span>
+<span class="fc" id="L377">      return 0;</span>
+    } else {
+<span class="fc" id="L379">      return _gaugeValues.get(fullGaugeName).get();</span>
+    }
+  }
+
+  /**
+   * Initializes all global meters (such as exceptions count) to zero.
+   */
+  public void initializeGlobalMeters() {
+<span class="fc" id="L387">    M[] meters = getMeters();</span>
+
+<span class="fc bfc" id="L389" title="All 2 branches covered.">    for (M meter : meters) {</span>
+<span class="fc bfc" id="L390" title="All 2 branches covered.">      if (meter.isGlobal()) {</span>
+<span class="fc" id="L391">        addMeteredGlobalValue(meter, 0);</span>
+      }
+    }
+
+<span class="fc" id="L395">    G[] gauges = getGauges();</span>
+<span class="fc bfc" id="L396" title="All 2 branches covered.">    for (G gauge : gauges) {</span>
+<span class="fc bfc" id="L397" title="All 2 branches covered.">      if (gauge.isGlobal()) {</span>
+<span class="fc" id="L398">        setValueOfGlobalGauge(gauge, 0);</span>
+      }
+    }
+<span class="fc" id="L401">  }</span>
+
+  /**
+   * Adds a new gauge whose values are retrieved from a callback function.
+   *
+   * @param metricName The name of the metric
+   * @param valueCallback The callback function used to retrieve the value of the gauge
+   */
+  public void addCallbackGauge(final String metricName, final Callable&lt;Long&gt; valueCallback) {
+<span class="fc" id="L410">    MetricsHelper.newGauge(_metricsRegistry, new MetricName(_clazz, _metricPrefix + metricName), new</span>
+<span class="fc" id="L411">        com.yammer.metrics.core.Gauge&lt;Long&gt;() {</span>
+      @Override
+      public Long value() {
+        try {
+<span class="nc" id="L415">          return valueCallback.call();</span>
+<span class="nc" id="L416">        } catch (Exception e) {</span>
+<span class="nc" id="L417">          LOGGER.error(&quot;Caught exception&quot;, e);</span>
+<span class="nc" id="L418">          Utils.rethrowException(e);</span>
+<span class="nc" id="L419">          throw new AssertionError(&quot;Should not reach this&quot;);</span>
+        }
+      }
+    });
+<span class="fc" id="L423">  }</span>
+
+  protected abstract QP[] getQueryPhases();
+
+  protected abstract M[] getMeters();
+
+  protected abstract G[] getGauges();
+
+  protected String getTableName(String tableName){
+<span class="pc bpc" id="L432" title="1 of 2 branches missed.">     return (_global ? &quot;allTables&quot; : tableName);</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>BalancedStreamPartitionAssignmentStrategy.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-tools</a> &gt; <a href="../index.html" class="el_bundle">pinot-controller</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.controller.helix.core.realtime.partition</a> &gt; <span class="el_source">BalancedStreamPartitionAssignmentStrategy.java</span></div><h1>BalancedStreamPartitionAssignmentStrategy.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.controller.helix.core.realtime.partition;
+
+import com.linkedin.pinot.common.config.StreamConsumptionConfig;
+import com.linkedin.pinot.common.config.TableConfig;
+import com.linkedin.pinot.common.utils.CommonConstants.Helix.StateModel.RealtimeSegmentOnlineOfflineStateModel;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import org.apache.helix.ZNRecord;
+import org.apache.helix.controller.rebalancer.strategy.AutoRebalanceStrategy;
+
+
+/**
+ * Generates partition assignment for all tables with
+ * streamPartitionAssignmentStrategy as BalancedStreamPartitionAssignment, using AutoRebalanceStrategy
+ *
+ * The partitions are evenly distributed across available instances.
+ * Any other tables in the same tenant which also have BalancedStreamPartitionAssignmentStrategy will also be repartitioned
+ * AutoRebalance Strategy tries to not move partitions unnecessarily
+ *
+ * An example znode for 8 kafka partitions and and 6 realtime servers (Server_s1 to Server_s6)
+ * for a tableConfig with BalancedStreamPartitionAssignmentStrategy in zookeeper.
+ *
+ *
+ * {
+   &quot;id&quot;:&quot;KafkaTopicName&quot;
+      ,&quot;simpleFields&quot;:{
+   }
+   ,&quot;listFields&quot;:{
+      &quot;0&quot;:[&quot;Server_s1.company.com_8001&quot;,&quot;Server_s2.company.com_8001&quot;,&quot;Server_s3.company.com_8001&quot;]
+      ,&quot;1&quot;:[&quot;Server_s2.company.com_8001&quot;,&quot;Server_s3.company.com_8001&quot;,&quot;Server_s4.company.com_8001&quot;]
+      ,&quot;2&quot;:[&quot;Server_s3.company.com_8001&quot;,&quot;Server_s4.company.com_8001&quot;,&quot;Server_s5.company.com_8001&quot;]
+      ,&quot;3&quot;:[&quot;Server_s4.company.com_8001&quot;,&quot;Server_s5.company.com_8001&quot;,&quot;Server_s6.company.com_8001&quot;]
+      ,&quot;4&quot;:[&quot;Server_s5.company.com_8001&quot;,&quot;Server_s6.company.com_8001&quot;,&quot;Server_s1.company.com_8001&quot;]
+      ,&quot;5&quot;:[&quot;Server_s6.company.com_8001&quot;,&quot;Server_s1.company.com_8001&quot;,&quot;Server_s2.company.com_8001&quot;]
+      ,&quot;6&quot;:[&quot;Server_s1.company.com_8001&quot;,&quot;Server_s2.company.com_8001&quot;,&quot;Server_s3.company.com_8001&quot;]
+      ,&quot;7&quot;:[&quot;Server_s2.company.com_8001&quot;,&quot;Server_s3.company.com_8001&quot;,&quot;Server_s4.company.com_8001&quot;]
+   }
+   ,&quot;mapFields&quot;:{
+   }
+ }
+ *
+ */
+<span class="fc" id="L61">public class BalancedStreamPartitionAssignmentStrategy implements StreamPartitionAssignmentStrategy {</span>
+
+  private static final String PARTITION_JOINER = &quot;_&quot;;
+
+  private List&lt;String&gt; _tablesForPartitionAssignment;
+  private List&lt;String&gt; _instanceNames;
+  private Map&lt;String, List&lt;RealtimePartition&gt;&gt; _tableNameToPartitionsList;
+
+  @Override
+  public void init(List&lt;TableConfig&gt; allTablesInTenant, List&lt;String&gt; instanceNames,
+      Map&lt;String, List&lt;RealtimePartition&gt;&gt; tableNameToPartitionsList) {
+
+    // NOTE: we only consider those tables which have explicitly stated that their streamPartitionAssignmentStrategy
+    // is Balanced. We treat Uniform strategy as our default, which writes only a single table,
+    // until we resolve race conditions in the znodes read/update code.
+    // Therefore, unless explicitly asked for, Balanced strategy will not be applied to the tables
+
+<span class="fc" id="L78">    _tablesForPartitionAssignment = new ArrayList&lt;&gt;();</span>
+<span class="fc bfc" id="L79" title="All 2 branches covered.">    for (TableConfig tableConfig : allTablesInTenant) {</span>
+<span class="fc" id="L80">      StreamConsumptionConfig streamConsumptionConfig = tableConfig.getIndexingConfig().getStreamConsumptionConfig();</span>
+<span class="pc bpc" id="L81" title="1 of 4 branches missed.">      if (streamConsumptionConfig != null &amp;&amp; streamConsumptionConfig.getStreamPartitionAssignmentStrategy()</span>
+          .equals(StreamPartitionAssignmentStrategyEnum.BalancedStreamPartitionAssignment.toString())) {
+<span class="fc" id="L83">        _tablesForPartitionAssignment.add(tableConfig.getTableName());</span>
+      }
+<span class="fc" id="L85">    }</span>
+<span class="fc" id="L86">    _instanceNames = instanceNames;</span>
+<span class="fc" id="L87">    _tableNameToPartitionsList = tableNameToPartitionsList;</span>
+<span class="fc" id="L88">  }</span>
+
+  @Override
+  public Map&lt;String, List&lt;RealtimePartition&gt;&gt; generatePartitionAssignment(TableConfig tableConfig, int numPartitions) {
+
+<span class="fc" id="L93">    Map&lt;String, List&lt;RealtimePartition&gt;&gt; newPartitionAssignment =</span>
+        new HashMap&lt;&gt;(_tablesForPartitionAssignment.size());
+
+    // get num replicas
+<span class="fc" id="L97">    int numReplicas = tableConfig.getValidationConfig().getReplicasPerPartitionNumber();</span>
+
+    // get num partitions
+<span class="fc" id="L100">    Map&lt;String, Integer&gt; tableToNumPartitions = new HashMap&lt;&gt;(_tablesForPartitionAssignment.size());</span>
+<span class="fc bfc" id="L101" title="All 2 branches covered.">    for (String realtimeTableName : _tablesForPartitionAssignment) {</span>
+<span class="fc" id="L102">      List&lt;RealtimePartition&gt; partitionsList = _tableNameToPartitionsList.get(realtimeTableName);</span>
+<span class="fc bfc" id="L103" title="All 2 branches covered.">      if (partitionsList != null) {</span>
+<span class="fc" id="L104">        tableToNumPartitions.put(realtimeTableName, partitionsList.size());</span>
+      }
+<span class="fc" id="L106">    }</span>
+<span class="fc" id="L107">    tableToNumPartitions.put(tableConfig.getTableName(), numPartitions);</span>
+
+
+<span class="fc" id="L110">    Map&lt;String, Map&lt;String, String&gt;&gt; currentPartitions = new HashMap&lt;&gt;(_tablesForPartitionAssignment.size());</span>
+<span class="fc" id="L111">    List&lt;String&gt; newPartitions = new ArrayList&lt;&gt;();</span>
+
+<span class="fc bfc" id="L113" title="All 2 branches covered.">    for (String realtimeTableName : _tablesForPartitionAssignment) {</span>
+
+      // construct current partitions map
+<span class="fc" id="L116">      List&lt;RealtimePartition&gt; partitionsList = _tableNameToPartitionsList.get(realtimeTableName);</span>
+<span class="fc bfc" id="L117" title="All 2 branches covered.">      if (partitionsList != null) {</span>
+
+<span class="fc bfc" id="L119" title="All 2 branches covered.">        for (RealtimePartition partition : partitionsList) {</span>
+<span class="fc" id="L120">          String key = realtimeTableName + PARTITION_JOINER + partition.getPartitionNum();</span>
+<span class="fc" id="L121">          Map&lt;String, String&gt; value = new HashMap&lt;&gt;();</span>
+<span class="fc bfc" id="L122" title="All 2 branches covered.">          for (String instance : partition.getInstanceNames()) {</span>
+<span class="fc" id="L123">            value.put(instance, RealtimeSegmentOnlineOfflineStateModel.ONLINE);</span>
+<span class="fc" id="L124">          }</span>
+<span class="fc" id="L125">          currentPartitions.put(key, value);</span>
+<span class="fc" id="L126">        }</span>
+      }
+
+      // construct new partitions list
+<span class="pc bpc" id="L130" title="1 of 2 branches missed.">      if (tableToNumPartitions.get(realtimeTableName) != null) { // if new table was added by another controller to the same tenant,</span>
+        // we will find it in this list, but not have the current partition assignment for it
+<span class="fc bfc" id="L132" title="All 2 branches covered.">        for (int i = 0; i &lt; tableToNumPartitions.get(realtimeTableName); i++) {</span>
+<span class="fc" id="L133">          newPartitions.add(realtimeTableName + PARTITION_JOINER + Integer.toString(i));</span>
+        }
+      }
+<span class="fc" id="L136">    }</span>
+
+    // get states
+<span class="fc" id="L139">    LinkedHashMap&lt;String, Integer&gt; states = new LinkedHashMap&lt;&gt;(2);</span>
+<span class="fc" id="L140">    states.put(RealtimeSegmentOnlineOfflineStateModel.OFFLINE, 0);</span>
+<span class="fc" id="L141">    states.put(RealtimeSegmentOnlineOfflineStateModel.ONLINE, numReplicas);</span>
+
+    // auto rebalance
+<span class="fc" id="L144">    AutoRebalanceStrategy autoRebalanceStrategy =</span>
+        new AutoRebalanceStrategy(tableConfig.getTableName(), newPartitions, states);
+<span class="fc" id="L146">    ZNRecord partitionAssignmentAcrossAllTables =</span>
+        autoRebalanceStrategy.computePartitionAssignment(_instanceNames, _instanceNames, currentPartitions, null);
+
+    // extract partitions from auto rebalance result
+<span class="fc" id="L150">    Map&lt;String, List&lt;String&gt;&gt; listFields = partitionAssignmentAcrossAllTables.getListFields();</span>
+<span class="fc bfc" id="L151" title="All 2 branches covered.">    for (Map.Entry&lt;String, List&lt;String&gt;&gt; entry : listFields.entrySet()) {</span>
+<span class="fc" id="L152">      String partitionName = entry.getKey();</span>
+<span class="fc" id="L153">      int lastIndex = partitionName.lastIndexOf(PARTITION_JOINER);</span>
+<span class="fc" id="L154">      String tableName = partitionName.substring(0, lastIndex);</span>
+<span class="fc" id="L155">      String partitionNumber = partitionName.substring(lastIndex + 1);</span>
+
+<span class="fc" id="L157">      List&lt;RealtimePartition&gt; partitionsForTable = newPartitionAssignment.get(tableName);</span>
+<span class="fc bfc" id="L158" title="All 2 branches covered.">      if (partitionsForTable == null) {</span>
+<span class="fc" id="L159">        partitionsForTable = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L160">        newPartitionAssignment.put(tableName, partitionsForTable);</span>
+      }
+<span class="fc" id="L162">      partitionsForTable.add(new RealtimePartition(partitionNumber, entry.getValue()));</span>
+<span class="fc" id="L163">    }</span>
+
+<span class="fc" id="L165">    return newPartitionAssignment;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

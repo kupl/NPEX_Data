@@ -1,0 +1,266 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>PlainFieldExtractor.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-controller</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.data.extractors</a> &gt; <span class="el_source">PlainFieldExtractor.java</span></div><h1>PlainFieldExtractor.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.data.extractors;
+
+import com.google.common.base.Preconditions;
+import com.linkedin.pinot.common.data.FieldSpec;
+import com.linkedin.pinot.common.data.MetricFieldSpec;
+import com.linkedin.pinot.common.data.Schema;
+import com.linkedin.pinot.common.data.TimeFieldSpec;
+import com.linkedin.pinot.common.data.TimeGranularitySpec;
+import com.linkedin.pinot.common.utils.StringUtil;
+import com.linkedin.pinot.common.utils.time.TimeConverter;
+import com.linkedin.pinot.common.utils.time.TimeConverterProvider;
+import com.linkedin.pinot.core.data.GenericRow;
+import java.util.HashMap;
+import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * This implementation will only inject columns inside the Schema.
+ */
+public class PlainFieldExtractor implements FieldExtractor {
+<span class="fc" id="L38">  private static final Logger LOGGER = LoggerFactory.getLogger(PlainFieldExtractor.class);</span>
+
+<span class="fc" id="L40">  private static final Map&lt;Class, PinotDataType&gt; SINGLE_VALUE_TYPE_MAP = new HashMap&lt;&gt;();</span>
+<span class="fc" id="L41">  private static final Map&lt;Class, PinotDataType&gt; MULTI_VALUE_TYPE_MAP = new HashMap&lt;&gt;();</span>
+
+  static {
+<span class="fc" id="L44">    SINGLE_VALUE_TYPE_MAP.put(Boolean.class, PinotDataType.BOOLEAN);</span>
+<span class="fc" id="L45">    SINGLE_VALUE_TYPE_MAP.put(Byte.class, PinotDataType.BYTE);</span>
+<span class="fc" id="L46">    SINGLE_VALUE_TYPE_MAP.put(Character.class, PinotDataType.CHARACTER);</span>
+<span class="fc" id="L47">    SINGLE_VALUE_TYPE_MAP.put(Short.class, PinotDataType.SHORT);</span>
+<span class="fc" id="L48">    SINGLE_VALUE_TYPE_MAP.put(Integer.class, PinotDataType.INTEGER);</span>
+<span class="fc" id="L49">    SINGLE_VALUE_TYPE_MAP.put(Long.class, PinotDataType.LONG);</span>
+<span class="fc" id="L50">    SINGLE_VALUE_TYPE_MAP.put(Float.class, PinotDataType.FLOAT);</span>
+<span class="fc" id="L51">    SINGLE_VALUE_TYPE_MAP.put(Double.class, PinotDataType.DOUBLE);</span>
+<span class="fc" id="L52">    SINGLE_VALUE_TYPE_MAP.put(String.class, PinotDataType.STRING);</span>
+
+<span class="fc" id="L54">    MULTI_VALUE_TYPE_MAP.put(Byte.class, PinotDataType.BYTE_ARRAY);</span>
+<span class="fc" id="L55">    MULTI_VALUE_TYPE_MAP.put(Character.class, PinotDataType.CHARACTER_ARRAY);</span>
+<span class="fc" id="L56">    MULTI_VALUE_TYPE_MAP.put(Short.class, PinotDataType.SHORT_ARRAY);</span>
+<span class="fc" id="L57">    MULTI_VALUE_TYPE_MAP.put(Integer.class, PinotDataType.INTEGER_ARRAY);</span>
+<span class="fc" id="L58">    MULTI_VALUE_TYPE_MAP.put(Long.class, PinotDataType.LONG_ARRAY);</span>
+<span class="fc" id="L59">    MULTI_VALUE_TYPE_MAP.put(Float.class, PinotDataType.FLOAT_ARRAY);</span>
+<span class="fc" id="L60">    MULTI_VALUE_TYPE_MAP.put(Double.class, PinotDataType.DOUBLE_ARRAY);</span>
+<span class="fc" id="L61">    MULTI_VALUE_TYPE_MAP.put(String.class, PinotDataType.STRING_ARRAY);</span>
+<span class="fc" id="L62">  }</span>
+
+  private final Schema _schema;
+
+<span class="fc" id="L66">  private final Map&lt;String, Integer&gt; _errorCount = new HashMap&lt;&gt;();</span>
+<span class="fc" id="L67">  private int _totalErrors = 0;</span>
+<span class="fc" id="L68">  private int _totalNulls = 0;</span>
+<span class="fc" id="L69">  private int _totalConversions = 0;</span>
+<span class="fc" id="L70">  private int _totalNullCols = 0;</span>
+
+<span class="fc" id="L72">  private final Map&lt;String, PinotDataType&gt; _columnType = new HashMap&lt;&gt;();</span>
+
+  private String _incomingTimeColumnName;
+  private String _outgoingTimeColumnName;
+  private TimeConverter _timeConverter;
+
+<span class="fc" id="L78">  public PlainFieldExtractor(Schema schema) {</span>
+<span class="fc" id="L79">    _schema = schema;</span>
+<span class="fc" id="L80">    initErrorCount();</span>
+<span class="fc" id="L81">    initColumnTypes();</span>
+<span class="fc" id="L82">    initTimeConverters();</span>
+<span class="fc" id="L83">  }</span>
+
+  public void resetCounters() {
+<span class="nc" id="L86">    _totalErrors = 0;</span>
+<span class="nc" id="L87">    _totalNulls = 0;</span>
+<span class="nc" id="L88">    _totalConversions = 0;</span>
+<span class="nc" id="L89">    _totalNullCols = 0;</span>
+<span class="nc" id="L90">  }</span>
+
+  private void initErrorCount() {
+<span class="fc bfc" id="L93" title="All 2 branches covered.">    for (String column : _schema.getColumnNames()) {</span>
+<span class="fc" id="L94">      _errorCount.put(column, 0);</span>
+<span class="fc" id="L95">    }</span>
+<span class="fc" id="L96">  }</span>
+
+  private void initColumnTypes() {
+    // Get the map from column name to pinot data type.
+<span class="fc bfc" id="L100" title="All 2 branches covered.">    for (String column : _schema.getColumnNames()) {</span>
+<span class="fc" id="L101">      FieldSpec fieldSpec = _schema.getFieldSpecFor(column);</span>
+<span class="fc" id="L102">      Preconditions.checkNotNull(fieldSpec, &quot;Bad schema: &quot; + _schema.getSchemaName() + &quot;, field: &quot; + column);</span>
+<span class="fc" id="L103">      _columnType.put(column, PinotDataType.getPinotDataType(fieldSpec));</span>
+<span class="fc" id="L104">    }</span>
+<span class="fc" id="L105">  }</span>
+
+  private void initTimeConverters() {
+<span class="fc" id="L108">    TimeFieldSpec timeFieldSpec = _schema.getTimeFieldSpec();</span>
+<span class="fc bfc" id="L109" title="All 2 branches covered.">    if (timeFieldSpec != null) {</span>
+<span class="fc" id="L110">      TimeGranularitySpec incomingGranularitySpec = timeFieldSpec.getIncomingGranularitySpec();</span>
+<span class="fc" id="L111">      TimeGranularitySpec outgoingGranularitySpec = timeFieldSpec.getOutgoingGranularitySpec();</span>
+<span class="fc" id="L112">      _outgoingTimeColumnName = outgoingGranularitySpec.getName();</span>
+<span class="fc bfc" id="L113" title="All 2 branches covered.">      if (!incomingGranularitySpec.equals(outgoingGranularitySpec)) {</span>
+<span class="fc" id="L114">        _incomingTimeColumnName = incomingGranularitySpec.getName();</span>
+<span class="fc" id="L115">        _timeConverter = TimeConverterProvider.getTimeConverter(incomingGranularitySpec, outgoingGranularitySpec);</span>
+      }
+    }
+<span class="fc" id="L118">  }</span>
+
+  @Override
+  public Schema getSchema() {
+<span class="nc" id="L122">    return _schema;</span>
+  }
+
+  @Override
+  public GenericRow transform(GenericRow row) {
+<span class="fc" id="L127">    return transform(row, new GenericRow());</span>
+  }
+
+  @Override
+  public GenericRow transform(GenericRow row, GenericRow destinationRow) {
+<span class="fc" id="L132">    boolean hasError = false;</span>
+<span class="fc" id="L133">    boolean hasNull = false;</span>
+<span class="fc" id="L134">    boolean hasConversion = false;</span>
+
+<span class="fc bfc" id="L136" title="All 2 branches covered.">    for (String column : _schema.getColumnNames()) {</span>
+<span class="fc" id="L137">      FieldSpec fieldSpec = _schema.getFieldSpecFor(column);</span>
+      // Ignore transform of DerivedMetric
+<span class="fc bfc" id="L139" title="All 4 branches covered.">      if (fieldSpec instanceof MetricFieldSpec &amp;&amp; ((MetricFieldSpec) fieldSpec).isDerivedMetric()) {</span>
+<span class="fc" id="L140">        continue;</span>
+      }
+
+      Object value;
+
+      // Fetch value for this column.
+<span class="fc bfc" id="L146" title="All 4 branches covered.">      if (column.equals(_outgoingTimeColumnName) &amp;&amp; _timeConverter != null) {</span>
+        // Convert incoming time to outgoing time.
+<span class="fc" id="L148">        value = row.getValue(_incomingTimeColumnName);</span>
+<span class="pc bpc" id="L149" title="1 of 2 branches missed.">        if (value == null) {</span>
+<span class="nc" id="L150">          hasNull = true;</span>
+<span class="nc" id="L151">          _totalNullCols++;</span>
+        } else {
+          try {
+<span class="fc" id="L154">            value = _timeConverter.convert(value);</span>
+<span class="nc" id="L155">          } catch (Exception e) {</span>
+<span class="nc" id="L156">            LOGGER.debug(&quot;Caught exception while converting incoming time value: {}&quot;, value, e);</span>
+<span class="nc" id="L157">            value = null;</span>
+<span class="nc" id="L158">            hasError = true;</span>
+<span class="nc" id="L159">            _errorCount.put(column, _errorCount.get(column) + 1);</span>
+<span class="pc" id="L160">          }</span>
+        }
+      } else {
+<span class="fc" id="L163">        value = row.getValue(column);</span>
+<span class="fc bfc" id="L164" title="All 2 branches covered.">        if (value == null) {</span>
+<span class="fc" id="L165">          hasNull = true;</span>
+<span class="fc" id="L166">          _totalNullCols++;</span>
+        }
+      }
+
+      // Convert value if necessary.
+<span class="fc" id="L171">      PinotDataType dest = _columnType.get(column);</span>
+<span class="fc" id="L172">      PinotDataType source = null;</span>
+<span class="fc bfc" id="L173" title="All 2 branches covered.">      if (value != null) {</span>
+<span class="fc bfc" id="L174" title="All 2 branches covered.">        if (value instanceof Object[]) {</span>
+          // Multi-value.
+<span class="fc" id="L176">          Object[] valueArray = (Object[]) value;</span>
+<span class="pc bpc" id="L177" title="1 of 2 branches missed.">          if (valueArray.length &gt; 0) {</span>
+<span class="fc" id="L178">            source = MULTI_VALUE_TYPE_MAP.get(valueArray[0].getClass());</span>
+<span class="fc bfc" id="L179" title="All 2 branches covered.">            if (source == null) {</span>
+<span class="fc" id="L180">              source = PinotDataType.OBJECT_ARRAY;</span>
+            }
+          } else {
+<span class="nc" id="L183">            LOGGER.debug(&quot;Got 0 length array.&quot;);</span>
+            // Use default value for 0 length array.
+<span class="nc" id="L185">            value = null;</span>
+<span class="nc" id="L186">            hasError = true;</span>
+<span class="nc" id="L187">            _errorCount.put(column, _errorCount.get(column) + 1);</span>
+          }
+<span class="fc" id="L189">        } else {</span>
+          // Single-value.
+<span class="fc" id="L191">          source = SINGLE_VALUE_TYPE_MAP.get(value.getClass());</span>
+<span class="fc bfc" id="L192" title="All 2 branches covered.">          if (source == null) {</span>
+<span class="fc" id="L193">            source = PinotDataType.OBJECT;</span>
+          }
+        }
+
+<span class="pc bpc" id="L197" title="1 of 4 branches missed.">        if (value != null &amp;&amp; source != dest) {</span>
+<span class="fc" id="L198">          Object before = value;</span>
+          try {
+<span class="fc" id="L200">            value = dest.convert(before, source);</span>
+<span class="fc" id="L201">            hasConversion = true;</span>
+<span class="fc" id="L202">          } catch (Exception e) {</span>
+<span class="fc" id="L203">            LOGGER.debug(&quot;Caught exception while converting value: {} from: {} to: {}&quot;, before, source, dest);</span>
+<span class="fc" id="L204">            value = null;</span>
+<span class="fc" id="L205">            hasError = true;</span>
+<span class="fc" id="L206">            _errorCount.put(column, _errorCount.get(column) + 1);</span>
+<span class="fc" id="L207">          }</span>
+        }
+
+        // Null character is used as the padding character, so we do not allow null characters in strings.
+<span class="pc bpc" id="L211" title="1 of 4 branches missed.">        if (dest == PinotDataType.STRING &amp;&amp; value != null) {</span>
+<span class="pc bpc" id="L212" title="1 of 2 branches missed.">          if (StringUtil.containsNullCharacter(value.toString())) {</span>
+<span class="nc" id="L213">            LOGGER.error(&quot;Input value: {} for column: {} contains null character&quot;, value, column);</span>
+<span class="nc" id="L214">            value = StringUtil.removeNullCharacters(value.toString());</span>
+          }
+        }
+      }
+
+      // Assign default value for null value.
+<span class="fc bfc" id="L220" title="All 2 branches covered.">      if (value == null) {</span>
+<span class="fc bfc" id="L221" title="All 2 branches covered.">        if (fieldSpec.isSingleValueField()) {</span>
+          // Single-value field.
+<span class="fc" id="L223">          value = fieldSpec.getDefaultNullValue();</span>
+        } else {
+          // Multi-value field.
+<span class="fc" id="L226">          value = new Object[]{fieldSpec.getDefaultNullValue()};</span>
+        }
+      }
+
+<span class="fc" id="L230">      destinationRow.putField(column, value);</span>
+<span class="fc" id="L231">    }</span>
+
+<span class="fc bfc" id="L233" title="All 2 branches covered.">    if (hasError) {</span>
+<span class="fc" id="L234">      _totalErrors++;</span>
+    }
+<span class="fc bfc" id="L236" title="All 2 branches covered.">    if (hasNull) {</span>
+<span class="fc" id="L237">      _totalNulls++;</span>
+    }
+<span class="fc bfc" id="L239" title="All 2 branches covered.">    if (hasConversion) {</span>
+<span class="fc" id="L240">      _totalConversions++;</span>
+    }
+
+<span class="fc" id="L243">    return destinationRow;</span>
+  }
+
+  public Map&lt;String, Integer&gt; getErrorCount() {
+<span class="fc" id="L247">    return _errorCount;</span>
+  }
+
+  public int getTotalErrors() {
+<span class="fc" id="L251">    return _totalErrors;</span>
+  }
+
+  public int getTotalNulls() {
+<span class="fc" id="L255">    return _totalNulls;</span>
+  }
+
+  public int getTotalConversions() {
+<span class="fc" id="L259">    return _totalConversions;</span>
+  }
+
+  public int getTotalNullCols() {
+<span class="fc" id="L263">    return _totalNullCols;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

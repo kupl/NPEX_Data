@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>SegmentPreProcessor.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-perf</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.segment.index.loader</a> &gt; <span class="el_source">SegmentPreProcessor.java</span></div><h1>SegmentPreProcessor.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.segment.index.loader;
+
+import com.linkedin.pinot.common.data.Schema;
+import com.linkedin.pinot.common.segment.ReadMode;
+import com.linkedin.pinot.core.segment.index.SegmentMetadataImpl;
+import com.linkedin.pinot.core.segment.index.loader.columnminmaxvalue.ColumnMinMaxValueGenerator;
+import com.linkedin.pinot.core.segment.index.loader.columnminmaxvalue.ColumnMinMaxValueGeneratorMode;
+import com.linkedin.pinot.core.segment.index.loader.defaultcolumn.DefaultColumnHandler;
+import com.linkedin.pinot.core.segment.index.loader.defaultcolumn.DefaultColumnHandlerFactory;
+import com.linkedin.pinot.core.segment.index.loader.invertedindex.InvertedIndexHandler;
+import com.linkedin.pinot.core.segment.store.SegmentDirectory;
+import java.io.File;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+
+
+/**
+ * Use mmap to load the segment and perform all pre-processing steps. (This can be slow)
+ * &lt;p&gt;Pre-processing steps include:
+ * &lt;ul&gt;
+ *   &lt;li&gt;Use {@link InvertedIndexHandler} to create inverted indices&lt;/li&gt;
+ *   &lt;li&gt;Use {@link DefaultColumnHandler} to update auto-generated default columns&lt;/li&gt;
+ *   &lt;li&gt;Use {@link ColumnMinMaxValueGenerator} to add min/max value to column metadata&lt;/li&gt;
+ * &lt;/ul&gt;
+ */
+public class SegmentPreProcessor implements AutoCloseable {
+  private final File _indexDir;
+  private final IndexLoadingConfig _indexLoadingConfig;
+  private final Schema _schema;
+  private final SegmentDirectory _segmentDirectory;
+  private SegmentMetadataImpl _segmentMetadata;
+
+  public SegmentPreProcessor(@Nonnull File indexDir, @Nonnull IndexLoadingConfig indexLoadingConfig,
+<span class="fc" id="L49">      @Nullable Schema schema) throws Exception {</span>
+<span class="fc" id="L50">    _indexDir = indexDir;</span>
+<span class="fc" id="L51">    _indexLoadingConfig = indexLoadingConfig;</span>
+<span class="fc" id="L52">    _schema = schema;</span>
+<span class="fc" id="L53">    _segmentMetadata = new SegmentMetadataImpl(indexDir);</span>
+
+    // Always use mmap to load the segment because it is safest and performs well without impact from -Xmx params.
+    // This is not the final load of the segment.
+<span class="fc" id="L57">    _segmentDirectory = SegmentDirectory.createFromLocalFS(indexDir, _segmentMetadata, ReadMode.mmap);</span>
+<span class="fc" id="L58">  }</span>
+
+  public void process() throws Exception {
+<span class="pc bpc" id="L61" title="1 of 2 branches missed.">    if (_segmentMetadata.getTotalDocs() == 0) {</span>
+<span class="nc" id="L62">      return;</span>
+    }
+
+<span class="fc" id="L65">    try (SegmentDirectory.Writer segmentWriter = _segmentDirectory.createWriter()) {</span>
+      // Create column inverted indices according to the index config.
+<span class="fc" id="L67">      InvertedIndexHandler invertedIndexHandler =</span>
+          new InvertedIndexHandler(_indexDir, _segmentMetadata, _indexLoadingConfig, segmentWriter);
+<span class="fc" id="L69">      invertedIndexHandler.createInvertedIndices();</span>
+
+      // Update default columns according to the schema.
+      // NOTE: This step may modify the segment metadata. When adding new steps after this, reload the metadata.
+<span class="pc bpc" id="L73" title="1 of 4 branches missed.">      if (_indexLoadingConfig.isEnableDefaultColumns() &amp;&amp; (_schema != null)) {</span>
+<span class="fc" id="L74">        DefaultColumnHandler defaultColumnHandler =</span>
+            DefaultColumnHandlerFactory.getDefaultColumnHandler(_indexDir, _schema, _segmentMetadata, segmentWriter);
+<span class="fc" id="L76">        defaultColumnHandler.updateDefaultColumns();</span>
+      }
+
+      // Add min/max value to column metadata according to the prune mode.
+      // For star-tree index, because it can only increase the range, so min/max value can still be used in pruner.
+      // NOTE: This step may modify the segment metadata. When adding new steps after this, reload the metadata.
+<span class="fc" id="L82">      ColumnMinMaxValueGeneratorMode columnMinMaxValueGeneratorMode =</span>
+          _indexLoadingConfig.getColumnMinMaxValueGeneratorMode();
+<span class="fc bfc" id="L84" title="All 2 branches covered.">      if (columnMinMaxValueGeneratorMode != ColumnMinMaxValueGeneratorMode.NONE) {</span>
+        // Reload the metadata.
+<span class="fc" id="L86">        _segmentMetadata = new SegmentMetadataImpl(_indexDir);</span>
+
+<span class="fc" id="L88">        ColumnMinMaxValueGenerator columnMinMaxValueGenerator =</span>
+            new ColumnMinMaxValueGenerator(_segmentMetadata, segmentWriter, columnMinMaxValueGeneratorMode);
+<span class="fc" id="L90">        columnMinMaxValueGenerator.addColumnMinMaxValue();</span>
+      }
+
+<span class="fc" id="L93">      segmentWriter.save();</span>
+<span class="pc bpc" id="L94" title="4 of 8 branches missed.">    }</span>
+<span class="fc" id="L95">  }</span>
+
+  @Override
+  public void close() throws Exception {
+<span class="fc" id="L99">    _segmentDirectory.close();</span>
+<span class="fc" id="L100">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

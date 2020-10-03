@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>PartitionAwareRealtimeRoutingTableBuilder.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-perf</a> &gt; <a href="../index.html" class="el_bundle">pinot-broker</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.broker.routing.builder</a> &gt; <span class="el_source">PartitionAwareRealtimeRoutingTableBuilder.java</span></div><h1>PartitionAwareRealtimeRoutingTableBuilder.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.linkedin.pinot.broker.routing.builder;
+
+import com.linkedin.pinot.common.config.TableConfig;
+import com.linkedin.pinot.common.metadata.ZKMetadataProvider;
+import com.linkedin.pinot.common.metadata.segment.SegmentZKMetadata;
+import com.linkedin.pinot.common.utils.CommonConstants;
+import com.linkedin.pinot.common.utils.LLCSegmentName;
+import com.linkedin.pinot.common.utils.SegmentName;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.SortedSet;
+import org.apache.commons.configuration.Configuration;
+import org.apache.helix.ZNRecord;
+import org.apache.helix.model.ExternalView;
+import org.apache.helix.model.InstanceConfig;
+import org.apache.helix.store.zk.ZkHelixPropertyStore;
+
+
+/**
+ * Partition aware routing table builder for the Kafka low level consumer.
+ *
+ * In contrast to the offline partition aware routing builder where the replica group aware segment assignment can be
+ * assumed, we do not use the concept of replica group for a realtime table. The routing look up table is simply built
+ * from the external view.
+ *
+ */
+<span class="fc" id="L45">public class PartitionAwareRealtimeRoutingTableBuilder extends BasePartitionAwareRoutingTableBuilder {</span>
+
+  @Override
+  public void init(Configuration configuration, TableConfig tableConfig, ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore) {
+<span class="fc" id="L49">    super.init(configuration, tableConfig, propertyStore);</span>
+<span class="fc" id="L50">    _numReplicas = Integer.valueOf(_tableConfig.getValidationConfig().getReplicasPerPartition());</span>
+<span class="fc" id="L51">  }</span>
+
+  @Override
+  public synchronized void computeRoutingTableFromExternalView(String tableName, ExternalView externalView,
+      List&lt;InstanceConfig&gt; instanceConfigs) {
+    // Update the cache for the segment ZK metadata
+<span class="fc" id="L57">    Set&lt;String&gt; segmentSet = externalView.getPartitionSet();</span>
+<span class="fc bfc" id="L58" title="All 2 branches covered.">    for (String segmentName : segmentSet) {</span>
+<span class="fc" id="L59">      SegmentZKMetadata segmentZKMetadata = _segmentToZkMetadataMapping.get(segmentName);</span>
+<span class="pc bpc" id="L60" title="5 of 6 branches missed.">      if (segmentZKMetadata == null || segmentZKMetadata.getPartitionMetadata() == null</span>
+          || segmentZKMetadata.getPartitionMetadata().getColumnPartitionMap().size() == 0) {
+<span class="fc" id="L62">        segmentZKMetadata = ZKMetadataProvider.getRealtimeSegmentZKMetadata(_propertyStore, tableName, segmentName);</span>
+<span class="pc bpc" id="L63" title="1 of 2 branches missed.">        if (segmentZKMetadata != null) {</span>
+<span class="fc" id="L64">          _segmentToZkMetadataMapping.put(segmentName, segmentZKMetadata);</span>
+        }
+      }
+<span class="fc" id="L67">    }</span>
+
+    // Gather all segments and group them by Kafka partition, sorted by sequence number
+<span class="fc" id="L70">    Map&lt;String, SortedSet&lt;SegmentName&gt;&gt; sortedSegmentsByKafkaPartition =</span>
+        KafkaLowLevelRoutingTableBuilderUtil.getSortedSegmentsByKafkaPartition(externalView);
+
+    // Ensure that for each Kafka partition, we have at most one Helix partition (Pinot segment) in consuming state
+<span class="fc" id="L74">    Map&lt;String, SegmentName&gt; allowedSegmentInConsumingStateByKafkaPartition =</span>
+        KafkaLowLevelRoutingTableBuilderUtil.getAllowedConsumingStateSegments(externalView,
+            sortedSegmentsByKafkaPartition);
+
+<span class="fc" id="L78">    RoutingTableInstancePruner instancePruner = new RoutingTableInstancePruner(instanceConfigs);</span>
+
+    // Compute map from segment to map from replica to server
+<span class="fc" id="L81">    Map&lt;String, Map&lt;Integer, String&gt;&gt; segmentToReplicaToServerMap = new HashMap&lt;&gt;();</span>
+<span class="fc bfc" id="L82" title="All 2 branches covered.">    for (String segmentName : segmentSet) {</span>
+<span class="fc" id="L83">      int partitionId = getPartitionId(segmentName);</span>
+<span class="fc" id="L84">      SegmentName validConsumingSegment =</span>
+          allowedSegmentInConsumingStateByKafkaPartition.get(Integer.toString(partitionId));
+
+<span class="fc" id="L87">      Map&lt;Integer, String&gt; replicaToServerMap = new HashMap&lt;&gt;();</span>
+<span class="fc" id="L88">      int replicaId = 0;</span>
+<span class="fc bfc" id="L89" title="All 2 branches covered.">      for (Map.Entry&lt;String, String&gt; entry : externalView.getStateMap(segmentName).entrySet()) {</span>
+<span class="fc" id="L90">        String serverName = entry.getKey();</span>
+<span class="fc" id="L91">        String state = entry.getValue();</span>
+
+        // Do not add the server if it is inactive
+<span class="pc bpc" id="L94" title="1 of 2 branches missed.">        if (instancePruner.isInactive(serverName)) {</span>
+<span class="nc" id="L95">          continue;</span>
+        }
+
+        // If the server is in ONLINE status, it's always to safe to add
+<span class="fc bfc" id="L99" title="All 2 branches covered.">        if (state.equals(CommonConstants.Helix.StateModel.RealtimeSegmentOnlineOfflineStateModel.ONLINE)) {</span>
+<span class="fc" id="L100">          replicaToServerMap.put(replicaId++, serverName);</span>
+        }
+
+        // If the server is in CONSUMING status, the segment has to be match with the valid consuming segment
+<span class="pc bpc" id="L104" title="1 of 6 branches missed.">        if (state.equals(CommonConstants.Helix.StateModel.RealtimeSegmentOnlineOfflineStateModel.CONSUMING)</span>
+            &amp;&amp; validConsumingSegment != null &amp;&amp; segmentName.equals(validConsumingSegment.getSegmentName())) {
+<span class="fc" id="L106">          replicaToServerMap.put(replicaId++, serverName);</span>
+        }
+<span class="fc" id="L108">      }</span>
+
+      // Update the final routing look up table.
+<span class="fc bfc" id="L111" title="All 2 branches covered.">      if (!replicaToServerMap.isEmpty()) {</span>
+<span class="fc" id="L112">        segmentToReplicaToServerMap.put(segmentName, replicaToServerMap);</span>
+      }
+<span class="fc" id="L114">    }</span>
+
+    // Delete segment metadata from the cache if the segment no longer exists in the external view.
+<span class="fc bfc" id="L117" title="All 2 branches covered.">    for (String segmentName : _segmentToZkMetadataMapping.keySet()) {</span>
+<span class="pc bpc" id="L118" title="1 of 2 branches missed.">      if (!segmentSet.contains(segmentName)) {</span>
+<span class="nc" id="L119">        _segmentToZkMetadataMapping.remove(segmentName);</span>
+      }
+<span class="fc" id="L121">    }</span>
+
+<span class="fc" id="L123">    setSegmentToReplicaToServerMap(segmentToReplicaToServerMap);</span>
+<span class="fc" id="L124">  }</span>
+
+  /**
+   * Retrieve the partition Id from the segment name of the realtime segment
+   *
+   * @param segmentName the name of the realtime segment
+   * @return partition id of the segment
+   */
+  private int getPartitionId(String segmentName) {
+<span class="fc" id="L133">    final LLCSegmentName llcSegmentName = new LLCSegmentName(segmentName);</span>
+<span class="fc" id="L134">    return llcSegmentName.getPartitionId();</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

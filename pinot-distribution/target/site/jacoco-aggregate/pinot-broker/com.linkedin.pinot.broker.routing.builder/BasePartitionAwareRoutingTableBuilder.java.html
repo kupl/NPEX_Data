@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>BasePartitionAwareRoutingTableBuilder.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-broker</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.broker.routing.builder</a> &gt; <span class="el_source">BasePartitionAwareRoutingTableBuilder.java</span></div><h1>BasePartitionAwareRoutingTableBuilder.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.broker.routing.builder;
+
+import com.linkedin.pinot.broker.pruner.SegmentPrunerContext;
+import com.linkedin.pinot.broker.pruner.SegmentZKMetadataPrunerService;
+import com.linkedin.pinot.broker.routing.RoutingTableLookupRequest;
+import com.linkedin.pinot.common.config.TableConfig;
+import com.linkedin.pinot.common.metadata.segment.SegmentZKMetadata;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.concurrent.ConcurrentHashMap;
+import org.apache.commons.configuration.Configuration;
+import org.apache.helix.ZNRecord;
+import org.apache.helix.store.zk.ZkHelixPropertyStore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * Base partition aware routing table builder.
+ *
+ * For an external view change, a subclass is in change of updating the look up table that is used
+ * for routing. The look up table is in the format of &lt; segment_name -&gt; (replica_id -&gt; server_instance) &gt;.
+ *
+ * When the query comes in, the routing algorithm is as follows:
+ *   1. Randomly pick a replica id (or replica group id)
+ *   2. For each segment of the given table,
+ *      a. Check if the segment can be pruned. If pruned, go to the next segment.
+ *      b. If not pruned, assign the segment to a server with the replica id that is picked above.
+ *
+ */
+<span class="fc" id="L49">public abstract class BasePartitionAwareRoutingTableBuilder implements RoutingTableBuilder {</span>
+<span class="fc" id="L50">  private static final Logger LOGGER = LoggerFactory.getLogger(BasePartitionAwareRoutingTableBuilder.class);</span>
+
+  protected static final String PARTITION_METADATA_PRUNER = &quot;PartitionZKMetadataPruner&quot;;
+  protected static final int NO_PARTITION_NUMBER = -1;
+
+  // Map from segment name to map from replica id to server
+  // Set variable as volatile so all threads can get the up-to-date map
+  private volatile Map&lt;String, Map&lt;Integer, String&gt;&gt; _segmentToReplicaToServerMap;
+
+  // Cache for segment zk metadata to reduce the lookup to ZK store
+<span class="fc" id="L60">  protected Map&lt;String, SegmentZKMetadata&gt; _segmentToZkMetadataMapping = new ConcurrentHashMap&lt;&gt;();</span>
+
+  protected ZkHelixPropertyStore&lt;ZNRecord&gt; _propertyStore;
+  protected SegmentZKMetadataPrunerService _pruner;
+  protected TableConfig _tableConfig;
+<span class="fc" id="L65">  protected Random _random = new Random();</span>
+  protected int _numReplicas;
+
+  protected void setSegmentToReplicaToServerMap(Map&lt;String, Map&lt;Integer, String&gt;&gt; segmentToReplicaToServerMap) {
+<span class="fc" id="L69">    _segmentToReplicaToServerMap = segmentToReplicaToServerMap;</span>
+<span class="fc" id="L70">  }</span>
+
+  @Override
+  public void init(Configuration configuration, TableConfig tableConfig, ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore) {
+<span class="fc" id="L74">    _tableConfig = tableConfig;</span>
+<span class="fc" id="L75">    _propertyStore = propertyStore;</span>
+
+    // TODO: We need to specify the type of pruners via config instead of hardcoding.
+<span class="fc" id="L78">    _pruner = new SegmentZKMetadataPrunerService(new String[]{PARTITION_METADATA_PRUNER});</span>
+<span class="fc" id="L79">  }</span>
+
+  @Override
+  public Map&lt;String, List&lt;String&gt;&gt; getRoutingTable(RoutingTableLookupRequest request) {
+<span class="fc" id="L83">    Map&lt;String, List&lt;String&gt;&gt; routingTable = new HashMap&lt;&gt;();</span>
+<span class="fc" id="L84">    SegmentPrunerContext prunerContext = new SegmentPrunerContext(request.getBrokerRequest());</span>
+
+    // 1. Randomly pick a replica id
+<span class="fc" id="L87">    int replicaId = _random.nextInt(_numReplicas);</span>
+<span class="fc bfc" id="L88" title="All 2 branches covered.">    for (Map.Entry&lt;String, Map&lt;Integer, String&gt;&gt; entry : _segmentToReplicaToServerMap.entrySet()) {</span>
+<span class="fc" id="L89">      String segmentName = entry.getKey();</span>
+<span class="fc" id="L90">      SegmentZKMetadata segmentZKMetadata = _segmentToZkMetadataMapping.get(segmentName);</span>
+
+      // 2a. Check if the segment can be pruned
+<span class="pc bpc" id="L93" title="1 of 4 branches missed.">      boolean segmentPruned = (segmentZKMetadata != null) &amp;&amp; _pruner.prune(segmentZKMetadata, prunerContext);</span>
+
+<span class="fc bfc" id="L95" title="All 2 branches covered.">      if (!segmentPruned) {</span>
+        // 2b. Segment cannot be pruned. Assign the segment to a server with the replica id picked above.
+<span class="fc" id="L97">        Map&lt;Integer, String&gt; replicaIdToServerMap = entry.getValue();</span>
+<span class="fc" id="L98">        String serverName = replicaIdToServerMap.get(replicaId);</span>
+
+        // When the server is not available with this replica id, we need to pick another available server.
+<span class="fc bfc" id="L101" title="All 2 branches covered.">        if (serverName == null) {</span>
+<span class="pc bpc" id="L102" title="1 of 2 branches missed.">          if (!replicaIdToServerMap.isEmpty()) {</span>
+<span class="fc" id="L103">            serverName = replicaIdToServerMap.values().iterator().next();</span>
+          } else {
+            // No server is found for this segment.
+<span class="nc" id="L106">            LOGGER.warn(&quot;No server is found for the segment {}.&quot;, segmentName);</span>
+<span class="nc" id="L107">            continue;</span>
+          }
+        }
+<span class="fc" id="L110">        List&lt;String&gt; segmentsForServer = routingTable.get(serverName);</span>
+<span class="fc bfc" id="L111" title="All 2 branches covered.">        if (segmentsForServer == null) {</span>
+<span class="fc" id="L112">          segmentsForServer = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L113">          routingTable.put(serverName, segmentsForServer);</span>
+        }
+<span class="fc" id="L115">        segmentsForServer.add(segmentName);</span>
+      }
+<span class="fc" id="L117">    }</span>
+
+<span class="fc" id="L119">    return routingTable;</span>
+  }
+
+  @Override
+  public List&lt;Map&lt;String, List&lt;String&gt;&gt;&gt; getRoutingTables() {
+<span class="nc" id="L124">    throw new UnsupportedOperationException(&quot;Partition aware routing table cannot be pre-computed&quot;);</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

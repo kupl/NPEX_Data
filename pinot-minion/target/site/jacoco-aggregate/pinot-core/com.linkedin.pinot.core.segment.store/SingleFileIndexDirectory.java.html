@@ -1,0 +1,351 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>SingleFileIndexDirectory.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-minion</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.segment.store</a> &gt; <span class="el_source">SingleFileIndexDirectory.java</span></div><h1>SingleFileIndexDirectory.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.segment.store;
+
+import com.google.common.base.Preconditions;
+import com.linkedin.pinot.common.segment.ReadMode;
+import com.linkedin.pinot.core.segment.index.SegmentMetadataImpl;
+import com.linkedin.pinot.core.segment.memory.PinotDataBuffer;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.nio.channels.FileChannel;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.SortedMap;
+import java.util.TreeMap;
+import org.apache.commons.configuration.ConfigurationException;
+import org.apache.commons.configuration.PropertiesConfiguration;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+// There are a couple of un-addressed issues right now
+//
+// thread-safety : methods in this class are not thread safe. External synchronization
+// is required. This will be addressed soon
+//
+// ACID: Various failures can lead to inconsistency. We will rely on retrieving segments
+// in case of failures. Some parts of this will improve in future but there will be
+// no complete ACID guarantee
+//
+// TODO/Missing features:
+// newBuffer : opening new buffer maps a new buffer separately. User can avoid
+// it by making all the write calls followed by reads.
+// Remove index: Ability to remove an index (particularly inverted index)
+// Abort writes: There is no way to abort discard changes
+//
+class SingleFileIndexDirectory extends ColumnIndexDirectory {
+<span class="fc" id="L57">  private static Logger LOGGER = LoggerFactory.getLogger(SingleFileIndexDirectory.class);</span>
+
+  private static final String DEFAULT_INDEX_FILE_NAME = &quot;columns.psf&quot;;
+  private static final String INDEX_MAP_FILE = &quot;index_map&quot;;
+  private static final long MAGIC_MARKER = 0xdeadbeefdeafbeadL;
+  private static final int MAGIC_MARKER_SIZE_BYTES = 8;
+  private static final String MAP_KEY_SEPARATOR = &quot;.&quot;;
+  private static final String MAP_KEY_NAME_START_OFFSET = &quot;startOffset&quot;;
+  private static final String MAP_KEY_NAME_SIZE = &quot;size&quot;;
+
+  // Max size of buffer we want to allocate
+  // ByteBuffer limits the size to 2GB - (some platform dependent size)
+  // This breaks the abstraction with PinotDataBuffer....a workaround for
+  // now till PinotDataBuffer can support large buffers again
+  private static final int MAX_ALLOCATION_SIZE = 2000 * 1024 * 1024;
+
+  private File indexFile;
+  private Map&lt;IndexKey, IndexEntry&gt; columnEntries;
+  private List&lt;PinotDataBuffer&gt; allocBuffers;
+
+  public SingleFileIndexDirectory(File segmentDirectory, SegmentMetadataImpl metadata, ReadMode readMode)
+      throws IOException, ConfigurationException {
+<span class="fc" id="L79">    super(segmentDirectory, metadata, readMode);</span>
+<span class="fc" id="L80">    indexFile = new File(segmentDirectory, DEFAULT_INDEX_FILE_NAME);</span>
+<span class="fc bfc" id="L81" title="All 2 branches covered.">    if (! indexFile.exists()) {</span>
+<span class="fc" id="L82">      indexFile.createNewFile();</span>
+    }
+<span class="fc" id="L84">    columnEntries = new HashMap&lt;&gt;(metadata.getAllColumns().size());</span>
+<span class="fc" id="L85">    allocBuffers = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L86">    load() ;</span>
+<span class="fc" id="L87">  }</span>
+
+  @Override
+  public PinotDataBuffer getDictionaryBufferFor(String column)
+      throws IOException {
+<span class="fc" id="L92">    return checkAndGetIndexBuffer(column, ColumnIndexType.DICTIONARY);</span>
+  }
+
+  @Override
+  public PinotDataBuffer getForwardIndexBufferFor(String column)
+      throws IOException {
+<span class="fc" id="L98">    return checkAndGetIndexBuffer(column, ColumnIndexType.FORWARD_INDEX);</span>
+  }
+
+  @Override
+  public PinotDataBuffer getInvertedIndexBufferFor(String column)
+      throws IOException {
+<span class="fc" id="L104">    return checkAndGetIndexBuffer(column, ColumnIndexType.INVERTED_INDEX);</span>
+  }
+
+  @Override
+  public boolean hasIndexFor(String column, ColumnIndexType type) {
+<span class="fc" id="L109">    IndexKey key = new IndexKey(column, type);</span>
+<span class="fc" id="L110">    return columnEntries.containsKey(key);</span>
+  }
+
+  @Override
+  public PinotDataBuffer newDictionaryBuffer(String column, int sizeBytes)
+      throws IOException {
+<span class="fc" id="L116">    return allocNewBufferInternal(column, ColumnIndexType.DICTIONARY, sizeBytes, &quot;dictionary.create&quot;);</span>
+  }
+
+  @Override
+  public PinotDataBuffer newForwardIndexBuffer(String column, int sizeBytes)
+      throws IOException {
+<span class="fc" id="L122">    return allocNewBufferInternal(column, ColumnIndexType.FORWARD_INDEX, sizeBytes, &quot;forward_index.create&quot;);</span>
+  }
+
+  @Override
+  public PinotDataBuffer newInvertedIndexBuffer(String column, int sizeBytes)
+      throws IOException {
+<span class="fc" id="L128">    return  allocNewBufferInternal(column, ColumnIndexType.INVERTED_INDEX, sizeBytes, &quot;inverted_index.create&quot;);</span>
+  }
+
+  private PinotDataBuffer checkAndGetIndexBuffer(String column, ColumnIndexType type) {
+<span class="fc" id="L132">    IndexKey key = new IndexKey(column, type);</span>
+<span class="fc" id="L133">    IndexEntry entry = columnEntries.get(key);</span>
+<span class="pc bpc" id="L134" title="1 of 4 branches missed.">    if (entry == null || entry.buffer == null) {</span>
+<span class="fc" id="L135">      throw new RuntimeException(&quot;Could not find index for column: &quot; + column + &quot;, type: &quot; + type +</span>
+          &quot;, segment: &quot; + segmentDirectory.toString());
+    }
+<span class="fc" id="L138">    return entry.buffer;</span>
+  }
+
+  // This is using extra resources right now which can be changed.
+  private PinotDataBuffer allocNewBufferInternal(String column, ColumnIndexType indexType, int size,
+      String context)
+      throws IOException {
+
+<span class="fc" id="L146">    IndexKey key = new IndexKey(column, indexType);</span>
+<span class="fc" id="L147">    checkKeyNotPresent(key);</span>
+
+<span class="fc" id="L149">    String allocContext = allocationContext(key) + context;</span>
+<span class="fc" id="L150">    IndexEntry entry = new IndexEntry(key);</span>
+<span class="fc" id="L151">    entry.startOffset = indexFile.length();</span>
+<span class="fc" id="L152">    entry.size = size + MAGIC_MARKER_SIZE_BYTES;</span>
+
+    // read-mode is always mmap so that buffer changes are synced
+    // to the file
+<span class="fc" id="L156">    PinotDataBuffer appendBuffer = PinotDataBuffer.fromFile(indexFile,</span>
+        entry.startOffset,
+        entry.size,
+        ReadMode.mmap,
+        FileChannel.MapMode.READ_WRITE,
+        allocContext);
+
+<span class="fc" id="L163">    LOGGER.debug(&quot;Allotted buffer for key: {}, startOffset: {}, size: {}&quot;, key, entry.startOffset, entry.size);</span>
+<span class="fc" id="L164">    appendBuffer.putLong(0, MAGIC_MARKER);</span>
+<span class="fc" id="L165">    allocBuffers.add(appendBuffer);</span>
+
+<span class="fc" id="L167">    entry.buffer = appendBuffer.view(0 + MAGIC_MARKER_SIZE_BYTES, entry.size);</span>
+<span class="fc" id="L168">    columnEntries.put(key, entry);</span>
+
+<span class="fc" id="L170">    persistIndexMap(entry);</span>
+
+<span class="fc" id="L172">    return entry.buffer.duplicate();</span>
+  }
+
+  private void checkKeyNotPresent(IndexKey key) {
+<span class="fc bfc" id="L176" title="All 2 branches covered.">    if (columnEntries.containsKey(key)) {</span>
+<span class="fc" id="L177">      throw new RuntimeException(&quot;Attempt to re-create an existing index for key: &quot; + key.toString()</span>
+          + &quot;, for segmentDirectory: &quot; + segmentDirectory.getAbsolutePath());
+    }
+<span class="fc" id="L180">  }</span>
+
+  private void validateMagicMarker(PinotDataBuffer buffer, int startOffset) {
+<span class="fc" id="L183">    long actualMarkerValue = buffer.getLong(startOffset);</span>
+<span class="pc bpc" id="L184" title="1 of 2 branches missed.">    if (actualMarkerValue != MAGIC_MARKER) {</span>
+<span class="nc" id="L185">      LOGGER.error(&quot;Missing magic marker in index file: {} at position: {}&quot;,</span>
+          indexFile, startOffset);
+<span class="nc" id="L187">      throw new RuntimeException(&quot;Inconsistent data read. Index data file &quot; +</span>
+          indexFile.toString() + &quot; is possibly corrupted&quot;);
+    }
+<span class="fc" id="L190">  }</span>
+
+  private void load()
+      throws IOException, ConfigurationException {
+<span class="fc" id="L194">    loadMap();</span>
+<span class="fc" id="L195">    mapBufferEntries();</span>
+<span class="fc" id="L196">  }</span>
+
+  private void loadMap()
+      throws ConfigurationException {
+<span class="fc" id="L200">    File mapFile = new File(segmentDirectory, INDEX_MAP_FILE);</span>
+
+<span class="fc" id="L202">    PropertiesConfiguration mapConfig = new PropertiesConfiguration(mapFile);</span>
+<span class="fc" id="L203">    Iterator keys = mapConfig.getKeys();</span>
+<span class="fc bfc" id="L204" title="All 2 branches covered.">    while (keys.hasNext()) {</span>
+<span class="fc" id="L205">      String key = (String) keys.next();</span>
+      // column names can have '.' in it hence scan from backwards
+      // parsing names like &quot;column.name.dictionary.startOffset&quot;
+      // or, &quot;column.name.dictionary.endOffset&quot; where column.name is the key
+<span class="fc" id="L209">      int lastSeparatorPos = key.lastIndexOf(MAP_KEY_SEPARATOR);</span>
+<span class="pc bpc" id="L210" title="1 of 2 branches missed.">      Preconditions.checkState(lastSeparatorPos != -1, &quot;Key separator not found: &quot; + key +</span>
+          &quot;, segment: &quot; + segmentDirectory);
+<span class="fc" id="L212">      String propertyName = key.substring(lastSeparatorPos + 1);</span>
+
+<span class="fc" id="L214">      int indexSeparatorPos = key.lastIndexOf(MAP_KEY_SEPARATOR, lastSeparatorPos-1);</span>
+<span class="pc bpc" id="L215" title="1 of 2 branches missed.">      Preconditions.checkState(indexSeparatorPos != -1, &quot;Index separator not found: &quot; + key +</span>
+          &quot; , segment: &quot; + segmentDirectory);
+<span class="fc" id="L217">      String indexName = key.substring(indexSeparatorPos + 1, lastSeparatorPos);</span>
+<span class="fc" id="L218">      String columnName = key.substring(0, indexSeparatorPos);</span>
+<span class="fc" id="L219">      IndexKey indexKey = new IndexKey(columnName, ColumnIndexType.getValue(indexName));</span>
+<span class="fc" id="L220">      IndexEntry entry = columnEntries.get(indexKey);</span>
+<span class="fc bfc" id="L221" title="All 2 branches covered.">      if (entry == null) {</span>
+<span class="fc" id="L222">        entry = new IndexEntry(indexKey);</span>
+<span class="fc" id="L223">        columnEntries.put(indexKey, entry);</span>
+      }
+
+<span class="fc bfc" id="L226" title="All 2 branches covered.">      if (propertyName.equals(MAP_KEY_NAME_START_OFFSET)) {</span>
+<span class="fc" id="L227">        entry.startOffset = mapConfig.getLong(key);</span>
+<span class="pc bpc" id="L228" title="1 of 2 branches missed.">      } else if (propertyName.equals(MAP_KEY_NAME_SIZE)) {</span>
+<span class="fc" id="L229">        entry.size = mapConfig.getLong(key);</span>
+      } else {
+<span class="nc" id="L231">        throw new ConfigurationException(&quot;Invalid map file key: &quot; + key +</span>
+            &quot;, segmentDirectory: &quot; + segmentDirectory.toString());
+      }
+<span class="fc" id="L234">    }</span>
+
+    // validation
+<span class="fc bfc" id="L237" title="All 2 branches covered.">    for (Map.Entry&lt;IndexKey, IndexEntry&gt; colIndexEntry : columnEntries.entrySet()) {</span>
+<span class="fc" id="L238">      IndexEntry entry = colIndexEntry.getValue();</span>
+<span class="pc bpc" id="L239" title="2 of 4 branches missed.">      if (entry.size &lt; 0 || entry.startOffset &lt; 0) {</span>
+<span class="nc" id="L240">        throw new ConfigurationException(&quot;Invalid map entry for key: &quot; + colIndexEntry.getKey().toString() +</span>
+            &quot;, segment: &quot; + segmentDirectory.toString());
+      }
+<span class="fc" id="L243">    }</span>
+<span class="fc" id="L244">  }</span>
+
+  private void mapBufferEntries()
+      throws IOException {
+<span class="fc" id="L248">    SortedMap&lt;Long, IndexEntry&gt; indexStartMap = new TreeMap&lt;&gt;();</span>
+
+<span class="fc bfc" id="L250" title="All 2 branches covered.">    for (Map.Entry&lt;IndexKey, IndexEntry&gt; columnEntry : columnEntries.entrySet()) {</span>
+<span class="fc" id="L251">      long startOffset = columnEntry.getValue().startOffset;</span>
+<span class="fc" id="L252">      indexStartMap.put(startOffset, columnEntry.getValue());</span>
+<span class="fc" id="L253">    }</span>
+
+<span class="fc" id="L255">    long runningSize = 0;</span>
+<span class="fc" id="L256">    List&lt;Long&gt; offsetAccum = new ArrayList&lt;&gt;();</span>
+<span class="fc bfc" id="L257" title="All 2 branches covered.">    for (Map.Entry&lt;Long, IndexEntry&gt; offsetEntry : indexStartMap.entrySet()) {</span>
+<span class="fc" id="L258">      IndexEntry entry = offsetEntry.getValue();</span>
+<span class="fc" id="L259">      runningSize += entry.size;</span>
+
+<span class="pc bpc" id="L261" title="1 of 2 branches missed.">      if ( runningSize &gt;= MAX_ALLOCATION_SIZE) {</span>
+<span class="nc" id="L262">        mapAndSliceFile(indexStartMap, offsetAccum, offsetEntry.getKey());</span>
+<span class="nc" id="L263">        runningSize = entry.size;</span>
+<span class="nc" id="L264">        offsetAccum.clear();</span>
+      }
+<span class="fc" id="L266">      offsetAccum.add(offsetEntry.getKey());</span>
+<span class="fc" id="L267">    }</span>
+
+<span class="fc bfc" id="L269" title="All 2 branches covered.">    if (offsetAccum.size() &gt; 0) {</span>
+<span class="fc" id="L270">      mapAndSliceFile(indexStartMap, offsetAccum, offsetAccum.get(0) + runningSize);</span>
+    }
+<span class="fc" id="L272">  }</span>
+
+  private void mapAndSliceFile(SortedMap&lt;Long, IndexEntry&gt; startOffsets, List&lt;Long&gt; offsetAccum, long endOffset)
+      throws IOException {
+<span class="fc" id="L276">    Preconditions.checkNotNull(startOffsets);</span>
+<span class="fc" id="L277">    Preconditions.checkNotNull(offsetAccum);</span>
+<span class="pc bpc" id="L278" title="1 of 2 branches missed.">    Preconditions.checkArgument(offsetAccum.size() &gt;= 1);</span>
+
+<span class="fc" id="L280">    long fromFilePos = offsetAccum.get(0);</span>
+<span class="fc" id="L281">    long toFilePos = endOffset - fromFilePos;</span>
+
+<span class="fc" id="L283">    String context = allocationContext(indexFile, &quot;single_file_index.rw.&quot; +</span>
+        &quot;.&quot; + String.valueOf(fromFilePos) + &quot;.&quot; + String.valueOf(toFilePos));
+
+<span class="fc" id="L286">    PinotDataBuffer buffer = PinotDataBuffer.fromFile(indexFile, fromFilePos, toFilePos, readMode,</span>
+        FileChannel.MapMode.READ_WRITE, context);
+<span class="fc" id="L288">    allocBuffers.add(buffer);</span>
+
+<span class="fc" id="L290">    int prevSlicePoint = 0;</span>
+<span class="fc bfc" id="L291" title="All 2 branches covered.">    for (Long fileOffset : offsetAccum) {</span>
+<span class="fc" id="L292">      IndexEntry entry = startOffsets.get(fileOffset);</span>
+<span class="fc" id="L293">      int endSlicePoint = prevSlicePoint + (int) entry.size;</span>
+<span class="fc" id="L294">      validateMagicMarker(buffer, prevSlicePoint);</span>
+<span class="fc" id="L295">      PinotDataBuffer viewBuffer = buffer.view(prevSlicePoint + MAGIC_MARKER_SIZE_BYTES, endSlicePoint);</span>
+<span class="fc" id="L296">      entry.buffer = viewBuffer;</span>
+<span class="fc" id="L297">      prevSlicePoint = endSlicePoint;</span>
+<span class="fc" id="L298">    }</span>
+<span class="fc" id="L299">  }</span>
+
+  private void persistIndexMap(IndexEntry entry)
+      throws IOException {
+<span class="fc" id="L303">    File mapFile = new File(segmentDirectory, INDEX_MAP_FILE);</span>
+<span class="pc" id="L304">    try (PrintWriter writer = new PrintWriter(new BufferedWriter(new FileWriter(mapFile, true)))) {</span>
+<span class="fc" id="L305">      String startKey = getKey(entry.key.name, entry.key.type.getIndexName(), true);</span>
+
+<span class="fc" id="L307">      StringBuilder sb = new StringBuilder();</span>
+<span class="fc" id="L308">      sb.append(startKey).append(&quot; = &quot;).append(entry.startOffset);</span>
+<span class="fc" id="L309">      writer.println(sb.toString());</span>
+
+<span class="fc" id="L311">      String endKey = getKey(entry.key.name, entry.key.type.getIndexName(), false);</span>
+<span class="fc" id="L312">      sb = new StringBuilder();</span>
+<span class="fc" id="L313">      sb.append(endKey).append(&quot; = &quot;).append(entry.size);</span>
+<span class="fc" id="L314">      writer.println(sb.toString());</span>
+<span class="pc bpc" id="L315" title="6 of 8 branches missed.">    }</span>
+<span class="fc" id="L316">  }</span>
+
+  private String getKey(String column, String indexName, boolean isStartOffset) {
+<span class="fc bfc" id="L319" title="All 2 branches covered.">    return column + MAP_KEY_SEPARATOR + indexName + MAP_KEY_SEPARATOR + (isStartOffset ? &quot;startOffset&quot; : &quot;size&quot;);</span>
+  }
+
+  private String allocationContext(IndexKey key) {
+<span class="fc" id="L323">    return this.getClass().getSimpleName() + key.toString();</span>
+  }
+
+  @Override
+  public void close() {
+<span class="fc bfc" id="L328" title="All 2 branches covered.">    for (PinotDataBuffer buf : allocBuffers) {</span>
+<span class="fc" id="L329">      buf.close();</span>
+<span class="fc" id="L330">    }</span>
+<span class="fc" id="L331">    columnEntries.clear();</span>
+<span class="fc" id="L332">    allocBuffers.clear();</span>
+<span class="fc" id="L333">  }</span>
+
+  @Override
+  public void removeIndex(String columnName, ColumnIndexType indexType) {
+<span class="fc" id="L337">    throw new UnsupportedOperationException(&quot;Index removal is not supported for single file index format. Requested colum: &quot;</span>
+        + columnName + &quot; indexType: &quot; + indexType);
+  }
+
+  @Override
+  public boolean isIndexRemovalSupported() {
+<span class="fc" id="L343">    return false;</span>
+  }
+
+  @Override
+  public String toString(){
+<span class="nc" id="L348">    return segmentDirectory.toString() + &quot;/&quot; + indexFile.toString();</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

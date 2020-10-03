@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>MinMaxRangeAggregationFunction.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-tools</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.query.aggregation.function</a> &gt; <span class="el_source">MinMaxRangeAggregationFunction.java</span></div><h1>MinMaxRangeAggregationFunction.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.query.aggregation.function;
+
+import com.linkedin.pinot.common.data.FieldSpec;
+import com.linkedin.pinot.core.common.BlockValSet;
+import com.linkedin.pinot.core.query.aggregation.AggregationResultHolder;
+import com.linkedin.pinot.core.query.aggregation.ObjectAggregationResultHolder;
+import com.linkedin.pinot.core.query.aggregation.function.customobject.MinMaxRangePair;
+import com.linkedin.pinot.core.query.aggregation.groupby.GroupByResultHolder;
+import com.linkedin.pinot.core.query.aggregation.groupby.ObjectGroupByResultHolder;
+import javax.annotation.Nonnull;
+
+
+<span class="fc" id="L28">public class MinMaxRangeAggregationFunction implements AggregationFunction&lt;MinMaxRangePair, Double&gt; {</span>
+<span class="fc" id="L29">  private static final String NAME = AggregationFunctionFactory.AggregationFunctionType.MINMAXRANGE.getName();</span>
+
+  @Nonnull
+  @Override
+  public String getName() {
+<span class="fc" id="L34">    return NAME;</span>
+  }
+
+  @Nonnull
+  @Override
+  public String getColumnName(@Nonnull String[] columns) {
+<span class="fc" id="L40">    return NAME + &quot;_&quot; + columns[0];</span>
+  }
+
+  @Override
+  public void accept(@Nonnull AggregationFunctionVisitorBase visitor) {
+<span class="fc" id="L45">    visitor.visit(this);</span>
+<span class="fc" id="L46">  }</span>
+
+  @Nonnull
+  @Override
+  public AggregationResultHolder createAggregationResultHolder() {
+<span class="fc" id="L51">    return new ObjectAggregationResultHolder();</span>
+  }
+
+  @Nonnull
+  @Override
+  public GroupByResultHolder createGroupByResultHolder(int initialCapacity, int maxCapacity, int trimSize) {
+<span class="fc" id="L57">    return new ObjectGroupByResultHolder(initialCapacity, maxCapacity, trimSize);</span>
+  }
+
+  @Override
+  public void aggregate(int length, @Nonnull AggregationResultHolder aggregationResultHolder,
+      @Nonnull BlockValSet... blockValSets) {
+<span class="fc" id="L63">    double[] valueArray = blockValSets[0].getDoubleValuesSV();</span>
+<span class="fc" id="L64">    double min = Double.POSITIVE_INFINITY;</span>
+<span class="fc" id="L65">    double max = Double.NEGATIVE_INFINITY;</span>
+<span class="fc bfc" id="L66" title="All 2 branches covered.">    for (int i = 0; i &lt; length; i++) {</span>
+<span class="fc" id="L67">      double value = valueArray[i];</span>
+<span class="fc bfc" id="L68" title="All 2 branches covered.">      if (value &lt; min) {</span>
+<span class="fc" id="L69">        min = value;</span>
+      }
+<span class="fc bfc" id="L71" title="All 2 branches covered.">      if (value &gt; max) {</span>
+<span class="fc" id="L72">        max = value;</span>
+      }
+    }
+<span class="fc" id="L75">    setAggregationResult(aggregationResultHolder, min, max);</span>
+<span class="fc" id="L76">  }</span>
+
+  protected void setAggregationResult(@Nonnull AggregationResultHolder aggregationResultHolder, double min,
+      double max) {
+<span class="fc" id="L80">    MinMaxRangePair minMaxRangePair = aggregationResultHolder.getResult();</span>
+<span class="fc bfc" id="L81" title="All 2 branches covered.">    if (minMaxRangePair == null) {</span>
+<span class="fc" id="L82">      aggregationResultHolder.setValue(new MinMaxRangePair(min, max));</span>
+    } else {
+<span class="fc" id="L84">      minMaxRangePair.apply(min, max);</span>
+    }
+<span class="fc" id="L86">  }</span>
+
+  @Override
+  public void aggregateGroupBySV(int length, @Nonnull int[] groupKeyArray,
+      @Nonnull GroupByResultHolder groupByResultHolder, @Nonnull BlockValSet... blockValSets) {
+<span class="fc" id="L91">    double[] valueArray = blockValSets[0].getDoubleValuesSV();</span>
+<span class="fc bfc" id="L92" title="All 2 branches covered.">    for (int i = 0; i &lt; length; i++) {</span>
+<span class="fc" id="L93">      double value = valueArray[i];</span>
+<span class="fc" id="L94">      setGroupByResult(groupKeyArray[i], groupByResultHolder, value, value);</span>
+    }
+<span class="fc" id="L96">  }</span>
+
+  @Override
+  public void aggregateGroupByMV(int length, @Nonnull int[][] groupKeysArray,
+      @Nonnull GroupByResultHolder groupByResultHolder, @Nonnull BlockValSet... blockValSets) {
+<span class="nc" id="L101">    double[] valueArray = blockValSets[0].getDoubleValuesSV();</span>
+<span class="nc bnc" id="L102" title="All 2 branches missed.">    for (int i = 0; i &lt; length; i++) {</span>
+<span class="nc" id="L103">      double value = valueArray[i];</span>
+<span class="nc bnc" id="L104" title="All 2 branches missed.">      for (int groupKey : groupKeysArray[i]) {</span>
+<span class="nc" id="L105">        setGroupByResult(groupKey, groupByResultHolder, value, value);</span>
+      }
+    }
+<span class="nc" id="L108">  }</span>
+
+  protected void setGroupByResult(int groupKey, @Nonnull GroupByResultHolder groupByResultHolder, double min,
+      double max) {
+<span class="fc" id="L112">    MinMaxRangePair minMaxRangePair = groupByResultHolder.getResult(groupKey);</span>
+<span class="fc bfc" id="L113" title="All 2 branches covered.">    if (minMaxRangePair == null) {</span>
+<span class="fc" id="L114">      groupByResultHolder.setValueForKey(groupKey, new MinMaxRangePair(min, max));</span>
+    } else {
+<span class="fc" id="L116">      minMaxRangePair.apply(min, max);</span>
+    }
+<span class="fc" id="L118">  }</span>
+
+  @Nonnull
+  @Override
+  public MinMaxRangePair extractAggregationResult(@Nonnull AggregationResultHolder aggregationResultHolder) {
+<span class="fc" id="L123">    MinMaxRangePair minMaxRangePair = aggregationResultHolder.getResult();</span>
+<span class="pc bpc" id="L124" title="1 of 2 branches missed.">    if (minMaxRangePair == null) {</span>
+<span class="nc" id="L125">      return new MinMaxRangePair(Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY);</span>
+    } else {
+<span class="fc" id="L127">      return minMaxRangePair;</span>
+    }
+  }
+
+  @Nonnull
+  @Override
+  public MinMaxRangePair extractGroupByResult(@Nonnull GroupByResultHolder groupByResultHolder, int groupKey) {
+<span class="fc" id="L134">    MinMaxRangePair minMaxRangePair = groupByResultHolder.getResult(groupKey);</span>
+<span class="pc bpc" id="L135" title="1 of 2 branches missed.">    if (minMaxRangePair == null) {</span>
+<span class="nc" id="L136">      return new MinMaxRangePair(Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY);</span>
+    } else {
+<span class="fc" id="L138">      return minMaxRangePair;</span>
+    }
+  }
+
+  @Nonnull
+  @Override
+  public MinMaxRangePair merge(@Nonnull MinMaxRangePair intermediateResult1,
+      @Nonnull MinMaxRangePair intermediateResult2) {
+<span class="fc" id="L146">    intermediateResult1.apply(intermediateResult2);</span>
+<span class="fc" id="L147">    return intermediateResult1;</span>
+  }
+
+  @Override
+  public boolean isIntermediateResultComparable() {
+<span class="nc" id="L152">    return true;</span>
+  }
+
+  @Nonnull
+  @Override
+  public FieldSpec.DataType getIntermediateResultDataType() {
+<span class="fc" id="L158">    return FieldSpec.DataType.OBJECT;</span>
+  }
+
+  @Nonnull
+  @Override
+  public Double extractFinalResult(@Nonnull MinMaxRangePair intermediateResult) {
+<span class="fc" id="L164">    return intermediateResult.getMax() - intermediateResult.getMin();</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>ServerTableSizeReader.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-controller</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.controller.api.resources</a> &gt; <span class="el_source">ServerTableSizeReader.java</span></div><h1>ServerTableSizeReader.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.controller.api.resources;
+
+import com.google.common.base.Throwables;
+import com.google.common.collect.BiMap;
+import com.linkedin.pinot.common.http.MultiGetRequest;
+import com.linkedin.pinot.common.restlet.resources.SegmentSizeInfo;
+import com.linkedin.pinot.common.restlet.resources.TableSizeInfo;
+import java.net.SocketTimeoutException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletionService;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
+import org.apache.commons.httpclient.ConnectTimeoutException;
+import org.apache.commons.httpclient.ConnectionPoolTimeoutException;
+import org.apache.commons.httpclient.HttpConnectionManager;
+import org.apache.commons.httpclient.URI;
+import org.apache.commons.httpclient.methods.GetMethod;
+import org.codehaus.jackson.map.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * Get the size information details from the server. Only the servers returning success are returned by the method
+ * For servers returning errors (http error or otherwise), no entry is created in the return map
+ */
+public class ServerTableSizeReader {
+<span class="fc" id="L46">  private static final Logger LOGGER = LoggerFactory.getLogger(</span>
+      ServerTableSizeReader.class);
+
+  private final Executor executor;
+  private final HttpConnectionManager connectionManager;
+
+<span class="fc" id="L52">  public ServerTableSizeReader(Executor executor, HttpConnectionManager connectionManager) {</span>
+<span class="fc" id="L53">    this.executor = executor;</span>
+<span class="fc" id="L54">    this.connectionManager = connectionManager;</span>
+<span class="fc" id="L55">  }</span>
+
+  public Map&lt;String, List&lt;SegmentSizeInfo&gt;&gt; getSizeDetailsFromServers(BiMap&lt;String, String&gt; serverEndPoints,
+      String table, int timeoutMsec) {
+
+<span class="fc" id="L60">    List&lt;String&gt; serverUrls = new ArrayList&lt;&gt;(serverEndPoints.size());</span>
+<span class="fc" id="L61">    BiMap&lt;String, String&gt; endpointsToServers = serverEndPoints.inverse();</span>
+<span class="fc bfc" id="L62" title="All 2 branches covered.">    for (String endpoint : endpointsToServers.keySet()) {</span>
+<span class="fc" id="L63">      String tableSizeUri = &quot;http://&quot; + endpoint + &quot;/table/&quot; + table + &quot;/size&quot;;</span>
+<span class="fc" id="L64">      serverUrls.add(tableSizeUri);</span>
+<span class="fc" id="L65">    }</span>
+
+<span class="fc" id="L67">    MultiGetRequest mget = new MultiGetRequest(executor, connectionManager);</span>
+<span class="fc" id="L68">    LOGGER.info(&quot;Reading segment sizes from servers for table: {}, timeoutMsec: {}&quot;, table, timeoutMsec);</span>
+<span class="fc" id="L69">    CompletionService&lt;GetMethod&gt; completionService = mget.execute(serverUrls, timeoutMsec);</span>
+
+<span class="fc" id="L71">    Map&lt;String, List&lt;SegmentSizeInfo&gt;&gt; serverSegmentSizes = new HashMap&lt;&gt;(serverEndPoints.size());</span>
+
+<span class="fc bfc" id="L73" title="All 2 branches covered.">    for (int i = 0; i &lt; serverUrls.size(); i++) {</span>
+<span class="fc" id="L74">      GetMethod getMethod = null;</span>
+      try {
+<span class="fc" id="L76">        getMethod = completionService.take().get();</span>
+<span class="fc" id="L77">        URI uri = getMethod.getURI();</span>
+<span class="fc" id="L78">        String instance = endpointsToServers.get(uri.getHost() + &quot;:&quot; + uri.getPort());</span>
+<span class="fc bfc" id="L79" title="All 2 branches covered.">        if (getMethod.getStatusCode() &gt;= 300) {</span>
+<span class="fc" id="L80">          LOGGER.error(&quot;Server: {} returned error: {}&quot;, instance, getMethod.getStatusCode());</span>
+          continue;
+        }
+<span class="fc" id="L83">        TableSizeInfo tableSizeInfo = new ObjectMapper().readValue(getMethod.getResponseBodyAsString(), TableSizeInfo.class);</span>
+<span class="fc" id="L84">        serverSegmentSizes.put(instance, tableSizeInfo.segments);</span>
+<span class="nc" id="L85">      } catch (InterruptedException e) {</span>
+<span class="nc" id="L86">        LOGGER.warn(&quot;Interrupted exception while reading segment size for table: {}&quot;, table, e);</span>
+<span class="fc" id="L87">      } catch (ExecutionException e) {</span>
+<span class="fc bfc" id="L88" title="All 2 branches covered.">        if (Throwables.getRootCause(e) instanceof SocketTimeoutException) {</span>
+<span class="fc" id="L89">          LOGGER.warn(&quot;Server request to read table size was timed out for table: {}&quot;, table, e);</span>
+<span class="pc bpc" id="L90" title="1 of 2 branches missed.">        } else if (Throwables.getRootCause(e) instanceof ConnectTimeoutException) {</span>
+<span class="nc" id="L91">          LOGGER.warn(&quot;Server request to read table size timed out waiting for connection. table: {}&quot;, table, e);</span>
+<span class="pc bpc" id="L92" title="1 of 2 branches missed.">        } else if (Throwables.getRootCause(e) instanceof ConnectionPoolTimeoutException) {</span>
+<span class="nc" id="L93">          LOGGER.warn(&quot;Server request to read table size timed out on getting a connection from pool, table: {}&quot;, table, e);</span>
+        } else {
+<span class="fc" id="L95">          LOGGER.warn(&quot;Execution exception while reading segment sizes for table: {}&quot;, table, e);</span>
+        }
+<span class="nc" id="L97">      } catch(Exception e) {</span>
+<span class="nc" id="L98">        LOGGER.warn(&quot;Error while reading segment sizes for table: {}&quot;, table);</span>
+      } finally {
+<span class="pc bpc" id="L100" title="9 of 12 branches missed.">        if (getMethod != null) {</span>
+<span class="pc" id="L101">          getMethod.releaseConnection();</span>
+        }
+      }
+    }
+<span class="fc" id="L105">    LOGGER.info(&quot;Finished reading segment sizes for table: {}&quot;, table);</span>
+<span class="fc" id="L106">    return serverSegmentSizes;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

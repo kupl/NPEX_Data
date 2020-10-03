@@ -1,0 +1,748 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>QueryRunner.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-tools</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.tools.perf</a> &gt; <span class="el_source">QueryRunner.java</span></div><h1>QueryRunner.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.tools.perf;
+
+import com.linkedin.pinot.tools.AbstractBaseCommand;
+import com.linkedin.pinot.tools.Command;
+import java.io.File;
+import java.io.FileInputStream;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import javax.annotation.concurrent.ThreadSafe;
+import org.apache.commons.io.IOUtils;
+import org.apache.commons.math.stat.descriptive.DescriptiveStatistics;
+import org.json.JSONObject;
+import org.kohsuke.args4j.CmdLineParser;
+import org.kohsuke.args4j.Option;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+@SuppressWarnings(&quot;FieldCanBeLocal&quot;)
+<span class="nc" id="L40">public class QueryRunner extends AbstractBaseCommand implements Command {</span>
+<span class="nc" id="L41">  private static final Logger LOGGER = LoggerFactory.getLogger(QueryRunner.class);</span>
+  private static final int MILLIS_PER_SECOND = 1000;
+  private static final String CLIENT_TIME_STATISTICS = &quot;CLIENT TIME STATISTICS&quot;;
+
+  @Option(name = &quot;-mode&quot;, required = true, metaVar = &quot;&lt;String&gt;&quot;,
+      usage = &quot;Mode of query runner (singleThread|multiThreads|targetQPS|increasingQPS).&quot;)
+  private String _mode;
+  @Option(name = &quot;-queryFile&quot;, required = true, metaVar = &quot;&lt;String&gt;&quot;, usage = &quot;Path to query file.&quot;)
+  private String _queryFile;
+<span class="nc" id="L50">  @Option(name = &quot;-numTimesToRunQueries&quot;, required = false, metaVar = &quot;&lt;int&gt;&quot;,</span>
+      usage = &quot;Number of times to run all queries in the query file, 0 means infinite times (default 1).&quot;)
+  private int _numTimesToRunQueries = 1;
+<span class="nc" id="L53">  @Option(name = &quot;-reportIntervalMs&quot;, required = false, metaVar = &quot;&lt;int&gt;&quot;,</span>
+      usage = &quot;Interval in milliseconds to report simple statistics (default 3000).&quot;)
+  private int _reportIntervalMs = 3000;
+<span class="nc" id="L56">  @Option(name = &quot;-numIntervalsToReportAndClearStatistics&quot;, required = false, metaVar = &quot;&lt;int&gt;&quot;,</span>
+      usage = &quot;Number of report intervals to report detailed statistics and clear them, 0 means never (default 10).&quot;)
+  private int _numIntervalsToReportAndClearStatistics = 10;
+<span class="nc" id="L59">  @Option(name = &quot;-numThreads&quot;, required = false, metaVar = &quot;&lt;int&gt;&quot;,</span>
+      usage = &quot;Number of threads sending queries for multiThreads, targetQPS and increasingQPS mode (default 5). &quot;
+          + &quot;This can be used to simulate multiple clients sending queries concurrently.&quot;)
+  private int _numThreads = 5;
+  @Option(name = &quot;-startQPS&quot;, required = false, metaVar = &quot;&lt;int&gt;&quot;,
+      usage = &quot;Start QPS for targetQPS and increasingQPS mode&quot;)
+  private double _startQPS;
+  @Option(name = &quot;-deltaQPS&quot;, required = false, metaVar = &quot;&lt;int&gt;&quot;, usage = &quot;Delta QPS for increasingQPS mode.&quot;)
+  private double _deltaQPS;
+<span class="nc" id="L68">  @Option(name = &quot;-numIntervalsToIncreaseQPS&quot;, required = false, metaVar = &quot;&lt;int&gt;&quot;,</span>
+      usage = &quot;Number of report intervals to increase QPS for increasingQPS mode (default 10).&quot;)
+  private int _numIntervalsToIncreaseQPS = 10;
+<span class="nc" id="L71">  @Option(name = &quot;-brokerHost&quot;, required = false, metaVar = &quot;&lt;String&gt;&quot;, usage = &quot;Broker host name (default localhost).&quot;)</span>
+  private String _brokerHost = &quot;localhost&quot;;
+<span class="nc" id="L73">  @Option(name = &quot;-brokerPort&quot;, required = false, metaVar = &quot;&lt;int&gt;&quot;, usage = &quot;Broker port number (default 8099).&quot;)</span>
+  private int _brokerPort = 8099;
+  @Option(name = &quot;-help&quot;, required = false, help = true, aliases = {&quot;-h&quot;, &quot;--h&quot;, &quot;--help&quot;},
+      usage = &quot;Print this message.&quot;)
+  private boolean _help;
+
+  @Override
+  public boolean getHelp() {
+<span class="nc" id="L81">    return _help;</span>
+  }
+
+  @Override
+  public String getName() {
+<span class="nc" id="L86">    return getClass().getSimpleName();</span>
+  }
+
+  @Override
+  public String description() {
+<span class="nc" id="L91">    return &quot;Run queries from a query file in singleThread, multiThreads, targetQPS or increasingQPS mode. E.g.\n&quot;</span>
+        + &quot;  QueryRunner -mode singleThread -queryFile &lt;queryFile&gt; -numTimesToRunQueries 0 -numIntervalsToReportAndClearStatistics 5\n&quot;
+        + &quot;  QueryRunner -mode multiThreads -queryFile &lt;queryFile&gt; -numThreads 10 -reportIntervalMs 1000\n&quot;
+        + &quot;  QueryRunner -mode targetQPS -queryFile &lt;queryFile&gt; -startQPS 50\n&quot;
+        + &quot;  QueryRunner -mode increasingQPS -queryFile &lt;queryFile&gt; -startQPS 50 -deltaQPS 10 -numIntervalsToIncreaseQPS 20\n&quot;;
+  }
+
+  @Override
+  public boolean execute()
+      throws Exception {
+<span class="nc bnc" id="L101" title="All 2 branches missed.">    if (!new File(_queryFile).isFile()) {</span>
+<span class="nc" id="L102">      LOGGER.error(&quot;Argument queryFile: {} is not a valid file.&quot;, _queryFile);</span>
+<span class="nc" id="L103">      printUsage();</span>
+<span class="nc" id="L104">      return false;</span>
+    }
+<span class="nc bnc" id="L106" title="All 2 branches missed.">    if (_numTimesToRunQueries &lt; 0) {</span>
+<span class="nc" id="L107">      LOGGER.error(&quot;Argument numTimesToRunQueries should be a non-negative number.&quot;);</span>
+<span class="nc" id="L108">      printUsage();</span>
+<span class="nc" id="L109">      return false;</span>
+    }
+<span class="nc bnc" id="L111" title="All 2 branches missed.">    if (_reportIntervalMs &lt;= 0) {</span>
+<span class="nc" id="L112">      LOGGER.error(&quot;Argument reportIntervalMs should be a positive number.&quot;);</span>
+<span class="nc" id="L113">      printUsage();</span>
+<span class="nc" id="L114">      return false;</span>
+    }
+<span class="nc bnc" id="L116" title="All 2 branches missed.">    if (_numIntervalsToReportAndClearStatistics &lt; 0) {</span>
+<span class="nc" id="L117">      LOGGER.error(&quot;Argument numIntervalsToReportAndClearStatistics should be a non-negative number.&quot;);</span>
+<span class="nc" id="L118">      printUsage();</span>
+<span class="nc" id="L119">      return false;</span>
+    }
+
+<span class="nc" id="L122">    LOGGER.info(&quot;Start query runner targeting broker: {}:{}&quot;, _brokerHost, _brokerPort);</span>
+<span class="nc" id="L123">    PerfBenchmarkDriverConf conf = new PerfBenchmarkDriverConf();</span>
+<span class="nc" id="L124">    conf.setBrokerHost(_brokerHost);</span>
+<span class="nc" id="L125">    conf.setBrokerPort(_brokerPort);</span>
+<span class="nc" id="L126">    conf.setRunQueries(true);</span>
+<span class="nc" id="L127">    conf.setStartZookeeper(false);</span>
+<span class="nc" id="L128">    conf.setStartController(false);</span>
+<span class="nc" id="L129">    conf.setStartBroker(false);</span>
+<span class="nc" id="L130">    conf.setStartServer(false);</span>
+
+<span class="nc bnc" id="L132" title="All 18 branches missed.">    switch (_mode) {</span>
+      case &quot;singleThread&quot;:
+<span class="nc" id="L134">        LOGGER.info(&quot;MODE singleThread with queryFile: {}, numTimesToRunQueries: {}, reportIntervalMs: {}, &quot;</span>
+                + &quot;numIntervalsToReportAndClearStatistics: {}&quot;, _queryFile, _numTimesToRunQueries, _reportIntervalMs,
+            _numIntervalsToReportAndClearStatistics);
+<span class="nc" id="L137">        singleThreadedQueryRunner(conf, _queryFile, _numTimesToRunQueries, _reportIntervalMs,</span>
+            _numIntervalsToReportAndClearStatistics);
+<span class="nc" id="L139">        break;</span>
+      case &quot;multiThreads&quot;:
+<span class="nc bnc" id="L141" title="All 2 branches missed.">        if (_numThreads &lt;= 0) {</span>
+<span class="nc" id="L142">          LOGGER.error(&quot;For multiThreads mode, argument numThreads should be a positive number.&quot;);</span>
+<span class="nc" id="L143">          printUsage();</span>
+<span class="nc" id="L144">          break;</span>
+        }
+<span class="nc" id="L146">        LOGGER.info(&quot;MODE multiThreads with queryFile: {}, numTimesToRunQueries: {}, numThreads: {}, &quot;</span>
+                + &quot;reportIntervalMs: {}, numIntervalsToReportAndClearStatistics: {}&quot;, _queryFile, _numTimesToRunQueries,
+            _numThreads, _reportIntervalMs, _numIntervalsToReportAndClearStatistics);
+<span class="nc" id="L149">        multiThreadedQueryRunner(conf, _queryFile, _numTimesToRunQueries, _numThreads, _reportIntervalMs,</span>
+            _numIntervalsToReportAndClearStatistics);
+<span class="nc" id="L151">        break;</span>
+      case &quot;targetQPS&quot;:
+<span class="nc bnc" id="L153" title="All 2 branches missed.">        if (_numThreads &lt;= 0) {</span>
+<span class="nc" id="L154">          LOGGER.error(&quot;For targetQPS mode, argument numThreads should be a positive number.&quot;);</span>
+<span class="nc" id="L155">          printUsage();</span>
+<span class="nc" id="L156">          break;</span>
+        }
+<span class="nc bnc" id="L158" title="All 4 branches missed.">        if (_startQPS &lt;= 0 || _startQPS &gt; 1000.0) {</span>
+<span class="nc" id="L159">          LOGGER.error(&quot;For targetQPS mode, argument startQPS should be a positive number that less or equal to 1000.&quot;);</span>
+<span class="nc" id="L160">          printUsage();</span>
+<span class="nc" id="L161">          break;</span>
+        }
+<span class="nc" id="L163">        LOGGER.info(&quot;MODE targetQPS with queryFile: {}, numTimesToRunQueries: {}, numThreads: {}, startQPS: {}, &quot;</span>
+                + &quot;reportIntervalMs: {}, numIntervalsToReportAndClearStatistics: {}&quot;, _queryFile, _numTimesToRunQueries,
+            _numThreads, _startQPS, _reportIntervalMs, _numIntervalsToReportAndClearStatistics);
+<span class="nc" id="L166">        targetQPSQueryRunner(conf, _queryFile, _numTimesToRunQueries, _numThreads, _startQPS, _reportIntervalMs,</span>
+            _numIntervalsToReportAndClearStatistics);
+<span class="nc" id="L168">        break;</span>
+      case &quot;increasingQPS&quot;:
+<span class="nc bnc" id="L170" title="All 2 branches missed.">        if (_numThreads &lt;= 0) {</span>
+<span class="nc" id="L171">          LOGGER.error(&quot;For increasingQPS mode, argument numThreads should be a positive number.&quot;);</span>
+<span class="nc" id="L172">          printUsage();</span>
+<span class="nc" id="L173">          break;</span>
+        }
+<span class="nc bnc" id="L175" title="All 4 branches missed.">        if (_startQPS &lt;= 0 || _startQPS &gt; 1000.0) {</span>
+<span class="nc" id="L176">          LOGGER.error(</span>
+              &quot;For increasingQPS mode, argument startQPS should be a positive number that less or equal to 1000.&quot;);
+<span class="nc" id="L178">          printUsage();</span>
+<span class="nc" id="L179">          break;</span>
+        }
+<span class="nc bnc" id="L181" title="All 2 branches missed.">        if (_deltaQPS &lt;= 0) {</span>
+<span class="nc" id="L182">          LOGGER.error(&quot;For increasingQPS mode, argument deltaQPS should be a positive number.&quot;);</span>
+<span class="nc" id="L183">          printUsage();</span>
+<span class="nc" id="L184">          break;</span>
+        }
+<span class="nc bnc" id="L186" title="All 2 branches missed.">        if (_numIntervalsToIncreaseQPS &lt;= 0) {</span>
+<span class="nc" id="L187">          LOGGER.error(&quot;For increasingQPS mode, argument numIntervalsToIncreaseQPS should be a positive number.&quot;);</span>
+<span class="nc" id="L188">          printUsage();</span>
+<span class="nc" id="L189">          break;</span>
+        }
+<span class="nc" id="L191">        LOGGER.info(&quot;MODE increasingQPS with queryFile: {}, numTimesToRunQueries: {}, numThreads: {}, startQPS: {}, &quot;</span>
+                + &quot;deltaQPS: {}, reportIntervalMs: {}, numIntervalsToReportAndClearStatistics: {}, &quot;
+                + &quot;numIntervalsToIncreaseQPS: {}&quot;, _queryFile, _numTimesToRunQueries, _numThreads, _startQPS, _deltaQPS,
+            _reportIntervalMs, _numIntervalsToReportAndClearStatistics, _numIntervalsToIncreaseQPS);
+<span class="nc" id="L195">        increasingQPSQueryRunner(conf, _queryFile, _numTimesToRunQueries, _numThreads, _startQPS, _deltaQPS,</span>
+            _reportIntervalMs, _numIntervalsToReportAndClearStatistics, _numIntervalsToIncreaseQPS);
+<span class="nc" id="L197">        break;</span>
+      default:
+<span class="nc" id="L199">        LOGGER.error(&quot;Invalid mode: {}&quot;, _mode);</span>
+<span class="nc" id="L200">        printUsage();</span>
+        break;
+    }
+<span class="nc" id="L203">    return true;</span>
+  }
+
+  /**
+   * Use single thread to run queries as fast as possible.
+   * &lt;p&gt;Use a single thread to send queries back to back and log statistic information periodically.
+   * &lt;p&gt;Queries are picked sequentially from the query file.
+   * &lt;p&gt;Query runner will stop when all queries in the query file has been executed number of times configured.
+   *
+   * @param conf perf benchmark driver config.
+   * @param queryFile query file.
+   * @param numTimesToRunQueries number of times to run all queries in the query file, 0 means infinite times.
+   * @param reportIntervalMs report interval in milliseconds.
+   * @param numIntervalsToReportAndClearStatistics number of report intervals to report detailed statistics and clear
+   *                                               them, 0 means never.
+   * @throws Exception
+   */
+  public static void singleThreadedQueryRunner(PerfBenchmarkDriverConf conf, String queryFile, int numTimesToRunQueries,
+      int reportIntervalMs, int numIntervalsToReportAndClearStatistics)
+      throws Exception {
+    List&lt;String&gt; queries;
+<span class="nc" id="L224">    try (FileInputStream input = new FileInputStream(new File(queryFile))) {</span>
+<span class="nc" id="L225">      queries = IOUtils.readLines(input);</span>
+<span class="nc bnc" id="L226" title="All 8 branches missed.">    }</span>
+
+<span class="nc" id="L228">    PerfBenchmarkDriver driver = new PerfBenchmarkDriver(conf);</span>
+<span class="nc" id="L229">    int numQueriesExecuted = 0;</span>
+<span class="nc" id="L230">    long totalBrokerTime = 0L;</span>
+<span class="nc" id="L231">    long totalClientTime = 0L;</span>
+<span class="nc" id="L232">    List&lt;Statistics&gt; statisticsList = Collections.singletonList(new Statistics(CLIENT_TIME_STATISTICS));</span>
+
+<span class="nc" id="L234">    long startTime = System.currentTimeMillis();</span>
+<span class="nc" id="L235">    long reportStartTime = startTime;</span>
+<span class="nc" id="L236">    int numReportIntervals = 0;</span>
+<span class="nc" id="L237">    int numTimesExecuted = 0;</span>
+<span class="nc bnc" id="L238" title="All 4 branches missed.">    while (numTimesToRunQueries == 0 || numTimesExecuted &lt; numTimesToRunQueries) {</span>
+<span class="nc bnc" id="L239" title="All 2 branches missed.">      for (String query : queries) {</span>
+<span class="nc" id="L240">        JSONObject response = driver.postQuery(query);</span>
+<span class="nc" id="L241">        numQueriesExecuted++;</span>
+<span class="nc" id="L242">        long brokerTime = response.getLong(&quot;timeUsedMs&quot;);</span>
+<span class="nc" id="L243">        totalBrokerTime += brokerTime;</span>
+<span class="nc" id="L244">        long clientTime = response.getLong(&quot;totalTime&quot;);</span>
+<span class="nc" id="L245">        totalClientTime += clientTime;</span>
+<span class="nc" id="L246">        statisticsList.get(0).addValue(clientTime);</span>
+
+<span class="nc" id="L248">        long currentTime = System.currentTimeMillis();</span>
+<span class="nc bnc" id="L249" title="All 2 branches missed.">        if (currentTime - reportStartTime &gt;= reportIntervalMs) {</span>
+<span class="nc" id="L250">          long timePassed = currentTime - startTime;</span>
+<span class="nc" id="L251">          LOGGER.info(&quot;Time Passed: {}ms, Queries Executed: {}, Average QPS: {}, Average Broker Time: {}ms, &quot;</span>
+                  + &quot;Average Client Time: {}ms.&quot;, timePassed, numQueriesExecuted,
+              numQueriesExecuted / ((double) timePassed / MILLIS_PER_SECOND),
+              totalBrokerTime / (double) numQueriesExecuted, totalClientTime / (double) numQueriesExecuted);
+<span class="nc" id="L255">          reportStartTime = currentTime;</span>
+<span class="nc" id="L256">          numReportIntervals++;</span>
+
+<span class="nc bnc" id="L258" title="All 4 branches missed.">          if ((numIntervalsToReportAndClearStatistics != 0)</span>
+              &amp;&amp; (numReportIntervals == numIntervalsToReportAndClearStatistics)) {
+<span class="nc" id="L260">            numReportIntervals = 0;</span>
+<span class="nc" id="L261">            startTime = currentTime;</span>
+<span class="nc" id="L262">            numQueriesExecuted = 0;</span>
+<span class="nc" id="L263">            totalBrokerTime = 0L;</span>
+<span class="nc" id="L264">            totalClientTime = 0L;</span>
+<span class="nc bnc" id="L265" title="All 2 branches missed.">            for (Statistics statistics : statisticsList) {</span>
+<span class="nc" id="L266">              statistics.report();</span>
+<span class="nc" id="L267">              statistics.clear();</span>
+<span class="nc" id="L268">            }</span>
+          }
+        }
+<span class="nc" id="L271">      }</span>
+<span class="nc" id="L272">      numTimesExecuted++;</span>
+    }
+
+<span class="nc" id="L275">    long timePassed = System.currentTimeMillis() - startTime;</span>
+<span class="nc" id="L276">    LOGGER.info(&quot;--------------------------------------------------------------------------------&quot;);</span>
+<span class="nc" id="L277">    LOGGER.info(&quot;FINAL REPORT:&quot;);</span>
+<span class="nc" id="L278">    LOGGER.info(&quot;Time Passed: {}ms, Queries Executed: {}, Average QPS: {}, Average Broker Time: {}ms, &quot;</span>
+            + &quot;Average Client Time: {}ms.&quot;, timePassed, numQueriesExecuted,
+        numQueriesExecuted / ((double) timePassed / MILLIS_PER_SECOND), totalBrokerTime / (double) numQueriesExecuted,
+        totalClientTime / (double) numQueriesExecuted);
+<span class="nc bnc" id="L282" title="All 2 branches missed.">    for (Statistics statistics : statisticsList) {</span>
+<span class="nc" id="L283">      statistics.report();</span>
+<span class="nc" id="L284">    }</span>
+<span class="nc" id="L285">  }</span>
+
+  /**
+   * Use multiple threads to run queries as fast as possible.
+   * &lt;p&gt;Use a concurrent linked queue to buffer the queries to be sent. Use the main thread to insert queries into the
+   * queue whenever the queue length is low, and start &lt;code&gt;numThreads&lt;/code&gt; worker threads to fetch queries from the
+   * queue and send them.
+   * &lt;p&gt;The main thread is responsible for collecting and logging the statistic information periodically.
+   * &lt;p&gt;Queries are picked sequentially from the query file.
+   * &lt;p&gt;Query runner will stop when all queries in the query file has been executed number of times configured.
+   *
+   * @param conf perf benchmark driver config.
+   * @param queryFile query file.
+   * @param numTimesToRunQueries number of times to run all queries in the query file, 0 means infinite times.
+   * @param numThreads number of threads sending queries.
+   * @param reportIntervalMs report interval in milliseconds.
+   * @param numIntervalsToReportAndClearStatistics number of report intervals to report detailed statistics and clear
+   *                                               them, 0 means never.
+   * @throws Exception
+   */
+  public static void multiThreadedQueryRunner(PerfBenchmarkDriverConf conf, String queryFile, int numTimesToRunQueries,
+      int numThreads, int reportIntervalMs, int numIntervalsToReportAndClearStatistics)
+      throws Exception {
+    List&lt;String&gt; queries;
+<span class="nc" id="L309">    try (FileInputStream input = new FileInputStream(new File(queryFile))) {</span>
+<span class="nc" id="L310">      queries = IOUtils.readLines(input);</span>
+<span class="nc bnc" id="L311" title="All 8 branches missed.">    }</span>
+
+<span class="nc" id="L313">    PerfBenchmarkDriver driver = new PerfBenchmarkDriver(conf);</span>
+<span class="nc" id="L314">    ConcurrentLinkedQueue&lt;String&gt; queryQueue = new ConcurrentLinkedQueue&lt;&gt;();</span>
+<span class="nc" id="L315">    AtomicInteger numQueriesExecuted = new AtomicInteger(0);</span>
+<span class="nc" id="L316">    AtomicLong totalBrokerTime = new AtomicLong(0L);</span>
+<span class="nc" id="L317">    AtomicLong totalClientTime = new AtomicLong(0L);</span>
+<span class="nc" id="L318">    List&lt;Statistics&gt; statisticsList = Collections.singletonList(new Statistics(CLIENT_TIME_STATISTICS));</span>
+
+<span class="nc" id="L320">    ExecutorService executorService = Executors.newFixedThreadPool(numThreads);</span>
+<span class="nc bnc" id="L321" title="All 2 branches missed.">    for (int i = 0; i &lt; numThreads; i++) {</span>
+<span class="nc" id="L322">      executorService.submit(</span>
+          new Worker(driver, queryQueue, numQueriesExecuted, totalBrokerTime, totalClientTime, statisticsList));
+    }
+<span class="nc" id="L325">    executorService.shutdown();</span>
+
+<span class="nc" id="L327">    long startTime = System.currentTimeMillis();</span>
+<span class="nc" id="L328">    long reportStartTime = startTime;</span>
+<span class="nc" id="L329">    int numReportIntervals = 0;</span>
+<span class="nc" id="L330">    int numTimesExecuted = 0;</span>
+<span class="nc bnc" id="L331" title="All 4 branches missed.">    while (numTimesToRunQueries == 0 || numTimesExecuted &lt; numTimesToRunQueries) {</span>
+<span class="nc bnc" id="L332" title="All 2 branches missed.">      if (executorService.isTerminated()) {</span>
+<span class="nc" id="L333">        LOGGER.error(&quot;All threads got exception and already dead.&quot;);</span>
+<span class="nc" id="L334">        return;</span>
+
+      }
+
+<span class="nc bnc" id="L338" title="All 2 branches missed.">      for (String query : queries) {</span>
+<span class="nc" id="L339">        queryQueue.add(query);</span>
+
+        // Keep 20 queries inside the query queue.
+<span class="nc bnc" id="L342" title="All 2 branches missed.">        while (queryQueue.size() == 20) {</span>
+<span class="nc" id="L343">          Thread.sleep(1);</span>
+
+<span class="nc" id="L345">          long currentTime = System.currentTimeMillis();</span>
+<span class="nc bnc" id="L346" title="All 2 branches missed.">          if (currentTime - reportStartTime &gt;= reportIntervalMs) {</span>
+<span class="nc" id="L347">            long timePassed = currentTime - startTime;</span>
+<span class="nc" id="L348">            int numQueriesExecutedInt = numQueriesExecuted.get();</span>
+<span class="nc" id="L349">            LOGGER.info(&quot;Time Passed: {}ms, Queries Executed: {}, Average QPS: {}, Average Broker Time: {}ms, &quot;</span>
+                    + &quot;Average Client Time: {}ms.&quot;, timePassed, numQueriesExecutedInt,
+                numQueriesExecutedInt / ((double) timePassed / MILLIS_PER_SECOND),
+                totalBrokerTime.get() / (double) numQueriesExecutedInt,
+                totalClientTime.get() / (double) numQueriesExecutedInt);
+<span class="nc" id="L354">            reportStartTime = currentTime;</span>
+<span class="nc" id="L355">            numReportIntervals++;</span>
+
+<span class="nc bnc" id="L357" title="All 4 branches missed.">            if ((numIntervalsToReportAndClearStatistics != 0)</span>
+                &amp;&amp; (numReportIntervals == numIntervalsToReportAndClearStatistics)) {
+<span class="nc" id="L359">              numReportIntervals = 0;</span>
+<span class="nc" id="L360">              startTime = currentTime;</span>
+<span class="nc" id="L361">              reportAndClearStatistics(numQueriesExecuted, totalBrokerTime, totalClientTime, statisticsList);</span>
+            }
+          }
+<span class="nc" id="L364">        }</span>
+<span class="nc" id="L365">      }</span>
+<span class="nc" id="L366">      numTimesExecuted++;</span>
+    }
+
+    // Wait for all queries getting executed.
+<span class="nc bnc" id="L370" title="All 2 branches missed.">    while (queryQueue.size() != 0) {</span>
+<span class="nc" id="L371">      Thread.sleep(1);</span>
+    }
+<span class="nc" id="L373">    executorService.shutdownNow();</span>
+<span class="nc bnc" id="L374" title="All 2 branches missed.">    while (!executorService.isTerminated()) {</span>
+<span class="nc" id="L375">      Thread.sleep(1);</span>
+    }
+
+<span class="nc" id="L378">    long timePassed = System.currentTimeMillis() - startTime;</span>
+<span class="nc" id="L379">    int numQueriesExecutedInt = numQueriesExecuted.get();</span>
+<span class="nc" id="L380">    LOGGER.info(&quot;--------------------------------------------------------------------------------&quot;);</span>
+<span class="nc" id="L381">    LOGGER.info(&quot;FINAL REPORT:&quot;);</span>
+<span class="nc" id="L382">    LOGGER.info(&quot;Time Passed: {}ms, Queries Executed: {}, Average QPS: {}, Average Broker Time: {}ms, &quot;</span>
+            + &quot;Average Client Time: {}ms.&quot;, timePassed, numQueriesExecutedInt,
+        numQueriesExecutedInt / ((double) timePassed / MILLIS_PER_SECOND),
+        totalBrokerTime.get() / (double) numQueriesExecutedInt, totalClientTime.get() / (double) numQueriesExecutedInt);
+<span class="nc bnc" id="L386" title="All 2 branches missed.">    for (Statistics statistics : statisticsList) {</span>
+<span class="nc" id="L387">      statistics.report();</span>
+<span class="nc" id="L388">    }</span>
+<span class="nc" id="L389">  }</span>
+
+  /**
+   * Use multiple threads to run query at a target QPS.
+   * &lt;p&gt;Use a concurrent linked queue to buffer the queries to be sent. Use the main thread to insert queries into the
+   * queue at the target QPS, and start &lt;code&gt;numThreads&lt;/code&gt; worker threads to fetch queries from the queue and send
+   * them.
+   * &lt;p&gt;The main thread is responsible for collecting and logging the statistic information periodically.
+   * &lt;p&gt;Queries are picked sequentially from the query file.
+   * &lt;p&gt;Query runner will stop when all queries in the query file has been executed number of times configured.
+   *
+   * @param conf perf benchmark driver config.
+   * @param queryFile query file.
+   * @param numTimesToRunQueries number of times to run all queries in the query file, 0 means infinite times.
+   * @param numThreads number of threads sending queries.
+   * @param startQPS start QPS (target QPS).
+   * @param reportIntervalMs report interval in milliseconds.
+   * @param numIntervalsToReportAndClearStatistics number of report intervals to report detailed statistics and clear
+   *                                               them, 0 means never.
+   * @throws Exception
+   */
+  public static void targetQPSQueryRunner(PerfBenchmarkDriverConf conf, String queryFile, int numTimesToRunQueries,
+      int numThreads, double startQPS, int reportIntervalMs, int numIntervalsToReportAndClearStatistics)
+      throws Exception {
+    List&lt;String&gt; queries;
+<span class="nc" id="L414">    try (FileInputStream input = new FileInputStream(new File(queryFile))) {</span>
+<span class="nc" id="L415">      queries = IOUtils.readLines(input);</span>
+<span class="nc bnc" id="L416" title="All 8 branches missed.">    }</span>
+
+<span class="nc" id="L418">    PerfBenchmarkDriver driver = new PerfBenchmarkDriver(conf);</span>
+<span class="nc" id="L419">    ConcurrentLinkedQueue&lt;String&gt; queryQueue = new ConcurrentLinkedQueue&lt;&gt;();</span>
+<span class="nc" id="L420">    AtomicInteger numQueriesExecuted = new AtomicInteger(0);</span>
+<span class="nc" id="L421">    AtomicLong totalBrokerTime = new AtomicLong(0L);</span>
+<span class="nc" id="L422">    AtomicLong totalClientTime = new AtomicLong(0L);</span>
+<span class="nc" id="L423">    List&lt;Statistics&gt; statisticsList = Collections.singletonList(new Statistics(CLIENT_TIME_STATISTICS));</span>
+
+<span class="nc" id="L425">    ExecutorService executorService = Executors.newFixedThreadPool(numThreads);</span>
+<span class="nc bnc" id="L426" title="All 2 branches missed.">    for (int i = 0; i &lt; numThreads; i++) {</span>
+<span class="nc" id="L427">      executorService.submit(</span>
+          new Worker(driver, queryQueue, numQueriesExecuted, totalBrokerTime, totalClientTime, statisticsList));
+    }
+<span class="nc" id="L430">    executorService.shutdown();</span>
+
+<span class="nc" id="L432">    int queryIntervalMs = (int) (MILLIS_PER_SECOND / startQPS);</span>
+<span class="nc" id="L433">    long startTime = System.currentTimeMillis();</span>
+<span class="nc" id="L434">    long reportStartTime = startTime;</span>
+<span class="nc" id="L435">    int numReportIntervals = 0;</span>
+<span class="nc" id="L436">    int numTimesExecuted = 0;</span>
+<span class="nc bnc" id="L437" title="All 4 branches missed.">    while (numTimesToRunQueries == 0 || numTimesExecuted &lt; numTimesToRunQueries) {</span>
+<span class="nc bnc" id="L438" title="All 2 branches missed.">      if (executorService.isTerminated()) {</span>
+<span class="nc" id="L439">        LOGGER.error(&quot;All threads got exception and already dead.&quot;);</span>
+<span class="nc" id="L440">        return;</span>
+      }
+
+<span class="nc bnc" id="L443" title="All 2 branches missed.">      for (String query : queries) {</span>
+<span class="nc" id="L444">        queryQueue.add(query);</span>
+<span class="nc" id="L445">        Thread.sleep(queryIntervalMs);</span>
+
+<span class="nc" id="L447">        long currentTime = System.currentTimeMillis();</span>
+<span class="nc bnc" id="L448" title="All 2 branches missed.">        if (currentTime - reportStartTime &gt;= reportIntervalMs) {</span>
+<span class="nc" id="L449">          long timePassed = currentTime - startTime;</span>
+<span class="nc" id="L450">          int numQueriesExecutedInt = numQueriesExecuted.get();</span>
+<span class="nc" id="L451">          LOGGER.info(&quot;Target QPS: {}, Time Passed: {}ms, Queries Executed: {}, Average QPS: {}, &quot;</span>
+                  + &quot;Average Broker Time: {}ms, Average Client Time: {}ms, Queries Queued: {}.&quot;, startQPS, timePassed,
+              numQueriesExecutedInt, numQueriesExecutedInt / ((double) timePassed / MILLIS_PER_SECOND),
+              totalBrokerTime.get() / (double) numQueriesExecutedInt,
+              totalClientTime.get() / (double) numQueriesExecutedInt, queryQueue.size());
+<span class="nc" id="L456">          reportStartTime = currentTime;</span>
+<span class="nc" id="L457">          numReportIntervals++;</span>
+
+<span class="nc bnc" id="L459" title="All 4 branches missed.">          if ((numIntervalsToReportAndClearStatistics != 0)</span>
+              &amp;&amp; (numReportIntervals == numIntervalsToReportAndClearStatistics)) {
+<span class="nc" id="L461">            numReportIntervals = 0;</span>
+<span class="nc" id="L462">            startTime = currentTime;</span>
+<span class="nc" id="L463">            reportAndClearStatistics(numQueriesExecuted, totalBrokerTime, totalClientTime, statisticsList);</span>
+          }
+        }
+<span class="nc" id="L466">      }</span>
+<span class="nc" id="L467">      numTimesExecuted++;</span>
+    }
+
+    // Wait for all queries getting executed.
+<span class="nc bnc" id="L471" title="All 2 branches missed.">    while (queryQueue.size() != 0) {</span>
+<span class="nc" id="L472">      Thread.sleep(1);</span>
+    }
+<span class="nc" id="L474">    executorService.shutdownNow();</span>
+<span class="nc bnc" id="L475" title="All 2 branches missed.">    while (!executorService.isTerminated()) {</span>
+<span class="nc" id="L476">      Thread.sleep(1);</span>
+    }
+
+<span class="nc" id="L479">    long timePassed = System.currentTimeMillis() - startTime;</span>
+<span class="nc" id="L480">    int numQueriesExecutedInt = numQueriesExecuted.get();</span>
+<span class="nc" id="L481">    LOGGER.info(&quot;--------------------------------------------------------------------------------&quot;);</span>
+<span class="nc" id="L482">    LOGGER.info(&quot;FINAL REPORT:&quot;);</span>
+<span class="nc" id="L483">    LOGGER.info(&quot;Target QPS: {}, Time Passed: {}ms, Queries Executed: {}, Average QPS: {}, &quot;</span>
+            + &quot;Average Broker Time: {}ms, Average Client Time: {}ms.&quot;, startQPS, timePassed, numQueriesExecutedInt,
+        numQueriesExecutedInt / ((double) timePassed / MILLIS_PER_SECOND),
+        totalBrokerTime.get() / (double) numQueriesExecutedInt, totalClientTime.get() / (double) numQueriesExecutedInt);
+<span class="nc bnc" id="L487" title="All 2 branches missed.">    for (Statistics statistics : statisticsList) {</span>
+<span class="nc" id="L488">      statistics.report();</span>
+<span class="nc" id="L489">    }</span>
+<span class="nc" id="L490">  }</span>
+
+  /**
+   * Use multiple threads to run query at an increasing target QPS.
+   * &lt;p&gt;Use a concurrent linked queue to buffer the queries to be sent. Use the main thread to insert queries into the
+   * queue at the target QPS, and start &lt;code&gt;numThreads&lt;/code&gt; worker threads to fetch queries from the queue and send
+   * them.
+   * &lt;p&gt;We start with the start QPS, and keep adding delta QPS to the start QPS during the test.
+   * &lt;p&gt;The main thread is responsible for collecting and logging the statistic information periodically.
+   * &lt;p&gt;Queries are picked sequentially from the query file.
+   * &lt;p&gt;Query runner will stop when all queries in the query file has been executed number of times configured.
+   *
+   * @param conf perf benchmark driver config.
+   * @param queryFile query file.
+   * @param numTimesToRunQueries number of times to run all queries in the query file, 0 means infinite times.
+   * @param numThreads number of threads sending queries.
+   * @param startQPS start QPS.
+   * @param deltaQPS delta QPS.
+   * @param reportIntervalMs report interval in milliseconds.
+   * @param numIntervalsToReportAndClearStatistics number of report intervals to report detailed statistics and clear
+   *                                               them, 0 means never.
+   * @param numIntervalsToIncreaseQPS number of intervals to increase QPS.
+   * @throws Exception
+   */
+
+  public static void increasingQPSQueryRunner(PerfBenchmarkDriverConf conf, String queryFile, int numTimesToRunQueries,
+      int numThreads, double startQPS, double deltaQPS, int reportIntervalMs,
+      int numIntervalsToReportAndClearStatistics, int numIntervalsToIncreaseQPS)
+      throws Exception {
+    List&lt;String&gt; queries;
+<span class="nc" id="L520">    try (FileInputStream input = new FileInputStream(new File(queryFile))) {</span>
+<span class="nc" id="L521">      queries = IOUtils.readLines(input);</span>
+<span class="nc bnc" id="L522" title="All 8 branches missed.">    }</span>
+
+<span class="nc" id="L524">    PerfBenchmarkDriver driver = new PerfBenchmarkDriver(conf);</span>
+<span class="nc" id="L525">    ConcurrentLinkedQueue&lt;String&gt; queryQueue = new ConcurrentLinkedQueue&lt;&gt;();</span>
+<span class="nc" id="L526">    AtomicInteger numQueriesExecuted = new AtomicInteger(0);</span>
+<span class="nc" id="L527">    AtomicLong totalBrokerTime = new AtomicLong(0L);</span>
+<span class="nc" id="L528">    AtomicLong totalClientTime = new AtomicLong(0L);</span>
+<span class="nc" id="L529">    List&lt;Statistics&gt; statisticsList = Collections.singletonList(new Statistics(CLIENT_TIME_STATISTICS));</span>
+
+<span class="nc" id="L531">    ExecutorService executorService = Executors.newFixedThreadPool(numThreads);</span>
+<span class="nc bnc" id="L532" title="All 2 branches missed.">    for (int i = 0; i &lt; numThreads; i++) {</span>
+<span class="nc" id="L533">      executorService.submit(</span>
+          new Worker(driver, queryQueue, numQueriesExecuted, totalBrokerTime, totalClientTime, statisticsList));
+    }
+<span class="nc" id="L536">    executorService.shutdown();</span>
+
+<span class="nc" id="L538">    long startTime = System.currentTimeMillis();</span>
+<span class="nc" id="L539">    long reportStartTime = startTime;</span>
+<span class="nc" id="L540">    int numReportIntervals = 0;</span>
+<span class="nc" id="L541">    int numTimesExecuted = 0;</span>
+<span class="nc" id="L542">    double currentQPS = startQPS;</span>
+<span class="nc" id="L543">    int queryIntervalMs = (int) (MILLIS_PER_SECOND / currentQPS);</span>
+<span class="nc bnc" id="L544" title="All 4 branches missed.">    while (numTimesToRunQueries == 0 || numTimesExecuted &lt; numTimesToRunQueries) {</span>
+<span class="nc bnc" id="L545" title="All 2 branches missed.">      if (executorService.isTerminated()) {</span>
+<span class="nc" id="L546">        LOGGER.error(&quot;All threads got exception and already dead.&quot;);</span>
+<span class="nc" id="L547">        return;</span>
+      }
+
+<span class="nc bnc" id="L550" title="All 2 branches missed.">      for (String query : queries) {</span>
+<span class="nc" id="L551">        queryQueue.add(query);</span>
+<span class="nc" id="L552">        Thread.sleep(queryIntervalMs);</span>
+
+<span class="nc" id="L554">        long currentTime = System.currentTimeMillis();</span>
+<span class="nc bnc" id="L555" title="All 2 branches missed.">        if (currentTime - reportStartTime &gt;= reportIntervalMs) {</span>
+<span class="nc" id="L556">          long timePassed = currentTime - startTime;</span>
+<span class="nc" id="L557">          reportStartTime = currentTime;</span>
+<span class="nc" id="L558">          numReportIntervals++;</span>
+
+<span class="nc bnc" id="L560" title="All 2 branches missed.">          if (numReportIntervals == numIntervalsToIncreaseQPS) {</span>
+            // Try to find the next interval.
+<span class="nc" id="L562">            double newQPS = currentQPS + deltaQPS;</span>
+            int newQueryIntervalMs;
+            // Skip the target QPS with the same interval as the previous one.
+<span class="nc bnc" id="L565" title="All 2 branches missed.">            while ((newQueryIntervalMs = (int) (MILLIS_PER_SECOND / newQPS)) == queryIntervalMs) {</span>
+<span class="nc" id="L566">              newQPS += deltaQPS;</span>
+            }
+<span class="nc bnc" id="L568" title="All 2 branches missed.">            if (newQueryIntervalMs == 0) {</span>
+<span class="nc" id="L569">              LOGGER.warn(&quot;Due to sleep granularity of millisecond, cannot further increase QPS.&quot;);</span>
+            } else {
+              // Find the next interval.
+<span class="nc" id="L572">              LOGGER.info(&quot;--------------------------------------------------------------------------------&quot;);</span>
+<span class="nc" id="L573">              LOGGER.info(&quot;REPORT FOR TARGET QPS: {}&quot;, currentQPS);</span>
+<span class="nc" id="L574">              int numQueriesExecutedInt = numQueriesExecuted.get();</span>
+<span class="nc" id="L575">              LOGGER.info(&quot;Current Target QPS: {}, Time Passed: {}ms, Queries Executed: {}, Average QPS: {}, &quot;</span>
+                      + &quot;Average Broker Time: {}ms, Average Client Time: {}ms, Queries Queued: {}.&quot;, currentQPS,
+                  timePassed, numQueriesExecutedInt, numQueriesExecutedInt / ((double) timePassed / MILLIS_PER_SECOND),
+                  totalBrokerTime.get() / (double) numQueriesExecutedInt,
+                  totalClientTime.get() / (double) numQueriesExecutedInt, queryQueue.size());
+<span class="nc" id="L580">              numReportIntervals = 0;</span>
+<span class="nc" id="L581">              startTime = currentTime;</span>
+<span class="nc" id="L582">              reportAndClearStatistics(numQueriesExecuted, totalBrokerTime, totalClientTime, statisticsList);</span>
+
+<span class="nc" id="L584">              currentQPS = newQPS;</span>
+<span class="nc" id="L585">              queryIntervalMs = newQueryIntervalMs;</span>
+<span class="nc" id="L586">              LOGGER.info(&quot;Increase target QPS to: {}, the following statistics are for the new target QPS.&quot;,</span>
+                  currentQPS);
+            }
+<span class="nc" id="L589">          } else {</span>
+<span class="nc" id="L590">            int numQueriesExecutedInt = numQueriesExecuted.get();</span>
+<span class="nc" id="L591">            LOGGER.info(&quot;Current Target QPS: {}, Time Passed: {}ms, Queries Executed: {}, Average QPS: {}, &quot;</span>
+                    + &quot;Average Broker Time: {}ms, Average Client Time: {}ms, Queries Queued: {}.&quot;, currentQPS,
+                timePassed, numQueriesExecutedInt, numQueriesExecutedInt / ((double) timePassed / MILLIS_PER_SECOND),
+                totalBrokerTime.get() / (double) numQueriesExecutedInt,
+                totalClientTime.get() / (double) numQueriesExecutedInt, queryQueue.size());
+
+<span class="nc bnc" id="L597" title="All 4 branches missed.">            if ((numIntervalsToReportAndClearStatistics != 0) &amp;&amp; (</span>
+                numReportIntervals % numIntervalsToReportAndClearStatistics == 0)) {
+<span class="nc" id="L599">              startTime = currentTime;</span>
+<span class="nc" id="L600">              reportAndClearStatistics(numQueriesExecuted, totalBrokerTime, totalClientTime, statisticsList);</span>
+            }
+          }
+        }
+<span class="nc" id="L604">      }</span>
+<span class="nc" id="L605">      numTimesExecuted++;</span>
+    }
+
+    // Wait for all queries getting executed.
+<span class="nc bnc" id="L609" title="All 2 branches missed.">    while (queryQueue.size() != 0) {</span>
+<span class="nc" id="L610">      Thread.sleep(1);</span>
+    }
+<span class="nc" id="L612">    executorService.shutdownNow();</span>
+<span class="nc bnc" id="L613" title="All 2 branches missed.">    while (!executorService.isTerminated()) {</span>
+<span class="nc" id="L614">      Thread.sleep(1);</span>
+    }
+
+<span class="nc" id="L617">    long timePassed = System.currentTimeMillis() - startTime;</span>
+<span class="nc" id="L618">    int numQueriesExecutedInt = numQueriesExecuted.get();</span>
+<span class="nc" id="L619">    LOGGER.info(&quot;--------------------------------------------------------------------------------&quot;);</span>
+<span class="nc" id="L620">    LOGGER.info(&quot;FINAL REPORT:&quot;);</span>
+<span class="nc" id="L621">    LOGGER.info(&quot;Current Target QPS: {}, Time Passed: {}ms, Queries Executed: {}, Average QPS: {}, &quot;</span>
+            + &quot;Average Broker Time: {}ms, Average Client Time: {}ms.&quot;, currentQPS, timePassed, numQueriesExecutedInt,
+        numQueriesExecutedInt / ((double) timePassed / MILLIS_PER_SECOND),
+        totalBrokerTime.get() / (double) numQueriesExecutedInt, totalClientTime.get() / (double) numQueriesExecutedInt);
+<span class="nc bnc" id="L625" title="All 2 branches missed.">    for (Statistics statistics : statisticsList) {</span>
+<span class="nc" id="L626">      statistics.report();</span>
+<span class="nc" id="L627">    }</span>
+<span class="nc" id="L628">  }</span>
+
+  private static void reportAndClearStatistics(AtomicInteger numQueriesExecuted, AtomicLong totalBrokerTime,
+      AtomicLong totalClientTime, List&lt;Statistics&gt; statisticsList) {
+<span class="nc" id="L632">    numQueriesExecuted.set(0);</span>
+<span class="nc" id="L633">    totalBrokerTime.set(0L);</span>
+<span class="nc" id="L634">    totalClientTime.set(0L);</span>
+<span class="nc bnc" id="L635" title="All 2 branches missed.">    for (Statistics statistics : statisticsList) {</span>
+<span class="nc" id="L636">      statistics.report();</span>
+<span class="nc" id="L637">      statistics.clear();</span>
+<span class="nc" id="L638">    }</span>
+<span class="nc" id="L639">  }</span>
+
+  private static void executeQueryInMultiThreads(PerfBenchmarkDriver driver, String query,
+      AtomicInteger numQueriesExecuted, AtomicLong totalBrokerTime, AtomicLong totalClientTime,
+      List&lt;Statistics&gt; statisticsList)
+      throws Exception {
+<span class="nc" id="L645">    JSONObject response = driver.postQuery(query);</span>
+<span class="nc" id="L646">    numQueriesExecuted.getAndIncrement();</span>
+<span class="nc" id="L647">    long brokerTime = response.getLong(&quot;timeUsedMs&quot;);</span>
+<span class="nc" id="L648">    totalBrokerTime.getAndAdd(brokerTime);</span>
+<span class="nc" id="L649">    long clientTime = response.getLong(&quot;totalTime&quot;);</span>
+<span class="nc" id="L650">    totalClientTime.getAndAdd(clientTime);</span>
+<span class="nc" id="L651">    statisticsList.get(0).addValue(clientTime);</span>
+<span class="nc" id="L652">  }</span>
+
+  private static class Worker implements Runnable {
+    private final PerfBenchmarkDriver _driver;
+    private final ConcurrentLinkedQueue&lt;String&gt; _queryQueue;
+    private final AtomicInteger _numQueriesExecuted;
+    private final AtomicLong _totalBrokerTime;
+    private final AtomicLong _totalClientTime;
+    private final List&lt;Statistics&gt; _statisticsList;
+
+    private Worker(PerfBenchmarkDriver driver, ConcurrentLinkedQueue&lt;String&gt; queryQueue,
+        AtomicInteger numQueriesExecuted, AtomicLong totalBrokerTime, AtomicLong totalClientTime,
+<span class="nc" id="L664">        List&lt;Statistics&gt; statisticsList) {</span>
+<span class="nc" id="L665">      _driver = driver;</span>
+<span class="nc" id="L666">      _queryQueue = queryQueue;</span>
+<span class="nc" id="L667">      _numQueriesExecuted = numQueriesExecuted;</span>
+<span class="nc" id="L668">      _totalBrokerTime = totalBrokerTime;</span>
+<span class="nc" id="L669">      _totalClientTime = totalClientTime;</span>
+<span class="nc" id="L670">      _statisticsList = statisticsList;</span>
+<span class="nc" id="L671">    }</span>
+
+    @Override
+    public void run() {
+      while (true) {
+<span class="nc" id="L676">        String query = _queryQueue.poll();</span>
+<span class="nc bnc" id="L677" title="All 2 branches missed.">        if (query == null) {</span>
+          try {
+<span class="nc" id="L679">            Thread.sleep(1);</span>
+<span class="nc" id="L680">            continue;</span>
+<span class="nc" id="L681">          } catch (InterruptedException e) {</span>
+<span class="nc" id="L682">            return;</span>
+          }
+        }
+        try {
+<span class="nc" id="L686">          executeQueryInMultiThreads(_driver, query, _numQueriesExecuted, _totalBrokerTime, _totalClientTime,</span>
+              _statisticsList);
+<span class="nc" id="L688">        } catch (Exception e) {</span>
+<span class="nc" id="L689">          LOGGER.error(&quot;Caught exception while running query: {}&quot;, query, e);</span>
+<span class="nc" id="L690">          return;</span>
+<span class="nc" id="L691">        }</span>
+<span class="nc" id="L692">      }</span>
+    }
+  }
+
+<span class="nc" id="L696">  @ThreadSafe</span>
+  private static class Statistics {
+<span class="nc" id="L698">    private final DescriptiveStatistics _statistics = new DescriptiveStatistics();</span>
+    private final String _name;
+
+<span class="nc" id="L701">    public Statistics(String name) {</span>
+<span class="nc" id="L702">      _name = name;</span>
+<span class="nc" id="L703">    }</span>
+
+    public void addValue(double value) {
+<span class="nc" id="L706">      synchronized (_statistics) {</span>
+<span class="nc" id="L707">        _statistics.addValue(value);</span>
+<span class="nc" id="L708">      }</span>
+<span class="nc" id="L709">    }</span>
+
+    public void report() {
+<span class="nc" id="L712">      synchronized (_statistics) {</span>
+<span class="nc" id="L713">        LOGGER.info(&quot;--------------------------------------------------------------------------------&quot;);</span>
+<span class="nc" id="L714">        LOGGER.info(&quot;{}:&quot;, _name);</span>
+<span class="nc" id="L715">        LOGGER.info(_statistics.toString());</span>
+<span class="nc" id="L716">        LOGGER.info(&quot;10th percentile: {}&quot;, _statistics.getPercentile(10.0));</span>
+<span class="nc" id="L717">        LOGGER.info(&quot;25th percentile: {}&quot;, _statistics.getPercentile(25.0));</span>
+<span class="nc" id="L718">        LOGGER.info(&quot;50th percentile: {}&quot;, _statistics.getPercentile(50.0));</span>
+<span class="nc" id="L719">        LOGGER.info(&quot;90th percentile: {}&quot;, _statistics.getPercentile(90.0));</span>
+<span class="nc" id="L720">        LOGGER.info(&quot;95th percentile: {}&quot;, _statistics.getPercentile(95.0));</span>
+<span class="nc" id="L721">        LOGGER.info(&quot;99th percentile: {}&quot;, _statistics.getPercentile(99.0));</span>
+<span class="nc" id="L722">        LOGGER.info(&quot;99.9th percentile: {}&quot;, _statistics.getPercentile(99.9));</span>
+<span class="nc" id="L723">        LOGGER.info(&quot;--------------------------------------------------------------------------------&quot;);</span>
+<span class="nc" id="L724">      }</span>
+<span class="nc" id="L725">    }</span>
+
+    public void clear() {
+<span class="nc" id="L728">      synchronized (_statistics) {</span>
+<span class="nc" id="L729">        _statistics.clear();</span>
+<span class="nc" id="L730">      }</span>
+<span class="nc" id="L731">    }</span>
+  }
+
+  public static void main(String[] args)
+      throws Exception {
+<span class="nc" id="L736">    QueryRunner queryRunner = new QueryRunner();</span>
+<span class="nc" id="L737">    CmdLineParser parser = new CmdLineParser(queryRunner);</span>
+<span class="nc" id="L738">    parser.parseArgument(args);</span>
+
+<span class="nc bnc" id="L740" title="All 2 branches missed.">    if (queryRunner._help) {</span>
+<span class="nc" id="L741">      queryRunner.printUsage();</span>
+    } else {
+<span class="nc" id="L743">      queryRunner.execute();</span>
+    }
+<span class="nc" id="L745">  }</span>
+}
+
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

@@ -1,0 +1,240 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>SVScanDocIdIterator.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-server</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.operator.dociditerators</a> &gt; <span class="el_source">SVScanDocIdIterator.java</span></div><h1>SVScanDocIdIterator.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.operator.dociditerators;
+
+import com.linkedin.pinot.common.data.FieldSpec;
+import com.linkedin.pinot.core.common.BlockMetadata;
+import com.linkedin.pinot.core.common.BlockSingleValIterator;
+import com.linkedin.pinot.core.common.BlockValSet;
+import com.linkedin.pinot.core.common.Constants;
+import com.linkedin.pinot.core.operator.filter.predicate.PredicateEvaluator;
+import org.roaringbitmap.IntIterator;
+import org.roaringbitmap.buffer.MutableRoaringBitmap;
+
+public class SVScanDocIdIterator implements ScanBasedDocIdIterator {
+<span class="fc" id="L28">  private int _currentDocId = -1;</span>
+  private final BlockSingleValIterator _valueIterator;
+  private int _startDocId;
+  private int _endDocId;
+  private PredicateEvaluator _evaluator;
+  private String _datasourceName;
+<span class="fc" id="L34">  private int _numEntriesScanned = 0;</span>
+  private final ValueMatcher _valueMatcher;
+
+  public SVScanDocIdIterator(String datasourceName, BlockValSet blockValSet, BlockMetadata blockMetadata,
+<span class="fc" id="L38">      PredicateEvaluator evaluator) {</span>
+<span class="fc" id="L39">    _datasourceName = datasourceName;</span>
+<span class="fc" id="L40">    _evaluator = evaluator;</span>
+<span class="fc" id="L41">    _valueIterator = (BlockSingleValIterator) blockValSet.iterator();</span>
+
+<span class="fc bfc" id="L43" title="All 2 branches covered.">    if (evaluator.isAlwaysFalse()) {</span>
+<span class="fc" id="L44">      _currentDocId = Constants.EOF;</span>
+<span class="fc" id="L45">      setStartDocId(Constants.EOF);</span>
+<span class="fc" id="L46">      setEndDocId(Constants.EOF);</span>
+    } else {
+<span class="fc" id="L48">      setStartDocId(blockMetadata.getStartDocId());</span>
+<span class="fc" id="L49">      setEndDocId(blockMetadata.getEndDocId());</span>
+    }
+
+<span class="pc bpc" id="L52" title="1 of 2 branches missed.">    if (evaluator.isDictionaryBased()) {</span>
+<span class="fc" id="L53">      _valueMatcher = new IntMatcher(); // Match using dictionary id's that are integers.</span>
+    } else {
+<span class="nc" id="L55">      _valueMatcher = getValueMatcherForType(blockMetadata.getDataType());</span>
+    }
+<span class="fc" id="L57">    _valueMatcher.setEvaluator(evaluator);</span>
+<span class="fc" id="L58">  }</span>
+
+  /**
+   * After setting the startDocId, next calls will always return from &amp;gt;=startDocId
+   *
+   * @param startDocId Start doc id
+   */
+  public void setStartDocId(int startDocId) {
+<span class="fc" id="L66">    _currentDocId = startDocId - 1;</span>
+<span class="fc" id="L67">    _valueIterator.skipTo(startDocId);</span>
+<span class="fc" id="L68">    _startDocId = startDocId;</span>
+<span class="fc" id="L69">  }</span>
+
+  /**
+   * After setting the endDocId, next call will return Constants.EOF after currentDocId exceeds
+   * endDocId
+   *
+   * @param endDocId End doc id
+   */
+  public void setEndDocId(int endDocId) {
+<span class="fc" id="L78">    _endDocId = endDocId;</span>
+<span class="fc" id="L79">  }</span>
+
+  @Override
+  public boolean isMatch(int docId) {
+<span class="nc bnc" id="L83" title="All 2 branches missed.">    if (_currentDocId == Constants.EOF) {</span>
+<span class="nc" id="L84">      return false;</span>
+    }
+<span class="nc" id="L86">    _valueIterator.skipTo(docId);</span>
+<span class="nc" id="L87">    _numEntriesScanned++;</span>
+<span class="nc" id="L88">    return _valueMatcher.doesCurrentEntryMatch(_valueIterator);</span>
+  }
+
+  @Override
+  public int advance(int targetDocId) {
+<span class="pc bpc" id="L93" title="1 of 2 branches missed.">    if (_currentDocId == Constants.EOF) {</span>
+<span class="nc" id="L94">      return _currentDocId;</span>
+    }
+<span class="pc bpc" id="L96" title="1 of 2 branches missed.">    if (targetDocId &lt; _startDocId) {</span>
+<span class="nc" id="L97">      targetDocId = _startDocId;</span>
+<span class="fc bfc" id="L98" title="All 2 branches covered.">    } else if (targetDocId &gt; _endDocId) {</span>
+<span class="fc" id="L99">      _currentDocId = Constants.EOF;</span>
+    }
+<span class="fc bfc" id="L101" title="All 2 branches covered.">    if (_currentDocId &gt;= targetDocId) {</span>
+<span class="fc" id="L102">      return _currentDocId;</span>
+    } else {
+<span class="fc" id="L104">      _currentDocId = targetDocId - 1;</span>
+<span class="fc" id="L105">      _valueIterator.skipTo(targetDocId);</span>
+<span class="fc" id="L106">      return next();</span>
+    }
+  }
+
+  @Override
+  public int next() {
+<span class="pc bpc" id="L112" title="1 of 2 branches missed.">    if (_currentDocId == Constants.EOF) {</span>
+<span class="nc" id="L113">      return Constants.EOF;</span>
+    }
+<span class="fc bfc" id="L115" title="All 4 branches covered.">    while (_valueIterator.hasNext() &amp;&amp; _currentDocId &lt; _endDocId) {</span>
+<span class="fc" id="L116">      _currentDocId = _currentDocId + 1;</span>
+<span class="fc" id="L117">      _numEntriesScanned++;</span>
+<span class="fc bfc" id="L118" title="All 2 branches covered.">      if (_valueMatcher.doesCurrentEntryMatch(_valueIterator)) {</span>
+<span class="fc" id="L119">        return _currentDocId;</span>
+      }
+    }
+<span class="fc" id="L122">    _currentDocId = Constants.EOF;</span>
+<span class="fc" id="L123">    return Constants.EOF;</span>
+  }
+
+  @Override
+  public int currentDocId() {
+<span class="nc" id="L128">    return _currentDocId;</span>
+  }
+
+  @Override
+  public String toString() {
+<span class="nc" id="L133">    return SVScanDocIdIterator.class.getSimpleName() + &quot;[&quot; + _datasourceName + &quot;]&quot;;</span>
+  }
+
+  @Override
+  public MutableRoaringBitmap applyAnd(MutableRoaringBitmap answer) {
+<span class="fc" id="L138">    MutableRoaringBitmap result = new MutableRoaringBitmap();</span>
+<span class="pc bpc" id="L139" title="1 of 2 branches missed.">    if (_evaluator.isAlwaysFalse()) {</span>
+<span class="nc" id="L140">      return result;</span>
+    }
+<span class="fc" id="L142">    IntIterator intIterator = answer.getIntIterator();</span>
+<span class="fc" id="L143">    int docId = -1;</span>
+<span class="pc bpc" id="L144" title="1 of 4 branches missed.">    while (intIterator.hasNext() &amp;&amp; docId &lt; _endDocId) {</span>
+<span class="fc" id="L145">      docId = intIterator.next();</span>
+<span class="pc bpc" id="L146" title="1 of 2 branches missed.">      if (docId &gt;= _startDocId) {</span>
+<span class="fc" id="L147">        _valueIterator.skipTo(docId);</span>
+<span class="fc" id="L148">        _numEntriesScanned++;</span>
+<span class="fc bfc" id="L149" title="All 2 branches covered.">        if (_valueMatcher.doesCurrentEntryMatch(_valueIterator)) {</span>
+<span class="fc" id="L150">          result.add(docId);</span>
+        }
+      }
+    }
+<span class="fc" id="L154">    return result;</span>
+  }
+
+  @Override
+  public int getNumEntriesScanned() {
+<span class="fc" id="L159">    return _numEntriesScanned;</span>
+  }
+
+  /**
+   * Helper method to get value matcher for a given data type.
+   * @param dataType data type for which to get the value matcher
+   * @return value matcher for the data type.
+   */
+  private static ValueMatcher getValueMatcherForType(FieldSpec.DataType dataType) {
+
+<span class="nc bnc" id="L169" title="All 6 branches missed.">    switch (dataType) {</span>
+      case INT:
+<span class="nc" id="L171">        return new IntMatcher();</span>
+
+      case LONG:
+<span class="nc" id="L174">        return new LongMatcher();</span>
+
+      case FLOAT:
+<span class="nc" id="L177">        return new FloatMatcher();</span>
+
+      case DOUBLE:
+<span class="nc" id="L180">        return new DoubleMatcher();</span>
+
+      case STRING:
+<span class="nc" id="L183">        return new StringMatcher();</span>
+
+      default:
+<span class="nc" id="L186">        throw new UnsupportedOperationException(&quot;Index without dictionary not supported for data type: &quot; + dataType);</span>
+    }
+  }
+
+<span class="fc" id="L190">  private static abstract class ValueMatcher {</span>
+    protected PredicateEvaluator _evaluator;
+
+    public void setEvaluator(PredicateEvaluator evaluator) {
+<span class="fc" id="L194">      _evaluator = evaluator;</span>
+<span class="fc" id="L195">    }</span>
+
+    abstract boolean doesCurrentEntryMatch(BlockSingleValIterator valueIterator);
+  }
+
+<span class="fc" id="L200">  private static class IntMatcher extends ValueMatcher {</span>
+
+    @Override
+    public boolean doesCurrentEntryMatch(BlockSingleValIterator valueIterator) {
+<span class="fc" id="L204">      return _evaluator.applySV(valueIterator.nextIntVal());</span>
+    }
+  }
+
+<span class="nc" id="L208">  private static class LongMatcher extends ValueMatcher {</span>
+
+    @Override
+    public boolean doesCurrentEntryMatch(BlockSingleValIterator valueIterator) {
+<span class="nc" id="L212">      return _evaluator.applySV(valueIterator.nextLongVal());</span>
+    }
+  }
+
+<span class="nc" id="L216">  private static class FloatMatcher extends ValueMatcher {</span>
+
+    @Override
+    public boolean doesCurrentEntryMatch(BlockSingleValIterator valueIterator) {
+<span class="nc" id="L220">      return _evaluator.applySV(valueIterator.nextFloatVal());</span>
+    }
+  }
+
+<span class="nc" id="L224">  private static class DoubleMatcher extends ValueMatcher {</span>
+
+    @Override
+    public boolean doesCurrentEntryMatch(BlockSingleValIterator valueIterator) {
+<span class="nc" id="L228">      return _evaluator.applySV(valueIterator.nextDoubleVal());</span>
+    }
+  }
+
+<span class="nc" id="L232">  private static class StringMatcher extends ValueMatcher {</span>
+
+    @Override
+    public boolean doesCurrentEntryMatch(BlockSingleValIterator valueIterator) {
+<span class="nc" id="L236">      return _evaluator.applySV(valueIterator.nextStringVal());</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

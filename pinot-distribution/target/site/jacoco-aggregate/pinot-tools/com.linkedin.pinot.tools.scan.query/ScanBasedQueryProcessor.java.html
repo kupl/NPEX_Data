@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>ScanBasedQueryProcessor.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-tools</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.tools.scan.query</a> &gt; <span class="el_source">ScanBasedQueryProcessor.java</span></div><h1>ScanBasedQueryProcessor.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.tools.scan.query;
+
+import com.linkedin.pinot.common.request.AggregationInfo;
+import com.linkedin.pinot.common.request.BrokerRequest;
+import com.linkedin.pinot.common.request.GroupBy;
+import com.linkedin.pinot.pql.parsers.Pql2Compiler;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import org.codehaus.jackson.map.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+public class ScanBasedQueryProcessor implements Cloneable {
+<span class="nc" id="L41">  private static final Logger LOGGER = LoggerFactory.getLogger(ScanBasedQueryProcessor.class);</span>
+
+  Map&lt;File, SegmentQueryProcessor&gt; _segmentQueryProcessorMap;
+<span class="nc" id="L44">  private long _timeoutInSeconds = 10000;</span>
+<span class="nc" id="L45">  private boolean _ownsQueryProcessors = false;</span>
+
+<span class="nc" id="L47">  private ScanBasedQueryProcessor() {}</span>
+
+  public ScanBasedQueryProcessor(String segmentsDirName)
+<span class="nc" id="L50">      throws Exception {</span>
+<span class="nc" id="L51">    File segmentsDir = new File(segmentsDirName);</span>
+<span class="nc" id="L52">    _segmentQueryProcessorMap = new HashMap&lt;&gt;();</span>
+<span class="nc" id="L53">    _ownsQueryProcessors = true;</span>
+
+<span class="nc bnc" id="L55" title="All 2 branches missed.">    for (File segmentFile : segmentsDir.listFiles()) {</span>
+<span class="nc" id="L56">      _segmentQueryProcessorMap.put(segmentFile, new SegmentQueryProcessor(segmentFile));</span>
+    }
+<span class="nc" id="L58">  }</span>
+
+  public QueryResponse processQuery(String query)
+      throws Exception {
+<span class="nc" id="L62">    long startTimeInMillis = System.currentTimeMillis();</span>
+<span class="nc" id="L63">    Pql2Compiler pql2Compiler = new Pql2Compiler();</span>
+<span class="nc" id="L64">    BrokerRequest brokerRequest = pql2Compiler.compileToBrokerRequest(query);</span>
+<span class="nc" id="L65">    ResultTable results = null;</span>
+
+<span class="nc" id="L67">    Aggregation aggregation = null;</span>
+    List&lt;String&gt; groupByColumns;
+<span class="nc" id="L69">    List&lt;AggregationInfo&gt; aggregationsInfo = brokerRequest.getAggregationsInfo();</span>
+<span class="nc bnc" id="L70" title="All 2 branches missed.">    if (aggregationsInfo != null) {</span>
+<span class="nc" id="L71">      GroupBy groupBy = brokerRequest.getGroupBy();</span>
+<span class="nc bnc" id="L72" title="All 2 branches missed.">      groupByColumns = (brokerRequest.isSetGroupBy()) ? groupBy.getColumns() : null;</span>
+<span class="nc bnc" id="L73" title="All 2 branches missed.">      long topN = (groupByColumns != null) ? groupBy.getTopN() : 10;</span>
+<span class="nc" id="L74">      aggregation = new Aggregation(brokerRequest.getAggregationsInfo(), groupByColumns, topN);</span>
+    }
+
+<span class="nc" id="L77">    int numDocsScanned = 0;</span>
+<span class="nc" id="L78">    int totalDocs = 0;</span>
+<span class="nc" id="L79">    int numSegments = 0;</span>
+<span class="nc" id="L80">    LOGGER.info(&quot;Processing Query: {}&quot;, query);</span>
+
+<span class="nc" id="L82">    List&lt;ResultTable&gt; resultTables = processSegments(query, brokerRequest);</span>
+<span class="nc bnc" id="L83" title="All 2 branches missed.">    for (ResultTable segmentResults : resultTables) {</span>
+<span class="nc" id="L84">      numDocsScanned += segmentResults.getNumDocsScanned();</span>
+<span class="nc" id="L85">      totalDocs += segmentResults.getTotalDocs();</span>
+<span class="nc" id="L86">      ++numSegments;</span>
+<span class="nc bnc" id="L87" title="All 2 branches missed.">      results = (results == null) ? segmentResults : results.append(segmentResults);</span>
+<span class="nc" id="L88">    }</span>
+
+<span class="nc bnc" id="L90" title="All 6 branches missed.">    if (aggregation != null &amp;&amp; numSegments &gt; 1 &amp;&amp; numDocsScanned &gt; 0) {</span>
+<span class="nc" id="L91">      results = aggregation.aggregate(results);</span>
+    }
+
+<span class="nc bnc" id="L94" title="All 2 branches missed.">    if (results != null) {</span>
+<span class="nc" id="L95">      results.setNumDocsScanned(numDocsScanned);</span>
+<span class="nc" id="L96">      results.setTotalDocs(totalDocs);</span>
+<span class="nc" id="L97">      long totalUsedMs = System.currentTimeMillis() - startTimeInMillis;</span>
+<span class="nc" id="L98">      results.setProcessingTime(totalUsedMs);</span>
+<span class="nc" id="L99">      results.seal();</span>
+    }
+
+<span class="nc" id="L102">    QueryResponse queryResponse = new QueryResponse(results);</span>
+
+<span class="nc" id="L104">    return queryResponse;</span>
+  }
+
+  public void close() {
+<span class="nc bnc" id="L108" title="All 2 branches missed.">    if (_ownsQueryProcessors) {</span>
+<span class="nc bnc" id="L109" title="All 2 branches missed.">      for (SegmentQueryProcessor segmentQueryProcessor : _segmentQueryProcessorMap.values()) {</span>
+<span class="nc" id="L110">        segmentQueryProcessor.close();</span>
+<span class="nc" id="L111">      }</span>
+    }
+<span class="nc" id="L113">  }</span>
+
+  @Override
+  public ScanBasedQueryProcessor clone() {
+<span class="nc" id="L117">    ScanBasedQueryProcessor copy = new ScanBasedQueryProcessor();</span>
+<span class="nc" id="L118">    copy._segmentQueryProcessorMap = _segmentQueryProcessorMap;</span>
+<span class="nc" id="L119">    copy._ownsQueryProcessors = false;</span>
+<span class="nc" id="L120">    return copy;</span>
+  }
+
+  private List&lt;ResultTable&gt; processSegments(final String query, final BrokerRequest brokerRequest)
+      throws InterruptedException {
+<span class="nc" id="L125">    ExecutorService executorService = Executors.newFixedThreadPool(10);</span>
+<span class="nc" id="L126">    final List&lt;ResultTable&gt; resultTables = Collections.synchronizedList(new ArrayList&lt;ResultTable&gt;());</span>
+
+<span class="nc bnc" id="L128" title="All 2 branches missed.">    for (final SegmentQueryProcessor segmentQueryProcessor : _segmentQueryProcessorMap.values()) {</span>
+<span class="nc" id="L129">      executorService.execute(new Runnable() {</span>
+        @Override
+        public void run() {
+          try {
+<span class="nc" id="L133">            ResultTable resultTable = segmentQueryProcessor.process(brokerRequest);</span>
+<span class="nc bnc" id="L134" title="All 2 branches missed.">            if (resultTable != null) {</span>
+<span class="nc" id="L135">              resultTables.add(resultTable);</span>
+            }
+<span class="nc" id="L137">          } catch (Exception e) {</span>
+<span class="nc" id="L138">            LOGGER.error(&quot;Exception caught while processing segment '{}'.&quot;, segmentQueryProcessor.getSegmentName(), e);</span>
+<span class="nc" id="L139">            return;</span>
+<span class="nc" id="L140">          }</span>
+<span class="nc" id="L141">        }</span>
+      });
+<span class="nc" id="L143">    }</span>
+<span class="nc" id="L144">    executorService.shutdown();</span>
+<span class="nc" id="L145">    executorService.awaitTermination(_timeoutInSeconds, TimeUnit.SECONDS);</span>
+<span class="nc" id="L146">    return resultTables;</span>
+  }
+
+  public static void main(String[] args)
+      throws Exception {
+<span class="nc bnc" id="L151" title="All 2 branches missed.">    if (args.length != 3) {</span>
+<span class="nc" id="L152">      LOGGER.error(&quot;Incorrect arguments&quot;);</span>
+<span class="nc" id="L153">      LOGGER.info(&quot;Usage: &lt;exec&gt; &lt;UntarredSegmentDir&gt; &lt;QueryFile&gt; &lt;outputFile&gt;&quot;);</span>
+<span class="nc" id="L154">      System.exit(1);</span>
+    }
+
+<span class="nc" id="L157">    String segDir = args[0];</span>
+<span class="nc" id="L158">    String queryFile = args[1];</span>
+<span class="nc" id="L159">    String outputFile = args[2];</span>
+    String query;
+
+<span class="nc" id="L162">    ScanBasedQueryProcessor scanBasedQueryProcessor = new ScanBasedQueryProcessor(segDir);</span>
+<span class="nc" id="L163">    BufferedReader bufferedReader = new BufferedReader(new FileReader(queryFile));</span>
+<span class="nc" id="L164">    PrintWriter printWriter = new PrintWriter(outputFile);</span>
+
+<span class="nc bnc" id="L166" title="All 2 branches missed.">    while ((query = bufferedReader.readLine()) != null) {</span>
+<span class="nc" id="L167">      QueryResponse queryResponse = scanBasedQueryProcessor.processQuery(query);</span>
+<span class="nc" id="L168">      printResult(queryResponse);</span>
+<span class="nc" id="L169">      printWriter.println(&quot;Query: &quot; + query);</span>
+<span class="nc" id="L170">      printWriter.println(&quot;Result: &quot; + new ObjectMapper().writeValueAsString(queryResponse));</span>
+<span class="nc" id="L171">    }</span>
+<span class="nc" id="L172">    bufferedReader.close();</span>
+<span class="nc" id="L173">    printWriter.close();</span>
+<span class="nc" id="L174">  }</span>
+
+  public static void printResult(QueryResponse queryResponse)
+      throws IOException {
+<span class="nc" id="L178">    ObjectMapper objectMapper = new ObjectMapper();</span>
+<span class="nc" id="L179">    LOGGER.info(objectMapper.writeValueAsString(queryResponse));</span>
+<span class="nc" id="L180">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

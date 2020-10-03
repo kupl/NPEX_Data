@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>TokenSchedulerGroup.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-minion</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.query.scheduler.tokenbucket</a> &gt; <span class="el_source">TokenSchedulerGroup.java</span></div><h1>TokenSchedulerGroup.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.linkedin.pinot.core.query.scheduler.tokenbucket;
+
+import com.google.common.base.Preconditions;
+import com.linkedin.pinot.core.query.scheduler.AbstractSchedulerGroup;
+import com.linkedin.pinot.core.query.scheduler.SchedulerGroup;
+import com.linkedin.pinot.core.query.scheduler.SchedulerGroupAccountant;
+import com.linkedin.pinot.core.query.scheduler.fcfs.FCFSSchedulerGroup;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+
+
+/**
+ * Scheduler group that manages accounting based on the number of tokens.
+ *
+ * Each SchedulerGroup is allotted a set of token periodically. Token represents
+ * a unit of thread wall clock time. Tokens are deducted from group for each unit
+ * of time per thread that this group uses. New batch of tokens are allotted periodically
+ * by applying linear decay. Linear decay memorizes resource utilization in the previous
+ * time quantum penalizing heavy users. This is important to give fair chance to low qps
+ * workloads.
+ */
+public class TokenSchedulerGroup extends AbstractSchedulerGroup {
+
+  // Lifetime for which allotted token in valid. Effectively, new tokens are allotted at this frequency
+  private final int tokenLifetimeMs;
+
+  // number of tokens allotted per millisecond. 1 token corresponds to 1 millisecond of wall clock time of a thread
+  // numTokensPerMs will typically correspond to the total number of threads available for execution.
+  // We over-allocate total tokens by giving each group numTokensPerMs = total threads (instead of dividing
+  // between two groups). This is for easy work-stealing - since each group will always have some pending tokens
+  // those can be scheduled if there is no other work
+  private final int numTokensPerMs;
+
+  // currently available tokens for this group
+  private int availableTokens;
+  // last time token values were updated for this group
+  private long lastUpdateTimeMs;
+  // last time tokens were allotted for this group. Tokens are not allotted proactively after tokenLifetimeMs. Instead
+  // we allot tokens in response to events - need to scheduler queries, account for threads etc.
+  private long lastTokenTimeMs;
+  // Internal lock for synchronizing accounting
+<span class="fc" id="L58">  private final Lock tokenLock = new ReentrantLock();</span>
+  // constant factor for applying linear decay when allotting tokens.
+  // We apply linear decay to temporarily lower the priority for the groups that heavily
+  // used resources in the previous token cycle. Without this, groups with steady requests will
+  // get a fresh start and continue to hog high resources impacting sparse users
+  private static final double ALPHA = 0.80;
+
+
+  TokenSchedulerGroup(String schedGroupName, int numTokensPerMs, int tokenLifetimeMs) {
+<span class="fc" id="L67">    super(schedGroupName);</span>
+<span class="pc bpc" id="L68" title="1 of 2 branches missed.">    Preconditions.checkArgument(numTokensPerMs &gt; 0);</span>
+<span class="pc bpc" id="L69" title="1 of 2 branches missed.">    Preconditions.checkArgument(tokenLifetimeMs &gt; 0);</span>
+<span class="fc" id="L70">    this.numTokensPerMs = numTokensPerMs;</span>
+<span class="fc" id="L71">    this.tokenLifetimeMs = tokenLifetimeMs;</span>
+<span class="fc" id="L72">    lastUpdateTimeMs = currentTimeMillis();</span>
+<span class="fc" id="L73">    availableTokens = numTokensPerMs * tokenLifetimeMs;</span>
+<span class="fc" id="L74">    lastTokenTimeMs = lastUpdateTimeMs;</span>
+<span class="fc" id="L75">  }</span>
+
+  int getAvailableTokens() {
+<span class="fc" id="L78">    return consumeTokens();</span>
+  }
+
+  @Override
+  public void incrementThreads() {
+<span class="fc" id="L83">    consumeTokens();</span>
+<span class="fc" id="L84">    super.incrementThreads();</span>
+<span class="fc" id="L85">  }</span>
+
+  @Override
+  public void decrementThreads() {
+<span class="fc" id="L89">    consumeTokens();</span>
+<span class="fc" id="L90">    super.decrementThreads();</span>
+<span class="fc" id="L91">  }</span>
+
+  @Override
+  public void startQuery() {
+<span class="fc" id="L95">    consumeTokens();</span>
+<span class="fc" id="L96">    super.startQuery();</span>
+<span class="fc" id="L97">  }</span>
+
+  @Override
+  public void endQuery() {
+<span class="fc" id="L101">    consumeTokens();</span>
+<span class="fc" id="L102">    super.endQuery();</span>
+<span class="fc" id="L103">  }</span>
+
+  /**
+   * Compares priority of this group with respect to another scheduler group.
+   * Priority is compared on the basis of available tokens. SchedulerGroup with
+   * higher number of tokens wins. If both groups have same tokens then the group
+   * with earliest waiting job has higher priority (FCFS if tokens are equal).
+   * If the arrival times of first waiting jobs are also equal then the group
+   * with least reserved resources is selected
+   * @param rhs SchedulerGroupAccount to compare with
+   * @return &lt; 0 if lhs has lower priority than rhs
+   *     &gt; 0 if lhs has higher priority than rhs
+   *     = 0 if lhs has same priority as rhs
+   */
+  @Override
+  public int compareTo(SchedulerGroupAccountant rhs) {
+<span class="nc bnc" id="L119" title="All 2 branches missed.">    if (rhs == null) {</span>
+<span class="nc" id="L120">      return 1;</span>
+    }
+
+<span class="nc bnc" id="L123" title="All 2 branches missed.">    if (this == rhs) {</span>
+<span class="nc" id="L124">      return 0;</span>
+    }
+
+<span class="nc" id="L127">    int leftTokens = getAvailableTokens();</span>
+<span class="nc" id="L128">    int rightTokens = ((TokenSchedulerGroup) rhs).getAvailableTokens();</span>
+<span class="nc bnc" id="L129" title="All 2 branches missed.">    if (leftTokens &gt; rightTokens) {</span>
+<span class="nc" id="L130">      return 1;</span>
+    }
+<span class="nc bnc" id="L132" title="All 2 branches missed.">    if (leftTokens &lt; rightTokens) {</span>
+<span class="nc" id="L133">      return -1;</span>
+    }
+<span class="nc" id="L135">    return FCFSSchedulerGroup.compareTo(this, (SchedulerGroup)rhs);</span>
+  }
+
+  public String toString() {
+<span class="nc" id="L139">    return String.format(&quot; {%s:[%d,%d,%d,%d,%d]},&quot;, name(),</span>
+        getAvailableTokens(),
+        numPending(),
+        numRunning(),
+        getThreadsInUse(),
+        totalReservedThreads());
+  }
+
+  // callers must synchronize access to this method
+  private int consumeTokens() {
+<span class="pc" id="L149">    try (TokenLockManager lm = new TokenLockManager(tokenLock)) {</span>
+<span class="fc" id="L150">      long currentTimeMs = currentTimeMillis();</span>
+      // multiple time qantas may have elapsed..hence, the modulo operation
+<span class="fc" id="L152">      int diffMs = (int) (currentTimeMs - lastUpdateTimeMs);</span>
+<span class="fc bfc" id="L153" title="All 2 branches covered.">      if (diffMs &lt;= 0) {</span>
+<span class="fc" id="L154">        return availableTokens;</span>
+      }
+<span class="fc" id="L156">      int threads = threadsInUse.get();</span>
+<span class="fc" id="L157">      long nextTokenTime = lastTokenTimeMs + tokenLifetimeMs;</span>
+<span class="fc bfc" id="L158" title="All 2 branches covered.">      if (nextTokenTime &gt; currentTimeMs) {</span>
+<span class="fc" id="L159">        availableTokens -= diffMs * threads;</span>
+      } else {
+<span class="fc" id="L161">        availableTokens -= (nextTokenTime - lastUpdateTimeMs) * threads;</span>
+        // for each quantum allocate new set of tokens with linear decay of tokens.
+        // Linear decay lowers the tokens available to heavy users in the next period
+        // allowing light users to have better chance at scheduling. Without linear decay,
+        // groups with high request rate will win more often putting light users at disadvantage.
+<span class="fc bfc" id="L166" title="All 2 branches covered.">        for (; nextTokenTime &lt;= currentTimeMs; nextTokenTime += tokenLifetimeMs) {</span>
+<span class="fc" id="L167">          availableTokens = (int) (ALPHA * tokenLifetimeMs * numTokensPerMs + (1 - ALPHA) * (availableTokens</span>
+              - tokenLifetimeMs * threads));
+        }
+<span class="fc" id="L170">        lastTokenTimeMs = nextTokenTime - tokenLifetimeMs;</span>
+<span class="fc" id="L171">        availableTokens -= (currentTimeMs - lastTokenTimeMs) * threads;</span>
+      }
+<span class="fc" id="L173">      lastUpdateTimeMs = currentTimeMs;</span>
+<span class="fc" id="L174">      return availableTokens;</span>
+<span class="pc bpc" id="L175" title="8 of 12 branches missed.">    }</span>
+  }
+
+  protected long currentTimeMillis() {
+<span class="nc" id="L179">    return System.currentTimeMillis();</span>
+  }
+
+  private class TokenLockManager implements AutoCloseable{
+    private final Lock lock;
+
+<span class="fc" id="L185">    TokenLockManager(Lock lock) {</span>
+<span class="fc" id="L186">      this.lock = lock;</span>
+<span class="fc" id="L187">      this.lock.lock();</span>
+<span class="fc" id="L188">    }</span>
+
+    @Override
+    public void close() {
+<span class="fc" id="L192">      lock.unlock();</span>
+<span class="fc" id="L193">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

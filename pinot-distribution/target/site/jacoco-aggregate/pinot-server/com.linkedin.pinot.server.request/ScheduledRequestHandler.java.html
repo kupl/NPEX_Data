@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>ScheduledRequestHandler.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-server</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.server.request</a> &gt; <span class="el_source">ScheduledRequestHandler.java</span></div><h1>ScheduledRequestHandler.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.server.request;
+
+import com.google.common.base.Preconditions;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.linkedin.pinot.common.metrics.ServerMeter;
+import com.linkedin.pinot.common.metrics.ServerMetrics;
+import com.linkedin.pinot.common.metrics.ServerQueryPhase;
+import com.linkedin.pinot.common.query.ServerQueryRequest;
+import com.linkedin.pinot.common.query.context.TimerContext;
+import com.linkedin.pinot.common.request.InstanceRequest;
+import com.linkedin.pinot.core.query.scheduler.QueryScheduler;
+import com.linkedin.pinot.serde.SerDe;
+import com.linkedin.pinot.transport.netty.NettyServer;
+import io.netty.buffer.ByteBuf;
+import io.netty.channel.ChannelHandlerContext;
+import java.net.InetSocketAddress;
+import org.apache.thrift.protocol.TCompactProtocol;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+public class ScheduledRequestHandler implements NettyServer.RequestHandler {
+<span class="fc" id="L39">  private static final Logger LOGGER = LoggerFactory.getLogger(ScheduledRequestHandler.class);</span>
+
+  private final ServerMetrics serverMetrics;
+  private QueryScheduler queryScheduler;
+
+<span class="fc" id="L44">  public ScheduledRequestHandler(QueryScheduler queryScheduler, ServerMetrics serverMetrics) {</span>
+<span class="fc" id="L45">    Preconditions.checkNotNull(queryScheduler);</span>
+<span class="fc" id="L46">    Preconditions.checkNotNull(serverMetrics);</span>
+<span class="fc" id="L47">    this.queryScheduler = queryScheduler;</span>
+<span class="fc" id="L48">    this.serverMetrics = serverMetrics;</span>
+<span class="fc" id="L49">  }</span>
+
+  @Override
+  public ListenableFuture&lt;byte[]&gt; processRequest(ChannelHandlerContext channelHandlerContext, ByteBuf request) {
+<span class="fc" id="L53">    final long queryStartTimeNs = System.nanoTime();</span>
+<span class="fc" id="L54">    serverMetrics.addMeteredGlobalValue(ServerMeter.QUERIES, 1);</span>
+
+<span class="fc" id="L56">    LOGGER.debug(&quot;Processing request : {}&quot;, request);</span>
+
+<span class="fc" id="L58">    byte[] byteArray = new byte[request.readableBytes()];</span>
+<span class="fc" id="L59">    request.readBytes(byteArray);</span>
+<span class="fc" id="L60">    SerDe serDe = new SerDe(new TCompactProtocol.Factory());</span>
+<span class="fc" id="L61">    final InstanceRequest instanceRequest = new InstanceRequest();</span>
+
+<span class="fc bfc" id="L63" title="All 2 branches covered.">    if (!serDe.deserialize(instanceRequest, byteArray)) {</span>
+<span class="fc" id="L64">      LOGGER.error(&quot;Failed to deserialize query request from broker ip: {}&quot;,</span>
+          ((InetSocketAddress) channelHandlerContext.channel().remoteAddress()).getAddress().getHostAddress());
+<span class="fc" id="L66">      serverMetrics.addMeteredGlobalValue(ServerMeter.REQUEST_DESERIALIZATION_EXCEPTIONS, 1);</span>
+<span class="fc" id="L67">      return Futures.immediateFuture(null);</span>
+    }
+
+<span class="fc" id="L70">    final ServerQueryRequest queryRequest = new ServerQueryRequest(instanceRequest, serverMetrics);</span>
+<span class="fc" id="L71">    final TimerContext timerContext = queryRequest.getTimerContext();</span>
+<span class="fc" id="L72">    timerContext.setQueryArrivalTimeNs(queryStartTimeNs);</span>
+<span class="fc" id="L73">    timerContext.startNewPhaseTimerAtNs(ServerQueryPhase.REQUEST_DESERIALIZATION, queryStartTimeNs).stopAndRecord();</span>
+
+<span class="fc" id="L75">    LOGGER.debug(&quot;Processing requestId:{},request={}&quot;, instanceRequest.getRequestId(), instanceRequest);</span>
+<span class="fc" id="L76">    return queryScheduler.submit(queryRequest);</span>
+  }
+
+  public void setScheduler(QueryScheduler scheduler) {
+<span class="nc" id="L80">    Preconditions.checkNotNull(scheduler);</span>
+<span class="nc" id="L81">    LOGGER.info(&quot;Setting scheduler to {}&quot;, scheduler.name());</span>
+<span class="nc" id="L82">    queryScheduler = scheduler;</span>
+<span class="nc" id="L83">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

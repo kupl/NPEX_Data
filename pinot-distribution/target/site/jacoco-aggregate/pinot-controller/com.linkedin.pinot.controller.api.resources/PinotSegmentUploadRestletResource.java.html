@@ -1,0 +1,649 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>PinotSegmentUploadRestletResource.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-controller</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.controller.api.resources</a> &gt; <span class="el_source">PinotSegmentUploadRestletResource.java</span></div><h1>PinotSegmentUploadRestletResource.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.linkedin.pinot.controller.api.resources;
+
+import com.google.common.base.Preconditions;
+import com.linkedin.pinot.common.config.TableConfig;
+import com.linkedin.pinot.common.config.TableNameBuilder;
+import com.linkedin.pinot.common.metadata.ZKMetadataProvider;
+import com.linkedin.pinot.common.metadata.segment.OfflineSegmentZKMetadata;
+import com.linkedin.pinot.common.metadata.segment.SegmentZKMetadataCustomMapModifier;
+import com.linkedin.pinot.common.metrics.ControllerMeter;
+import com.linkedin.pinot.common.metrics.ControllerMetrics;
+import com.linkedin.pinot.common.segment.SegmentMetadata;
+import com.linkedin.pinot.common.segment.fetcher.SegmentFetcher;
+import com.linkedin.pinot.common.segment.fetcher.SegmentFetcherFactory;
+import com.linkedin.pinot.common.utils.CommonConstants;
+import com.linkedin.pinot.common.utils.FileUploadDownloadClient;
+import com.linkedin.pinot.common.utils.StringUtil;
+import com.linkedin.pinot.common.utils.TarGzCompressionUtils;
+import com.linkedin.pinot.common.utils.helix.HelixHelper;
+import com.linkedin.pinot.common.utils.time.TimeUtils;
+import com.linkedin.pinot.controller.ControllerConf;
+import com.linkedin.pinot.controller.api.access.AccessControl;
+import com.linkedin.pinot.controller.api.access.AccessControlFactory;
+import com.linkedin.pinot.controller.helix.core.PinotHelixResourceManager;
+import com.linkedin.pinot.controller.helix.core.PinotHelixSegmentOnlineOfflineStateModelGenerator;
+import com.linkedin.pinot.controller.util.TableSizeReader;
+import com.linkedin.pinot.controller.validation.StorageQuotaChecker;
+import com.linkedin.pinot.core.segment.index.SegmentMetadataImpl;
+import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
+import io.swagger.annotations.ApiParam;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UnsupportedEncodingException;
+import java.net.InetAddress;
+import java.net.URISyntaxException;
+import java.net.URLDecoder;
+import java.util.Date;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.Executor;
+import javax.annotation.Nonnull;
+import javax.inject.Inject;
+import javax.ws.rs.Consumes;
+import javax.ws.rs.DELETE;
+import javax.ws.rs.DefaultValue;
+import javax.ws.rs.Encoded;
+import javax.ws.rs.GET;
+import javax.ws.rs.POST;
+import javax.ws.rs.Path;
+import javax.ws.rs.PathParam;
+import javax.ws.rs.Produces;
+import javax.ws.rs.QueryParam;
+import javax.ws.rs.WebApplicationException;
+import javax.ws.rs.container.AsyncResponse;
+import javax.ws.rs.container.Suspended;
+import javax.ws.rs.core.Context;
+import javax.ws.rs.core.HttpHeaders;
+import javax.ws.rs.core.MediaType;
+import javax.ws.rs.core.Response;
+import org.apache.commons.httpclient.HttpConnectionManager;
+import org.apache.commons.io.FileUtils;
+import org.apache.commons.io.IOUtils;
+import org.apache.helix.ZNRecord;
+import org.apache.helix.model.IdealState;
+import org.glassfish.grizzly.http.server.Request;
+import org.glassfish.jersey.media.multipart.FormDataBodyPart;
+import org.glassfish.jersey.media.multipart.FormDataMultiPart;
+import org.glassfish.jersey.server.ManagedAsync;
+import org.joda.time.Interval;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+import org.json.JSONTokener;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+@Api(tags = Constants.SEGMENT_TAG)
+@Path(&quot;/&quot;)
+<span class="fc" id="L98">public class PinotSegmentUploadRestletResource {</span>
+<span class="fc" id="L99">  private static final Logger LOGGER = LoggerFactory.getLogger(PinotSegmentUploadRestletResource.class);</span>
+
+  @Inject
+  PinotHelixResourceManager _pinotHelixResourceManager;
+
+  @Inject
+  ControllerConf _controllerConf;
+
+  @Inject
+  ControllerMetrics _controllerMetrics;
+
+  @Inject
+  HttpConnectionManager _connectionManager;
+
+  @Inject
+  Executor _executor;
+
+  @Inject
+  AccessControlFactory _accessControlFactory;
+
+  @GET
+  @Produces(MediaType.APPLICATION_JSON)
+  @Path(&quot;/segments&quot;)
+  @Deprecated
+  public String listAllSegmentNames() throws Exception {
+<span class="nc" id="L124">    FileUploadPathProvider provider = new FileUploadPathProvider(_controllerConf);</span>
+<span class="nc" id="L125">    final JSONArray ret = new JSONArray();</span>
+<span class="nc bnc" id="L126" title="All 2 branches missed.">    for (final File file : provider.getBaseDataDir().listFiles()) {</span>
+<span class="nc" id="L127">      final String fileName = file.getName();</span>
+<span class="nc bnc" id="L128" title="All 4 branches missed.">      if (fileName.equalsIgnoreCase(&quot;fileUploadTemp&quot;) || fileName.equalsIgnoreCase(&quot;schemasTemp&quot;)) {</span>
+<span class="nc" id="L129">        continue;</span>
+      }
+
+<span class="nc" id="L132">      final String url = _controllerConf.generateVipUrl() + &quot;/segments/&quot; + fileName;</span>
+<span class="nc" id="L133">      ret.put(url);</span>
+    }
+<span class="nc" id="L135">    return ret.toString();</span>
+  }
+
+  @GET
+  @Produces(MediaType.APPLICATION_JSON)
+  @Path(&quot;/segments/{tableName}&quot;)
+  @ApiOperation(value = &quot;Lists names of all segments of a table&quot;, notes = &quot;Lists names of all segment names of a table&quot;)
+  public String listAllSegmentNames(
+      @ApiParam(value = &quot;Name of the table&quot;, required = true) @PathParam(&quot;tableName&quot;) String tableName,
+      @ApiParam(value = &quot;realtime|offline&quot;) @QueryParam(&quot;type&quot;) String tableTypeStr) throws Exception {
+<span class="nc" id="L145">    JSONArray ret = new JSONArray();</span>
+
+<span class="nc" id="L147">    CommonConstants.Helix.TableType tableType = Constants.validateTableType(tableTypeStr);</span>
+<span class="nc bnc" id="L148" title="All 2 branches missed.">    if (tableTypeStr == null) {</span>
+<span class="nc" id="L149">      ret.put(formatSegments(tableName, CommonConstants.Helix.TableType.OFFLINE));</span>
+<span class="nc" id="L150">      ret.put(formatSegments(tableName, CommonConstants.Helix.TableType.REALTIME));</span>
+    } else {
+<span class="nc" id="L152">      ret.put(formatSegments(tableName, tableType));</span>
+    }
+<span class="nc" id="L154">    return ret.toString();</span>
+  }
+
+  @GET
+  @Produces(MediaType.APPLICATION_OCTET_STREAM)
+  @Path(&quot;/segments/{tableName}/{segmentName}&quot;)
+  @ApiOperation(value = &quot;Download a segment&quot;, notes = &quot;Download a segment&quot;)
+  public Response downloadSegment(
+      @ApiParam(value = &quot;Name of the table&quot;, required = true) @PathParam(&quot;tableName&quot;) String tableName,
+      @ApiParam(value = &quot;Name of the segment&quot;, required = true) @PathParam(&quot;segmentName&quot;) @Encoded String segmentName,
+      @Context HttpHeaders httpHeaders) {
+    // Validate data access
+    boolean hasDataAccess;
+    try {
+<span class="fc" id="L168">      AccessControl accessControl = _accessControlFactory.create();</span>
+<span class="fc" id="L169">      hasDataAccess = accessControl.hasDataAccess(httpHeaders, tableName);</span>
+<span class="nc" id="L170">    } catch (Exception e) {</span>
+<span class="nc" id="L171">      throw new ControllerApplicationException(LOGGER,</span>
+          &quot;Caught exception while validating access to table: &quot; + tableName, Response.Status.INTERNAL_SERVER_ERROR, e);
+<span class="fc" id="L173">    }</span>
+<span class="pc bpc" id="L174" title="1 of 2 branches missed.">    if (!hasDataAccess) {</span>
+<span class="fc" id="L175">      throw new ControllerApplicationException(LOGGER, &quot;No data access to table: &quot; + tableName,</span>
+          Response.Status.FORBIDDEN);
+    }
+
+    FileUploadPathProvider provider;
+    try {
+<span class="nc" id="L181">      provider = new FileUploadPathProvider(_controllerConf);</span>
+<span class="nc" id="L182">    } catch (Exception e) {</span>
+<span class="nc" id="L183">      throw new ControllerApplicationException(LOGGER, e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR, e);</span>
+<span class="nc" id="L184">    }</span>
+    try {
+<span class="nc" id="L186">      segmentName = URLDecoder.decode(segmentName, &quot;UTF-8&quot;);</span>
+<span class="nc" id="L187">    } catch (UnsupportedEncodingException e) {</span>
+<span class="nc" id="L188">      String errStr = &quot;Could not decode segment name '&quot; + segmentName + &quot;'&quot;;</span>
+<span class="nc" id="L189">      throw new ControllerApplicationException(LOGGER, errStr, Response.Status.BAD_REQUEST);</span>
+<span class="nc" id="L190">    }</span>
+<span class="nc" id="L191">    final File dataFile = new File(provider.getBaseDataDir(), StringUtil.join(&quot;/&quot;, tableName, segmentName));</span>
+<span class="nc bnc" id="L192" title="All 2 branches missed.">    if (!dataFile.exists()) {</span>
+<span class="nc" id="L193">      throw new ControllerApplicationException(LOGGER,</span>
+          &quot;Segment &quot; + segmentName + &quot; or table &quot; + tableName + &quot; not found&quot;, Response.Status.NOT_FOUND);
+    }
+<span class="nc" id="L196">    Response.ResponseBuilder builder = Response.ok(dataFile);</span>
+<span class="nc" id="L197">    builder.header(HttpHeaders.CONTENT_DISPOSITION, &quot;attachment; filename=&quot; + dataFile.getName());</span>
+<span class="nc" id="L198">    builder.header(HttpHeaders.CONTENT_LENGTH, dataFile.length());</span>
+<span class="nc" id="L199">    return builder.build();</span>
+  }
+
+  @DELETE
+  @Produces(MediaType.APPLICATION_JSON)
+  @Path(&quot;/segments/{tableName}/{segmentName}&quot;)
+  @ApiOperation(value = &quot;Deletes a segment&quot;, notes = &quot;Deletes a segment&quot;)
+  public SuccessResponse deleteOneSegment(
+      @ApiParam(value = &quot;Name of the table&quot;, required = true) @PathParam(&quot;tableName&quot;) String tableName,
+      @ApiParam(value = &quot;Name of the segment&quot;, required = true) @PathParam(&quot;segmentName&quot;) @Encoded String segmentName,
+      @ApiParam(value = &quot;realtime|offline&quot;, required = true) @QueryParam(&quot;type&quot;) String tableTypeStr) {
+<span class="nc" id="L210">    CommonConstants.Helix.TableType tableType = Constants.validateTableType(tableTypeStr);</span>
+<span class="nc bnc" id="L211" title="All 2 branches missed.">    if (tableType == null) {</span>
+<span class="nc" id="L212">      throw new ControllerApplicationException(LOGGER, &quot;Table type must not be null&quot;, Response.Status.BAD_REQUEST);</span>
+    }
+    try {
+<span class="nc" id="L215">      segmentName = URLDecoder.decode(segmentName, &quot;UTF-8&quot;);</span>
+<span class="nc" id="L216">    } catch (UnsupportedEncodingException e) {</span>
+<span class="nc" id="L217">      String errStr = &quot;Could not decode segment name '&quot; + segmentName + &quot;'&quot;;</span>
+<span class="nc" id="L218">      throw new ControllerApplicationException(LOGGER, errStr, Response.Status.BAD_REQUEST);</span>
+<span class="nc" id="L219">    }</span>
+<span class="nc" id="L220">    PinotSegmentRestletResource.toggleStateInternal(tableName, StateType.DROP, tableType, segmentName,</span>
+        _pinotHelixResourceManager);
+
+<span class="nc" id="L223">    return new SuccessResponse(&quot;Segment deleted&quot;);</span>
+  }
+
+  @DELETE
+  @Produces(MediaType.APPLICATION_JSON)
+  @Path(&quot;/segments/{tableName}&quot;)
+  @ApiOperation(value = &quot;Deletes all segments of a table&quot;, notes = &quot;Deletes all segments of a table&quot;)
+  public SuccessResponse deleteAllSegments(
+      @ApiParam(value = &quot;Name of the table&quot;, required = true) @PathParam(&quot;tableName&quot;) String tableName,
+      @ApiParam(value = &quot;realtime|offline&quot;, required = true) @QueryParam(&quot;type&quot;) String tableTypeStr) {
+<span class="nc" id="L233">    CommonConstants.Helix.TableType tableType = Constants.validateTableType(tableTypeStr);</span>
+<span class="nc bnc" id="L234" title="All 2 branches missed.">    if (tableType == null) {</span>
+<span class="nc" id="L235">      throw new ControllerApplicationException(LOGGER, &quot;Table type must not be null&quot;, Response.Status.BAD_REQUEST);</span>
+    }
+<span class="nc" id="L237">    PinotSegmentRestletResource.toggleStateInternal(tableName, StateType.DROP, tableType, null,</span>
+        _pinotHelixResourceManager);
+
+<span class="nc" id="L240">    return new SuccessResponse(</span>
+        &quot;All segments of table &quot; + TableNameBuilder.forType(tableType).tableNameWithType(tableName) + &quot; deleted&quot;);
+  }
+
+  @POST
+  @ManagedAsync
+  @Produces(MediaType.APPLICATION_JSON)
+  @Consumes(MediaType.MULTIPART_FORM_DATA)
+  @Path(&quot;/segments&quot;)
+  @ApiOperation(value = &quot;Upload a segment&quot;, notes = &quot;Upload a segment as binary&quot;)
+  public void uploadSegmentAsMultiPart(FormDataMultiPart multiPart,
+      @ApiParam(value = &quot;Whether to enable parallel push protection&quot;) @DefaultValue(&quot;false&quot;) @QueryParam(FileUploadDownloadClient.QueryParameters.ENABLE_PARALLEL_PUSH_PROTECTION) boolean enableParallelPushProtection,
+      @Context HttpHeaders headers, @Context Request request, @Suspended final AsyncResponse asyncResponse) {
+    try {
+<span class="nc" id="L254">      asyncResponse.resume(uploadSegmentInternal(multiPart, null, enableParallelPushProtection, headers, request));</span>
+<span class="nc" id="L255">    } catch (Throwable t) {</span>
+<span class="nc" id="L256">      asyncResponse.resume(t);</span>
+<span class="nc" id="L257">    }</span>
+<span class="nc" id="L258">  }</span>
+
+  @POST
+  @ManagedAsync
+  @Produces(MediaType.APPLICATION_JSON)
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Path(&quot;/segments&quot;)
+  @ApiOperation(value = &quot;Upload a segment&quot;, notes = &quot;Upload a segment as json&quot;)
+  // TODO Does it even work if the segment is sent as a JSON body? Need to compare with the other API
+  public void uploadSegmentAsJson(String segmentJsonStr,    // If segment is present as json body
+      @ApiParam(value = &quot;Whether to enable parallel push protection&quot;) @DefaultValue(&quot;false&quot;) @QueryParam(FileUploadDownloadClient.QueryParameters.ENABLE_PARALLEL_PUSH_PROTECTION) boolean enableParallelPushProtection,
+      @Context HttpHeaders headers, @Context Request request, @Suspended final AsyncResponse asyncResponse) {
+    try {
+<span class="nc" id="L271">      asyncResponse.resume(uploadSegmentInternal(null, segmentJsonStr, enableParallelPushProtection, headers, request));</span>
+<span class="nc" id="L272">    } catch (Throwable t) {</span>
+<span class="nc" id="L273">      asyncResponse.resume(t);</span>
+<span class="nc" id="L274">    }</span>
+<span class="nc" id="L275">  }</span>
+
+  private SuccessResponse uploadSegmentInternal(FormDataMultiPart multiPart, String segmentJsonStr,
+      boolean enableParallelPushProtection, HttpHeaders headers, Request request) {
+<span class="nc" id="L279">    File tempTarredSegmentFile = null;</span>
+<span class="nc" id="L280">    File tempSegmentDir = null;</span>
+
+    try {
+<span class="nc" id="L283">      FileUploadPathProvider provider = new FileUploadPathProvider(_controllerConf);</span>
+<span class="nc" id="L284">      String tempSegmentName = &quot;tmp-&quot; + System.nanoTime();</span>
+<span class="nc" id="L285">      tempTarredSegmentFile = new File(provider.getFileUploadTmpDir(), tempSegmentName);</span>
+<span class="nc" id="L286">      tempSegmentDir = new File(provider.getTmpUntarredPath(), tempSegmentName);</span>
+
+      // Get upload type
+<span class="nc" id="L289">      String uploadTypeStr = headers.getHeaderString(FileUploadDownloadClient.CustomHeaders.UPLOAD_TYPE);</span>
+      FileUploadDownloadClient.FileUploadType uploadType;
+<span class="nc bnc" id="L291" title="All 2 branches missed.">      if (uploadTypeStr != null) {</span>
+<span class="nc" id="L292">        uploadType = FileUploadDownloadClient.FileUploadType.valueOf(uploadTypeStr);</span>
+      } else {
+<span class="nc" id="L294">        uploadType = FileUploadDownloadClient.FileUploadType.getDefaultUploadType();</span>
+      }
+
+<span class="nc" id="L297">      String downloadURI = null;</span>
+<span class="nc bnc" id="L298" title="All 3 branches missed.">      switch (uploadType) {</span>
+        case JSON:
+        case URI:
+          // Get download URI
+          try {
+<span class="nc" id="L303">            downloadURI = getDownloadUri(uploadType, headers, segmentJsonStr);</span>
+<span class="nc" id="L304">          } catch (Exception e) {</span>
+<span class="nc" id="L305">            throw new ControllerApplicationException(LOGGER, &quot;Failed to get download URI&quot;, Response.Status.BAD_REQUEST,</span>
+                e);
+<span class="nc" id="L307">          }</span>
+
+          // Get segment fetcher based on the download URI
+          SegmentFetcher segmentFetcher;
+          try {
+<span class="nc" id="L312">            segmentFetcher = SegmentFetcherFactory.getInstance().getSegmentFetcherBasedOnURI(downloadURI);</span>
+<span class="nc" id="L313">          } catch (URISyntaxException e) {</span>
+<span class="nc" id="L314">            throw new ControllerApplicationException(LOGGER,</span>
+                &quot;Caught exception while parsing download URI: &quot; + downloadURI, Response.Status.BAD_REQUEST, e);
+<span class="nc" id="L316">          }</span>
+<span class="nc bnc" id="L317" title="All 2 branches missed.">          if (segmentFetcher == null) {</span>
+<span class="nc" id="L318">            throw new ControllerApplicationException(LOGGER,</span>
+                &quot;Failed to get segment fetcher for download URI: &quot; + downloadURI, Response.Status.BAD_REQUEST);
+          }
+
+          // Download segment tar file to local
+<span class="nc" id="L323">          segmentFetcher.fetchSegmentToLocal(downloadURI, tempTarredSegmentFile);</span>
+<span class="nc" id="L324">          break;</span>
+
+        case TAR:
+<span class="nc" id="L327">          Map&lt;String, List&lt;FormDataBodyPart&gt;&gt; map = multiPart.getFields();</span>
+<span class="nc bnc" id="L328" title="All 2 branches missed.">          if (!validateMultiPart(map, &quot;UNKNOWN&quot;)) {</span>
+<span class="nc" id="L329">            throw new ControllerApplicationException(LOGGER, &quot;Invalid multi-part form&quot;, Response.Status.BAD_REQUEST);</span>
+          }
+<span class="nc" id="L331">          String partName = map.keySet().iterator().next();</span>
+<span class="nc" id="L332">          FormDataBodyPart bodyPart = map.get(partName).get(0);</span>
+<span class="nc" id="L333">          try (InputStream inputStream = bodyPart.getValueAs(InputStream.class);</span>
+<span class="nc" id="L334">              FileOutputStream outputStream = new FileOutputStream(tempTarredSegmentFile)) {</span>
+<span class="nc" id="L335">            IOUtils.copyLarge(inputStream, outputStream);</span>
+<span class="nc bnc" id="L336" title="All 16 branches missed.">          }</span>
+<span class="nc" id="L337">          break;</span>
+
+        default:
+<span class="pc" id="L340">          throw new UnsupportedOperationException(&quot;Unsupported upload type: &quot; + uploadType);</span>
+      }
+
+      // While there is TarGzCompressionUtils.unTarOneFile, we use unTar here to unpack all files
+      // in the segment in order to ensure the segment is not corrupted
+<span class="nc" id="L345">      TarGzCompressionUtils.unTar(tempTarredSegmentFile, tempSegmentDir);</span>
+<span class="nc" id="L346">      File[] files = tempSegmentDir.listFiles();</span>
+<span class="nc bnc" id="L347" title="All 4 branches missed.">      Preconditions.checkState(files != null &amp;&amp; files.length == 1);</span>
+<span class="nc" id="L348">      File indexDir = files[0];</span>
+
+<span class="nc" id="L350">      SegmentMetadata segmentMetadata = new SegmentMetadataImpl(indexDir);</span>
+<span class="nc" id="L351">      String segmentName = segmentMetadata.getName();</span>
+<span class="nc" id="L352">      String offlineTableName = TableNameBuilder.OFFLINE.tableNameWithType(segmentMetadata.getTableName());</span>
+<span class="nc" id="L353">      String clientAddress = InetAddress.getByName(request.getRemoteAddr()).getHostName();</span>
+<span class="nc" id="L354">      LOGGER.info(&quot;Processing upload request for segment: {} of table: {} from client: {}&quot;, segmentName,</span>
+          offlineTableName, clientAddress);
+<span class="nc" id="L356">      uploadSegment(indexDir, segmentMetadata, tempTarredSegmentFile, downloadURI, provider,</span>
+          enableParallelPushProtection, headers);
+
+<span class="nc" id="L359">      return new SuccessResponse(&quot;Successfully uploaded segment: &quot; + segmentName + &quot; of table: &quot; + offlineTableName);</span>
+<span class="nc" id="L360">    } catch (WebApplicationException e) {</span>
+<span class="nc" id="L361">      throw e;</span>
+<span class="nc" id="L362">    } catch (Exception e) {</span>
+<span class="nc" id="L363">      _controllerMetrics.addMeteredGlobalValue(ControllerMeter.CONTROLLER_SEGMENT_UPLOAD_ERROR, 1L);</span>
+<span class="nc" id="L364">      throw new ControllerApplicationException(LOGGER, &quot;Caught internal server exception while uploading segment&quot;,</span>
+          Response.Status.INTERNAL_SERVER_ERROR, e);
+    } finally {
+<span class="nc" id="L367">      FileUtils.deleteQuietly(tempTarredSegmentFile);</span>
+<span class="nc" id="L368">      FileUtils.deleteQuietly(tempSegmentDir);</span>
+    }
+  }
+
+  /**
+   * Helper method to upload segment with the following steps:
+   * &lt;ul&gt;
+   *   &lt;li&gt;Check storage quota&lt;/li&gt;
+   *   &lt;li&gt;Check segment start/end time&lt;/li&gt;
+   *   &lt;li&gt;For new segment (non-refresh), directly add the segment&lt;/li&gt;
+   *   &lt;li&gt;
+   *     For REFRESH case
+   *     &lt;ul&gt;
+   *       &lt;li&gt;Check IF-MATCH CRC if existing&lt;/li&gt;
+   *       &lt;li&gt;Lock the segment if parallel push protection enabled&lt;/li&gt;
+   *       &lt;li&gt;Update the custom map in segment ZK metadata&lt;/li&gt;
+   *       &lt;li&gt;Update the segment ZK metadata (this will also unlock the segment)&lt;/li&gt;
+   *     &lt;/ul&gt;
+   *   &lt;/li&gt;
+   * &lt;/ul&gt;
+   */
+  private void uploadSegment(File indexDir, SegmentMetadata segmentMetadata, File tempTarredSegmentFile,
+      String downloadUrl, FileUploadPathProvider provider, boolean enableParallelPushProtection, HttpHeaders headers)
+      throws IOException, JSONException {
+<span class="nc" id="L392">    String rawTableName = segmentMetadata.getTableName();</span>
+<span class="nc" id="L393">    String offlineTableName = TableNameBuilder.OFFLINE.tableNameWithType(rawTableName);</span>
+<span class="nc" id="L394">    String segmentName = segmentMetadata.getName();</span>
+<span class="nc" id="L395">    TableConfig offlineTableConfig =</span>
+        ZKMetadataProvider.getOfflineTableConfig(_pinotHelixResourceManager.getPropertyStore(), offlineTableName);
+
+<span class="nc bnc" id="L398" title="All 2 branches missed.">    if (offlineTableConfig == null) {</span>
+<span class="nc" id="L399">      throw new ControllerApplicationException(LOGGER, &quot;Failed to find table config for table: &quot; + offlineTableName,</span>
+          Response.Status.NOT_FOUND);
+    }
+
+    // Check quota
+<span class="nc" id="L404">    StorageQuotaChecker.QuotaCheckerResponse quotaResponse =</span>
+        checkStorageQuota(indexDir, segmentMetadata, offlineTableConfig);
+<span class="nc bnc" id="L406" title="All 2 branches missed.">    if (!quotaResponse.isSegmentWithinQuota) {</span>
+<span class="nc" id="L407">      throw new ControllerApplicationException(LOGGER,</span>
+          &quot;Quota check failed for segment: &quot; + segmentName + &quot; of table: &quot; + offlineTableName + &quot;, reason: &quot;
+              + quotaResponse.reason, Response.Status.FORBIDDEN);
+    }
+
+    // Check time range
+<span class="nc bnc" id="L413" title="All 2 branches missed.">    if (!isSegmentTimeValid(segmentMetadata)) {</span>
+<span class="nc" id="L414">      throw new ControllerApplicationException(LOGGER,</span>
+          &quot;Invalid segment start/end time for segment: &quot; + segmentName + &quot; of table: &quot; + offlineTableName,
+          Response.Status.NOT_ACCEPTABLE);
+    }
+
+<span class="nc" id="L419">    ZNRecord znRecord = _pinotHelixResourceManager.getSegmentMetadataZnRecord(offlineTableName, segmentName);</span>
+
+    // Brand new segment, not refresh, directly add the segment
+<span class="nc bnc" id="L422" title="All 2 branches missed.">    if (znRecord == null) {</span>
+<span class="nc bnc" id="L423" title="All 2 branches missed.">      if (downloadUrl == null) {</span>
+<span class="nc" id="L424">        downloadUrl = moveSegmentToPermanentDirectory(provider, rawTableName, segmentName, tempTarredSegmentFile);</span>
+      }
+<span class="nc" id="L426">      _pinotHelixResourceManager.addNewSegment(segmentMetadata, downloadUrl);</span>
+<span class="nc" id="L427">      return;</span>
+    }
+
+    // Segment already exists, refresh if necessary
+<span class="nc" id="L431">    OfflineSegmentZKMetadata existingSegmentZKMetadata = new OfflineSegmentZKMetadata(znRecord);</span>
+<span class="nc" id="L432">    long existingCrc = existingSegmentZKMetadata.getCrc();</span>
+
+    // Check if CRC match when IF-MATCH header is set
+<span class="nc" id="L435">    String expectedCrcStr = headers.getHeaderString(HttpHeaders.IF_MATCH);</span>
+<span class="nc bnc" id="L436" title="All 2 branches missed.">    if (expectedCrcStr != null) {</span>
+      long expectedCrc;
+      try {
+<span class="nc" id="L439">        expectedCrc = Long.parseLong(expectedCrcStr);</span>
+<span class="nc" id="L440">      } catch (NumberFormatException e) {</span>
+<span class="nc" id="L441">        throw new ControllerApplicationException(LOGGER,</span>
+            &quot;Caught exception for segment: &quot; + segmentName + &quot; of table: &quot; + offlineTableName
+                + &quot; while parsing IF-MATCH CRC: \&quot;&quot; + expectedCrcStr + &quot;\&quot;&quot;, Response.Status.PRECONDITION_FAILED);
+<span class="nc" id="L444">      }</span>
+<span class="nc bnc" id="L445" title="All 2 branches missed.">      if (expectedCrc != existingCrc) {</span>
+<span class="nc" id="L446">        throw new ControllerApplicationException(LOGGER,</span>
+            &quot;For segment: &quot; + segmentName + &quot; of table: &quot; + offlineTableName + &quot;, expected CRC: &quot; + expectedCrc
+                + &quot; does not match existing CRC: &quot; + existingCrc, Response.Status.PRECONDITION_FAILED);
+      }
+    }
+
+    // Check segment upload start time when parallel push protection enabled
+<span class="nc bnc" id="L453" title="All 2 branches missed.">    if (enableParallelPushProtection) {</span>
+      // When segment upload start time is larger than 0, that means another upload is in progress
+<span class="nc" id="L455">      long segmentUploadStartTime = existingSegmentZKMetadata.getSegmentUploadStartTime();</span>
+<span class="nc bnc" id="L456" title="All 2 branches missed.">      if (segmentUploadStartTime &gt; 0) {</span>
+<span class="nc bnc" id="L457" title="All 2 branches missed.">        if (System.currentTimeMillis() - segmentUploadStartTime &gt; _controllerConf.getSegmentUploadTimeoutInMillis()) {</span>
+          // Last segment upload does not finish properly, replace the segment
+<span class="nc" id="L459">          LOGGER.error(&quot;Segment: {} of table: {} was not properly uploaded, replacing it&quot;, segmentName,</span>
+              offlineTableName);
+<span class="nc" id="L461">          _controllerMetrics.addMeteredGlobalValue(ControllerMeter.NUMBER_SEGMENT_UPLOAD_TIMEOUT_EXCEEDED, 1L);</span>
+        } else {
+          // Another segment upload is in progress
+<span class="nc" id="L464">          throw new ControllerApplicationException(LOGGER,</span>
+              &quot;Another segment upload is in progress for segment: &quot; + segmentName + &quot; of table: &quot; + offlineTableName
+                  + &quot;, retry later&quot;, Response.Status.CONFLICT);
+        }
+      }
+
+      // Lock the segment by setting the upload start time in ZK
+<span class="nc" id="L471">      existingSegmentZKMetadata.setSegmentUploadStartTime(System.currentTimeMillis());</span>
+<span class="nc bnc" id="L472" title="All 2 branches missed.">      if (!_pinotHelixResourceManager.updateZkMetadata(existingSegmentZKMetadata, znRecord.getVersion())) {</span>
+<span class="nc" id="L473">        throw new ControllerApplicationException(LOGGER,</span>
+            &quot;Failed to lock the segment: &quot; + segmentName + &quot; of table: &quot; + offlineTableName + &quot;, retry later&quot;,
+            Response.Status.CONFLICT);
+      }
+    }
+
+    // Reset segment upload start time to unlock the segment later
+    // NOTE: reset this value even if parallel push protection is not enabled so that segment can recover in case
+    // previous segment upload did not finish properly and the parallel push protection is turned off
+<span class="nc" id="L482">    existingSegmentZKMetadata.setSegmentUploadStartTime(-1);</span>
+
+    try {
+      // Modify the custom map in segment ZK metadata
+<span class="nc" id="L486">      String segmentZKMetadataCustomMapModifierStr =</span>
+          headers.getHeaderString(FileUploadDownloadClient.CustomHeaders.SEGMENT_ZK_METADATA_CUSTOM_MAP_MODIFIER);
+      SegmentZKMetadataCustomMapModifier segmentZKMetadataCustomMapModifier;
+<span class="nc bnc" id="L489" title="All 2 branches missed.">      if (segmentZKMetadataCustomMapModifierStr != null) {</span>
+<span class="nc" id="L490">        segmentZKMetadataCustomMapModifier =</span>
+            new SegmentZKMetadataCustomMapModifier(segmentZKMetadataCustomMapModifierStr);
+      } else {
+        // By default, use REPLACE modify mode
+<span class="nc" id="L494">        segmentZKMetadataCustomMapModifier =</span>
+            new SegmentZKMetadataCustomMapModifier(SegmentZKMetadataCustomMapModifier.ModifyMode.REPLACE, null);
+      }
+<span class="nc" id="L497">      existingSegmentZKMetadata.setCustomMap(</span>
+          segmentZKMetadataCustomMapModifier.modifyMap(existingSegmentZKMetadata.getCustomMap()));
+
+      // Update ZK metadata and refresh the segment if necessary
+<span class="nc" id="L501">      long newCrc = Long.valueOf(segmentMetadata.getCrc());</span>
+<span class="nc bnc" id="L502" title="All 2 branches missed.">      if (newCrc == existingCrc) {</span>
+        // New segment is the same as the existing one, only update ZK metadata without refresh the segment
+<span class="nc bnc" id="L504" title="All 2 branches missed.">        if (!_pinotHelixResourceManager.updateZkMetadata(existingSegmentZKMetadata)) {</span>
+<span class="nc" id="L505">          throw new RuntimeException(</span>
+              &quot;Failed to update ZK metadata for segment: &quot; + segmentName + &quot; of table: &quot; + offlineTableName);
+        }
+      } else {
+        // New segment is different with the existing one, update ZK metadata and refresh the segment
+<span class="nc bnc" id="L510" title="All 2 branches missed.">        if (downloadUrl == null) {</span>
+<span class="nc" id="L511">          downloadUrl = moveSegmentToPermanentDirectory(provider, rawTableName, segmentName, tempTarredSegmentFile);</span>
+        }
+<span class="nc" id="L513">        _pinotHelixResourceManager.refreshSegment(segmentMetadata, existingSegmentZKMetadata, downloadUrl);</span>
+      }
+<span class="nc" id="L515">    } catch (Exception e) {</span>
+<span class="nc bnc" id="L516" title="All 2 branches missed.">      if (!_pinotHelixResourceManager.updateZkMetadata(existingSegmentZKMetadata)) {</span>
+<span class="nc" id="L517">        LOGGER.error(&quot;Failed to update ZK metadata for segment: {} of table: {}&quot;, segmentName, offlineTableName);</span>
+      }
+<span class="nc" id="L519">      throw e;</span>
+<span class="nc" id="L520">    }</span>
+<span class="nc" id="L521">  }</span>
+
+  private String moveSegmentToPermanentDirectory(FileUploadPathProvider provider, String tableName, String segmentName,
+      File tempTarredSegmentFile) throws IOException {
+    // Move tarred segment file to data directory when there is no external download URL
+<span class="nc" id="L526">    File tarredSegmentFile = new File(new File(provider.getBaseDataDir(), tableName), segmentName);</span>
+<span class="nc" id="L527">    FileUtils.deleteQuietly(tarredSegmentFile);</span>
+<span class="nc" id="L528">    FileUtils.moveFile(tempTarredSegmentFile, tarredSegmentFile);</span>
+<span class="nc" id="L529">    return ControllerConf.constructDownloadUrl(tableName, segmentName, provider.getVip());</span>
+  }
+
+  private String getDownloadUri(FileUploadDownloadClient.FileUploadType uploadType, HttpHeaders headers,
+      String segmentJsonStr) throws Exception {
+<span class="nc bnc" id="L534" title="All 3 branches missed.">    switch (uploadType) {</span>
+      case URI:
+<span class="nc" id="L536">        return headers.getHeaderString(FileUploadDownloadClient.CustomHeaders.DOWNLOAD_URI);</span>
+      case JSON:
+        // Get segmentJsonStr
+<span class="nc" id="L539">        JSONTokener tokener = new JSONTokener(segmentJsonStr);</span>
+<span class="nc" id="L540">        JSONObject segmentJson = new JSONObject(tokener);</span>
+        // Download segment from the given Uri
+<span class="nc" id="L542">        return segmentJson.getString(CommonConstants.Segment.Offline.DOWNLOAD_URL);</span>
+      default:
+        break;
+    }
+<span class="nc" id="L546">    throw new UnsupportedOperationException(&quot;Not support getDownloadUri method for upload type - &quot; + uploadType);</span>
+  }
+
+  private org.json.JSONObject formatSegments(String tableName, CommonConstants.Helix.TableType tableType)
+      throws Exception {
+<span class="nc" id="L551">    org.json.JSONObject obj = new org.json.JSONObject();</span>
+<span class="nc" id="L552">    obj.put(tableType.toString(), getSegments(tableName, tableType.toString()));</span>
+<span class="nc" id="L553">    return obj;</span>
+  }
+
+  private JSONArray getSegments(String tableName, String tableType) {
+
+<span class="nc" id="L558">    final JSONArray ret = new JSONArray();</span>
+
+<span class="nc" id="L560">    String realtimeTableName = TableNameBuilder.REALTIME.tableNameWithType(tableName);</span>
+<span class="nc" id="L561">    String offlineTableName = TableNameBuilder.OFFLINE.tableNameWithType(tableName);</span>
+
+    String tableNameWithType;
+<span class="nc bnc" id="L564" title="All 2 branches missed.">    if (CommonConstants.Helix.TableType.valueOf(tableType).toString().equals(&quot;REALTIME&quot;)) {</span>
+<span class="nc" id="L565">      tableNameWithType = realtimeTableName;</span>
+    } else {
+<span class="nc" id="L567">      tableNameWithType = offlineTableName;</span>
+    }
+
+<span class="nc" id="L570">    List&lt;String&gt; segmentList = _pinotHelixResourceManager.getSegmentsFor(tableNameWithType);</span>
+<span class="nc" id="L571">    IdealState idealState =</span>
+        HelixHelper.getTableIdealState(_pinotHelixResourceManager.getHelixZkManager(), tableNameWithType);
+
+<span class="nc bnc" id="L574" title="All 2 branches missed.">    for (String segmentName : segmentList) {</span>
+<span class="nc" id="L575">      Map&lt;String, String&gt; map = idealState.getInstanceStateMap(segmentName);</span>
+<span class="nc bnc" id="L576" title="All 2 branches missed.">      if (map == null) {</span>
+<span class="nc" id="L577">        continue;</span>
+      }
+<span class="nc bnc" id="L579" title="All 2 branches missed.">      if (!map.containsValue(PinotHelixSegmentOnlineOfflineStateModelGenerator.OFFLINE_STATE)) {</span>
+<span class="nc" id="L580">        ret.put(segmentName);</span>
+      }
+<span class="nc" id="L582">    }</span>
+
+<span class="nc" id="L584">    return ret;</span>
+  }
+
+  // Validate that there is one file that is in the input.
+  public static boolean validateMultiPart(Map&lt;String, List&lt;FormDataBodyPart&gt;&gt; map, String segmentName) {
+<span class="fc" id="L589">    boolean isGood = true;</span>
+<span class="pc bpc" id="L590" title="1 of 2 branches missed.">    if (map.size() != 1) {</span>
+<span class="nc" id="L591">      LOGGER.warn(&quot;Incorrect number of multi-part elements: {} (segmentName {}). Picking one&quot;, map.size(), segmentName);</span>
+<span class="nc" id="L592">      isGood = false;</span>
+    }
+<span class="fc" id="L594">    List&lt;FormDataBodyPart&gt; bodyParts = map.get(map.keySet().iterator().next());</span>
+<span class="pc bpc" id="L595" title="1 of 2 branches missed.">    if (bodyParts.size() != 1) {</span>
+<span class="nc" id="L596">      LOGGER.warn(&quot;Incorrect number of elements in list in first part: {} (segmentName {}). Picking first one&quot;,</span>
+          bodyParts.size(), segmentName);
+<span class="nc" id="L598">      isGood = false;</span>
+    }
+<span class="fc" id="L600">    return isGood;</span>
+  }
+
+  /**
+   * check if the segment represented by segmentFile is within the storage quota
+   * @param segmentFile untarred segment. This should not be null.
+   *                    segmentFile must exist on disk and must be a directory
+   * @param metadata segment metadata. This should not be null.
+   * @param offlineTableConfig offline table configuration. This should not be null.
+   */
+  private StorageQuotaChecker.QuotaCheckerResponse checkStorageQuota(@Nonnull File segmentFile,
+      @Nonnull SegmentMetadata metadata, @Nonnull TableConfig offlineTableConfig) {
+<span class="nc" id="L612">    TableSizeReader tableSizeReader = new TableSizeReader(_executor, _connectionManager, _pinotHelixResourceManager);</span>
+<span class="nc" id="L613">    StorageQuotaChecker quotaChecker = new StorageQuotaChecker(offlineTableConfig, tableSizeReader, _controllerMetrics);</span>
+<span class="nc" id="L614">    String offlineTableName = TableNameBuilder.OFFLINE.tableNameWithType(metadata.getTableName());</span>
+<span class="nc" id="L615">    return quotaChecker.isSegmentStorageWithinQuota(segmentFile, offlineTableName, metadata.getName(),</span>
+        _controllerConf.getServerAdminRequestTimeoutSeconds() * 1000);
+  }
+
+  /**
+   * Returns true if:
+   * - Segment does not have a start/end time, OR
+   * - The start/end time are in a valid range (Jan 01 1971 - Jan 01, 2071)
+   * @param metadata Segment metadata
+   * @return
+   */
+  private boolean isSegmentTimeValid(SegmentMetadata metadata) {
+<span class="nc" id="L627">    Interval interval = metadata.getTimeInterval();</span>
+<span class="nc bnc" id="L628" title="All 2 branches missed.">    if (interval == null) {</span>
+<span class="nc" id="L629">      return true;</span>
+    }
+
+<span class="nc" id="L632">    long startMillis = interval.getStartMillis();</span>
+<span class="nc" id="L633">    long endMillis = interval.getEndMillis();</span>
+
+<span class="nc bnc" id="L635" title="All 4 branches missed.">    if (!TimeUtils.timeValueInValidRange(startMillis) || !TimeUtils.timeValueInValidRange(endMillis)) {</span>
+<span class="nc" id="L636">      Date minDate = new Date(TimeUtils.getValidMinTimeMillis());</span>
+<span class="nc" id="L637">      Date maxDate = new Date(TimeUtils.getValidMaxTimeMillis());</span>
+
+<span class="nc" id="L639">      LOGGER.error(</span>
+          &quot;Invalid start time '{}ms' or end time '{}ms' for segment {}, must be between '{}' and '{}' (timecolumn {}, timeunit {})&quot;,
+          interval.getStartMillis(), interval.getEndMillis(), metadata.getName(), minDate, maxDate,
+          metadata.getTimeColumn(), metadata.getTimeUnit().toString());
+<span class="nc" id="L643">      return false;</span>
+    }
+
+<span class="nc" id="L646">    return true;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

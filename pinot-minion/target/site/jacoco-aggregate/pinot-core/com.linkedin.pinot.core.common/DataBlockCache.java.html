@@ -1,0 +1,408 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>DataBlockCache.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-minion</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.common</a> &gt; <span class="el_source">DataBlockCache.java</span></div><h1>DataBlockCache.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.common;
+
+import com.linkedin.pinot.common.data.FieldSpec;
+import com.linkedin.pinot.core.plan.DocIdSetPlanNode;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+
+
+/**
+ * This class serves as a single/multi value column block level cache. Using this class can prevent fetching the same column
+ * data multiple times. This class allocate resources on demand, and reuse them as much as possible to prevent garbage
+ * collection.
+ */
+@SuppressWarnings(&quot;Duplicates&quot;)
+public class DataBlockCache {
+  private final DataFetcher _dataFetcher;
+
+  /** _columnXXLoaded must be cleared in initNewBlock */
+<span class="fc" id="L36">  private final Set&lt;String&gt; _columnDictIdLoaded = new HashSet&lt;&gt;();</span>
+<span class="fc" id="L37">  private final Set&lt;String&gt; _columnValueLoaded = new HashSet&lt;&gt;();</span>
+<span class="fc" id="L38">  private final Set&lt;String&gt; _columnHashCodeLoaded = new HashSet&lt;&gt;();</span>
+<span class="fc" id="L39">  private final Set&lt;String&gt; _columnStringLoaded = new HashSet&lt;&gt;();</span>
+
+  /** _columnToXXsMap must be defined accordingly */
+<span class="fc" id="L42">  private final Map&lt;String, int[]&gt; _columnToDictIdsMap = new HashMap&lt;&gt;();</span>
+<span class="fc" id="L43">  private final Map&lt;String, Object&gt; _columnToValuesMap = new HashMap&lt;&gt;();</span>
+<span class="fc" id="L44">  private final Map&lt;String, String[]&gt; _columnToStringsMap = new HashMap&lt;&gt;();</span>
+
+<span class="fc" id="L46">  private final Map&lt;String, int[]&gt; _columnToNumberOfEntriesMap = new HashMap&lt;&gt;();</span>
+
+<span class="fc" id="L48">  private final Map&lt;String, int[][]&gt; _columnToDictIdsArrayMap = new HashMap&lt;&gt;();</span>
+<span class="fc" id="L49">  private final Map&lt;String, Object&gt; _columnToValuesArrayMap = new HashMap&lt;&gt;();</span>
+<span class="fc" id="L50">  private final Map&lt;String, String[][]&gt; _columnToStringsArrayMap = new HashMap&lt;&gt;();</span>
+
+<span class="fc" id="L52">  private final Map&lt;String, int[]&gt; _columnToTempDictIdsMap = new HashMap&lt;&gt;();</span>
+
+  private int[] _docIds;
+  private int _startPos;
+  private int _length;
+
+  /**
+   * Constructor for SingleValueBlockCache.
+   *
+   * @param dataFetcher data fetcher associated with the index segment.
+   */
+<span class="fc" id="L63">  public DataBlockCache(DataFetcher dataFetcher) {</span>
+<span class="fc" id="L64">    _dataFetcher = dataFetcher;</span>
+<span class="fc" id="L65">  }</span>
+
+  /**
+   * Init the block cache with block doc id array, start index and block length. This method should be called before
+   * fetching data for any specific block.
+   *
+   * @param docIds doc id array.
+   * @param startPos start position.
+   * @param length length.
+   */
+  public void initNewBlock(int[] docIds, int startPos, int length) {
+<span class="fc" id="L76">    _columnDictIdLoaded.clear();</span>
+<span class="fc" id="L77">    _columnValueLoaded.clear();</span>
+<span class="fc" id="L78">    _columnHashCodeLoaded.clear();</span>
+<span class="fc" id="L79">    _columnStringLoaded.clear();</span>
+
+<span class="fc" id="L81">    _docIds = docIds;</span>
+<span class="fc" id="L82">    _startPos = startPos;</span>
+<span class="fc" id="L83">    _length = length;</span>
+<span class="fc" id="L84">  }</span>
+
+  /**
+   * Get dictionary id array for a given column for the specific block initialized in the initNewBlock.
+   *
+   * @param column column name.
+   * @return dictionary id array associated with this column.
+   */
+  public int[] getDictIdArrayForColumn(String column) {
+<span class="fc" id="L93">    int[] dictIds = _columnToDictIdsMap.get(column);</span>
+<span class="fc bfc" id="L94" title="All 2 branches covered.">    if (!_columnDictIdLoaded.contains(column)) {</span>
+<span class="fc bfc" id="L95" title="All 2 branches covered.">      if (dictIds == null) {</span>
+<span class="fc" id="L96">        dictIds = new int[DocIdSetPlanNode.MAX_DOC_PER_CALL];</span>
+<span class="fc" id="L97">        _columnToDictIdsMap.put(column, dictIds);</span>
+      }
+<span class="fc" id="L99">      _dataFetcher.fetchSingleDictIds(column, _docIds, _startPos, _length, dictIds, 0);</span>
+<span class="fc" id="L100">      _columnDictIdLoaded.add(column);</span>
+    }
+<span class="fc" id="L102">    return dictIds;</span>
+  }
+
+  /**
+   * Get an array of array representation for dictionary ids for a given column for the
+   * specific block initialized in the initNewBlock.
+   *
+   * @param column column name.
+   * @return dictionary ids array associated with this column.
+   */
+  private int[][] getDictIdsArrayForColumn(String column) {
+<span class="fc" id="L113">    int[][] dictIdsArray = _columnToDictIdsArrayMap.get(column);</span>
+<span class="pc bpc" id="L114" title="1 of 2 branches missed.">    if (!_columnDictIdLoaded.contains(column)) {</span>
+<span class="fc bfc" id="L115" title="All 2 branches covered.">      if (dictIdsArray == null) {</span>
+<span class="fc" id="L116">        dictIdsArray = new int[DocIdSetPlanNode.MAX_DOC_PER_CALL][];</span>
+<span class="fc" id="L117">        _columnToDictIdsArrayMap.put(column, dictIdsArray);</span>
+      }
+<span class="fc" id="L119">      _dataFetcher.fetchMultiValueDictIds(column, _docIds, _startPos, _length, dictIdsArray, 0,</span>
+          getTempDictIdArrayForColumn(column));
+<span class="fc" id="L121">      _columnDictIdLoaded.add(column);</span>
+    }
+<span class="fc" id="L123">    return dictIdsArray;</span>
+  }
+
+  private int[] getTempDictIdArrayForColumn(String column) {
+<span class="fc bfc" id="L127" title="All 2 branches covered.">    if (!_columnToTempDictIdsMap.containsKey(column)) {</span>
+<span class="fc" id="L128">      int maxNumberOfEntries = _dataFetcher.getMaxNumberOfEntriesForColumn(column);</span>
+<span class="fc" id="L129">      int[] tempDictIdArray = new int[maxNumberOfEntries];</span>
+<span class="fc" id="L130">      _columnToTempDictIdsMap.put(column, tempDictIdArray);</span>
+    }
+<span class="fc" id="L132">    return _columnToTempDictIdsMap.get(column);</span>
+  }
+
+  /**
+   * Get int value array for a given column for the specific block initialized in the initNewBlock.
+   *
+   * @param column column name.
+   * @return value array associated with this column.
+   */
+  public int[] getIntValueArrayForColumn(String column) {
+<span class="fc" id="L142">    String key = getKeyForColumnAndType(column, FieldSpec.DataType.INT);</span>
+<span class="fc" id="L143">    int[] intValues = (int []) _columnToValuesMap.get(key);</span>
+<span class="pc bpc" id="L144" title="1 of 2 branches missed.">    if (!_columnValueLoaded.contains(key)) {</span>
+<span class="fc bfc" id="L145" title="All 2 branches covered.">      if (intValues == null) {</span>
+<span class="fc" id="L146">        intValues = new int[DocIdSetPlanNode.MAX_DOC_PER_CALL];</span>
+<span class="fc" id="L147">        _columnToValuesMap.put(key, intValues);</span>
+      }
+<span class="fc" id="L149">      _dataFetcher.fetchIntValues(column, _docIds, _startPos, _length, intValues, 0);</span>
+<span class="fc" id="L150">      _columnValueLoaded.add(key);</span>
+    }
+<span class="fc" id="L152">    return intValues;</span>
+  }
+
+  /**
+   * Get double value array for a given column for the specific block initialized in the initNewBlock.
+   *
+   * @param column column name.
+   * @return int values array associated with this column.
+   */
+  public int[][] getIntValuesArrayForColumn(String column) {
+<span class="fc" id="L162">    String key = getKeyForColumnAndType(column, FieldSpec.DataType.INT_ARRAY);</span>
+<span class="fc" id="L163">    int[][] intValues = (int[][]) _columnToValuesArrayMap.get(key);</span>
+
+<span class="pc bpc" id="L165" title="1 of 2 branches missed.">    if (!_columnValueLoaded.contains(key)) {</span>
+<span class="fc bfc" id="L166" title="All 2 branches covered.">      if (intValues == null) {</span>
+<span class="fc" id="L167">        intValues = new int[DocIdSetPlanNode.MAX_DOC_PER_CALL][];</span>
+<span class="fc" id="L168">        _columnToValuesArrayMap.put(key, intValues);</span>
+      }
+
+<span class="fc" id="L171">      _dataFetcher.fetchIntValues(column, _docIds, _startPos, _length, intValues, 0);</span>
+<span class="fc" id="L172">      _columnValueLoaded.add(key);</span>
+    }
+<span class="fc" id="L174">    return intValues;</span>
+  }
+
+  /**
+   * Get long value array for a given column for the specific block initialized in the initNewBlock.
+   *
+   * @param column column name.
+   * @return value array associated with this column.
+   */
+  public long[] getLongValueArrayForColumn(String column) {
+<span class="fc" id="L184">    String key = getKeyForColumnAndType(column, FieldSpec.DataType.LONG);</span>
+<span class="fc" id="L185">    long[] longValues = (long []) _columnToValuesMap.get(key);</span>
+<span class="pc bpc" id="L186" title="1 of 2 branches missed.">    if (!_columnValueLoaded.contains(key)) {</span>
+<span class="pc bpc" id="L187" title="1 of 2 branches missed.">      if (longValues == null) {</span>
+<span class="fc" id="L188">        longValues = new long[DocIdSetPlanNode.MAX_DOC_PER_CALL];</span>
+<span class="fc" id="L189">        _columnToValuesMap.put(key, longValues);</span>
+      }
+<span class="fc" id="L191">      _dataFetcher.fetchLongValues(column, _docIds, _startPos, _length, longValues, 0);</span>
+<span class="fc" id="L192">      _columnValueLoaded.add(key);</span>
+    }
+<span class="fc" id="L194">    return longValues;</span>
+  }
+
+  /**
+   * Get long value array for a given column for the specific block initialized in the initNewBlock.
+   *
+   * @param column column name.
+   * @return long values array associated with this column.
+   */
+  public long[][] getLongValuesArrayForColumn(String column) {
+<span class="nc" id="L204">    String key = getKeyForColumnAndType(column, FieldSpec.DataType.LONG_ARRAY);</span>
+<span class="nc" id="L205">    long[][] longValues = (long[][]) _columnToValuesArrayMap.get(key);</span>
+
+<span class="nc bnc" id="L207" title="All 2 branches missed.">    if (!_columnValueLoaded.contains(key)) {</span>
+<span class="nc bnc" id="L208" title="All 2 branches missed.">      if (longValues == null) {</span>
+<span class="nc" id="L209">        longValues = new long[DocIdSetPlanNode.MAX_DOC_PER_CALL][];</span>
+<span class="nc" id="L210">        _columnToValuesArrayMap.put(key, longValues);</span>
+      }
+
+<span class="nc" id="L213">      _dataFetcher.fetchLongValues(column, _docIds, _startPos, _length, longValues, 0);</span>
+<span class="nc" id="L214">      _columnValueLoaded.add(key);</span>
+    }
+<span class="nc" id="L216">    return longValues;</span>
+  }
+
+  /**
+   * Get long value array for a given column for the specific block initialized in the initNewBlock.
+   *
+   * @param column column name.
+   * @return value array associated with this column.
+   */
+  public float[] getFloatValueArrayForColumn(String column) {
+<span class="fc" id="L226">    String key = getKeyForColumnAndType(column, FieldSpec.DataType.FLOAT);</span>
+<span class="fc" id="L227">    float[] floatValues = (float []) _columnToValuesMap.get(key);</span>
+<span class="pc bpc" id="L228" title="1 of 2 branches missed.">    if (!_columnValueLoaded.contains(key)) {</span>
+<span class="pc bpc" id="L229" title="1 of 2 branches missed.">      if (floatValues == null) {</span>
+<span class="fc" id="L230">        floatValues = new float[DocIdSetPlanNode.MAX_DOC_PER_CALL];</span>
+<span class="fc" id="L231">        _columnToValuesMap.put(key, floatValues);</span>
+      }
+<span class="fc" id="L233">      _dataFetcher.fetchFloatValues(column, _docIds, _startPos, _length, floatValues, 0);</span>
+<span class="fc" id="L234">      _columnValueLoaded.add(key);</span>
+    }
+<span class="fc" id="L236">    return floatValues;</span>
+  }
+
+  /**
+   * Get long value array for a given column for the specific block initialized in the initNewBlock.
+   *
+   * @param column column name.
+   * @return long values array associated with this column.
+   */
+  public float[][] getFloatValuesArrayForColumn(String column) {
+<span class="nc" id="L246">    String key = getKeyForColumnAndType(column, FieldSpec.DataType.FLOAT_ARRAY);</span>
+<span class="nc" id="L247">    float[][] floatValues = (float[][]) _columnToValuesArrayMap.get(key);</span>
+
+<span class="nc bnc" id="L249" title="All 2 branches missed.">    if (!_columnValueLoaded.contains(key)) {</span>
+<span class="nc bnc" id="L250" title="All 2 branches missed.">      if (floatValues == null) {</span>
+<span class="nc" id="L251">        floatValues = new float[DocIdSetPlanNode.MAX_DOC_PER_CALL][];</span>
+<span class="nc" id="L252">        _columnToValuesArrayMap.put(key, floatValues);</span>
+      }
+
+<span class="nc" id="L255">      _dataFetcher.fetchFloatValues(column, _docIds, _startPos, _length, floatValues, 0);</span>
+<span class="nc" id="L256">      _columnValueLoaded.add(key);</span>
+    }
+<span class="nc" id="L258">    return floatValues;</span>
+  }
+
+  /**
+   * Get double value array for a given column for the specific block initialized in the initNewBlock.
+   *
+   * @param column column name.
+   * @return value array associated with this column.
+   */
+  public double[] getDoubleValueArrayForColumn(String column) {
+<span class="fc" id="L268">    String key = getKeyForColumnAndType(column, FieldSpec.DataType.DOUBLE);</span>
+<span class="fc" id="L269">    double[] doubleValues = (double []) _columnToValuesMap.get(key);</span>
+<span class="fc bfc" id="L270" title="All 2 branches covered.">    if (!_columnValueLoaded.contains(key)) {</span>
+<span class="fc bfc" id="L271" title="All 2 branches covered.">      if (doubleValues == null) {</span>
+<span class="fc" id="L272">        doubleValues = new double[DocIdSetPlanNode.MAX_DOC_PER_CALL];</span>
+<span class="fc" id="L273">        _columnToValuesMap.put(key, doubleValues);</span>
+      }
+<span class="fc" id="L275">      _dataFetcher.fetchDoubleValues(column, _docIds, _startPos, _length, doubleValues, 0);</span>
+<span class="fc" id="L276">      _columnValueLoaded.add(key);</span>
+    }
+<span class="fc" id="L278">    return doubleValues;</span>
+  }
+
+  /**
+   * Get double value array for a given column for the specific block initialized in the initNewBlock.
+   *
+   * @param column column name.
+   * @return double values array associated with this column.
+   */
+  public double[][] getDoubleValuesArrayForColumn(String column) {
+<span class="fc" id="L288">    String key = getKeyForColumnAndType(column, FieldSpec.DataType.DOUBLE_ARRAY);</span>
+<span class="fc" id="L289">    double[][] doubleValuesArray = (double[][]) _columnToValuesArrayMap.get(key);</span>
+
+<span class="fc bfc" id="L291" title="All 2 branches covered.">    if (!_columnValueLoaded.contains(key)) {</span>
+<span class="fc bfc" id="L292" title="All 2 branches covered.">      if (doubleValuesArray == null) {</span>
+<span class="fc" id="L293">        doubleValuesArray = new double[DocIdSetPlanNode.MAX_DOC_PER_CALL][];</span>
+<span class="fc" id="L294">        _columnToValuesArrayMap.put(key, doubleValuesArray);</span>
+      }
+
+<span class="fc" id="L297">      _dataFetcher.fetchDoubleValues(column, _docIds, _startPos, _length, doubleValuesArray, 0);</span>
+<span class="fc" id="L298">      _columnValueLoaded.add(key);</span>
+    }
+<span class="fc" id="L300">    return doubleValuesArray;</span>
+  }
+
+  /**
+   * Get hash code array for a given column for the specific block initialized in the initNewBlock.
+   *
+   * @param column column name.
+   * @return hash codes array associated with this column.
+   */
+  public int[] getNumberOfEntriesArrayForColumn(String column) {
+<span class="fc" id="L310">    int[] numberOfEntriesArray = _columnToNumberOfEntriesMap.get(column);</span>
+<span class="pc bpc" id="L311" title="1 of 2 branches missed.">    if (!_columnHashCodeLoaded.contains(column)) {</span>
+<span class="fc bfc" id="L312" title="All 2 branches covered.">      if (numberOfEntriesArray == null) {</span>
+<span class="fc" id="L313">        numberOfEntriesArray = new int[DocIdSetPlanNode.MAX_DOC_PER_CALL];</span>
+<span class="fc" id="L314">        _columnToNumberOfEntriesMap.put(column, numberOfEntriesArray);</span>
+      }
+<span class="fc" id="L316">      int[][] dictIdsArray = getDictIdsArrayForColumn(column);</span>
+<span class="fc bfc" id="L317" title="All 2 branches covered.">      for (int pos = 0; pos &lt; _length; ++pos) {</span>
+<span class="fc" id="L318">        numberOfEntriesArray[pos] = dictIdsArray[pos].length;</span>
+      }
+<span class="fc" id="L320">      _columnHashCodeLoaded.add(column);</span>
+    }
+<span class="fc" id="L322">    return numberOfEntriesArray;</span>
+  }
+
+  /**
+   * Get string value array for a given column for the specific block initialized in the initNewBlock.
+   *
+   * @param column column name.
+   * @return value array associated with this column.
+   */
+  public String[] getStringValueArrayForColumn(String column) {
+<span class="fc" id="L332">    String[] stringValues = _columnToStringsMap.get(column);</span>
+<span class="pc bpc" id="L333" title="1 of 2 branches missed.">    if (!_columnStringLoaded.contains(column)) {</span>
+<span class="fc bfc" id="L334" title="All 2 branches covered.">      if (stringValues == null) {</span>
+<span class="fc" id="L335">        stringValues = new String[DocIdSetPlanNode.MAX_DOC_PER_CALL];</span>
+<span class="fc" id="L336">        _columnToStringsMap.put(column, stringValues);</span>
+      }
+<span class="fc" id="L338">      _dataFetcher.fetchStringValues(column, _docIds, _startPos, _length, stringValues, 0);</span>
+<span class="fc" id="L339">      _columnStringLoaded.add(column);</span>
+    }
+<span class="fc" id="L341">    return stringValues;</span>
+  }
+
+  /**
+   * Get string value array for a given column for the specific block initialized in the initNewBlock.
+   *
+   * @param column column name.
+   * @return string values array associated with this column.
+   */
+  public String[][] getStringValuesArrayForColumn(String column) {
+<span class="nc" id="L351">    String[][] stringsArray = _columnToStringsArrayMap.get(column);</span>
+<span class="nc bnc" id="L352" title="All 2 branches missed.">    if (!_columnHashCodeLoaded.contains(column)) {</span>
+<span class="nc bnc" id="L353" title="All 2 branches missed.">      if (stringsArray == null) {</span>
+<span class="nc" id="L354">        stringsArray = new String[DocIdSetPlanNode.MAX_DOC_PER_CALL][];</span>
+<span class="nc" id="L355">        _columnToStringsArrayMap.put(column, stringsArray);</span>
+      }
+
+<span class="nc" id="L358">      _dataFetcher.fetchStringValues(column, _docIds, _startPos, _length, stringsArray, 0);</span>
+<span class="nc" id="L359">      _columnHashCodeLoaded.add(column);</span>
+    }
+<span class="nc" id="L361">    return stringsArray;</span>
+  }
+
+  /**
+   * Returns the data type of the specified column.
+   *
+   * @param column Column for which to return the data type.
+   * @return Data type of the column.
+   */
+  public FieldSpec.DataType getDataType(String column) {
+<span class="fc" id="L371">    return _dataFetcher.getDataType(column);</span>
+  }
+
+  /**
+   * Returns the block metadata for the given column.
+   *
+   * @param column Column for which to get the metadata
+   * @return Metadata for the column
+   */
+  public BlockMetadata getMetadataFor(String column) {
+<span class="nc" id="L381">    return _dataFetcher.getBlockMetadataFor(column);</span>
+  }
+
+  /**
+   * Returns the data fetcher
+   *
+   * @return Data fetcher
+   */
+  public DataFetcher getDataFetcher() {
+<span class="fc" id="L390">    return _dataFetcher;</span>
+  }
+
+  /**
+   * Helper method that generates a key for {@link #_columnToValuesMap} using column name and data type
+   * to be fetched for the column.
+   *
+   * @param column Column Name
+   * @param dataType Data Type
+   * @return Key of column name and data type
+   */
+  private String getKeyForColumnAndType(String column, FieldSpec.DataType dataType) {
+<span class="fc" id="L402">    StringBuilder builder = new StringBuilder(column);</span>
+<span class="fc" id="L403">    builder.append(&quot;_&quot;);</span>
+<span class="fc" id="L404">    builder.append(dataType);</span>
+<span class="fc" id="L405">    return builder.toString();</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>FCFSQueryScheduler.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-server</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.query.scheduler.fcfs</a> &gt; <span class="el_source">FCFSQueryScheduler.java</span></div><h1>FCFSQueryScheduler.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.linkedin.pinot.core.query.scheduler.fcfs;
+
+import com.google.common.base.Preconditions;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.ListenableFutureTask;
+import com.linkedin.pinot.common.exception.QueryException;
+import com.linkedin.pinot.common.metrics.ServerMetrics;
+import com.linkedin.pinot.common.metrics.ServerQueryPhase;
+import com.linkedin.pinot.common.query.QueryExecutor;
+import com.linkedin.pinot.common.query.ServerQueryRequest;
+import com.linkedin.pinot.core.query.scheduler.QueryScheduler;
+import com.linkedin.pinot.core.query.scheduler.resources.QueryExecutorService;
+import com.linkedin.pinot.core.query.scheduler.resources.UnboundedResourceManager;
+import javax.annotation.Nonnull;
+import org.apache.commons.configuration.Configuration;
+
+
+/**
+ * First Come First Served(FCFS) query scheduler. The FCFS policy applies across all tables.
+ * This implementation does not throttle resource utilization. That makes it unsafe in
+ * the multi-tenant clusters.
+ */
+public class FCFSQueryScheduler extends QueryScheduler {
+
+
+  public FCFSQueryScheduler(@Nonnull Configuration config, @Nonnull QueryExecutor queryExecutor,
+      @Nonnull ServerMetrics serverMetrics) {
+<span class="nc" id="L44">    super(queryExecutor, new UnboundedResourceManager(config), serverMetrics);</span>
+<span class="nc" id="L45">  }</span>
+
+  @Override
+  public ListenableFuture&lt;byte[]&gt; submit(final ServerQueryRequest queryRequest) {
+<span class="nc" id="L49">    Preconditions.checkNotNull(queryRequest);</span>
+<span class="nc bnc" id="L50" title="All 2 branches missed.">    if (! isRunning) {</span>
+<span class="nc" id="L51">      return immediateErrorResponse(queryRequest, QueryException.SERVER_SCHEDULER_DOWN_ERROR);</span>
+    }
+<span class="nc" id="L53">    queryRequest.getTimerContext().startNewPhaseTimer(ServerQueryPhase.SCHEDULER_WAIT);</span>
+<span class="nc" id="L54">    QueryExecutorService queryExecutorService =</span>
+        resourceManager.getExecutorService(queryRequest, null);
+<span class="nc" id="L56">    ListenableFutureTask&lt;byte[]&gt; queryTask = createQueryFutureTask(queryRequest, queryExecutorService);</span>
+<span class="nc" id="L57">    resourceManager.getQueryRunners().submit(queryTask);</span>
+<span class="nc" id="L58">    return queryTask;</span>
+  }
+
+  @Override
+  public void start() {
+<span class="nc" id="L63">    super.start();</span>
+<span class="nc" id="L64">  }</span>
+
+  @Override
+  public void stop() {
+<span class="nc" id="L68">    super.stop();</span>
+<span class="nc" id="L69">  }</span>
+
+  @Override
+  public String name() {
+<span class="nc" id="L73">    return &quot;fcfs&quot;;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

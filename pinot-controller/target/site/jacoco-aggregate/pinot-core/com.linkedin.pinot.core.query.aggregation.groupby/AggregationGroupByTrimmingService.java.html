@@ -1,0 +1,350 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>AggregationGroupByTrimmingService.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-controller</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.query.aggregation.groupby</a> &gt; <span class="el_source">AggregationGroupByTrimmingService.java</span></div><h1>AggregationGroupByTrimmingService.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.query.aggregation.groupby;
+
+import com.google.common.base.Preconditions;
+import com.linkedin.pinot.common.response.broker.GroupByResult;
+import com.linkedin.pinot.core.query.aggregation.function.AggregationFunction;
+import com.linkedin.pinot.core.query.aggregation.function.AggregationFunctionUtils;
+import com.linkedin.pinot.core.query.aggregation.function.MinAggregationFunction;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.PriorityQueue;
+import java.util.TreeMap;
+import javax.annotation.Nonnull;
+import org.apache.commons.collections.comparators.ComparableComparator;
+import org.apache.commons.lang3.tuple.ImmutablePair;
+
+
+/**
+ * The &lt;code&gt;AggregationGroupByTrimmingService&lt;/code&gt; class provides trimming service for aggregation group-by queries.
+ */
+public class AggregationGroupByTrimmingService {
+  public static final String GROUP_KEY_DELIMITER = &quot;\t&quot;;
+
+  private final AggregationFunction[] _aggregationFunctions;
+  private final int _groupByTopN;
+  private final int _trimSize;
+  private final int _trimThreshold;
+
+<span class="fc" id="L49">  public AggregationGroupByTrimmingService(@Nonnull AggregationFunction[] aggregationFunctions, int groupByTopN) {</span>
+<span class="pc bpc" id="L50" title="1 of 2 branches missed.">    Preconditions.checkArgument(groupByTopN &gt; 0);</span>
+
+<span class="fc" id="L52">    _aggregationFunctions = aggregationFunctions;</span>
+<span class="fc" id="L53">    _groupByTopN = groupByTopN;</span>
+
+    // To keep the precision, _trimSize is the larger of (_groupByTopN * 5) or 5000
+<span class="fc" id="L56">    _trimSize = Math.max(_groupByTopN * 5, 5000);</span>
+
+    // To trigger the trimming, number of groups should be larger than _trimThreshold which is (_trimSize * 4)
+<span class="fc" id="L59">    _trimThreshold = _trimSize * 4;</span>
+<span class="fc" id="L60">  }</span>
+
+  /**
+   * Given a map from group key to the intermediate results for multiple aggregation functions, trim the results to
+   * desired size and put them into a list of maps from group key to intermediate result for each aggregation function.
+   */
+  @SuppressWarnings(&quot;unchecked&quot;)
+  @Nonnull
+  public List&lt;Map&lt;String, Object&gt;&gt; trimIntermediateResultsMap(@Nonnull Map&lt;String, Object[]&gt; intermediateResultsMap) {
+<span class="fc" id="L69">    int numAggregationFunctions = _aggregationFunctions.length;</span>
+<span class="fc" id="L70">    Map&lt;String, Object&gt;[] trimmedResultMaps = new Map[numAggregationFunctions];</span>
+
+<span class="fc" id="L72">    int numGroups = intermediateResultsMap.size();</span>
+<span class="fc bfc" id="L73" title="All 2 branches covered.">    if (numGroups &gt; _trimThreshold) {</span>
+      // Trim the result only if number of groups is larger than the threshold
+
+<span class="fc" id="L76">      Sorter[] sorters = new Sorter[numAggregationFunctions];</span>
+<span class="fc bfc" id="L77" title="All 2 branches covered.">      for (int i = 0; i &lt; numAggregationFunctions; i++) {</span>
+<span class="fc" id="L78">        AggregationFunction aggregationFunction = _aggregationFunctions[i];</span>
+<span class="fc" id="L79">        sorters[i] = getSorter(_trimSize, aggregationFunction, aggregationFunction.isIntermediateResultComparable());</span>
+      }
+
+      // Add results into sorters
+<span class="fc bfc" id="L83" title="All 2 branches covered.">      for (Map.Entry&lt;String, Object[]&gt; entry : intermediateResultsMap.entrySet()) {</span>
+<span class="fc" id="L84">        String groupKey = entry.getKey();</span>
+<span class="fc" id="L85">        Object[] intermediateResults = entry.getValue();</span>
+<span class="fc bfc" id="L86" title="All 2 branches covered.">        for (int i = 0; i &lt; numAggregationFunctions; i++) {</span>
+<span class="fc" id="L87">          sorters[i].add(groupKey, intermediateResults[i]);</span>
+        }
+<span class="fc" id="L89">      }</span>
+
+      // Dump trimmed results into maps
+<span class="fc bfc" id="L92" title="All 2 branches covered.">      for (int i = 0; i &lt; numAggregationFunctions; i++) {</span>
+<span class="fc" id="L93">        Map&lt;String, Object&gt; trimmedResultMap = new HashMap&lt;&gt;(_trimSize);</span>
+<span class="fc" id="L94">        sorters[i].dumpToMap(trimmedResultMap);</span>
+<span class="fc" id="L95">        trimmedResultMaps[i] = trimmedResultMap;</span>
+      }
+<span class="fc" id="L97">    } else {</span>
+      // Simply put results from intermediateResultsMap into trimmedResults
+
+<span class="fc bfc" id="L100" title="All 2 branches covered.">      for (int i = 0; i &lt; numAggregationFunctions; i++) {</span>
+<span class="fc" id="L101">        trimmedResultMaps[i] = new HashMap&lt;&gt;(numGroups);</span>
+      }
+<span class="fc bfc" id="L103" title="All 2 branches covered.">      for (Map.Entry&lt;String, Object[]&gt; entry : intermediateResultsMap.entrySet()) {</span>
+<span class="fc" id="L104">        String groupKey = entry.getKey();</span>
+<span class="fc" id="L105">        Object[] intermediateResults = entry.getValue();</span>
+<span class="fc bfc" id="L106" title="All 2 branches covered.">        for (int i = 0; i &lt; numAggregationFunctions; i++) {</span>
+<span class="fc" id="L107">          trimmedResultMaps[i].put(groupKey, intermediateResults[i]);</span>
+        }
+<span class="fc" id="L109">      }</span>
+    }
+
+<span class="fc" id="L112">    return Arrays.asList(trimmedResultMaps);</span>
+  }
+
+  /**
+   * Given an array of maps from group key to final result for each aggregation function, trim the results to topN size.
+   */
+  @SuppressWarnings(&quot;unchecked&quot;)
+  @Nonnull
+  public List&lt;GroupByResult&gt;[] trimFinalResults(@Nonnull Map&lt;String, Comparable&gt;[] finalResultMaps) {
+<span class="fc" id="L121">    int numAggregationFunctions = _aggregationFunctions.length;</span>
+<span class="fc" id="L122">    List&lt;GroupByResult&gt;[] trimmedResults = new List[numAggregationFunctions];</span>
+
+<span class="fc bfc" id="L124" title="All 2 branches covered.">    for (int i = 0; i &lt; numAggregationFunctions; i++) {</span>
+<span class="fc" id="L125">      LinkedList&lt;GroupByResult&gt; groupByResults = new LinkedList&lt;&gt;();</span>
+<span class="fc" id="L126">      trimmedResults[i] = groupByResults;</span>
+
+<span class="fc" id="L128">      Map&lt;String, Comparable&gt; finalResultMap = finalResultMaps[i];</span>
+<span class="pc bpc" id="L129" title="1 of 2 branches missed.">      if (finalResultMap.isEmpty()) {</span>
+<span class="nc" id="L130">        continue;</span>
+      }
+
+      // Final result is always comparable
+<span class="fc" id="L134">      Sorter sorter = getSorter(_groupByTopN, _aggregationFunctions[i], true);</span>
+
+      // Add results into sorter
+<span class="fc bfc" id="L137" title="All 2 branches covered.">      for (Map.Entry&lt;String, Comparable&gt; entry : finalResultMap.entrySet()) {</span>
+<span class="fc" id="L138">        sorter.add(entry.getKey(), entry.getValue());</span>
+<span class="fc" id="L139">      }</span>
+
+      // Dump trimmed results into list
+<span class="fc" id="L142">      sorter.dumpToGroupByResults(groupByResults);</span>
+    }
+
+<span class="fc" id="L145">    return trimmedResults;</span>
+  }
+
+  private interface Sorter {
+    void add(String groupKey, Object result);
+
+    void dumpToMap(Map&lt;String, Object&gt; dest);
+
+    void dumpToGroupByResults(LinkedList&lt;GroupByResult&gt; dest);
+  }
+
+  @SuppressWarnings(&quot;unchecked&quot;)
+  private static Sorter getSorter(int trimSize, AggregationFunction aggregationFunction, boolean isComparable) {
+    // This will cover both MIN and MINMV
+<span class="fc" id="L159">    boolean minOrder = aggregationFunction instanceof MinAggregationFunction;</span>
+
+<span class="fc bfc" id="L161" title="All 2 branches covered.">    if (isComparable) {</span>
+<span class="fc bfc" id="L162" title="All 2 branches covered.">      if (minOrder) {</span>
+<span class="fc" id="L163">        return new ComparableSorter(trimSize, Collections.reverseOrder());</span>
+      } else {
+<span class="fc" id="L165">        return new ComparableSorter(trimSize, new ComparableComparator());</span>
+      }
+    } else {
+      // Reverse the comparator so that keys are ordered in descending order
+<span class="pc bpc" id="L169" title="1 of 2 branches missed.">      if (minOrder) {</span>
+<span class="nc" id="L170">        return new NonComparableSorter(trimSize, new ComparableComparator(), aggregationFunction);</span>
+      } else {
+<span class="fc" id="L172">        return new NonComparableSorter(trimSize, Collections.reverseOrder(), aggregationFunction);</span>
+      }
+    }
+  }
+
+  /**
+   * Helper class based on {@link PriorityQueue} to sort on comparable values:
+   * &lt;ul&gt;
+   *   &lt;li&gt;
+   *     If the heap size is less than the trim size, simply add the groupKey-result pair into the heap
+   *   &lt;/li&gt;
+   *   &lt;li&gt;
+   *     If the heap size is equal to the trim size, compare the given groupKey-result pair against the min
+   *     groupKey-result pair from the heap. If the given groupKey-result pair is bigger, remove the min groupKey-result
+   *     pair and insert the new one to keep the heap size bounded
+   *   &lt;/li&gt;
+   * &lt;/ul&gt;
+   */
+  private static class ComparableSorter implements Sorter {
+    private final int _trimSize;
+    private final Comparator&lt;? super Comparable&gt; _comparator;
+    private final PriorityQueue&lt;GroupKeyResultPair&gt; _heap;
+
+<span class="fc" id="L195">    public ComparableSorter(int trimSize, Comparator&lt;? super Comparable&gt; comparator) {</span>
+<span class="fc" id="L196">      _trimSize = trimSize;</span>
+<span class="fc" id="L197">      _comparator = comparator;</span>
+<span class="fc" id="L198">      _heap = new PriorityQueue&lt;&gt;(_trimSize, comparator);</span>
+<span class="fc" id="L199">    }</span>
+
+    @SuppressWarnings(&quot;unchecked&quot;)
+    @Override
+    public void add(String groupKey, Object result) {
+<span class="fc" id="L204">      GroupKeyResultPair newGroupKeyResultPair = new GroupKeyResultPair(groupKey, (Comparable) result);</span>
+<span class="fc bfc" id="L205" title="All 2 branches covered.">      if (_heap.size() == _trimSize) {</span>
+<span class="fc" id="L206">        GroupKeyResultPair minGroupKeyResultPair = _heap.peek();</span>
+<span class="fc bfc" id="L207" title="All 2 branches covered.">        if (_comparator.compare(newGroupKeyResultPair, minGroupKeyResultPair) &gt; 0) {</span>
+<span class="fc" id="L208">          _heap.poll();</span>
+<span class="fc" id="L209">          _heap.add(newGroupKeyResultPair);</span>
+        }
+<span class="fc" id="L211">      } else {</span>
+<span class="fc" id="L212">        _heap.add(newGroupKeyResultPair);</span>
+      }
+<span class="fc" id="L214">    }</span>
+
+    @Override
+    public void dumpToMap(Map&lt;String, Object&gt; dest) {
+      GroupKeyResultPair groupKeyResultPair;
+<span class="fc bfc" id="L219" title="All 2 branches covered.">      while ((groupKeyResultPair = _heap.poll()) != null) {</span>
+<span class="fc" id="L220">        dest.put(groupKeyResultPair._groupKey, groupKeyResultPair._result);</span>
+      }
+<span class="fc" id="L222">    }</span>
+
+    @Override
+    public void dumpToGroupByResults(LinkedList&lt;GroupByResult&gt; dest) {
+      GroupKeyResultPair groupKeyResultPair;
+<span class="fc bfc" id="L227" title="All 2 branches covered.">      while ((groupKeyResultPair = _heap.poll()) != null) {</span>
+        // Set limit to -1 to prevent removing trailing empty strings
+<span class="fc" id="L229">        String[] groupKeys = groupKeyResultPair._groupKey.split(GROUP_KEY_DELIMITER, -1);</span>
+
+<span class="fc" id="L231">        GroupByResult groupByResult = new GroupByResult();</span>
+<span class="fc" id="L232">        groupByResult.setGroup(Arrays.asList(groupKeys));</span>
+<span class="fc" id="L233">        groupByResult.setValue(AggregationFunctionUtils.formatValue(groupKeyResultPair._result));</span>
+
+        // Add to head to reverse the order
+<span class="fc" id="L236">        dest.addFirst(groupByResult);</span>
+<span class="fc" id="L237">      }</span>
+<span class="fc" id="L238">    }</span>
+
+    private static class GroupKeyResultPair implements Comparable&lt;GroupKeyResultPair&gt; {
+      private String _groupKey;
+      private Comparable&lt;? super Comparable&gt; _result;
+
+<span class="fc" id="L244">      public GroupKeyResultPair(@Nonnull String groupKey, @Nonnull Comparable&lt;? super Comparable&gt; result) {</span>
+<span class="fc" id="L245">        _groupKey = groupKey;</span>
+<span class="fc" id="L246">        _result = result;</span>
+<span class="fc" id="L247">      }</span>
+
+      @Override
+      public int compareTo(@Nonnull GroupKeyResultPair o) {
+<span class="fc" id="L251">        return _result.compareTo(o._result);</span>
+      }
+    }
+  }
+
+  /**
+   * Helper class based on {@link TreeMap} to sort on non-comparable values:
+   * &lt;ul&gt;
+   *   &lt;li&gt;
+   *     The key of the map is the final result derived from the intermediate result passed in
+   *   &lt;/li&gt;
+   *   &lt;li&gt;
+   *     The value of the map is a list of groupKey-result pairs that inserted with the same key
+   *   &lt;/li&gt;
+   *   &lt;li&gt;
+   *     If the number of values added is less than the trim size, simply add the groupKey-result pair into the map
+   *   &lt;/li&gt;
+   *   &lt;li&gt;
+   *     If the number of values added is greater or equal to the trim size, compare the given key against the max key
+   *     from the map. If the given key is smaller, insert the new groupKey-result pair into the map
+   *   &lt;/li&gt;
+   *   &lt;li&gt;
+   *     When possible, remove the max key from the map when enough values inserted
+   *   &lt;/li&gt;
+   * &lt;/ul&gt;
+   */
+  private static class NonComparableSorter implements Sorter {
+    private final int _trimSize;
+    private final Comparator&lt;? super Comparable&gt; _comparator;
+    private final AggregationFunction _aggregationFunction;
+    private final TreeMap&lt;Comparable, List&lt;ImmutablePair&lt;String, Object&gt;&gt;&gt; _treeMap;
+<span class="fc" id="L282">    private int _numValuesAdded = 0;</span>
+
+    public NonComparableSorter(int trimSize, Comparator&lt;? super Comparable&gt; comparator,
+<span class="fc" id="L285">        AggregationFunction aggregationFunction) {</span>
+<span class="fc" id="L286">      _trimSize = trimSize;</span>
+<span class="fc" id="L287">      _comparator = comparator;</span>
+<span class="fc" id="L288">      _aggregationFunction = aggregationFunction;</span>
+<span class="fc" id="L289">      _treeMap = new TreeMap&lt;&gt;(comparator);</span>
+<span class="fc" id="L290">    }</span>
+
+    @SuppressWarnings(&quot;unchecked&quot;)
+    @Override
+    public void add(String groupKey, Object result) {
+<span class="fc" id="L295">      Comparable newKey = _aggregationFunction.extractFinalResult(result);</span>
+<span class="fc" id="L296">      ImmutablePair&lt;String, Object&gt; groupKeyResultPair = new ImmutablePair&lt;&gt;(groupKey, result);</span>
+
+<span class="fc" id="L298">      List&lt;ImmutablePair&lt;String, Object&gt;&gt; groupKeyResultPairs = _treeMap.get(newKey);</span>
+<span class="fc bfc" id="L299" title="All 2 branches covered.">      if (_numValuesAdded &gt;= _trimSize) {</span>
+        // Check whether the pair should be added
+<span class="fc" id="L301">        Map.Entry&lt;Comparable, List&lt;ImmutablePair&lt;String, Object&gt;&gt;&gt; maxEntry = _treeMap.lastEntry();</span>
+<span class="fc" id="L302">        Comparable maxKey = maxEntry.getKey();</span>
+<span class="pc bpc" id="L303" title="1 of 2 branches missed.">        if (_comparator.compare(newKey, maxKey) &lt; 0) {</span>
+          // Add the pair into list of pairs
+<span class="fc bfc" id="L305" title="All 2 branches covered.">          if (groupKeyResultPairs == null) {</span>
+<span class="fc" id="L306">            groupKeyResultPairs = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L307">            _treeMap.put(newKey, groupKeyResultPairs);</span>
+          }
+<span class="fc" id="L309">          groupKeyResultPairs.add(groupKeyResultPair);</span>
+<span class="fc" id="L310">          _numValuesAdded++;</span>
+
+          // Check if the max key can be removed
+<span class="fc bfc" id="L313" title="All 2 branches covered.">          if (maxEntry.getValue().size() + _trimSize == _numValuesAdded) {</span>
+<span class="fc" id="L314">            _treeMap.remove(maxKey);</span>
+          }
+        }
+<span class="fc" id="L317">      } else {</span>
+        // Pair should be added
+<span class="fc bfc" id="L319" title="All 2 branches covered.">        if (groupKeyResultPairs == null) {</span>
+<span class="fc" id="L320">          groupKeyResultPairs = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L321">          _treeMap.put(newKey, groupKeyResultPairs);</span>
+        }
+<span class="fc" id="L323">        groupKeyResultPairs.add(groupKeyResultPair);</span>
+<span class="fc" id="L324">        _numValuesAdded++;</span>
+      }
+<span class="fc" id="L326">    }</span>
+
+    @Override
+    public void dumpToMap(Map&lt;String, Object&gt; dest) {
+      // Track the number of results added because there could be more than trim size values inside the map
+<span class="fc" id="L331">      int numResultsAdded = 0;</span>
+<span class="pc bpc" id="L332" title="1 of 2 branches missed.">      for (List&lt;ImmutablePair&lt;String, Object&gt;&gt; groupKeyResultPairs : _treeMap.values()) {</span>
+<span class="fc bfc" id="L333" title="All 2 branches covered.">        for (ImmutablePair&lt;String, Object&gt; groupResultPair : groupKeyResultPairs) {</span>
+<span class="fc bfc" id="L334" title="All 2 branches covered.">          if (numResultsAdded != _trimSize) {</span>
+<span class="fc" id="L335">            dest.put(groupResultPair.left, groupResultPair.right);</span>
+<span class="fc" id="L336">            numResultsAdded++;</span>
+          } else {
+<span class="fc" id="L338">            return;</span>
+          }
+<span class="fc" id="L340">        }</span>
+<span class="fc" id="L341">      }</span>
+<span class="nc" id="L342">    }</span>
+
+    @Override
+    public void dumpToGroupByResults(LinkedList&lt;GroupByResult&gt; dest) {
+<span class="nc" id="L346">      throw new UnsupportedOperationException();</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

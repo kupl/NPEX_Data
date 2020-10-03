@@ -1,0 +1,241 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>AbstractCompositeListenableFuture.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-broker</a> &gt; <a href="../index.html" class="el_bundle">pinot-transport</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.transport.common</a> &gt; <span class="el_source">AbstractCompositeListenableFuture.java</span></div><h1>AbstractCompositeListenableFuture.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.transport.common;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import com.linkedin.pinot.common.response.ServerInstance;
+
+
+public abstract class AbstractCompositeListenableFuture&lt;T&gt; implements ServerResponseFuture&lt;T&gt; {
+<span class="fc" id="L33">  protected static Logger LOGGER = LoggerFactory.getLogger(CompositeFuture.class);</span>
+
+  /**
+   * Response Future State
+   */
+<span class="pc" id="L38">  private enum State {</span>
+<span class="fc" id="L39">    PENDING,</span>
+<span class="fc" id="L40">    STARTED,</span>
+<span class="fc" id="L41">    CANCELLED,</span>
+<span class="fc" id="L42">    DONE;</span>
+
+    public boolean isCompleted() {
+<span class="pc bpc" id="L45" title="1 of 4 branches missed.">      return (this != PENDING) &amp;&amp; (this != STARTED);</span>
+    }
+  }
+
+  // Lock for mutex
+<span class="fc" id="L50">  private final Lock _futureLock = new ReentrantLock();</span>
+
+  // Latch to wait for the response
+  protected volatile CountDownLatch _latch;
+
+  // State of the future
+  protected State _state;
+
+  // List of runnables that needs to be executed on completion
+<span class="fc" id="L59">  private final List&lt;Runnable&gt; _pendingRunnable = new ArrayList&lt;Runnable&gt;();</span>
+  //List of executors that needs to run the runnables.
+<span class="fc" id="L61">  private final List&lt;Executor&gt; _pendingRunnableExecutors = new ArrayList&lt;Executor&gt;();</span>
+
+<span class="fc" id="L63">  public AbstractCompositeListenableFuture() {</span>
+<span class="fc" id="L64">    _state = State.PENDING;</span>
+<span class="fc" id="L65">  }</span>
+
+  protected synchronized boolean start() {
+<span class="pc bpc" id="L68" title="1 of 2 branches missed.">    if (_state != State.PENDING) {</span>
+<span class="nc" id="L69">      return false;</span>
+    }
+
+<span class="fc" id="L72">    _state = State.STARTED;</span>
+<span class="fc" id="L73">    return true;</span>
+  }
+
+  @Override
+  /**
+   * Does best-effort cancellation of futures. If one of the underlying futures are cancelled, the others
+   * are still cancelled. THere is no undo here. The composite future will be marked cancelled. If there are
+   * listeners to the non-cancelled underlying future, it can still see the future getting complete.
+   * If using Composite futures, only listen to the composite instance and not to the underlying futures directly.
+   *
+   */
+  public boolean cancel(boolean mayInterruptIfRunning) {
+    try {
+<span class="fc" id="L86">      _futureLock.lock();</span>
+<span class="fc bfc" id="L87" title="All 2 branches covered.">      if (_state.isCompleted()) {</span>
+<span class="fc" id="L88">        LOGGER.info(&quot;Request is no longer pending. Cannot cancel !!&quot;);</span>
+<span class="fc" id="L89">        return false;</span>
+      }
+<span class="fc" id="L91">      setDone(State.CANCELLED);</span>
+    } finally {
+<span class="pc" id="L93">      _futureLock.unlock();</span>
+<span class="fc" id="L94">    }</span>
+
+<span class="fc" id="L96">    cancelUnderlyingFutures();</span>
+<span class="fc" id="L97">    return true;</span>
+  }
+
+  /**
+   * Call cancel on underlying futures. Dont worry if they are completed.
+   * If they are already completed, cancel will be discarded. THis is best-effort only !!.
+   */
+  protected abstract void cancelUnderlyingFutures();
+
+  @Override
+  public boolean isCancelled() {
+<span class="fc bfc" id="L108" title="All 2 branches covered.">    return _state == State.CANCELLED;</span>
+  }
+
+  /**
+   * Mark complete and notify threads waiting for this condition
+   */
+  private void setDone(State state) {
+<span class="fc" id="L115">    LOGGER.debug(&quot;Setting state to :&quot; + state + &quot;, Current State :&quot; + _state);</span>
+    try {
+<span class="fc" id="L117">      _futureLock.lock();</span>
+<span class="fc" id="L118">      _state = state;</span>
+
+      // Drain the latch
+<span class="fc" id="L121">      long count = _latch.getCount();</span>
+<span class="fc bfc" id="L122" title="All 2 branches covered.">      for (long i = 0; i &lt; count; i++) {</span>
+<span class="fc" id="L123">        _latch.countDown();</span>
+      }
+    } finally {
+<span class="pc" id="L126">      _futureLock.unlock();</span>
+<span class="fc" id="L127">    }</span>
+
+<span class="fc bfc" id="L129" title="All 2 branches covered.">    for (int i = 0; i &lt; _pendingRunnable.size(); i++) {</span>
+<span class="fc" id="L130">      LOGGER.info(&quot;Running pending runnable :&quot; + i);</span>
+<span class="fc" id="L131">      Executor e = _pendingRunnableExecutors.get(i);</span>
+<span class="pc bpc" id="L132" title="1 of 2 branches missed.">      if (null != e) {</span>
+<span class="nc" id="L133">        e.execute(_pendingRunnable.get(i));</span>
+      } else {
+<span class="fc" id="L135">        _pendingRunnable.get(i).run(); // run in the current thread.</span>
+      }
+    }
+<span class="fc" id="L138">    _pendingRunnable.clear();</span>
+<span class="fc" id="L139">    _pendingRunnableExecutors.clear();</span>
+<span class="fc" id="L140">  }</span>
+
+  @Override
+  public boolean isDone() {
+<span class="fc" id="L144">    return _state.isCompleted();</span>
+  }
+
+  @Override
+  public void addListener(Runnable listener, Executor executor) {
+<span class="fc" id="L149">    boolean processed = false;</span>
+    try {
+<span class="fc" id="L151">      _futureLock.lock();</span>
+<span class="fc bfc" id="L152" title="All 2 branches covered.">      if (!_state.isCompleted()) {</span>
+<span class="fc" id="L153">        _pendingRunnable.add(listener);</span>
+<span class="fc" id="L154">        _pendingRunnableExecutors.add(executor);</span>
+<span class="fc" id="L155">        processed = true;</span>
+      }
+    } finally {
+<span class="pc" id="L158">      _futureLock.unlock();</span>
+<span class="fc" id="L159">    }</span>
+
+<span class="fc bfc" id="L161" title="All 2 branches covered.">    if (!processed) {</span>
+<span class="fc" id="L162">      LOGGER.info(&quot;Executing the listener as the future event is already done !!&quot;);</span>
+<span class="pc bpc" id="L163" title="1 of 2 branches missed.">      if (null != executor) {</span>
+<span class="nc" id="L164">        executor.execute(listener);</span>
+      } else {
+<span class="fc" id="L166">        listener.run(); // run in the same thread</span>
+      }
+    }
+<span class="fc" id="L169">  }</span>
+
+  /**
+   * Process underlying futures. Returns true if all the processing is done
+   * The framework will go ahead and cancel any outstanding futures.
+   *
+   * @param server ServerInstance that is responding
+   * @param responses Response
+   * @param error Error
+   * @param durationMillis
+   * @return true if processing done
+   */
+  protected abstract boolean processFutureResult(ServerInstance server, Map&lt;ServerInstance, T&gt; responses, Map&lt;ServerInstance, Throwable&gt; error,
+      long durationMillis);
+
+  protected void addResponseFutureListener(ServerResponseFuture&lt;T&gt; future) {
+<span class="fc" id="L185">    future.addListener(new ResponseFutureListener(future), null); // no need for separate Executors</span>
+<span class="fc" id="L186">  }</span>
+
+  /**
+   * Underlying Response future listener. This will count down the latch.
+   */
+  private class ResponseFutureListener implements Runnable {
+    private final ServerResponseFuture&lt;T&gt; _future;
+
+<span class="fc" id="L194">    public ResponseFutureListener(ServerResponseFuture&lt;T&gt; future) {</span>
+<span class="fc" id="L195">      _future = future;</span>
+<span class="fc" id="L196">    }</span>
+
+    @Override
+    public void run() {
+<span class="fc" id="L200">      LOGGER.debug(&quot;Running Future Listener for underlying future for {}&quot;, _future.getName());</span>
+      try {
+<span class="fc" id="L202">        _futureLock.lock();</span>
+<span class="fc bfc" id="L203" title="All 2 branches covered.">        if (_state.isCompleted()) {</span>
+          return; // We are marked done. Dont take in anything.
+        }
+      } finally {
+<span class="pc" id="L207">        _futureLock.unlock();</span>
+<span class="fc" id="L208">      }</span>
+
+<span class="fc" id="L210">      Map&lt;ServerInstance, T&gt; response = null;</span>
+      try {
+<span class="fc" id="L212">        response = _future.get();</span>
+<span class="nc" id="L213">      } catch (InterruptedException e) {</span>
+<span class="nc" id="L214">        LOGGER.info(&quot;Got interrupted waiting for response&quot;, e);</span>
+<span class="nc" id="L215">      } catch (ExecutionException e) {</span>
+<span class="nc" id="L216">        LOGGER.info(&quot;Got execution exception waiting for response&quot;, e);</span>
+<span class="pc" id="L217">      }</span>
+
+      // Since the future is done, it is safe to look at error results
+<span class="fc" id="L220">      Map&lt;ServerInstance, Throwable&gt; error = _future.getError();</span>
+<span class="fc" id="L221">      boolean done = processFutureResult(_future.getServerInstance(), response, error, _future.getDurationMillis());</span>
+
+<span class="fc bfc" id="L223" title="All 2 branches covered.">      if (done) {</span>
+<span class="fc" id="L224">        setDone(State.DONE);</span>
+<span class="fc" id="L225">        cancelUnderlyingFutures(); //Cancel underlying futures if they have not completed.</span>
+      }
+
+      try {
+<span class="fc" id="L229">        _futureLock.lock();</span>
+<span class="pc bpc" id="L230" title="1 of 4 branches missed.">        if ((_latch.getCount() == 1) &amp;&amp; !done) {</span>
+<span class="fc" id="L231">          setDone(State.DONE);</span>
+<span class="fc bfc" id="L232" title="All 2 branches covered.">        } else if (!done) {</span>
+<span class="fc" id="L233">          _latch.countDown();</span>
+        }
+      } finally {
+<span class="pc" id="L236">        _futureLock.unlock();</span>
+<span class="fc" id="L237">      }</span>
+<span class="fc" id="L238">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

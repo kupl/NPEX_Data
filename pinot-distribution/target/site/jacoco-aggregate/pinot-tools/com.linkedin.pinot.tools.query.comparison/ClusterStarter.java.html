@@ -1,0 +1,280 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>ClusterStarter.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-tools</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.tools.query.comparison</a> &gt; <span class="el_source">ClusterStarter.java</span></div><h1>ClusterStarter.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.tools.query.comparison;
+
+import com.linkedin.pinot.common.config.TableConfig;
+import com.linkedin.pinot.common.utils.CommonConstants;
+import com.linkedin.pinot.common.utils.NetUtil;
+import com.linkedin.pinot.controller.helix.ControllerRequestURLBuilder;
+import com.linkedin.pinot.tools.admin.command.AddTableCommand;
+import com.linkedin.pinot.tools.admin.command.CreateSegmentCommand;
+import com.linkedin.pinot.tools.admin.command.DeleteClusterCommand;
+import com.linkedin.pinot.tools.admin.command.PostQueryCommand;
+import com.linkedin.pinot.tools.admin.command.StartBrokerCommand;
+import com.linkedin.pinot.tools.admin.command.StartControllerCommand;
+import com.linkedin.pinot.tools.admin.command.StartServerCommand;
+import com.linkedin.pinot.tools.admin.command.StartZookeeperCommand;
+import com.linkedin.pinot.tools.admin.command.UploadSegmentCommand;
+import com.linkedin.pinot.tools.perf.PerfBenchmarkDriver;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.SocketException;
+import java.net.URL;
+import java.net.URLConnection;
+import java.net.URLEncoder;
+import java.net.UnknownHostException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import static com.linkedin.pinot.tools.admin.command.AbstractBaseAdminCommand.sendPostRequest;
+
+
+public class ClusterStarter {
+<span class="nc" id="L48">  private static final Logger LOGGER = LoggerFactory.getLogger(ClusterStarter.class);</span>
+
+  private String _controllerPort;
+  private String _brokerHost;
+  private String _brokerPort;
+  private String _serverPort;
+  private String _perfUrl;
+  private String _zkAddress;
+  private String _clusterName;
+  private String _localhost;
+
+  private String _tableName;
+  private String _tableConfigFile;
+  private String _timeColumnName;
+  private String _timeUnit;
+
+  private String _inputDataDir;
+  private String _segmentName;
+  private String _schemaFileName;
+  private String _segmentDirName;
+
+  private boolean _startZookeeper;
+  private boolean _enableStarTreeIndex;
+
+  private static final long TIMEOUT_IN_MILLISECONDS = 200 * 1000;
+
+  ClusterStarter(QueryComparisonConfig config)
+<span class="nc" id="L75">      throws SocketException, UnknownHostException {</span>
+
+<span class="nc" id="L77">    _segmentName = config.getSegmentName();</span>
+<span class="nc" id="L78">    _schemaFileName = config.getSchemaFileName();</span>
+<span class="nc" id="L79">    _inputDataDir = config.getInputDataDir();</span>
+<span class="nc" id="L80">    _segmentDirName = config.getSegmentsDir();</span>
+
+<span class="nc" id="L82">    _localhost = NetUtil.getHostAddress();</span>
+
+<span class="nc" id="L84">    _zkAddress = config.getZookeeperAddress();</span>
+<span class="nc" id="L85">    _clusterName = config.getClusterName();</span>
+
+<span class="nc" id="L87">    _controllerPort = config.getControllerPort();</span>
+<span class="nc" id="L88">    _brokerHost = config.getBrokerHost();</span>
+<span class="nc" id="L89">    _brokerPort = config.getBrokerPort();</span>
+<span class="nc" id="L90">    _serverPort = config.getServerPort();</span>
+<span class="nc" id="L91">    _perfUrl = config.getPerfUrl();</span>
+<span class="nc" id="L92">    _startZookeeper = config.getStartZookeeper();</span>
+
+<span class="nc" id="L94">    _tableName = config.getTableName();</span>
+<span class="nc" id="L95">    _timeColumnName = config.getTimeColumnName();</span>
+<span class="nc" id="L96">    _timeUnit = config.getTimeUnit();</span>
+<span class="nc" id="L97">    _tableConfigFile = config.getTableConfigFile();</span>
+
+<span class="nc" id="L99">    _enableStarTreeIndex = false;</span>
+<span class="nc" id="L100">  }</span>
+
+  public ClusterStarter setControllerPort(String controllerPort) {
+<span class="nc" id="L103">    _controllerPort = controllerPort;</span>
+<span class="nc" id="L104">    return this;</span>
+  }
+
+  public ClusterStarter setBrokerHost(String brokerHost) {
+<span class="nc" id="L108">    _brokerHost = brokerHost;</span>
+<span class="nc" id="L109">    return this;</span>
+  }
+
+  public ClusterStarter setBrokerPort(String brokerPort) {
+<span class="nc" id="L113">    _brokerPort = brokerPort;</span>
+<span class="nc" id="L114">    return this;</span>
+  }
+
+  public ClusterStarter setServerPort(String serverPort) {
+<span class="nc" id="L118">    _serverPort = serverPort;</span>
+<span class="nc" id="L119">    return this;</span>
+  }
+
+  public ClusterStarter setZkAddress(String zkAddress) {
+<span class="nc" id="L123">    _zkAddress = zkAddress;</span>
+<span class="nc" id="L124">    return this;</span>
+  }
+
+  public ClusterStarter setStartZookeeper(boolean startZookeeper) {
+<span class="nc" id="L128">    _startZookeeper = startZookeeper;</span>
+<span class="nc" id="L129">    return this;</span>
+  }
+
+  public ClusterStarter setClusterName(String clusterName) {
+<span class="nc" id="L133">    _clusterName = clusterName;</span>
+<span class="nc" id="L134">    return this;</span>
+  }
+
+  public ClusterStarter setSegmentDirName(String segmentDirName) {
+<span class="nc" id="L138">    _segmentDirName = segmentDirName;</span>
+<span class="nc" id="L139">    return this;</span>
+  }
+
+  public ClusterStarter setEnableStarTree(boolean value) {
+<span class="nc" id="L143">    _enableStarTreeIndex = value;</span>
+<span class="nc" id="L144">    return this;</span>
+  }
+
+  public ClusterStarter setTableName(String tableName) {
+<span class="nc" id="L148">    _tableName = tableName;</span>
+<span class="nc" id="L149">    return this;</span>
+  }
+
+  private void startZookeeper()
+      throws IOException {
+<span class="nc bnc" id="L154" title="All 2 branches missed.">    if (_startZookeeper) {</span>
+<span class="nc" id="L155">      StartZookeeperCommand zkStarter = new StartZookeeperCommand();</span>
+<span class="nc" id="L156">      zkStarter.execute();</span>
+    }
+<span class="nc" id="L158">  }</span>
+
+  private void startController()
+      throws Exception {
+
+    // Delete existing cluster first.
+<span class="nc" id="L164">    DeleteClusterCommand deleteClusterCommand = new DeleteClusterCommand().setClusterName(_clusterName);</span>
+<span class="nc" id="L165">    deleteClusterCommand.execute();</span>
+
+<span class="nc" id="L167">    StartControllerCommand controllerStarter =</span>
+        new StartControllerCommand().setControllerPort(_controllerPort).setZkAddress(_zkAddress)
+            .setClusterName(_clusterName);
+
+<span class="nc" id="L171">    controllerStarter.execute();</span>
+<span class="nc" id="L172">  }</span>
+
+  private void startBroker()
+      throws Exception {
+<span class="nc" id="L176">    StartBrokerCommand brokerStarter =</span>
+        new StartBrokerCommand().setClusterName(_clusterName).setPort(Integer.valueOf(_brokerPort));
+<span class="nc" id="L178">    brokerStarter.execute();</span>
+<span class="nc" id="L179">  }</span>
+
+  private void startServer()
+      throws Exception {
+<span class="nc" id="L183">    StartServerCommand serverStarter =</span>
+        new StartServerCommand().setPort(Integer.valueOf(_serverPort)).setClusterName(_clusterName);
+<span class="nc" id="L185">    serverStarter.execute();</span>
+<span class="nc" id="L186">  }</span>
+
+  private void addTable()
+      throws Exception {
+<span class="nc bnc" id="L190" title="All 2 branches missed.">    if (_tableConfigFile != null) {</span>
+<span class="nc" id="L191">      AddTableCommand addTableCommand =</span>
+          new AddTableCommand().setControllerPort(_controllerPort).setFilePath(_tableConfigFile).setExecute(true);
+<span class="nc" id="L193">      addTableCommand.execute();</span>
+<span class="nc" id="L194">      return;</span>
+    }
+
+<span class="nc bnc" id="L197" title="All 2 branches missed.">    if (_tableName == null) {</span>
+<span class="nc" id="L198">      LOGGER.error(&quot;Table info not specified in configuration, please specify either config file or table name&quot;);</span>
+<span class="nc" id="L199">      return;</span>
+    }
+
+<span class="nc" id="L202">    String controllerAddress = &quot;http://&quot; + _localhost + &quot;:&quot; + _controllerPort;</span>
+<span class="nc" id="L203">    String tableJSONConfigString =</span>
+        new TableConfig.Builder(CommonConstants.Helix.TableType.OFFLINE).setTableName(_tableName)
+            .setTimeColumnName(_timeColumnName)
+            .setTimeType(_timeUnit)
+            .setNumReplicas(3)
+            .setBrokerTenant(&quot;broker&quot;)
+            .setServerTenant(&quot;server&quot;)
+            .build()
+            .toJSONConfigString();
+<span class="nc" id="L212">    sendPostRequest(ControllerRequestURLBuilder.baseUrl(controllerAddress).forTableCreate(), tableJSONConfigString);</span>
+<span class="nc" id="L213">  }</span>
+
+  private void uploadData()
+      throws Exception {
+<span class="nc" id="L217">    UploadSegmentCommand segmentUploader =</span>
+        new UploadSegmentCommand().setSegmentDir(_segmentDirName).setControllerHost(_localhost)
+            .setControllerPort(_controllerPort);
+<span class="nc" id="L220">    segmentUploader.execute();</span>
+<span class="nc" id="L221">    PerfBenchmarkDriver.waitForExternalViewUpdate(_zkAddress, _clusterName, TIMEOUT_IN_MILLISECONDS);</span>
+<span class="nc" id="L222">  }</span>
+
+  private void createSegments()
+      throws Exception {
+<span class="nc bnc" id="L226" title="All 2 branches missed.">    if (_inputDataDir != null) {</span>
+<span class="nc" id="L227">      CreateSegmentCommand segmentCreator =</span>
+          new CreateSegmentCommand().setDataDir(_inputDataDir).setSchemaFile(_schemaFileName)
+              .setTableName(_tableName).setSegmentName(_segmentName).setOutDir(_segmentDirName).setOverwrite(true)
+              .setEnableStarTreeIndex(_enableStarTreeIndex);
+
+<span class="nc" id="L232">      segmentCreator.execute();</span>
+    }
+<span class="nc" id="L234">  }</span>
+
+  public void start()
+      throws Exception {
+<span class="nc" id="L238">    startZookeeper();</span>
+<span class="nc" id="L239">    startController();</span>
+<span class="nc" id="L240">    startBroker();</span>
+<span class="nc" id="L241">    startServer();</span>
+<span class="nc" id="L242">    addTable();</span>
+
+<span class="nc" id="L244">    createSegments();</span>
+<span class="nc" id="L245">    uploadData();</span>
+<span class="nc" id="L246">  }</span>
+
+  public String query(String query)
+      throws Exception {
+<span class="nc" id="L250">    LOGGER.debug(&quot;Running query on Pinot Cluster&quot;);</span>
+<span class="nc" id="L251">    PostQueryCommand queryRunner =</span>
+        new PostQueryCommand().setQuery(query).setBrokerHost(_brokerHost).setBrokerPort(_brokerPort);
+<span class="nc" id="L253">    return queryRunner.run();</span>
+  }
+
+  public int perfQuery(String query)
+      throws Exception {
+<span class="nc" id="L258">    LOGGER.debug(&quot;Running perf query on Pinot Cluster&quot;);</span>
+<span class="nc" id="L259">    String encodedQuery = URLEncoder.encode(query, &quot;UTF-8&quot;);</span>
+<span class="nc" id="L260">    String brokerUrl = _perfUrl + encodedQuery;</span>
+<span class="nc" id="L261">    LOGGER.info(&quot;Executing command: &quot; + brokerUrl);</span>
+<span class="nc" id="L262">    URLConnection conn = new URL(brokerUrl).openConnection();</span>
+<span class="nc" id="L263">    conn.setDoOutput(true);</span>
+
+<span class="nc" id="L265">    long startTime = System.currentTimeMillis();</span>
+<span class="nc" id="L266">    InputStream input = conn.getInputStream();</span>
+<span class="nc" id="L267">    long endTime = System.currentTimeMillis();</span>
+
+<span class="nc" id="L269">    BufferedReader reader = new BufferedReader(new InputStreamReader(input, &quot;UTF-8&quot;));</span>
+<span class="nc" id="L270">    StringBuilder sb = new StringBuilder();</span>
+    String line;
+<span class="nc bnc" id="L272" title="All 2 branches missed.">    while ((line = reader.readLine()) != null) {</span>
+<span class="nc" id="L273">      sb.append(line);</span>
+    }
+<span class="nc" id="L275">    LOGGER.debug(&quot;Actual response: &quot; + sb.toString());</span>
+
+<span class="nc" id="L277">    return (int) (endTime - startTime);</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

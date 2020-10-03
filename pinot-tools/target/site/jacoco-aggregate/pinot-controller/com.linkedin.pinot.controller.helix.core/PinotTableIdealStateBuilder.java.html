@@ -1,0 +1,331 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>PinotTableIdealStateBuilder.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-tools</a> &gt; <a href="../index.html" class="el_bundle">pinot-controller</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.controller.helix.core</a> &gt; <span class="el_source">PinotTableIdealStateBuilder.java</span></div><h1>PinotTableIdealStateBuilder.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.controller.helix.core;
+
+import com.linkedin.pinot.common.config.TableConfig;
+import com.linkedin.pinot.common.config.RealtimeTagConfig;
+import com.linkedin.pinot.common.metadata.ZKMetadataProvider;
+import com.linkedin.pinot.common.metadata.instance.InstanceZKMetadata;
+import com.linkedin.pinot.common.metadata.stream.KafkaStreamMetadata;
+import com.linkedin.pinot.common.utils.CommonConstants;
+import com.linkedin.pinot.common.utils.CommonConstants.Helix;
+import com.linkedin.pinot.common.utils.ControllerTenantNameBuilder;
+import com.linkedin.pinot.common.utils.StringUtil;
+import com.linkedin.pinot.common.utils.retry.RetryPolicies;
+import com.linkedin.pinot.controller.helix.core.realtime.PinotLLCRealtimeSegmentManager;
+import com.linkedin.pinot.core.realtime.impl.kafka.PinotKafkaConsumer;
+import com.linkedin.pinot.core.realtime.impl.kafka.PinotKafkaConsumerFactory;
+import com.linkedin.pinot.core.realtime.impl.kafka.SimpleConsumerWrapper;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.Callable;
+import org.apache.commons.compress.utils.IOUtils;
+import org.apache.helix.HelixAdmin;
+import org.apache.helix.HelixManager;
+import org.apache.helix.ZNRecord;
+import org.apache.helix.model.IdealState;
+import org.apache.helix.model.builder.CustomModeISBuilder;
+import org.apache.helix.store.zk.ZkHelixPropertyStore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * Pinot data server layer IdealState builder.
+ *
+ *
+ */
+<span class="pc bpc" id="L52" title="1 of 2 branches missed.">public class PinotTableIdealStateBuilder {</span>
+<span class="fc" id="L53">  private static final Logger LOGGER = LoggerFactory.getLogger(PinotTableIdealStateBuilder.class);</span>
+  public static final String ONLINE = &quot;ONLINE&quot;;
+  public static final String OFFLINE = &quot;OFFLINE&quot;;
+
+  /**
+   *
+   * Building an empty idealState for a given table.
+   * Used when creating a new table.
+   *
+   * @param tableName resource name
+   * @param numCopies is the number of replicas
+   * @return
+   */
+  public static IdealState buildEmptyIdealStateFor(String tableName, int numCopies) {
+<span class="fc" id="L67">    final CustomModeISBuilder customModeIdealStateBuilder = new CustomModeISBuilder(tableName);</span>
+<span class="fc" id="L68">    final int replicas = numCopies;</span>
+<span class="fc" id="L69">    customModeIdealStateBuilder</span>
+        .setStateModel(PinotHelixSegmentOnlineOfflineStateModelGenerator.PINOT_SEGMENT_ONLINE_OFFLINE_STATE_MODEL)
+        .setNumPartitions(0).setNumReplica(replicas).setMaxPartitionsPerNode(1);
+<span class="fc" id="L72">    final IdealState idealState = customModeIdealStateBuilder.build();</span>
+<span class="fc" id="L73">    idealState.setInstanceGroupTag(tableName);</span>
+<span class="fc" id="L74">    return idealState;</span>
+  }
+
+  /**
+   *
+   * Building an empty idealState for a given table.
+   * Used when creating a new table.
+   *
+   * @param helixAdmin
+   * @param helixClusterName
+   * @return
+   */
+  public static IdealState buildEmptyIdealStateForBrokerResource(HelixAdmin helixAdmin, String helixClusterName) {
+<span class="fc" id="L87">    final CustomModeISBuilder customModeIdealStateBuilder =</span>
+        new CustomModeISBuilder(CommonConstants.Helix.BROKER_RESOURCE_INSTANCE);
+<span class="fc" id="L89">    customModeIdealStateBuilder</span>
+        .setStateModel(
+            PinotHelixBrokerResourceOnlineOfflineStateModelGenerator.PINOT_BROKER_RESOURCE_ONLINE_OFFLINE_STATE_MODEL)
+        .setMaxPartitionsPerNode(Integer.MAX_VALUE).setNumReplica(Integer.MAX_VALUE)
+        .setNumPartitions(Integer.MAX_VALUE);
+<span class="fc" id="L94">    final IdealState idealState = customModeIdealStateBuilder.build();</span>
+<span class="fc" id="L95">    return idealState;</span>
+  }
+
+  public static IdealState addNewRealtimeSegmentToIdealState(String segmentId, IdealState state, String instanceName) {
+<span class="fc" id="L99">    state.setPartitionState(segmentId, instanceName, ONLINE);</span>
+<span class="fc" id="L100">    state.setNumPartitions(state.getNumPartitions() + 1);</span>
+<span class="fc" id="L101">    return state;</span>
+  }
+
+  /**
+   * Remove a segment is also required to recompute the ideal state.
+   *
+   * @param tableName
+   * @param segmentId
+   * @param helixAdmin
+   * @param helixClusterName
+   * @return
+   */
+  public synchronized static IdealState dropSegmentFromIdealStateFor(String tableName, String segmentId,
+      HelixAdmin helixAdmin, String helixClusterName) {
+
+<span class="nc" id="L116">    final IdealState currentIdealState = helixAdmin.getResourceIdealState(helixClusterName, tableName);</span>
+<span class="nc" id="L117">    final Set&lt;String&gt; currentInstanceSet = currentIdealState.getInstanceSet(segmentId);</span>
+<span class="nc bnc" id="L118" title="All 4 branches missed.">    if (!currentInstanceSet.isEmpty() &amp;&amp; currentIdealState.getPartitionSet().contains(segmentId)) {</span>
+<span class="nc bnc" id="L119" title="All 2 branches missed.">      for (String instanceName : currentIdealState.getInstanceSet(segmentId)) {</span>
+<span class="nc" id="L120">        currentIdealState.setPartitionState(segmentId, instanceName, &quot;DROPPED&quot;);</span>
+<span class="nc" id="L121">      }</span>
+    } else {
+<span class="nc" id="L123">      throw new RuntimeException(&quot;Cannot found segmentId - &quot; + segmentId + &quot; in table - &quot; + tableName);</span>
+    }
+<span class="nc" id="L125">    return currentIdealState;</span>
+  }
+
+  /**
+   * Remove a segment is also required to recompute the ideal state.
+   *
+   * @param tableName
+   * @param segmentId
+   * @param helixAdmin
+   * @param helixClusterName
+   * @return
+   */
+  public synchronized static IdealState removeSegmentFromIdealStateFor(String tableName, String segmentId,
+      HelixAdmin helixAdmin, String helixClusterName) {
+
+<span class="nc" id="L140">    final IdealState currentIdealState = helixAdmin.getResourceIdealState(helixClusterName, tableName);</span>
+<span class="nc bnc" id="L141" title="All 6 branches missed.">    if (currentIdealState != null &amp;&amp; currentIdealState.getPartitionSet() != null</span>
+        &amp;&amp; currentIdealState.getPartitionSet().contains(segmentId)) {
+<span class="nc" id="L143">      currentIdealState.getPartitionSet().remove(segmentId);</span>
+    } else {
+<span class="nc" id="L145">      throw new RuntimeException(&quot;Cannot found segmentId - &quot; + segmentId + &quot; in table - &quot; + tableName);</span>
+    }
+<span class="nc" id="L147">    return currentIdealState;</span>
+  }
+
+  /**
+   *
+   * @param brokerResourceName
+   * @param helixAdmin
+   * @param helixClusterName
+   * @return
+   */
+  public static IdealState removeBrokerResourceFromIdealStateFor(String brokerResourceName, HelixAdmin helixAdmin,
+      String helixClusterName) {
+<span class="nc" id="L159">    final IdealState currentIdealState =</span>
+        helixAdmin.getResourceIdealState(helixClusterName, CommonConstants.Helix.BROKER_RESOURCE_INSTANCE);
+<span class="nc" id="L161">    final Set&lt;String&gt; currentInstanceSet = currentIdealState.getInstanceSet(brokerResourceName);</span>
+<span class="nc bnc" id="L162" title="All 4 branches missed.">    if (!currentInstanceSet.isEmpty() &amp;&amp; currentIdealState.getPartitionSet().contains(brokerResourceName)) {</span>
+<span class="nc" id="L163">      currentIdealState.getPartitionSet().remove(brokerResourceName);</span>
+    } else {
+<span class="nc" id="L165">      throw new RuntimeException(&quot;Cannot found broker resource - &quot; + brokerResourceName + &quot; in broker resource &quot;);</span>
+    }
+<span class="nc" id="L167">    return currentIdealState;</span>
+  }
+
+  public static IdealState buildInitialHighLevelRealtimeIdealStateFor(String realtimeTableName,
+      TableConfig realtimeTableConfig, HelixAdmin helixAdmin, String helixClusterName,
+      ZkHelixPropertyStore&lt;ZNRecord&gt; zkHelixPropertyStore) {
+<span class="fc" id="L173">    String realtimeServerTenant =</span>
+        ControllerTenantNameBuilder.getRealtimeTenantNameForTenant(realtimeTableConfig.getTenantConfig().getServer());
+<span class="fc" id="L175">    final List&lt;String&gt; realtimeInstances = helixAdmin.getInstancesInClusterWithTag(helixClusterName,</span>
+        realtimeServerTenant);
+<span class="fc" id="L177">    IdealState idealState = buildEmptyKafkaConsumerRealtimeIdealStateFor(realtimeTableName, 1);</span>
+<span class="pc bpc" id="L178" title="1 of 2 branches missed.">    if (realtimeInstances.size() % Integer.parseInt(realtimeTableConfig.getValidationConfig().getReplication()) != 0) {</span>
+<span class="nc" id="L179">      throw new RuntimeException(</span>
+          &quot;Number of instance in current tenant should be an integer multiples of the number of replications&quot;);
+    }
+<span class="fc" id="L182">    setupInstanceConfigForKafkaHighLevelConsumer(realtimeTableName, realtimeInstances.size(),</span>
+        Integer.parseInt(realtimeTableConfig.getValidationConfig().getReplication()),
+        realtimeTableConfig.getIndexingConfig().getStreamConfigs(), zkHelixPropertyStore, realtimeInstances);
+<span class="fc" id="L185">    return idealState;</span>
+  }
+
+  public static void buildLowLevelRealtimeIdealStateFor(String realtimeTableName, TableConfig realtimeTableConfig,
+      HelixAdmin helixAdmin, String helixClusterName, HelixManager helixManager, IdealState idealState) {
+
+<span class="nc" id="L191">    boolean create = false;</span>
+    // Validate replicasPerPartition here.
+<span class="nc" id="L193">    final String replicasPerPartitionStr = realtimeTableConfig.getValidationConfig().getReplicasPerPartition();</span>
+<span class="nc bnc" id="L194" title="All 4 branches missed.">    if (replicasPerPartitionStr == null || replicasPerPartitionStr.isEmpty()) {</span>
+<span class="nc" id="L195">      throw new RuntimeException(&quot;Null or empty value for replicasPerPartition, expected a number&quot;);</span>
+    }
+    final int nReplicas;
+    try {
+<span class="nc" id="L199">      nReplicas = Integer.valueOf(replicasPerPartitionStr);</span>
+<span class="nc" id="L200">    } catch (NumberFormatException e) {</span>
+<span class="nc" id="L201">      throw new PinotHelixResourceManager.InvalidTableConfigException(</span>
+          &quot;Invalid value for replicasPerPartition, expected a number: &quot; + replicasPerPartitionStr, e);
+<span class="nc" id="L203">    }</span>
+<span class="nc bnc" id="L204" title="All 2 branches missed.">    if (idealState == null) {</span>
+<span class="nc" id="L205">      idealState = buildEmptyKafkaConsumerRealtimeIdealStateFor(realtimeTableName, nReplicas);</span>
+<span class="nc" id="L206">      create = true;</span>
+    }
+<span class="nc" id="L208">    LOGGER.info(&quot;Assigning partitions to instances for simple consumer for table {}&quot;, realtimeTableName);</span>
+<span class="nc" id="L209">    final KafkaStreamMetadata kafkaMetadata = new KafkaStreamMetadata(realtimeTableConfig.getIndexingConfig().getStreamConfigs());</span>
+<span class="nc" id="L210">    final PinotLLCRealtimeSegmentManager segmentManager = PinotLLCRealtimeSegmentManager.getInstance();</span>
+<span class="nc" id="L211">    final int nPartitions = getPartitionCount(kafkaMetadata);</span>
+<span class="nc" id="L212">    LOGGER.info(&quot;Assigning {} partitions to instances for simple consumer for table {}&quot;, nPartitions, realtimeTableName);</span>
+
+<span class="nc" id="L214">    RealtimeTagConfig realtimeTagConfig = new RealtimeTagConfig(realtimeTableConfig, helixManager);</span>
+<span class="nc" id="L215">    final List&lt;String&gt; realtimeInstances = helixAdmin.getInstancesInClusterWithTag(helixClusterName,</span>
+        realtimeTagConfig.getConsumingRealtimeServerTag());
+<span class="nc" id="L217">    segmentManager.setupHelixEntries(realtimeTagConfig, kafkaMetadata, nPartitions, realtimeInstances, idealState, create);</span>
+<span class="nc" id="L218">  }</span>
+
+  public static int getPartitionCount(KafkaStreamMetadata kafkaMetadata) {
+<span class="nc" id="L221">    KafkaPartitionsCountFetcher fetcher = new KafkaPartitionsCountFetcher(kafkaMetadata);</span>
+    try {
+<span class="nc" id="L223">      RetryPolicies.noDelayRetryPolicy(3).attempt(fetcher);</span>
+<span class="nc" id="L224">      return fetcher.getPartitionCount();</span>
+<span class="nc" id="L225">    } catch (Exception e) {</span>
+<span class="nc" id="L226">      Exception fetcherException = fetcher.getException();</span>
+<span class="nc" id="L227">      LOGGER.error(&quot;Could not get partition count for {}&quot;, kafkaMetadata.getKafkaTopicName(), fetcherException);</span>
+<span class="nc" id="L228">      throw new RuntimeException(fetcherException);</span>
+    }
+  }
+
+  public static IdealState buildEmptyKafkaConsumerRealtimeIdealStateFor(String realtimeTableName, int replicaCount) {
+<span class="fc" id="L233">    final CustomModeISBuilder customModeIdealStateBuilder = new CustomModeISBuilder(realtimeTableName);</span>
+<span class="fc" id="L234">    customModeIdealStateBuilder</span>
+        .setStateModel(PinotHelixSegmentOnlineOfflineStateModelGenerator.PINOT_SEGMENT_ONLINE_OFFLINE_STATE_MODEL)
+        .setNumPartitions(0).setNumReplica(replicaCount).setMaxPartitionsPerNode(1);
+<span class="fc" id="L237">    final IdealState idealState = customModeIdealStateBuilder.build();</span>
+<span class="fc" id="L238">    idealState.setInstanceGroupTag(realtimeTableName);</span>
+
+<span class="fc" id="L240">    return idealState;</span>
+  }
+
+  private static void setupInstanceConfigForKafkaHighLevelConsumer(String realtimeTableName, int numDataInstances,
+      int numDataReplicas, Map&lt;String, String&gt; streamProviderConfig,
+      ZkHelixPropertyStore&lt;ZNRecord&gt; zkHelixPropertyStore, List&lt;String&gt; instanceList) {
+<span class="fc" id="L246">    int numInstancesPerReplica = numDataInstances / numDataReplicas;</span>
+<span class="fc" id="L247">    int partitionId = 0;</span>
+<span class="fc" id="L248">    int replicaId = 0;</span>
+
+<span class="fc" id="L250">    String groupId = getGroupIdFromRealtimeDataTable(realtimeTableName, streamProviderConfig);</span>
+<span class="fc bfc" id="L251" title="All 2 branches covered.">    for (int i = 0; i &lt; numInstancesPerReplica * numDataReplicas; ++i) {</span>
+<span class="fc" id="L252">      String instance = instanceList.get(i);</span>
+<span class="fc" id="L253">      InstanceZKMetadata instanceZKMetadata = ZKMetadataProvider.getInstanceZKMetadata(zkHelixPropertyStore, instance);</span>
+<span class="fc bfc" id="L254" title="All 2 branches covered.">      if (instanceZKMetadata == null) {</span>
+<span class="fc" id="L255">        instanceZKMetadata = new InstanceZKMetadata();</span>
+<span class="fc" id="L256">        String[] instanceConfigs = instance.split(&quot;_&quot;);</span>
+<span class="pc bpc" id="L257" title="2 of 4 branches missed.">        assert (instanceConfigs.length == 3);</span>
+<span class="fc" id="L258">        instanceZKMetadata.setInstanceType(instanceConfigs[0]);</span>
+<span class="fc" id="L259">        instanceZKMetadata.setInstanceName(instanceConfigs[1]);</span>
+<span class="fc" id="L260">        instanceZKMetadata.setInstancePort(Integer.parseInt(instanceConfigs[2]));</span>
+      }
+<span class="fc" id="L262">      instanceZKMetadata.setGroupId(realtimeTableName, groupId + &quot;_&quot; + replicaId);</span>
+<span class="fc" id="L263">      instanceZKMetadata.setPartition(realtimeTableName, Integer.toString(partitionId));</span>
+<span class="fc" id="L264">      partitionId = (partitionId + 1) % numInstancesPerReplica;</span>
+<span class="fc bfc" id="L265" title="All 2 branches covered.">      if (partitionId == 0) {</span>
+<span class="fc" id="L266">        replicaId++;</span>
+      }
+<span class="fc" id="L268">      ZKMetadataProvider.setInstanceZKMetadata(zkHelixPropertyStore, instanceZKMetadata);</span>
+    }
+<span class="fc" id="L270">  }</span>
+
+  private static String getGroupIdFromRealtimeDataTable(String realtimeTableName,
+      Map&lt;String, String&gt; streamProviderConfig) {
+<span class="fc" id="L274">    String keyOfGroupId =</span>
+        StringUtil
+            .join(&quot;.&quot;, Helix.DataSource.STREAM_PREFIX, Helix.DataSource.Realtime.Kafka.HighLevelConsumer.GROUP_ID);
+<span class="fc" id="L277">    String groupId = StringUtil.join(&quot;_&quot;, realtimeTableName, System.currentTimeMillis() + &quot;&quot;);</span>
+<span class="pc bpc" id="L278" title="3 of 4 branches missed.">    if (streamProviderConfig.containsKey(keyOfGroupId) &amp;&amp; !streamProviderConfig.get(keyOfGroupId).isEmpty()) {</span>
+<span class="nc" id="L279">      groupId = streamProviderConfig.get(keyOfGroupId);</span>
+    }
+<span class="fc" id="L281">    return groupId;</span>
+  }
+
+<span class="nc" id="L284">  private static class KafkaPartitionsCountFetcher implements Callable&lt;Boolean&gt; {</span>
+<span class="nc" id="L285">    private int _partitionCount = -1;</span>
+    private final KafkaStreamMetadata _kafkaStreamMetadata;
+    private Exception _exception;
+
+<span class="nc" id="L289">    private KafkaPartitionsCountFetcher(KafkaStreamMetadata kafkaStreamMetadata) {</span>
+<span class="nc" id="L290">      _kafkaStreamMetadata = kafkaStreamMetadata;</span>
+<span class="nc" id="L291">    }</span>
+
+    private int getPartitionCount() {
+<span class="nc" id="L294">      return _partitionCount;</span>
+    }
+
+    private Exception getException() {
+<span class="nc" id="L298">      return _exception;</span>
+    }
+
+    @Override
+    public Boolean call() throws Exception {
+<span class="nc" id="L303">      final String bootstrapHosts = _kafkaStreamMetadata.getBootstrapHosts();</span>
+<span class="nc" id="L304">      final String kafkaTopicName = _kafkaStreamMetadata.getKafkaTopicName();</span>
+<span class="nc bnc" id="L305" title="All 4 branches missed.">      if (bootstrapHosts == null || bootstrapHosts.isEmpty()) {</span>
+<span class="nc" id="L306">        throw new RuntimeException(&quot;Invalid value for &quot; + Helix.DataSource.Realtime.Kafka.KAFKA_BROKER_LIST);</span>
+      }
+<span class="nc" id="L308">      PinotKafkaConsumerFactory pinotKafkaConsumerFactory = PinotKafkaConsumerFactory.create(_kafkaStreamMetadata);</span>
+<span class="nc" id="L309">      PinotKafkaConsumer consumerWrapper = pinotKafkaConsumerFactory.buildMetadataFetcher(</span>
+          PinotTableIdealStateBuilder.class.getSimpleName() + &quot;-&quot; + kafkaTopicName, _kafkaStreamMetadata);
+      try {
+<span class="nc" id="L312">        _partitionCount = consumerWrapper.getPartitionCount(kafkaTopicName, /*maxWaitTimeMs=*/5000L);</span>
+<span class="nc bnc" id="L313" title="All 2 branches missed.">        if (_exception != null) {</span>
+          // We had at least one failure, but succeeded now. Log an info
+<span class="nc" id="L315">          LOGGER.info(&quot;Successfully retrieved partition count as {} for {}&quot;, _partitionCount, kafkaTopicName);</span>
+        }
+<span class="nc" id="L317">        return Boolean.TRUE;</span>
+<span class="nc" id="L318">      } catch (SimpleConsumerWrapper.TransientConsumerException e) {</span>
+<span class="nc" id="L319">        LOGGER.warn(&quot;Could not get Kafka partition count for {}:{}&quot;, kafkaTopicName, e.getMessage());</span>
+<span class="nc" id="L320">        _exception = e;</span>
+<span class="nc" id="L321">        return Boolean.FALSE;</span>
+<span class="nc" id="L322">      } catch (Exception e) {</span>
+<span class="nc" id="L323">        _exception = e;</span>
+<span class="nc" id="L324">        throw e;</span>
+      } finally {
+<span class="nc" id="L326">        IOUtils.closeQuietly(consumerWrapper);</span>
+      }
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

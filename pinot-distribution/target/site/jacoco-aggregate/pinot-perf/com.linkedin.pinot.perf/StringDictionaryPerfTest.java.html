@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>StringDictionaryPerfTest.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-perf</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.perf</a> &gt; <span class="el_source">StringDictionaryPerfTest.java</span></div><h1>StringDictionaryPerfTest.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.perf;
+
+import com.linkedin.pinot.common.data.DimensionFieldSpec;
+import com.linkedin.pinot.common.data.FieldSpec;
+import com.linkedin.pinot.common.data.Schema;
+import com.linkedin.pinot.common.segment.ReadMode;
+import com.linkedin.pinot.core.data.GenericRow;
+import com.linkedin.pinot.core.data.readers.FileFormat;
+import com.linkedin.pinot.core.data.readers.GenericRowRecordReader;
+import com.linkedin.pinot.core.indexsegment.generator.SegmentGeneratorConfig;
+import com.linkedin.pinot.core.segment.creator.impl.SegmentIndexCreationDriverImpl;
+import com.linkedin.pinot.core.segment.index.IndexSegmentImpl;
+import com.linkedin.pinot.core.segment.index.loader.Loaders;
+import com.linkedin.pinot.core.segment.index.readers.ImmutableDictionaryReader;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Random;
+import java.util.Set;
+import org.apache.commons.io.FileUtils;
+import org.apache.commons.lang.RandomStringUtils;
+
+
+/**
+ * Performance test for lookup in string dictionary.
+ */
+<span class="nc" id="L44">public class StringDictionaryPerfTest {</span>
+  private static final int MAX_STRING_LENGTH = 100;
+<span class="nc" id="L46">  private static final String TMP_DIR = System.getProperty(&quot;java.io.tmpdir&quot;);</span>
+  private static final String COLUMN_NAME = &quot;test&quot;;
+  private static final int TOTAL_NUM_LOOKUPS = 100_000;
+
+  String[] _inputStrings;
+  private File _indexDir;
+  private int _dictLength;
+
+  /**
+   * Helper method to build a segment:
+   * &lt;ul&gt;
+   *   &lt;li&gt; Segment contains one string column &lt;/li&gt;
+   *   &lt;li&gt; Row values for the column are randomly generated strings of length 1 to 100 &lt;/li&gt;
+   * &lt;/ul&gt;
+   *
+   * @param dictLength Length of the dictionary
+   * @throws Exception
+   */
+  public void buildSegment(int dictLength)
+      throws Exception {
+<span class="nc" id="L66">    Schema schema = new Schema();</span>
+<span class="nc" id="L67">    String segmentName = &quot;perfTestSegment&quot; + System.currentTimeMillis();</span>
+<span class="nc" id="L68">    _indexDir = new File(TMP_DIR + File.separator + segmentName);</span>
+<span class="nc" id="L69">    _indexDir.deleteOnExit();</span>
+
+<span class="nc" id="L71">    FieldSpec fieldSpec = new DimensionFieldSpec(COLUMN_NAME, FieldSpec.DataType.STRING, true);</span>
+<span class="nc" id="L72">    schema.addField(fieldSpec);</span>
+
+<span class="nc" id="L74">    _dictLength = dictLength;</span>
+<span class="nc" id="L75">    _inputStrings = new String[dictLength];</span>
+
+<span class="nc" id="L77">    SegmentGeneratorConfig config = new SegmentGeneratorConfig(schema);</span>
+<span class="nc" id="L78">    config.setOutDir(_indexDir.getParent());</span>
+<span class="nc" id="L79">    config.setFormat(FileFormat.AVRO);</span>
+<span class="nc" id="L80">    config.setSegmentName(segmentName);</span>
+
+<span class="nc" id="L82">    Random random = new Random(System.nanoTime());</span>
+<span class="nc" id="L83">    List&lt;GenericRow&gt; rows = new ArrayList&lt;&gt;(dictLength);</span>
+<span class="nc" id="L84">    Set&lt;String&gt; uniqueStrings = new HashSet&lt;&gt;(dictLength);</span>
+
+<span class="nc" id="L86">    int i = 0;</span>
+<span class="nc bnc" id="L87" title="All 2 branches missed.">    while (i &lt; dictLength) {</span>
+<span class="nc" id="L88">      HashMap&lt;String, Object&gt; map = new HashMap&lt;&gt;();</span>
+<span class="nc" id="L89">      String randomString = RandomStringUtils.randomAlphanumeric(1 + random.nextInt(MAX_STRING_LENGTH));</span>
+
+<span class="nc bnc" id="L91" title="All 2 branches missed.">      if (uniqueStrings.contains(randomString)) {</span>
+<span class="nc" id="L92">        continue;</span>
+      }
+
+<span class="nc" id="L95">      _inputStrings[i] = randomString;</span>
+<span class="nc" id="L96">      uniqueStrings.add(randomString);</span>
+<span class="nc" id="L97">      map.put(&quot;test&quot;, _inputStrings[i++]);</span>
+
+<span class="nc" id="L99">      GenericRow genericRow = new GenericRow();</span>
+<span class="nc" id="L100">      genericRow.init(map);</span>
+<span class="nc" id="L101">      rows.add(genericRow);</span>
+<span class="nc" id="L102">    }</span>
+
+<span class="nc" id="L104">    SegmentIndexCreationDriverImpl driver = new SegmentIndexCreationDriverImpl();</span>
+<span class="nc" id="L105">    driver.init(config, new GenericRowRecordReader(rows, schema));</span>
+<span class="nc" id="L106">    driver.build();</span>
+<span class="nc" id="L107">  }</span>
+
+  /**
+   * Measures the performance of string dictionary lookups by performing the provided
+   * number of lookups to random indices.
+   *
+   * @param numLookups Number of lookups to perform
+   * @throws Exception
+   */
+  public void perfTestLookups(int numLookups)
+      throws Exception {
+<span class="nc" id="L118">    IndexSegmentImpl segment = (IndexSegmentImpl) Loaders.IndexSegment.load(_indexDir, ReadMode.heap);</span>
+<span class="nc" id="L119">    ImmutableDictionaryReader dictionary = segment.getDictionaryFor(COLUMN_NAME);</span>
+
+<span class="nc" id="L121">    Random random = new Random(System.nanoTime());</span>
+<span class="nc" id="L122">    long start = System.currentTimeMillis();</span>
+
+<span class="nc bnc" id="L124" title="All 2 branches missed.">    for (int i = 0; i &lt; numLookups; i++) {</span>
+<span class="nc" id="L125">      int index = 1 + random.nextInt(_dictLength);</span>
+<span class="nc" id="L126">      dictionary.indexOf(_inputStrings[index]);</span>
+    }
+
+<span class="nc" id="L129">    FileUtils.deleteQuietly(_indexDir);</span>
+<span class="nc" id="L130">    System.out.println(&quot;Total time for &quot; + TOTAL_NUM_LOOKUPS + &quot; lookups: &quot; + (System.currentTimeMillis() - start));</span>
+<span class="nc" id="L131">  }</span>
+
+  public static void main(String[] args)
+      throws Exception {
+<span class="nc bnc" id="L135" title="All 2 branches missed.">    if (args.length != 2) {</span>
+<span class="nc" id="L136">      System.out.println(&quot;Usage: StringDictionaryPerfRunner &lt;dictionary_length&gt; &lt;num_lookups&gt; &quot;);</span>
+    }
+
+<span class="nc" id="L139">    int dictLength = Integer.valueOf(args[0]);</span>
+<span class="nc" id="L140">    int numLookups = Integer.valueOf(args[1]);</span>
+
+<span class="nc" id="L142">    StringDictionaryPerfTest test = new StringDictionaryPerfTest();</span>
+<span class="nc" id="L143">    test.buildSegment(dictLength);</span>
+<span class="nc" id="L144">    test.perfTestLookups(numLookups);</span>
+<span class="nc" id="L145">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

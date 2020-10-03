@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>PercentileAggregationFunction.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-hadoop</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.query.aggregation.function</a> &gt; <span class="el_source">PercentileAggregationFunction.java</span></div><h1>PercentileAggregationFunction.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.query.aggregation.function;
+
+import com.linkedin.pinot.common.data.FieldSpec;
+import com.linkedin.pinot.core.common.BlockValSet;
+import com.linkedin.pinot.core.query.aggregation.AggregationResultHolder;
+import com.linkedin.pinot.core.query.aggregation.ObjectAggregationResultHolder;
+import com.linkedin.pinot.core.query.aggregation.groupby.GroupByResultHolder;
+import com.linkedin.pinot.core.query.aggregation.groupby.ObjectGroupByResultHolder;
+import it.unimi.dsi.fastutil.doubles.DoubleArrayList;
+import java.util.Collections;
+import javax.annotation.Nonnull;
+
+
+public class PercentileAggregationFunction implements AggregationFunction&lt;DoubleArrayList, Double&gt; {
+  private static final double DEFAULT_FINAL_RESULT = Double.NEGATIVE_INFINITY;
+
+  private final String _name;
+  private final int _percentile;
+
+<span class="fc" id="L35">  public PercentileAggregationFunction(int percentile) {</span>
+<span class="pc bpc" id="L36" title="1 of 5 branches missed.">    switch (percentile) {</span>
+      case 50:
+<span class="fc" id="L38">        _name = AggregationFunctionFactory.AggregationFunctionType.PERCENTILE50.getName();</span>
+<span class="fc" id="L39">        break;</span>
+      case 90:
+<span class="fc" id="L41">        _name = AggregationFunctionFactory.AggregationFunctionType.PERCENTILE90.getName();</span>
+<span class="fc" id="L42">        break;</span>
+      case 95:
+<span class="fc" id="L44">        _name = AggregationFunctionFactory.AggregationFunctionType.PERCENTILE95.getName();</span>
+<span class="fc" id="L45">        break;</span>
+      case 99:
+<span class="fc" id="L47">        _name = AggregationFunctionFactory.AggregationFunctionType.PERCENTILE99.getName();</span>
+<span class="fc" id="L48">        break;</span>
+      default:
+<span class="nc" id="L50">        throw new UnsupportedOperationException(</span>
+            &quot;Unsupported percentile for PercentileAggregationFunction: &quot; + percentile);
+    }
+<span class="fc" id="L53">    _percentile = percentile;</span>
+<span class="fc" id="L54">  }</span>
+
+  @Nonnull
+  @Override
+  public String getName() {
+<span class="fc" id="L59">    return _name;</span>
+  }
+
+  @Nonnull
+  @Override
+  public String getColumnName(@Nonnull String[] columns) {
+<span class="fc" id="L65">    return _name + &quot;_&quot; + columns[0];</span>
+  }
+
+  @Override
+  public void accept(@Nonnull AggregationFunctionVisitorBase visitor) {
+<span class="fc" id="L70">    visitor.visit(this);</span>
+<span class="fc" id="L71">  }</span>
+
+  @Nonnull
+  @Override
+  public AggregationResultHolder createAggregationResultHolder() {
+<span class="fc" id="L76">    return new ObjectAggregationResultHolder();</span>
+  }
+
+  @Nonnull
+  @Override
+  public GroupByResultHolder createGroupByResultHolder(int initialCapacity, int maxCapacity, int trimSize) {
+<span class="fc" id="L82">    return new ObjectGroupByResultHolder(initialCapacity, maxCapacity, trimSize);</span>
+  }
+
+  @Override
+  public void aggregate(int length, @Nonnull AggregationResultHolder aggregationResultHolder,
+      @Nonnull BlockValSet... blockValSets) {
+<span class="fc" id="L88">    double[] valueArray = blockValSets[0].getDoubleValuesSV();</span>
+<span class="fc" id="L89">    DoubleArrayList doubleArrayList = aggregationResultHolder.getResult();</span>
+<span class="fc bfc" id="L90" title="All 2 branches covered.">    if (doubleArrayList == null) {</span>
+<span class="fc" id="L91">      doubleArrayList = new DoubleArrayList();</span>
+<span class="fc" id="L92">      aggregationResultHolder.setValue(doubleArrayList);</span>
+    }
+<span class="fc bfc" id="L94" title="All 2 branches covered.">    for (int i = 0; i &lt; length; i++) {</span>
+<span class="fc" id="L95">      doubleArrayList.add(valueArray[i]);</span>
+    }
+<span class="fc" id="L97">  }</span>
+
+  @Override
+  public void aggregateGroupBySV(int length, @Nonnull int[] groupKeyArray,
+      @Nonnull GroupByResultHolder groupByResultHolder, @Nonnull BlockValSet... blockValSets) {
+<span class="fc" id="L102">    double[] valueArray = blockValSets[0].getDoubleValuesSV();</span>
+<span class="fc bfc" id="L103" title="All 2 branches covered.">    for (int i = 0; i &lt; length; i++) {</span>
+<span class="fc" id="L104">      int groupKey = groupKeyArray[i];</span>
+<span class="fc" id="L105">      DoubleArrayList doubleArrayList = groupByResultHolder.getResult(groupKey);</span>
+<span class="fc bfc" id="L106" title="All 2 branches covered.">      if (doubleArrayList == null) {</span>
+<span class="fc" id="L107">        doubleArrayList = new DoubleArrayList();</span>
+<span class="fc" id="L108">        groupByResultHolder.setValueForKey(groupKey, doubleArrayList);</span>
+      }
+<span class="fc" id="L110">      doubleArrayList.add(valueArray[i]);</span>
+    }
+<span class="fc" id="L112">  }</span>
+
+  @Override
+  public void aggregateGroupByMV(int length, @Nonnull int[][] groupKeysArray,
+      @Nonnull GroupByResultHolder groupByResultHolder, @Nonnull BlockValSet... blockValSets) {
+<span class="nc" id="L117">    double[] valueArray = blockValSets[0].getDoubleValuesSV();</span>
+<span class="nc bnc" id="L118" title="All 2 branches missed.">    for (int i = 0; i &lt; length; i++) {</span>
+<span class="nc" id="L119">      double value = valueArray[i];</span>
+<span class="nc bnc" id="L120" title="All 2 branches missed.">      for (int groupKey : groupKeysArray[i]) {</span>
+<span class="nc" id="L121">        DoubleArrayList doubleArrayList = groupByResultHolder.getResult(groupKey);</span>
+<span class="nc bnc" id="L122" title="All 2 branches missed.">        if (doubleArrayList == null) {</span>
+<span class="nc" id="L123">          doubleArrayList = new DoubleArrayList();</span>
+<span class="nc" id="L124">          groupByResultHolder.setValueForKey(groupKey, doubleArrayList);</span>
+        }
+<span class="nc" id="L126">        doubleArrayList.add(value);</span>
+      }
+    }
+<span class="nc" id="L129">  }</span>
+
+  @Nonnull
+  @Override
+  public DoubleArrayList extractAggregationResult(@Nonnull AggregationResultHolder aggregationResultHolder) {
+<span class="fc" id="L134">    DoubleArrayList doubleArrayList = aggregationResultHolder.getResult();</span>
+<span class="pc bpc" id="L135" title="1 of 2 branches missed.">    if (doubleArrayList == null) {</span>
+<span class="nc" id="L136">      return new DoubleArrayList();</span>
+    } else {
+<span class="fc" id="L138">      return doubleArrayList;</span>
+    }
+  }
+
+  @Nonnull
+  @Override
+  public DoubleArrayList extractGroupByResult(@Nonnull GroupByResultHolder groupByResultHolder, int groupKey) {
+<span class="fc" id="L145">    DoubleArrayList doubleArrayList = groupByResultHolder.getResult(groupKey);</span>
+<span class="pc bpc" id="L146" title="1 of 2 branches missed.">    if (doubleArrayList == null) {</span>
+<span class="nc" id="L147">      return new DoubleArrayList();</span>
+    } else {
+<span class="fc" id="L149">      return doubleArrayList;</span>
+    }
+  }
+
+  @Nonnull
+  @Override
+  public DoubleArrayList merge(@Nonnull DoubleArrayList intermediateResult1,
+      @Nonnull DoubleArrayList intermediateResult2) {
+<span class="fc" id="L157">    intermediateResult1.addAll(intermediateResult2);</span>
+<span class="fc" id="L158">    return intermediateResult1;</span>
+  }
+
+  @Override
+  public boolean isIntermediateResultComparable() {
+<span class="nc" id="L163">    return false;</span>
+  }
+
+  @Nonnull
+  @Override
+  public FieldSpec.DataType getIntermediateResultDataType() {
+<span class="fc" id="L169">    return FieldSpec.DataType.OBJECT;</span>
+  }
+
+  @Nonnull
+  @Override
+  public Double extractFinalResult(@Nonnull DoubleArrayList intermediateResult) {
+<span class="fc" id="L175">    int size = intermediateResult.size();</span>
+<span class="pc bpc" id="L176" title="1 of 2 branches missed.">    if (size == 0) {</span>
+<span class="nc" id="L177">      return DEFAULT_FINAL_RESULT;</span>
+    } else {
+<span class="fc" id="L179">      Collections.sort(intermediateResult);</span>
+<span class="fc" id="L180">      return intermediateResult.get((int) ((long) intermediateResult.size() * _percentile / 100));</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

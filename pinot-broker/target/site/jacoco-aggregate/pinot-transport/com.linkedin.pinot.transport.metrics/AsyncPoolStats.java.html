@@ -1,0 +1,237 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>AsyncPoolStats.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-broker</a> &gt; <a href="../index.html" class="el_bundle">pinot-transport</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.transport.metrics</a> &gt; <span class="el_source">AsyncPoolStats.java</span></div><h1>AsyncPoolStats.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.transport.metrics;
+
+import com.linkedin.pinot.common.metrics.LatencyMetric;
+import com.linkedin.pinot.transport.pool.AsyncPool;
+import com.yammer.metrics.core.Sampling;
+import com.yammer.metrics.core.Summarizable;
+
+
+public class AsyncPoolStats&lt;T extends Sampling &amp; Summarizable&gt; implements PoolStats&lt;T&gt; {
+  private final int _totalCreated;
+  private final int _totalDestroyed;
+  private final int _totalCreateErrors;
+  private final int _totalDestroyErrors;
+  private final int _totalBadDestroyed;
+  private final int _totalTimedOut;
+
+  private final int _checkedOut;
+  private final int _maxPoolSize;
+  private final int _minPoolSize;
+  private final int _poolSize;
+
+  private final int _sampleMaxCheckedOut;
+  private final int _sampleMaxPoolSize;
+
+  private final int _idleCount;
+  private final LatencyMetric&lt;T&gt; _waitTime;
+  private final LifecycleStats&lt;T&gt; _lifecycleStats;
+
+  /**
+   * This class should be instantiated through a call to
+   * getStats() on an AsyncPool.
+   */
+  public AsyncPoolStats(int totalCreated, int totalDestroyed, int totalCreateErrors, int totalDestroyErrors,
+      int totalBadDestroyed, int totalTimedOut,
+
+      int checkedOut, int maxPoolSize, int minPoolSize, int poolSize,
+
+      int sampleMaxCheckedOut, int sampleMaxPoolSize,
+
+<span class="fc" id="L55">      int idleCount, LatencyMetric&lt;T&gt; waitTime, LifecycleStats&lt;T&gt; lifecycleStats) {</span>
+<span class="fc" id="L56">    _totalCreated = totalCreated;</span>
+<span class="fc" id="L57">    _totalDestroyed = totalDestroyed;</span>
+<span class="fc" id="L58">    _totalCreateErrors = totalCreateErrors;</span>
+<span class="fc" id="L59">    _totalDestroyErrors = totalDestroyErrors;</span>
+<span class="fc" id="L60">    _totalBadDestroyed = totalBadDestroyed;</span>
+<span class="fc" id="L61">    _totalTimedOut = totalTimedOut;</span>
+
+<span class="fc" id="L63">    _checkedOut = checkedOut;</span>
+<span class="fc" id="L64">    _maxPoolSize = maxPoolSize;</span>
+<span class="fc" id="L65">    _minPoolSize = minPoolSize;</span>
+<span class="fc" id="L66">    _poolSize = poolSize;</span>
+
+<span class="fc" id="L68">    _sampleMaxCheckedOut = sampleMaxCheckedOut;</span>
+<span class="fc" id="L69">    _sampleMaxPoolSize = sampleMaxPoolSize;</span>
+
+<span class="fc" id="L71">    _idleCount = idleCount;</span>
+<span class="fc" id="L72">    _waitTime = waitTime;</span>
+<span class="fc" id="L73">    _lifecycleStats = lifecycleStats;</span>
+<span class="fc" id="L74">  }</span>
+
+  /**
+   * Get the total number of pool objects created between
+   * the starting of the AsyncPool and the call to getStats().
+   * Does not include create errors.
+   * @return The total number of pool objects created
+   */
+  @Override
+  public int getTotalCreated() {
+<span class="fc" id="L84">    return _totalCreated;</span>
+  }
+
+  /**
+   * Get the total number of pool objects destroyed between
+   * the starting of the AsyncPool and the call to getStats().
+   * Includes lifecycle validation failures, disposes,
+   * and timed-out objects, but does not include destroy errors.
+   * @return The total number of pool objects destroyed
+   */
+  @Override
+  public int getTotalDestroyed() {
+<span class="nc" id="L96">    return _totalDestroyed;</span>
+  }
+
+  /**
+   * Get the total number of lifecycle create errors between
+   * the starting of the AsyncPool and the call to getStats().
+   * @return The total number of create errors
+   */
+  @Override
+  public int getTotalCreateErrors() {
+<span class="fc" id="L106">    return _totalCreateErrors;</span>
+  }
+
+  /**
+   * Get the total number of lifecycle destroy errors between
+   * the starting of the AsyncPool and the call to getStats().
+   * @return The total number of destroy errors
+   */
+  @Override
+  public int getTotalDestroyErrors() {
+<span class="fc" id="L116">    return _totalDestroyErrors;</span>
+  }
+
+  /**
+   * Get the total number of pool objects destroyed (or failed to
+   * to destroy because of an error) because of disposes or failed
+   * lifecycle validations between the starting of the AsyncPool
+   * and the call to getStats().
+   * @return The total number of destroyed &quot;bad&quot; objects
+   */
+  @Override
+  public int getTotalBadDestroyed() {
+<span class="fc" id="L128">    return _totalBadDestroyed;</span>
+  }
+
+  /**
+   * Get the total number of timed out pool objects between the
+   * starting of the AsyncPool and the call to getStats().
+   * @return The total number of timed out objects
+   */
+  @Override
+  public int getTotalTimedOut() {
+<span class="fc" id="L138">    return _totalTimedOut;</span>
+  }
+
+  /**
+   * Get the number of pool objects checked out at the time of
+   * the call to getStats().
+   * @return The number of checked out pool objects
+   */
+  @Override
+  public int getCheckedOut() {
+<span class="fc" id="L148">    return _checkedOut;</span>
+  }
+
+  /**
+   * Get the configured maximum pool size.
+   * @return The maximum pool size
+   */
+  @Override
+  public int getMaxPoolSize() {
+<span class="fc" id="L157">    return _maxPoolSize;</span>
+  }
+
+  /**
+   * Get the configured minimum pool size.
+   * @return The minimum pool size
+   */
+  @Override
+  public int getMinPoolSize() {
+<span class="fc" id="L166">    return _minPoolSize;</span>
+  }
+
+  /**
+   * Get the pool size at the time of the call to getStats().
+   * @return The pool size
+   */
+  @Override
+  public int getPoolSize() {
+<span class="fc" id="L175">    return _poolSize;</span>
+  }
+
+  /**
+   * Get the maximum number of checked out objects. Reset
+   * after each call to getStats().
+   * @return The maximum number of checked out objects
+   */
+  @Override
+  public int getSampleMaxCheckedOut() {
+<span class="fc" id="L185">    return _sampleMaxCheckedOut;</span>
+  }
+
+  /**
+   * Get the maximum pool size. Reset after each call to
+   * getStats().
+   * @return The maximum pool size
+   */
+  @Override
+  public int getSampleMaxPoolSize() {
+<span class="fc" id="L195">    return _sampleMaxPoolSize;</span>
+  }
+
+  /**
+   * Get the number of objects that are idle(not checked out)
+   * in the pool.
+   * @return The number of idle objects
+   */
+  @Override
+  public int getIdleCount() {
+<span class="fc" id="L205">    return _idleCount;</span>
+  }
+
+  /**
+   * Get stats collected from {@link AsyncPool.Lifecycle}
+   * @return Lifecycle stats
+   */
+  @Override
+  public LifecycleStats&lt;T&gt; getLifecycleStats() {
+<span class="fc" id="L214">    return _lifecycleStats;</span>
+  }
+
+  @Override
+  public String toString() {
+<span class="nc bnc" id="L219" title="All 2 branches missed.">    return &quot;\ntotalCreated: &quot; + _totalCreated + &quot;\ntotalDestroyed: &quot; + _totalDestroyed + &quot;\ntotalCreateErrors: &quot;</span>
+        + _totalCreateErrors + &quot;\ntotalDestroyErrors: &quot; + _totalDestroyErrors + &quot;\ntotalBadDestroyed: &quot;
+        + _totalBadDestroyed + &quot;\ntotalTimeOut: &quot; + _totalTimedOut + &quot;\ncheckedOut: &quot; + _totalTimedOut
+        + &quot;\nmaxPoolSize: &quot; + _maxPoolSize + &quot;\npoolSize: &quot; + _poolSize + &quot;\nsampleMaxCheckedOut: &quot;
+        + _sampleMaxCheckedOut + &quot;\nsampleMaxPoolSize: &quot; + _sampleMaxPoolSize + &quot;\nidleCount: &quot; + _idleCount
+        + &quot;\nwaitTime: &quot; + _waitTime + (_lifecycleStats != null ? _lifecycleStats.toString() : &quot;&quot;);
+  }
+
+  @Override
+  public LatencyMetric&lt;T&gt; getWaitTime() {
+<span class="fc" id="L229">    return _waitTime;</span>
+  }
+
+  @Override
+  public void refresh() {
+
+<span class="nc" id="L235">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

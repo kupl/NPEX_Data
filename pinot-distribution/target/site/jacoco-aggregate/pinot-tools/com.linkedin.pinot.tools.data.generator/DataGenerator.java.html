@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>DataGenerator.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-tools</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.tools.data.generator</a> &gt; <span class="el_source">DataGenerator.java</span></div><h1>DataGenerator.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.tools.data.generator;
+
+import com.linkedin.pinot.common.data.DimensionFieldSpec;
+import com.linkedin.pinot.common.data.FieldSpec;
+import com.linkedin.pinot.common.data.FieldSpec.DataType;
+import com.linkedin.pinot.common.data.FieldSpec.FieldType;
+import com.linkedin.pinot.common.data.MetricFieldSpec;
+import com.linkedin.pinot.common.data.Schema;
+import com.linkedin.pinot.common.data.TimeFieldSpec;
+import com.linkedin.pinot.core.data.readers.FileFormat;
+import java.io.File;
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import org.apache.commons.io.FileUtils;
+import org.apache.commons.lang.math.IntRange;
+import org.json.JSONException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * Sep 12, 2014
+ */
+
+public class DataGenerator {
+<span class="nc" id="L43">  private static final Logger LOGGER = LoggerFactory.getLogger(DataGenerator.class);</span>
+  private File outDir;
+
+  DataGeneratorSpec genSpec;
+
+  private final Map&lt;String, Generator&gt; generators;
+
+<span class="nc" id="L50">  public DataGenerator() {</span>
+<span class="nc" id="L51">    generators = new HashMap&lt;String, Generator&gt;();</span>
+<span class="nc" id="L52">  }</span>
+
+  public void init(DataGeneratorSpec spec) throws IOException {
+<span class="nc" id="L55">    genSpec = spec;</span>
+<span class="nc" id="L56">    outDir = new File(genSpec.getOutputDir());</span>
+<span class="nc bnc" id="L57" title="All 4 branches missed.">    if (outDir.exists() &amp;&amp; !genSpec.isOverrideOutDir()) {</span>
+<span class="nc" id="L58">      LOGGER.error(&quot;output directory already exists, and override is set to false&quot;);</span>
+<span class="nc" id="L59">      throw new RuntimeException(&quot;output directory exists&quot;);</span>
+    }
+
+<span class="nc bnc" id="L62" title="All 2 branches missed.">    if (outDir.exists()) {</span>
+<span class="nc" id="L63">      FileUtils.deleteDirectory(outDir);</span>
+    }
+
+<span class="nc" id="L66">    outDir.mkdir();</span>
+
+<span class="nc bnc" id="L68" title="All 2 branches missed.">    for (final String column : genSpec.getColumns()) {</span>
+<span class="nc" id="L69">      DataType dataType = genSpec.getDataTypesMap().get(column);</span>
+
+<span class="nc bnc" id="L71" title="All 2 branches missed.">      if (genSpec.getCardinalityMap().containsKey(column)) {</span>
+<span class="nc" id="L72">        generators.put(column,</span>
+            GeneratorFactory.getGeneratorFor(dataType, genSpec.getCardinalityMap().get(column)));
+
+<span class="nc bnc" id="L75" title="All 2 branches missed.">      } else if (genSpec.getRangeMap().containsKey(column)) {</span>
+<span class="nc" id="L76">        IntRange range = genSpec.getRangeMap().get(column);</span>
+
+<span class="nc" id="L78">        generators.put(column,</span>
+            GeneratorFactory.getGeneratorFor(dataType, range.getMinimumInteger(), range.getMaximumInteger()));
+<span class="nc" id="L80">      } else {</span>
+<span class="nc" id="L81">        LOGGER.error(&quot;cardinality for this column does not exist : &quot; + column);</span>
+<span class="nc" id="L82">        throw new RuntimeException(&quot;cardinality for this column does not exist&quot;);</span>
+      }
+
+<span class="nc" id="L85">      generators.get(column).init();</span>
+<span class="nc" id="L86">    }</span>
+<span class="nc" id="L87">  }</span>
+
+  public void generate(long totalDocs, int numFiles) throws IOException, JSONException {
+<span class="nc" id="L90">    final int numPerFiles = (int) (totalDocs / numFiles);</span>
+<span class="nc bnc" id="L91" title="All 2 branches missed.">    for (int i = 0; i &lt; numFiles; i++) {</span>
+<span class="nc" id="L92">      try (AvroWriter writer = new AvroWriter(outDir, i, generators, fetchSchema())) {</span>
+<span class="nc bnc" id="L93" title="All 2 branches missed.">        for (int j = 0; j &lt; numPerFiles; j++) {</span>
+<span class="nc" id="L94">          writer.writeNext();</span>
+        }
+<span class="nc bnc" id="L96" title="All 8 branches missed.">      }</span>
+    }
+<span class="nc" id="L98">  }</span>
+
+  public Schema fetchSchema() {
+<span class="nc" id="L101">    final Schema schema = new Schema();</span>
+<span class="nc bnc" id="L102" title="All 2 branches missed.">    for (final String column : genSpec.getColumns()) {</span>
+<span class="nc" id="L103">      final FieldSpec spec = buildSpec(genSpec, column);</span>
+<span class="nc" id="L104">      schema.addField(spec);</span>
+<span class="nc" id="L105">    }</span>
+<span class="nc" id="L106">    return schema;</span>
+  }
+
+  private FieldSpec buildSpec(DataGeneratorSpec genSpec, String column) {
+<span class="nc" id="L110">    DataType dataType = genSpec.getDataTypesMap().get(column);</span>
+<span class="nc" id="L111">    FieldType fieldType = genSpec.getFieldTypesMap().get(column);</span>
+
+    FieldSpec spec;
+<span class="nc bnc" id="L114" title="All 4 branches missed.">    switch (fieldType) {</span>
+      case DIMENSION:
+<span class="nc" id="L116">        spec = new DimensionFieldSpec();</span>
+<span class="nc" id="L117">        break;</span>
+
+      case METRIC:
+<span class="nc" id="L120">        spec = new MetricFieldSpec();</span>
+<span class="nc" id="L121">        break;</span>
+
+      case TIME:
+<span class="nc" id="L124">        spec = new TimeFieldSpec(column, dataType, genSpec.getTimeUnitMap().get(column));</span>
+<span class="nc" id="L125">        break;</span>
+
+        default:
+<span class="nc" id="L128">          throw new RuntimeException(&quot;Invalid Field type.&quot;);</span>
+    }
+
+<span class="nc" id="L131">    spec.setName(column);</span>
+<span class="nc" id="L132">    spec.setDataType(dataType);</span>
+<span class="nc" id="L133">    spec.setSingleValueField(true);</span>
+
+<span class="nc" id="L135">    return spec;</span>
+  }
+
+  public static void main(String[] args) throws IOException, JSONException {
+<span class="nc" id="L139">    final String[] columns = { &quot;column1&quot;, &quot;column2&quot;, &quot;column3&quot;, &quot;column4&quot;, &quot;column5&quot; };</span>
+<span class="nc" id="L140">    final Map&lt;String, DataType&gt; dataTypes = new HashMap&lt;String, DataType&gt;();</span>
+<span class="nc" id="L141">    final Map&lt;String, FieldType&gt; fieldTypes = new HashMap&lt;String, FieldType&gt;();</span>
+<span class="nc" id="L142">    final Map&lt;String, TimeUnit&gt; timeUnits = new HashMap&lt;String, TimeUnit&gt;();</span>
+
+<span class="nc" id="L144">    final Map&lt;String, Integer&gt; cardinality = new HashMap&lt;String, Integer&gt;();</span>
+<span class="nc" id="L145">    final Map&lt;String, IntRange&gt; range = new HashMap&lt;String, IntRange&gt;();</span>
+
+<span class="nc bnc" id="L147" title="All 2 branches missed.">    for (final String col : columns) {</span>
+<span class="nc" id="L148">      dataTypes.put(col, DataType.INT);</span>
+<span class="nc" id="L149">      fieldTypes.put(col, FieldType.DIMENSION);</span>
+<span class="nc" id="L150">      cardinality.put(col, 1000);</span>
+    }
+<span class="nc" id="L152">    final DataGeneratorSpec spec = new DataGeneratorSpec(Arrays.asList(columns), cardinality,</span>
+        range, dataTypes, fieldTypes, timeUnits, FileFormat.AVRO, &quot;/tmp/out&quot;, true);
+
+<span class="nc" id="L155">    final DataGenerator gen = new DataGenerator();</span>
+<span class="nc" id="L156">    gen.init(spec);</span>
+<span class="nc" id="L157">    gen.generate(1000000L, 2);</span>
+<span class="nc" id="L158">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

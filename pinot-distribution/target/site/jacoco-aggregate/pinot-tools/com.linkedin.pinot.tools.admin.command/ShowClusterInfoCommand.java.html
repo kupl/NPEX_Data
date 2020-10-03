@@ -1,0 +1,253 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>ShowClusterInfoCommand.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-tools</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.tools.admin.command</a> &gt; <span class="el_source">ShowClusterInfoCommand.java</span></div><h1>ShowClusterInfoCommand.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.tools.admin.command;
+
+import com.linkedin.pinot.common.config.TableNameBuilder;
+import com.linkedin.pinot.tools.Command;
+import java.io.StringWriter;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import org.apache.helix.PropertyKey;
+import org.apache.helix.ZNRecord;
+import org.apache.helix.manager.zk.ZKHelixAdmin;
+import org.apache.helix.manager.zk.ZKHelixDataAccessor;
+import org.apache.helix.manager.zk.ZNRecordStreamingSerializer;
+import org.apache.helix.manager.zk.ZkBaseDataAccessor;
+import org.apache.helix.manager.zk.ZkClient;
+import org.apache.helix.model.ExternalView;
+import org.apache.helix.model.IdealState;
+import org.apache.helix.model.InstanceConfig;
+import org.apache.helix.model.LiveInstance;
+import org.kohsuke.args4j.Option;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.yaml.snakeyaml.Yaml;
+
+<span class="nc" id="L44">public class ShowClusterInfoCommand extends AbstractBaseAdminCommand implements Command {</span>
+<span class="nc" id="L45">  private static final Logger LOGGER = LoggerFactory.getLogger(ShowClusterInfoCommand.class.getName());</span>
+
+<span class="nc" id="L47">  @Option(name = &quot;-zkAddress&quot;, required = false, metaVar = &quot;&lt;http&gt;&quot;, usage = &quot;HTTP address of Zookeeper.&quot;)</span>
+  private String _zkAddress = DEFAULT_ZK_ADDRESS;
+
+<span class="nc" id="L50">  @Option(name = &quot;-clusterName&quot;, required = false, metaVar = &quot;&lt;String&gt;&quot;, usage = &quot;Pinot cluster clusterName.&quot;)</span>
+  private String _clusterName = DEFAULT_CLUSTER_NAME;
+
+<span class="nc" id="L53">  @Option(name = &quot;-tables&quot;, required = false, metaVar = &quot;&lt;String&gt;&quot;, usage = &quot;Comma separated table names.&quot;)</span>
+  private String _tables = &quot;&quot;;
+
+<span class="nc" id="L56">  @Option(name = &quot;-tags&quot;, required = false, metaVar = &quot;&lt;String&gt;&quot;, usage = &quot;Commaa separated tag names.&quot;)</span>
+  private String _tags = &quot;&quot;;
+
+<span class="nc" id="L59">  @Option(name = &quot;-help&quot;, required = false, help = true, aliases = {&quot;-h&quot;, &quot;--h&quot;, &quot;--help&quot;},</span>
+      usage = &quot;Print this message.&quot;)
+  private boolean _help = false;
+
+  @Override
+  public boolean execute() throws Exception {
+<span class="nc" id="L65">    Set&lt;String&gt; includeTableSet = new HashSet&lt;&gt;();</span>
+<span class="nc" id="L66">    String[] includeTables = _tables.split(&quot;,&quot;);</span>
+<span class="nc bnc" id="L67" title="All 2 branches missed.">    for (String includeTable : includeTables) {</span>
+<span class="nc" id="L68">      String name = stripTypeFromName(includeTable.trim());</span>
+<span class="nc bnc" id="L69" title="All 2 branches missed.">      if (name.length() &gt; 0) {</span>
+<span class="nc" id="L70">        includeTableSet.add(name);</span>
+      }
+    }
+<span class="nc" id="L73">    Set&lt;String&gt; includeTagSet = new HashSet&lt;&gt;();</span>
+<span class="nc" id="L74">    String[] includeTags = _tags.split(&quot;,&quot;);</span>
+<span class="nc bnc" id="L75" title="All 2 branches missed.">    for (String includeTag : includeTags) {</span>
+<span class="nc" id="L76">      String name = stripTypeFromName(includeTag.trim());</span>
+<span class="nc bnc" id="L77" title="All 2 branches missed.">      if (name.length() &gt; 0) {</span>
+<span class="nc" id="L78">        includeTagSet.add(name);</span>
+      }
+    }
+
+<span class="nc" id="L82">    ClusterInfo clusterInfo = new ClusterInfo();</span>
+<span class="nc" id="L83">    clusterInfo.clusterName = _clusterName;</span>
+
+<span class="nc" id="L85">    ZKHelixAdmin zkHelixAdmin = new ZKHelixAdmin(_zkAddress);</span>
+<span class="nc bnc" id="L86" title="All 2 branches missed.">    if (!zkHelixAdmin.getClusters().contains(_clusterName)) {</span>
+<span class="nc" id="L87">      LOGGER.error(&quot;Cluster {} not found in {}.&quot;, _clusterName, _zkAddress);</span>
+<span class="nc" id="L88">      return false;</span>
+    }
+
+<span class="nc" id="L91">    List&lt;String&gt; instancesInCluster = zkHelixAdmin.getInstancesInCluster(_clusterName);</span>
+<span class="nc" id="L92">    List&lt;String&gt; tables = zkHelixAdmin.getResourcesInCluster(_clusterName);</span>
+
+<span class="nc" id="L94">    ZkClient zkClient = new ZkClient(_zkAddress);</span>
+<span class="nc" id="L95">    zkClient.setZkSerializer(new ZNRecordStreamingSerializer());</span>
+<span class="nc" id="L96">    LOGGER.info(&quot;Connecting to Zookeeper at: {}&quot;, _zkAddress);</span>
+<span class="nc" id="L97">    zkClient.waitUntilConnected();</span>
+<span class="nc" id="L98">    ZkBaseDataAccessor&lt;ZNRecord&gt; baseDataAccessor = new ZkBaseDataAccessor&lt;&gt;(zkClient);</span>
+<span class="nc" id="L99">    ZKHelixDataAccessor zkHelixDataAccessor = new ZKHelixDataAccessor(_clusterName, baseDataAccessor);</span>
+<span class="nc" id="L100">    PropertyKey property = zkHelixDataAccessor.keyBuilder().liveInstances();</span>
+<span class="nc" id="L101">    List&lt;String&gt; liveInstances = zkHelixDataAccessor.getChildNames(property);</span>
+
+<span class="nc" id="L103">    PropertyKey controllerLeaderKey = zkHelixDataAccessor.keyBuilder().controllerLeader();</span>
+<span class="nc" id="L104">    LiveInstance controllerLeaderLiveInstance = zkHelixDataAccessor.getProperty(controllerLeaderKey);</span>
+<span class="nc" id="L105">    ControllerInfo controllerInfo = new ControllerInfo();</span>
+<span class="nc" id="L106">    controllerInfo.leaderName = controllerLeaderLiveInstance.getId();</span>
+<span class="nc" id="L107">    clusterInfo.controllerInfo = controllerInfo;</span>
+<span class="nc bnc" id="L108" title="All 2 branches missed.">    for (String server : instancesInCluster) {</span>
+<span class="nc bnc" id="L109" title="All 2 branches missed.">      if (server.startsWith(&quot;Server&quot;)) {</span>
+<span class="nc" id="L110">        ServerInfo serverInfo = new ServerInfo();</span>
+<span class="nc" id="L111">        serverInfo.name = server;</span>
+<span class="nc bnc" id="L112" title="All 2 branches missed.">        serverInfo.state = (liveInstances.contains(server)) ? &quot;ONLINE&quot; : &quot;OFFLINE&quot;;</span>
+<span class="nc" id="L113">        InstanceConfig config = zkHelixAdmin.getInstanceConfig(_clusterName, server);</span>
+<span class="nc" id="L114">        serverInfo.tags = config.getRecord().getListField(&quot;TAG_LIST&quot;);</span>
+<span class="nc" id="L115">        clusterInfo.addServerInfo(serverInfo);</span>
+      }
+<span class="nc bnc" id="L117" title="All 2 branches missed.">      if (server.startsWith(&quot;Broker&quot;)) {</span>
+<span class="nc" id="L118">        BrokerInfo brokerInfo = new BrokerInfo();</span>
+<span class="nc" id="L119">        brokerInfo.name = server;</span>
+<span class="nc bnc" id="L120" title="All 2 branches missed.">        brokerInfo.state = (liveInstances.contains(server)) ? &quot;ONLINE&quot; : &quot;OFFLINE&quot;;</span>
+<span class="nc" id="L121">        InstanceConfig config = zkHelixAdmin.getInstanceConfig(_clusterName, server);</span>
+<span class="nc" id="L122">        brokerInfo.tags = config.getRecord().getListField(&quot;TAG_LIST&quot;);</span>
+<span class="nc" id="L123">        clusterInfo.addBrokerInfo(brokerInfo);</span>
+      }
+<span class="nc" id="L125">    }</span>
+<span class="nc bnc" id="L126" title="All 2 branches missed.">    for (String table : tables) {</span>
+      // Skip non-table resources
+<span class="nc bnc" id="L128" title="All 2 branches missed.">      if (!TableNameBuilder.isTableResource(table)) {</span>
+<span class="nc" id="L129">        continue;</span>
+      }
+
+<span class="nc" id="L132">      TableInfo tableInfo = new TableInfo();</span>
+<span class="nc" id="L133">      IdealState idealState = zkHelixAdmin.getResourceIdealState(_clusterName, table);</span>
+<span class="nc" id="L134">      ExternalView externalView = zkHelixAdmin.getResourceExternalView(_clusterName, table);</span>
+<span class="nc" id="L135">      Set&lt;String&gt; segmentsFromIdealState = idealState.getPartitionSet();</span>
+
+<span class="nc" id="L137">      tableInfo.tableName = table;</span>
+<span class="nc" id="L138">      tableInfo.tag = idealState.getRecord().getSimpleField(&quot;INSTANCE_GROUP_TAG&quot;);</span>
+<span class="nc" id="L139">      String rawTableName = stripTypeFromName(tableInfo.tableName);</span>
+<span class="nc" id="L140">      String rawTagName = stripTypeFromName(tableInfo.tag);</span>
+
+<span class="nc bnc" id="L142" title="All 4 branches missed.">      if (!includeTableSet.isEmpty() &amp;&amp; !includeTableSet.contains(rawTableName)) {</span>
+<span class="nc" id="L143">        continue;</span>
+      }
+
+<span class="nc bnc" id="L146" title="All 4 branches missed.">      if (!includeTagSet.isEmpty() &amp;&amp; !includeTagSet.contains(rawTagName)) {</span>
+<span class="nc" id="L147">        continue;</span>
+      }
+<span class="nc bnc" id="L149" title="All 2 branches missed.">      for (String segment : segmentsFromIdealState) {</span>
+<span class="nc" id="L150">        SegmentInfo segmentInfo = new SegmentInfo();</span>
+<span class="nc" id="L151">        segmentInfo.name = segment;</span>
+<span class="nc" id="L152">        Map&lt;String, String&gt; serverStateMapFromIS = idealState.getInstanceStateMap(segment);</span>
+<span class="nc bnc" id="L153" title="All 2 branches missed.">        if (serverStateMapFromIS == null) {</span>
+<span class="nc" id="L154">          LOGGER.info(&quot;Unassigned segment {} in ideal state&quot;, segment);</span>
+<span class="nc" id="L155">          serverStateMapFromIS = Collections.emptyMap();</span>
+        }
+<span class="nc" id="L157">        Map&lt;String, String&gt; serverStateMapFromEV = externalView.getStateMap(segment);</span>
+<span class="nc bnc" id="L158" title="All 2 branches missed.">        if (serverStateMapFromEV == null) {</span>
+<span class="nc" id="L159">          LOGGER.info(&quot;Unassigned segment {} in external view&quot;, segment);</span>
+<span class="nc" id="L160">          serverStateMapFromEV = Collections.emptyMap();</span>
+        }
+
+<span class="nc bnc" id="L163" title="All 2 branches missed.">        for (String serverName : serverStateMapFromIS.keySet()) {</span>
+<span class="nc" id="L164">          segmentInfo.segmentStateMap.put(serverName, serverStateMapFromEV.get(serverName));</span>
+<span class="nc" id="L165">        }</span>
+<span class="nc" id="L166">        tableInfo.addSegmentInfo(segmentInfo);</span>
+<span class="nc" id="L167">      }</span>
+<span class="nc" id="L168">      clusterInfo.addTableInfo(tableInfo);</span>
+<span class="nc" id="L169">    }</span>
+<span class="nc" id="L170">    Yaml yaml = new Yaml();</span>
+<span class="nc" id="L171">    StringWriter sw = new StringWriter();</span>
+<span class="nc" id="L172">    yaml.dump(clusterInfo, sw);</span>
+<span class="nc" id="L173">    LOGGER.info(sw.toString());</span>
+<span class="nc" id="L174">    return true;</span>
+  }
+
+  private String stripTypeFromName(String tableName) {
+<span class="nc" id="L178">    return tableName.replace(&quot;_OFFLINE&quot;, &quot;&quot;).replace(&quot;_REALTIME&quot;, &quot;&quot;);</span>
+  }
+
+  @Override
+  public String description() {
+<span class="nc" id="L183">    return &quot;Show Pinot Cluster information.&quot;;</span>
+  }
+
+  @Override
+  public boolean getHelp() {
+<span class="nc" id="L188">    return _help;</span>
+  }
+
+  @Override
+  public String toString() {
+<span class="nc" id="L193">    return (&quot;ShowClusterInfo -clusterName &quot; + _clusterName + &quot; -zkAddress &quot; + _zkAddress</span>
+        + &quot; -tables &quot; + _tables + &quot; -tags &quot; + _tags);
+  }
+
+<span class="nc" id="L197">  class SegmentInfo {</span>
+    public String name;
+<span class="nc" id="L199">    public Map&lt;String, String&gt; segmentStateMap = new HashMap&lt;String, String&gt;();</span>
+
+  }
+
+<span class="nc" id="L203">  class TableInfo {</span>
+    public String tableName;
+    public String tag;
+<span class="nc" id="L206">    public List&lt;SegmentInfo&gt; segmentInfoList = new ArrayList&lt;SegmentInfo&gt;();</span>
+
+    public void addSegmentInfo(SegmentInfo segmentInfo) {
+<span class="nc" id="L209">      segmentInfoList.add(segmentInfo);</span>
+<span class="nc" id="L210">    }</span>
+  }
+
+<span class="nc" id="L213">  class ServerInfo {</span>
+    public String name;
+    public List&lt;String&gt; tags;
+    public String state;
+  }
+
+<span class="nc" id="L219">  class BrokerInfo {</span>
+    public String name;
+    public List&lt;String&gt; tags;
+    public String state;
+
+  }
+
+<span class="nc" id="L226">  class ControllerInfo {</span>
+
+    public String leaderName;
+
+  }
+
+<span class="nc" id="L232">  class ClusterInfo {</span>
+    public ControllerInfo controllerInfo;
+<span class="nc" id="L234">    public List&lt;BrokerInfo&gt; brokerInfoList = new ArrayList&lt;&gt;();</span>
+<span class="nc" id="L235">    public List&lt;ServerInfo&gt; serverInfoList = new ArrayList&lt;&gt;();</span>
+<span class="nc" id="L236">    public List&lt;TableInfo&gt; tableInfoList = new ArrayList&lt;&gt;();</span>
+
+    public String clusterName;
+
+    public void addServerInfo(ServerInfo serverInfo) {
+<span class="nc" id="L241">      serverInfoList.add(serverInfo);</span>
+<span class="nc" id="L242">    }</span>
+
+    public void addTableInfo(TableInfo tableInfo) {
+<span class="nc" id="L245">      tableInfoList.add(tableInfo);</span>
+<span class="nc" id="L246">    }</span>
+
+    public void addBrokerInfo(BrokerInfo brokerInfo) {
+<span class="nc" id="L249">      brokerInfoList.add(brokerInfo);</span>
+<span class="nc" id="L250">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>UploadSegmentCommand.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-tools</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.tools.admin.command</a> &gt; <span class="el_source">UploadSegmentCommand.java</span></div><h1>UploadSegmentCommand.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.tools.admin.command;
+
+import com.google.common.base.Preconditions;
+import com.linkedin.pinot.common.utils.FileUploadDownloadClient;
+import com.linkedin.pinot.common.utils.NetUtil;
+import com.linkedin.pinot.common.utils.TarGzCompressionUtils;
+import com.linkedin.pinot.tools.Command;
+import java.io.File;
+import java.net.URI;
+import org.apache.commons.io.FileUtils;
+import org.kohsuke.args4j.Option;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * Class for command to upload data into Pinot.
+ *
+ *
+ */
+<span class="nc" id="L36">public class UploadSegmentCommand extends AbstractBaseAdminCommand implements Command {</span>
+<span class="nc" id="L37">  private static final Logger LOGGER = LoggerFactory.getLogger(UploadSegmentCommand.class);</span>
+  private static final String SEGMENT_UPLOADER = &quot;segmentUploader&quot;;
+  private static final String TAR_GZIP = &quot;.tar.gz&quot;;
+
+  @Option(name = &quot;-controllerHost&quot;, required = false, metaVar = &quot;&lt;String&gt;&quot;, usage = &quot;host name for controller.&quot;)
+  private String _controllerHost;
+
+<span class="nc" id="L44">  @Option(name = &quot;-controllerPort&quot;, required = false, metaVar = &quot;&lt;int&gt;&quot;, usage = &quot;Port number for controller.&quot;)</span>
+  private String _controllerPort = DEFAULT_CONTROLLER_PORT;
+
+<span class="nc" id="L47">  @Option(name = &quot;-segmentDir&quot;, required = true, metaVar = &quot;&lt;string&gt;&quot;, usage = &quot;Path to segment directory.&quot;)</span>
+  private String _segmentDir = null;
+
+<span class="nc" id="L50">  @Option(name = &quot;-help&quot;, required = false, help = true, aliases = { &quot;-h&quot;, &quot;--h&quot;, &quot;--help&quot; },</span>
+      usage = &quot;Print this message.&quot;)
+  private boolean _help = false;
+
+  @Override
+  public boolean getHelp() {
+<span class="nc" id="L56">    return _help;</span>
+  }
+
+  @Override
+  public String getName() {
+<span class="nc" id="L61">    return &quot;UploadSegment&quot;;</span>
+  }
+
+  @Override
+  public String toString() {
+<span class="nc" id="L66">    return (&quot;UploadSegment -controllerHost &quot; + _controllerHost + &quot; -controllerPort &quot; + _controllerPort</span>
+        + &quot; -segmentDir &quot; + _segmentDir);
+  }
+
+  @Override
+  public void cleanup() {
+
+<span class="nc" id="L73">  }</span>
+
+  @Override
+  public String description() {
+<span class="nc" id="L77">    return &quot;Upload the Pinot segments.&quot;;</span>
+  }
+
+  public UploadSegmentCommand setControllerHost(String controllerHost) {
+<span class="nc" id="L81">    _controllerHost = controllerHost;</span>
+<span class="nc" id="L82">    return this;</span>
+  }
+
+  public UploadSegmentCommand setControllerPort(String controllerPort) {
+<span class="nc" id="L86">    _controllerPort = controllerPort;</span>
+<span class="nc" id="L87">    return this;</span>
+  }
+
+  public UploadSegmentCommand setSegmentDir(String segmentDir) {
+<span class="nc" id="L91">    _segmentDir = segmentDir;</span>
+<span class="nc" id="L92">    return this;</span>
+  }
+
+  @Override
+  public boolean execute() throws Exception {
+<span class="nc bnc" id="L97" title="All 2 branches missed.">    if (_controllerHost == null) {</span>
+<span class="nc" id="L98">      _controllerHost = NetUtil.getHostAddress();</span>
+    }
+
+    // Create a temporary working directory.
+<span class="nc" id="L102">    File tempDir = File.createTempFile(SEGMENT_UPLOADER, null, FileUtils.getTempDirectory());</span>
+<span class="nc" id="L103">    FileUtils.deleteQuietly(tempDir);</span>
+<span class="nc" id="L104">    FileUtils.forceMkdir(tempDir);</span>
+
+<span class="nc" id="L106">    LOGGER.info(&quot;Executing command: &quot; + toString());</span>
+<span class="nc" id="L107">    File dir = new File(_segmentDir);</span>
+<span class="nc" id="L108">    File[] files = dir.listFiles();</span>
+<span class="nc" id="L109">    Preconditions.checkNotNull(files);</span>
+
+<span class="nc" id="L111">    try (FileUploadDownloadClient fileUploadDownloadClient = new FileUploadDownloadClient()) {</span>
+<span class="nc" id="L112">      URI uploadSegmentHttpURI =</span>
+          FileUploadDownloadClient.getUploadSegmentHttpURI(_controllerHost, Integer.parseInt(_controllerPort));
+<span class="nc bnc" id="L114" title="All 2 branches missed.">      for (File file : files) {</span>
+<span class="nc" id="L115">        File tgzFile = file;</span>
+
+<span class="nc bnc" id="L117" title="All 2 branches missed.">        if (file.isDirectory()) {</span>
+<span class="nc" id="L118">          LOGGER.info(&quot;Compressing segment {}&quot;, file.getName());</span>
+
+<span class="nc" id="L120">          String srcDir = file.getAbsolutePath();</span>
+<span class="nc" id="L121">          String tgzFileName = TarGzCompressionUtils.createTarGzOfDirectory(srcDir,</span>
+              tempDir.getAbsolutePath() + File.separator + file.getName() + TAR_GZIP);
+<span class="nc" id="L123">          tgzFile = new File(tgzFileName);</span>
+        }
+
+<span class="nc" id="L126">        LOGGER.info(&quot;Uploading segment {}&quot;, tgzFile.getName());</span>
+<span class="nc" id="L127">        fileUploadDownloadClient.uploadSegment(uploadSegmentHttpURI, tgzFile.getName(), tgzFile);</span>
+      }
+<span class="nc bnc" id="L129" title="All 8 branches missed.">    } finally {</span>
+      // Delete the temporary working directory.
+<span class="nc" id="L131">      FileUtils.deleteQuietly(tempDir);</span>
+<span class="nc" id="L132">    }</span>
+<span class="nc" id="L133">    return true;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

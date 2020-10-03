@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>TablesResource.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-server</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.server.api.resources</a> &gt; <span class="el_source">TablesResource.java</span></div><h1>TablesResource.java</h1><pre class="source lang-java linenums"> /**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.linkedin.pinot.server.api.resources;
+
+import com.google.common.collect.ImmutableList;
+import com.linkedin.pinot.common.restlet.resources.TableSegments;
+import com.linkedin.pinot.common.restlet.resources.TablesList;
+import com.linkedin.pinot.core.data.manager.offline.InstanceDataManager;
+import com.linkedin.pinot.core.data.manager.offline.SegmentDataManager;
+import com.linkedin.pinot.core.data.manager.offline.TableDataManager;
+import com.linkedin.pinot.core.segment.index.SegmentMetadataImpl;
+import com.linkedin.pinot.server.starter.ServerInstance;
+import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
+import io.swagger.annotations.ApiParam;
+import io.swagger.annotations.ApiResponse;
+import io.swagger.annotations.ApiResponses;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import javax.inject.Inject;
+import javax.ws.rs.DefaultValue;
+import javax.ws.rs.GET;
+import javax.ws.rs.Path;
+import javax.ws.rs.PathParam;
+import javax.ws.rs.Produces;
+import javax.ws.rs.QueryParam;
+import javax.ws.rs.WebApplicationException;
+import javax.ws.rs.core.MediaType;
+import javax.ws.rs.core.Response;
+import org.codehaus.jackson.map.ObjectMapper;
+import org.json.JSONException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+@Api(tags = &quot;Table&quot;)
+@Path(&quot;/&quot;)
+<span class="fc" id="L56">public class TablesResource {</span>
+<span class="fc" id="L57">  private static final Logger LOGGER = LoggerFactory.getLogger(TablesResource.class);</span>
+
+  @Inject
+  ServerInstance serverInstance;
+
+
+  @GET
+  @Path(&quot;/tables&quot;)
+  @Produces(MediaType.APPLICATION_JSON)
+  //swagger annotations
+  @ApiOperation(value = &quot;List tables&quot;, notes = &quot;List all the tables on this server&quot;)
+  @ApiResponses(value = {@ApiResponse(code = 200, message = &quot;Success&quot;, response = TablesList.class),
+      @ApiResponse(code = 500, message = &quot;Server initialization error&quot;, response = ErrorInfo.class)})
+  public TablesList listTables() {
+<span class="fc" id="L71">    InstanceDataManager dataManager = checkGetInstanceDataManager();</span>
+<span class="fc" id="L72">    Collection&lt;TableDataManager&gt; tableDataManagers = dataManager.getTableDataManagers();</span>
+<span class="fc" id="L73">    List&lt;String&gt; tables = new ArrayList&lt;&gt;(tableDataManagers.size());</span>
+<span class="fc bfc" id="L74" title="All 2 branches covered.">    for (TableDataManager tableDataManager : tableDataManagers) {</span>
+<span class="fc" id="L75">      tables.add(tableDataManager.getTableName());</span>
+<span class="fc" id="L76">    }</span>
+<span class="fc" id="L77">    return new TablesList(tables);</span>
+  }
+
+  private InstanceDataManager checkGetInstanceDataManager() {
+<span class="pc bpc" id="L81" title="1 of 2 branches missed.">    if (serverInstance == null) {</span>
+<span class="nc" id="L82">      throw new WebApplicationException(&quot;Server initialization error. Missing server instance&quot;);</span>
+    }
+<span class="fc" id="L84">    InstanceDataManager instanceDataManager = serverInstance.getInstanceDataManager();</span>
+<span class="pc bpc" id="L85" title="1 of 2 branches missed.">    if (instanceDataManager == null) {</span>
+<span class="nc" id="L86">      throw new WebApplicationException(&quot;Server initialization error. Missing data manager&quot;,</span>
+          Response.Status.INTERNAL_SERVER_ERROR);
+    }
+<span class="fc" id="L89">    return instanceDataManager;</span>
+  }
+
+  private TableDataManager checkGetTableDataManager(String tableName) {
+<span class="fc" id="L93">    InstanceDataManager dataManager = checkGetInstanceDataManager();</span>
+<span class="fc" id="L94">    TableDataManager tableDataManager = dataManager.getTableDataManager(tableName);</span>
+<span class="fc bfc" id="L95" title="All 2 branches covered.">    if (tableDataManager == null) {</span>
+<span class="fc" id="L96">      throw new WebApplicationException(&quot;Table &quot; + tableName + &quot; does not exist&quot;, Response.Status.NOT_FOUND);</span>
+    }
+<span class="fc" id="L98">    return tableDataManager;</span>
+  }
+  @GET
+  @Path(&quot;/tables/{tableName}/segments&quot;)
+  @Produces(MediaType.APPLICATION_JSON)
+  @ApiOperation(value = &quot;List table segments&quot;, notes = &quot;List segments of table hosted on this server&quot;)
+  @ApiResponses(value = {@ApiResponse(code = 200, message = &quot;Success&quot;, response = TableSegments.class),
+      @ApiResponse(code = 500, message = &quot;Server initialization error&quot;, response = ErrorInfo.class)})
+  public TableSegments listTableSegments(
+      @ApiParam(value = &quot;Table name including type&quot;, required = true, example = &quot;myTable_OFFLINE&quot;)
+      @PathParam(&quot;tableName&quot;) String tableName) {
+<span class="fc" id="L109">    TableDataManager tableDataManager = checkGetTableDataManager(tableName);</span>
+<span class="fc" id="L110">    ImmutableList&lt;SegmentDataManager&gt; segmentDataManagers = tableDataManager.acquireAllSegments();</span>
+<span class="fc" id="L111">    List&lt;String&gt; segments = new ArrayList&lt;&gt;(segmentDataManagers.size());</span>
+<span class="fc bfc" id="L112" title="All 2 branches covered.">    for (SegmentDataManager segmentDataManager : segmentDataManagers) {</span>
+<span class="fc" id="L113">      segments.add(segmentDataManager.getSegmentName());</span>
+<span class="fc" id="L114">      tableDataManager.releaseSegment(segmentDataManager);</span>
+<span class="fc" id="L115">    }</span>
+
+<span class="fc" id="L117">    return new TableSegments(segments);</span>
+  }
+
+  @GET
+  @Path(&quot;/tables/{tableName}/segments/{segmentName}/metadata&quot;)
+  @Produces(MediaType.APPLICATION_JSON)
+  @ApiOperation(value = &quot;Provide segment metadata&quot;, notes = &quot;Provide segments metadata for the segment on server&quot;)
+  @ApiResponses( value = {
+      @ApiResponse(code=200, message = &quot;Success&quot;),
+      @ApiResponse(code=500, message = &quot;Internal server error&quot;, response = ErrorInfo.class),
+      @ApiResponse(code = 404, message = &quot;Table or segment not found&quot;, response = ErrorInfo.class)
+  })
+  public String getSegmentMetadata(
+      @ApiParam(value = &quot;Table name including type&quot;, required = true, example = &quot;myTable_OFFLINE&quot;)
+      @PathParam(&quot;tableName&quot;) String tableName,
+      @ApiParam(value = &quot;Segment Name&quot;, required = true)
+      @PathParam(&quot;segmentName&quot;) String segmentName,
+      @ApiParam(value = &quot;column name&quot;, required = false, allowMultiple = true, defaultValue = &quot;&quot;)
+      @QueryParam(&quot;columns&quot;) @DefaultValue(&quot;&quot;) List&lt;String&gt; columns
+      ) {
+<span class="fc" id="L137">    TableDataManager tableDataManager = checkGetTableDataManager(tableName);</span>
+<span class="fc" id="L138">    SegmentDataManager segmentDataManager = null;</span>
+    try {
+<span class="fc" id="L140">      segmentDataManager = tableDataManager.acquireSegment(segmentName);</span>
+<span class="pc bpc" id="L141" title="1 of 2 branches missed.">      if (segmentDataManager == null) {</span>
+<span class="nc" id="L142">        throw new WebApplicationException(String.format(&quot;Table %s segments %s does not exist&quot;, tableName, segmentName),</span>
+            Response.Status.NOT_FOUND);
+      }
+<span class="fc" id="L145">      SegmentMetadataImpl segmentMetadata = (SegmentMetadataImpl) segmentDataManager.getSegment().getSegmentMetadata();</span>
+      Set&lt;String&gt; columnSet;
+<span class="fc bfc" id="L147" title="All 4 branches covered.">      if (columns.size() == 1 &amp;&amp; columns.get(0).equals(&quot;*&quot;)) {</span>
+<span class="fc" id="L148">        columnSet = null;</span>
+      } else {
+<span class="fc" id="L150">        columnSet = new HashSet&lt;&gt;(columns);</span>
+      }
+      try {
+<span class="fc" id="L153">        return segmentMetadata.toJson(columnSet).toString();</span>
+<span class="nc" id="L154">      } catch (JSONException e) {</span>
+<span class="nc" id="L155">        LOGGER.error(&quot;Failed to convert table {} segment {} to json&quot;, tableName, segmentMetadata);</span>
+<span class="nc" id="L156">        throw new WebApplicationException(&quot;Failed to convert segment metadata to json&quot;, Response.Status.INTERNAL_SERVER_ERROR);</span>
+      }
+    } finally {
+<span class="pc bpc" id="L159" title="3 of 4 branches missed.">      if (segmentDataManager != null) {</span>
+<span class="pc" id="L160">        tableDataManager.releaseSegment(segmentDataManager);</span>
+      }
+    }
+  }
+
+  @GET
+  @Path(&quot;/tables/{tableName}/segments/crc&quot;)
+  @Produces(MediaType.APPLICATION_JSON)
+  @ApiOperation(value = &quot;Provide segment crc information&quot;, notes = &quot;Provide crc information for the segments on server&quot;)
+  @ApiResponses(value = {
+      @ApiResponse(code = 200, message = &quot;Success&quot;),
+      @ApiResponse(code = 500, message = &quot;Internal server error&quot;, response = ErrorInfo.class),
+      @ApiResponse(code = 404, message = &quot;Table or segment not found&quot;, response = ErrorInfo.class)
+  })
+  public String getCrcMetadataForTable(
+      @ApiParam(value = &quot;Table name including type&quot;, required = true, example = &quot;myTable_OFFLINE&quot;)
+      @PathParam(&quot;tableName&quot;) String tableName) {
+
+<span class="fc" id="L178">    TableDataManager tableDataManager = checkGetTableDataManager(tableName);</span>
+<span class="fc" id="L179">    ImmutableList&lt;SegmentDataManager&gt; segmentDataManagers = tableDataManager.acquireAllSegments();</span>
+<span class="fc" id="L180">    Map&lt;String, String&gt; segmentCrcForTable = new HashMap&lt;&gt;();</span>
+    try {
+<span class="fc bfc" id="L182" title="All 2 branches covered.">      for(SegmentDataManager segmentDataManager : segmentDataManagers) {</span>
+<span class="fc" id="L183">        SegmentMetadataImpl segmentMetadata = (SegmentMetadataImpl) segmentDataManager.getSegment().getSegmentMetadata();</span>
+<span class="fc" id="L184">        segmentCrcForTable.put(segmentDataManager.getSegmentName(), segmentMetadata.getCrc());</span>
+<span class="fc" id="L185">      }</span>
+<span class="fc" id="L186">      ObjectMapper mapper = new ObjectMapper();</span>
+<span class="fc" id="L187">      return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(segmentCrcForTable);</span>
+<span class="nc" id="L188">    } catch (Exception e) {</span>
+<span class="nc" id="L189">      throw new WebApplicationException(&quot;Failed to convert crc information to json&quot;, Response.Status.INTERNAL_SERVER_ERROR);</span>
+    } finally {
+<span class="pc bpc" id="L191" title="2 of 4 branches missed.">      for (SegmentDataManager segmentDataManager : segmentDataManagers) {</span>
+<span class="pc" id="L192">        tableDataManager.releaseSegment(segmentDataManager);</span>
+<span class="pc" id="L193">      }</span>
+    }
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

@@ -1,0 +1,197 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>OffHeapStarTree.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-server</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.startree</a> &gt; <span class="el_source">OffHeapStarTree.java</span></div><h1>OffHeapStarTree.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.startree;
+
+import com.google.common.base.MoreObjects;
+import com.google.common.base.Preconditions;
+import com.linkedin.pinot.common.segment.ReadMode;
+import com.linkedin.pinot.core.segment.creator.impl.V1Constants;
+import com.linkedin.pinot.core.segment.index.readers.Dictionary;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.charset.Charset;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import xerial.larray.buffer.LBuffer;
+import xerial.larray.buffer.LBufferAPI;
+import xerial.larray.mmap.MMapBuffer;
+import xerial.larray.mmap.MMapMode;
+
+
+/**
+ * LBuffer based implementation of star tree.
+ */
+public class OffHeapStarTree implements StarTree {
+  public static final long MAGIC_MARKER = 0xBADDA55B00DAD00DL;
+  public static final int VERSION = 1;
+
+<span class="fc" id="L46">  private static final Charset UTF_8 = Charset.forName(&quot;UTF-8&quot;);</span>
+  private static final int DIMENSION_NAME_MAX_LENGTH = 4096;
+  private static final int LOAD_FILE_BUFFER_SIZE = 10 * 1024 * 1024;
+
+  private final LBufferAPI _dataBuffer;
+  private final OffHeapStarTreeNode _root;
+  private final List&lt;String&gt; _dimensionNames;
+
+  /**
+   * Constructor for the class.
+   * - Reads in the header
+   * - Loads/MMap's the OffHeapStarTreeNode array.
+   */
+<span class="fc" id="L59">  public OffHeapStarTree(File starTreeFile, ReadMode readMode) throws IOException {</span>
+<span class="fc bfc" id="L60" title="All 2 branches covered.">    if (readMode.equals(ReadMode.mmap)) {</span>
+<span class="fc" id="L61">      _dataBuffer = new MMapBuffer(starTreeFile, MMapMode.READ_ONLY);</span>
+    } else {
+<span class="fc" id="L63">      _dataBuffer = loadFrom(starTreeFile);</span>
+    }
+
+<span class="fc" id="L66">    long offset = 0L;</span>
+<span class="pc bpc" id="L67" title="1 of 2 branches missed.">    Preconditions.checkState(MAGIC_MARKER == _dataBuffer.getLong(offset), &quot;Invalid magic marker in Star Tree file&quot;);</span>
+<span class="fc" id="L68">    offset += V1Constants.Numbers.LONG_SIZE;</span>
+
+<span class="pc bpc" id="L70" title="1 of 2 branches missed.">    Preconditions.checkState(VERSION == _dataBuffer.getInt(offset), &quot;Invalid version in Star Tree file&quot;);</span>
+<span class="fc" id="L71">    offset += V1Constants.Numbers.INTEGER_SIZE;</span>
+
+<span class="fc" id="L73">    int rootNodeOffset = _dataBuffer.getInt(offset);</span>
+<span class="fc" id="L74">    offset += V1Constants.Numbers.INTEGER_SIZE;</span>
+
+<span class="fc" id="L76">    int numDimensions = _dataBuffer.getInt(offset);</span>
+<span class="fc" id="L77">    offset += V1Constants.Numbers.INTEGER_SIZE;</span>
+
+<span class="fc" id="L79">    String[] dimensionNames = new String[numDimensions];</span>
+<span class="fc" id="L80">    byte[] dimensionNameBytes = new byte[DIMENSION_NAME_MAX_LENGTH];</span>
+<span class="fc bfc" id="L81" title="All 2 branches covered.">    for (int i = 0; i &lt; numDimensions; i++) {</span>
+      // NOTE: In old version, index might not be stored in order
+<span class="fc" id="L83">      int dimensionId = _dataBuffer.getInt(offset);</span>
+<span class="fc" id="L84">      offset += V1Constants.Numbers.INTEGER_SIZE;</span>
+
+<span class="fc" id="L86">      int dimensionLength = _dataBuffer.getInt(offset);</span>
+<span class="pc bpc" id="L87" title="1 of 2 branches missed.">      Preconditions.checkState(dimensionLength &lt; DIMENSION_NAME_MAX_LENGTH);</span>
+<span class="fc" id="L88">      offset += V1Constants.Numbers.INTEGER_SIZE;</span>
+
+<span class="fc" id="L90">      _dataBuffer.copyTo((int) offset, dimensionNameBytes, 0, dimensionLength);</span>
+<span class="fc" id="L91">      offset += dimensionLength;</span>
+
+<span class="fc" id="L93">      String dimensionName = new String(dimensionNameBytes, 0, dimensionLength, UTF_8);</span>
+<span class="fc" id="L94">      dimensionNames[dimensionId] = dimensionName;</span>
+    }
+<span class="fc" id="L96">    _dimensionNames = Arrays.asList(dimensionNames);</span>
+
+<span class="fc" id="L98">    int numNodes = _dataBuffer.getInt(offset);</span>
+<span class="fc" id="L99">    offset += V1Constants.Numbers.INTEGER_SIZE;</span>
+<span class="pc bpc" id="L100" title="1 of 2 branches missed.">    Preconditions.checkState(offset == rootNodeOffset, &quot;Error reading Star Tree file, header length mis-match&quot;);</span>
+<span class="fc" id="L101">    long fileLength = starTreeFile.length();</span>
+<span class="pc bpc" id="L102" title="1 of 2 branches missed.">    Preconditions.checkState(offset + numNodes * OffHeapStarTreeNode.SERIALIZABLE_SIZE_IN_BYTES == fileLength,</span>
+        &quot;Error reading Star Tree file, file length mis-match&quot;);
+
+<span class="fc" id="L105">    _root = new OffHeapStarTreeNode(_dataBuffer.view(rootNodeOffset, fileLength), 0);</span>
+<span class="fc" id="L106">  }</span>
+
+  /**
+   * Helper method to create an LBuffer from a given file.
+   */
+  private static LBuffer loadFrom(File file) throws IOException {
+<span class="pc" id="L112">    try (FileChannel fileChannel = new FileInputStream(file).getChannel()) {</span>
+<span class="fc" id="L113">      ByteBuffer byteBuffer = ByteBuffer.allocate(LOAD_FILE_BUFFER_SIZE);</span>
+<span class="fc" id="L114">      LBuffer lBuffer = new LBuffer(file.length());</span>
+
+<span class="fc" id="L116">      long offset = 0;</span>
+      int numBytesRead;
+<span class="fc bfc" id="L118" title="All 2 branches covered.">      while ((numBytesRead = fileChannel.read(byteBuffer, offset)) &gt; 0) {</span>
+<span class="fc" id="L119">        lBuffer.readFrom(byteBuffer.array(), 0, offset, numBytesRead);</span>
+<span class="fc" id="L120">        offset += numBytesRead;</span>
+      }
+<span class="fc" id="L122">      return lBuffer;</span>
+<span class="pc bpc" id="L123" title="6 of 8 branches missed.">    }</span>
+  }
+
+  @Override
+  public StarTreeNode getRoot() {
+<span class="fc" id="L128">    return _root;</span>
+  }
+
+  @Override
+  public List&lt;String&gt; getDimensionNames() {
+<span class="fc" id="L133">    return _dimensionNames;</span>
+  }
+
+  @Override
+  public void printTree(Map&lt;String, Dictionary&gt; dictionaryMap) {
+<span class="nc" id="L138">    printTreeHelper(dictionaryMap, _root, 0);</span>
+<span class="nc" id="L139">  }</span>
+
+  /**
+   * Helper method to print the tree.
+   */
+  private void printTreeHelper(Map&lt;String, Dictionary&gt; dictionaryMap, OffHeapStarTreeNode node, int level) {
+<span class="nc" id="L145">    StringBuilder stringBuilder = new StringBuilder();</span>
+<span class="nc bnc" id="L146" title="All 2 branches missed.">    for (int i = 0; i &lt; level; i++) {</span>
+<span class="nc" id="L147">      stringBuilder.append(&quot;  &quot;);</span>
+    }
+<span class="nc" id="L149">    String dimensionName = &quot;ALL&quot;;</span>
+<span class="nc" id="L150">    int dimensionId = node.getDimensionId();</span>
+<span class="nc bnc" id="L151" title="All 2 branches missed.">    if (dimensionId != StarTreeNode.ALL) {</span>
+<span class="nc" id="L152">      dimensionName = _dimensionNames.get(dimensionId);</span>
+    }
+<span class="nc" id="L154">    String dimensionValueString = &quot;ALL&quot;;</span>
+<span class="nc" id="L155">    int dimensionValue = node.getDimensionValue();</span>
+<span class="nc bnc" id="L156" title="All 2 branches missed.">    if (dimensionValue != StarTreeNode.ALL) {</span>
+<span class="nc" id="L157">      dimensionValueString = dictionaryMap.get(dimensionName).get(dimensionValue).toString();</span>
+    }
+
+    // For leaf node, child dimension id is -1
+<span class="nc" id="L161">    String childDimensionName = &quot;null&quot;;</span>
+<span class="nc" id="L162">    int childDimensionId = node.getChildDimensionId();</span>
+<span class="nc bnc" id="L163" title="All 2 branches missed.">    if (childDimensionId != -1) {</span>
+<span class="nc" id="L164">      childDimensionName = _dimensionNames.get(childDimensionId);</span>
+    }
+
+<span class="nc" id="L167">    String formattedOutput = MoreObjects.toStringHelper(node)</span>
+        .add(&quot;level&quot;, level)
+        .add(&quot;dimensionName&quot;, dimensionName)
+        .add(&quot;dimensionValue&quot;, dimensionValueString)
+        .add(&quot;childDimensionName&quot;, childDimensionName)
+        .add(&quot;startDocId&quot;, node.getStartDocId())
+        .add(&quot;endDocId&quot;, node.getEndDocId())
+        .add(&quot;aggregatedDocId&quot;, node.getAggregatedDocId())
+        .add(&quot;numChildren&quot;, node.getNumChildren())
+        .toString();
+<span class="nc" id="L177">    stringBuilder.append(formattedOutput);</span>
+<span class="nc" id="L178">    System.out.println(stringBuilder.toString());</span>
+
+<span class="nc bnc" id="L180" title="All 2 branches missed.">    if (!node.isLeaf()) {</span>
+<span class="nc" id="L181">      Iterator&lt;OffHeapStarTreeNode&gt; childrenIterator = node.getChildrenIterator();</span>
+<span class="nc bnc" id="L182" title="All 2 branches missed.">      while (childrenIterator.hasNext()) {</span>
+<span class="nc" id="L183">        printTreeHelper(dictionaryMap, childrenIterator.next(), level + 1);</span>
+      }
+    }
+<span class="nc" id="L186">  }</span>
+
+  @Override
+  public void close() throws IOException {
+<span class="fc bfc" id="L190" title="All 2 branches covered.">    if (_dataBuffer instanceof MMapBuffer) {</span>
+<span class="fc" id="L191">      ((MMapBuffer) _dataBuffer).close();</span>
+    } else {
+<span class="fc" id="L193">      _dataBuffer.release();</span>
+    }
+<span class="fc" id="L195">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

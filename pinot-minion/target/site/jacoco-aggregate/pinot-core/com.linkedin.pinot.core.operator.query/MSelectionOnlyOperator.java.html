@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>MSelectionOnlyOperator.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-minion</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.operator.query</a> &gt; <span class="el_source">MSelectionOnlyOperator.java</span></div><h1>MSelectionOnlyOperator.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.operator.query;
+
+import com.linkedin.pinot.common.request.Selection;
+import com.linkedin.pinot.common.utils.DataSchema;
+import com.linkedin.pinot.core.common.Block;
+import com.linkedin.pinot.core.common.Operator;
+import com.linkedin.pinot.core.indexsegment.IndexSegment;
+import com.linkedin.pinot.core.operator.BaseOperator;
+import com.linkedin.pinot.core.operator.ExecutionStatistics;
+import com.linkedin.pinot.core.operator.MProjectionOperator;
+import com.linkedin.pinot.core.operator.blocks.DocIdSetBlock;
+import com.linkedin.pinot.core.operator.blocks.IntermediateResultsBlock;
+import com.linkedin.pinot.core.operator.blocks.ProjectionBlock;
+import com.linkedin.pinot.core.query.selection.SelectionFetcher;
+import com.linkedin.pinot.core.query.selection.SelectionOperatorUtils;
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+
+
+/**
+ * This MSelectionOnlyOperator will take care of applying a selection query to one IndexSegment.
+ * nextBlock() will return an IntermediateResultBlock for the given IndexSegment.
+ *
+ *
+ */
+public class MSelectionOnlyOperator extends BaseOperator&lt;IntermediateResultsBlock&gt; {
+  private static final String OPERATOR_NAME = &quot;MSelectionOnlyOperator&quot;;
+
+  private final IndexSegment _indexSegment;
+  private final MProjectionOperator _projectionOperator;
+  private final DataSchema _dataSchema;
+  private final Block[] _blocks;
+  private final int _limitDocs;
+  private final Collection&lt;Serializable[]&gt; _rowEvents;
+  private ExecutionStatistics _executionStatistics;
+
+<span class="fc" id="L54">  public MSelectionOnlyOperator(IndexSegment indexSegment, Selection selection, Operator projectionOperator) {</span>
+<span class="fc" id="L55">    _indexSegment = indexSegment;</span>
+<span class="fc" id="L56">    _limitDocs = selection.getSize();</span>
+<span class="fc" id="L57">    _projectionOperator = (MProjectionOperator) projectionOperator;</span>
+<span class="fc" id="L58">    List&lt;String&gt; selectionColumns =</span>
+        SelectionOperatorUtils.getSelectionColumns(selection.getSelectionColumns(), indexSegment);
+<span class="fc" id="L60">    _dataSchema = SelectionOperatorUtils.extractDataSchema(null, selectionColumns, indexSegment);</span>
+<span class="fc" id="L61">    _blocks = new Block[selectionColumns.size()];</span>
+<span class="fc" id="L62">    _rowEvents = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L63">  }</span>
+
+  @Override
+  protected IntermediateResultsBlock getNextBlock() {
+<span class="fc" id="L67">    int numDocsScanned = 0;</span>
+
+    ProjectionBlock projectionBlock;
+<span class="pc bpc" id="L70" title="1 of 2 branches missed.">    while ((projectionBlock = _projectionOperator.nextBlock()) != null) {</span>
+<span class="fc bfc" id="L71" title="All 2 branches covered.">      for (int i = 0; i &lt; _dataSchema.size(); i++) {</span>
+<span class="fc" id="L72">        _blocks[i] = projectionBlock.getBlock(_dataSchema.getColumnName(i));</span>
+      }
+<span class="fc" id="L74">      SelectionFetcher selectionFetcher = new SelectionFetcher(_blocks, _dataSchema);</span>
+<span class="fc" id="L75">      DocIdSetBlock docIdSetBlock = projectionBlock.getDocIdSetBlock();</span>
+<span class="fc" id="L76">      int numDocsToFetch = Math.min(docIdSetBlock.getSearchableLength(), _limitDocs - _rowEvents.size());</span>
+<span class="fc" id="L77">      numDocsScanned += numDocsToFetch;</span>
+<span class="fc" id="L78">      int[] docIdSet = docIdSetBlock.getDocIdSet();</span>
+<span class="fc bfc" id="L79" title="All 2 branches covered.">      for (int i = 0; i &lt; numDocsToFetch; i++) {</span>
+<span class="fc" id="L80">        _rowEvents.add(selectionFetcher.getRow(docIdSet[i]));</span>
+      }
+<span class="pc bpc" id="L82" title="1 of 2 branches missed.">      if (_rowEvents.size() == _limitDocs) {</span>
+<span class="fc" id="L83">        break;</span>
+      }
+<span class="nc" id="L85">    }</span>
+
+    // Create execution statistics.
+<span class="fc" id="L88">    long numEntriesScannedInFilter = _projectionOperator.getExecutionStatistics().getNumEntriesScannedInFilter();</span>
+<span class="fc" id="L89">    long numEntriesScannedPostFilter = numDocsScanned * _projectionOperator.getNumProjectionColumns();</span>
+<span class="fc" id="L90">    long numTotalRawDocs = _indexSegment.getSegmentMetadata().getTotalRawDocs();</span>
+<span class="fc" id="L91">    _executionStatistics =</span>
+        new ExecutionStatistics(numDocsScanned, numEntriesScannedInFilter, numEntriesScannedPostFilter,
+            numTotalRawDocs);
+
+<span class="fc" id="L95">    return new IntermediateResultsBlock(_dataSchema, _rowEvents);</span>
+  }
+
+  @Override
+  public String getOperatorName() {
+<span class="nc" id="L100">    return OPERATOR_NAME;</span>
+  }
+
+  @Override
+  public ExecutionStatistics getExecutionStatistics() {
+<span class="fc" id="L105">    return _executionStatistics;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

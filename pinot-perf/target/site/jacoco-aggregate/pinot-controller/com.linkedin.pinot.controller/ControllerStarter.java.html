@@ -1,0 +1,356 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>ControllerStarter.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-perf</a> &gt; <a href="../index.html" class="el_bundle">pinot-controller</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.controller</a> &gt; <span class="el_source">ControllerStarter.java</span></div><h1>ControllerStarter.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.controller;
+
+import com.google.common.primitives.Longs;
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import com.linkedin.pinot.common.Utils;
+import com.linkedin.pinot.common.metrics.ControllerMeter;
+import com.linkedin.pinot.common.metrics.ControllerMetrics;
+import com.linkedin.pinot.common.metrics.MetricsHelper;
+import com.linkedin.pinot.common.metrics.ValidationMetrics;
+import com.linkedin.pinot.common.segment.fetcher.SegmentFetcherFactory;
+import com.linkedin.pinot.common.utils.CommonConstants;
+import com.linkedin.pinot.common.utils.ServiceStatus;
+import com.linkedin.pinot.controller.api.ControllerAdminApiApplication;
+import com.linkedin.pinot.controller.api.access.AccessControlFactory;
+import com.linkedin.pinot.controller.api.events.MetadataEventNotifierFactory;
+import com.linkedin.pinot.controller.helix.SegmentStatusChecker;
+import com.linkedin.pinot.controller.helix.core.PinotHelixResourceManager;
+import com.linkedin.pinot.controller.helix.core.minion.PinotHelixTaskResourceManager;
+import com.linkedin.pinot.controller.helix.core.minion.PinotTaskManager;
+import com.linkedin.pinot.controller.helix.core.realtime.PinotLLCRealtimeSegmentManager;
+import com.linkedin.pinot.controller.helix.core.realtime.PinotRealtimeSegmentManager;
+import com.linkedin.pinot.controller.helix.core.retention.RetentionManager;
+import com.linkedin.pinot.controller.validation.ValidationManager;
+import com.yammer.metrics.core.MetricsRegistry;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.util.concurrent.Callable;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import org.apache.commons.httpclient.HttpConnectionManager;
+import org.apache.commons.httpclient.MultiThreadedHttpConnectionManager;
+import org.apache.commons.io.FileUtils;
+import org.apache.helix.PreConnectCallback;
+import org.glassfish.hk2.utilities.binding.AbstractBinder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+public class ControllerStarter {
+<span class="fc" id="L56">  private static final Logger LOGGER = LoggerFactory.getLogger(ControllerStarter.class);</span>
+
+  private static final String METRICS_REGISTRY_NAME = &quot;pinot.controller.metrics&quot;;
+<span class="fc" id="L59">  private static final Long DATA_DIRECTORY_MISSING_VALUE = 1000000L;</span>
+<span class="fc" id="L60">  private static final Long DATA_DIRECTORY_EXCEPTION_VALUE = 1100000L;</span>
+  private static final String METADATA_EVENT_NOTIFIER_PREFIX = &quot;metadata.event.notifier&quot;;
+
+  private final ControllerConf _config;
+  private final ControllerAdminApiApplication _adminApp;
+  private final PinotHelixResourceManager _helixResourceManager;
+  private final RetentionManager _retentionManager;
+  private final MetricsRegistry _metricsRegistry;
+  private final ControllerMetrics _controllerMetrics;
+  private final PinotRealtimeSegmentManager _realtimeSegmentsManager;
+  private final SegmentStatusChecker _segmentStatusChecker;
+  private final ExecutorService _executorService;
+
+  // Can only be constructed after resource manager getting started
+  private ValidationManager _validationManager;
+  private PinotHelixTaskResourceManager _helixTaskResourceManager;
+  private PinotTaskManager _taskManager;
+
+<span class="fc" id="L78">  public ControllerStarter(ControllerConf conf) {</span>
+<span class="fc" id="L79">    _config = conf;</span>
+<span class="fc" id="L80">    _adminApp = new ControllerAdminApiApplication(_config.getQueryConsole());</span>
+<span class="fc" id="L81">    _helixResourceManager = new PinotHelixResourceManager(_config);</span>
+<span class="fc" id="L82">    _retentionManager = new RetentionManager(_helixResourceManager, _config.getRetentionControllerFrequencyInSeconds(),</span>
+        _config.getDeletedSegmentsRetentionInDays());
+<span class="fc" id="L84">    _metricsRegistry = new MetricsRegistry();</span>
+<span class="fc" id="L85">    _controllerMetrics = new ControllerMetrics(_metricsRegistry);</span>
+<span class="fc" id="L86">    _realtimeSegmentsManager = new PinotRealtimeSegmentManager(_helixResourceManager);</span>
+<span class="fc" id="L87">    _executorService = Executors.newCachedThreadPool(</span>
+        new ThreadFactoryBuilder().setNameFormat(&quot;restapi-multiget-thread-%d&quot;).build());
+<span class="fc" id="L89">    _segmentStatusChecker = new SegmentStatusChecker(_helixResourceManager, _config, _controllerMetrics);</span>
+<span class="fc" id="L90">  }</span>
+
+  public PinotHelixResourceManager getHelixResourceManager() {
+<span class="fc" id="L93">    return _helixResourceManager;</span>
+  }
+
+  public ValidationManager getValidationManager() {
+<span class="nc" id="L97">    return _validationManager;</span>
+  }
+
+  public PinotHelixTaskResourceManager getHelixTaskResourceManager() {
+<span class="fc" id="L101">    return _helixTaskResourceManager;</span>
+  }
+
+  public PinotTaskManager getTaskManager() {
+<span class="fc" id="L105">    return _taskManager;</span>
+  }
+
+  public void start() {
+<span class="fc" id="L109">    LOGGER.info(&quot;Starting Pinot controller&quot;);</span>
+
+<span class="fc" id="L111">    Utils.logVersions();</span>
+
+    // Set up controller metrics
+<span class="fc" id="L114">    MetricsHelper.initializeMetrics(_config.subset(METRICS_REGISTRY_NAME));</span>
+<span class="fc" id="L115">    MetricsHelper.registerMetricsRegistry(_metricsRegistry);</span>
+
+    // Start all components
+    try {
+<span class="fc" id="L119">      LOGGER.info(&quot;initializing segment fetchers for all protocols&quot;);</span>
+<span class="fc" id="L120">      SegmentFetcherFactory.getInstance()</span>
+          .init(_config.subset(CommonConstants.Controller.PREFIX_OF_CONFIG_OF_SEGMENT_FETCHER_FACTORY));
+
+<span class="fc" id="L123">      LOGGER.info(&quot;Starting Pinot Helix resource manager and connecting to Zookeeper&quot;);</span>
+<span class="fc" id="L124">      _helixResourceManager.start();</span>
+
+<span class="fc" id="L126">      LOGGER.info(&quot;Starting task resource manager&quot;);</span>
+<span class="fc" id="L127">      _helixTaskResourceManager = new PinotHelixTaskResourceManager(_helixResourceManager.getHelixZkManager());</span>
+
+<span class="fc" id="L129">      LOGGER.info(&quot;Starting task manager&quot;);</span>
+<span class="fc" id="L130">      _taskManager = new PinotTaskManager(_helixTaskResourceManager, _helixResourceManager, _config, _controllerMetrics);</span>
+<span class="fc" id="L131">      int taskManagerFrequencyInSeconds = _config.getTaskManagerFrequencyInSeconds();</span>
+<span class="pc bpc" id="L132" title="1 of 2 branches missed.">      if (taskManagerFrequencyInSeconds &gt; 0) {</span>
+<span class="nc" id="L133">        LOGGER.info(&quot;Starting task manager with running frequency of {} seconds&quot;, taskManagerFrequencyInSeconds);</span>
+<span class="nc" id="L134">        _taskManager.startScheduler(taskManagerFrequencyInSeconds);</span>
+      }
+
+<span class="fc" id="L137">      LOGGER.info(&quot;Starting retention manager&quot;);</span>
+<span class="fc" id="L138">      _retentionManager.start();</span>
+
+<span class="fc" id="L140">      LOGGER.info(&quot;Starting validation manager&quot;);</span>
+      // Helix resource manager must be started in order to create PinotLLCRealtimeSegmentManager
+<span class="fc" id="L142">      PinotLLCRealtimeSegmentManager.create(_helixResourceManager, _config, _controllerMetrics);</span>
+<span class="fc" id="L143">      ValidationMetrics validationMetrics = new ValidationMetrics(_metricsRegistry);</span>
+<span class="fc" id="L144">      _validationManager = new ValidationManager(validationMetrics, _helixResourceManager, _config,</span>
+          PinotLLCRealtimeSegmentManager.getInstance());
+<span class="fc" id="L146">      _validationManager.start();</span>
+
+<span class="fc" id="L148">      LOGGER.info(&quot;Starting realtime segment manager&quot;);</span>
+<span class="fc" id="L149">      _realtimeSegmentsManager.start(_controllerMetrics);</span>
+<span class="fc" id="L150">      PinotLLCRealtimeSegmentManager.getInstance().start();</span>
+
+<span class="fc" id="L152">      LOGGER.info(&quot;Starting segment status manager&quot;);</span>
+<span class="fc" id="L153">      _segmentStatusChecker.start();</span>
+
+<span class="fc" id="L155">      String accessControlFactoryClass = _config.getAccessControlFactoryClass();</span>
+<span class="fc" id="L156">      LOGGER.info(&quot;Use class: {} as the access control factory&quot;, accessControlFactoryClass);</span>
+<span class="fc" id="L157">      final AccessControlFactory accessControlFactory =</span>
+          (AccessControlFactory) Class.forName(accessControlFactoryClass).newInstance();
+
+<span class="fc" id="L160">      final MetadataEventNotifierFactory metadataEventNotifierFactory = MetadataEventNotifierFactory.loadFactory(</span>
+          _config.subset(METADATA_EVENT_NOTIFIER_PREFIX));
+
+<span class="fc" id="L163">      int jerseyPort = Integer.parseInt(_config.getControllerPort());</span>
+
+<span class="fc" id="L165">      LOGGER.info(&quot;Controller download url base: {}&quot;, _config.generateVipUrl());</span>
+<span class="fc" id="L166">      LOGGER.info(&quot;Injecting configuration and resource managers to the API context&quot;);</span>
+<span class="fc" id="L167">      final MultiThreadedHttpConnectionManager connectionManager = new MultiThreadedHttpConnectionManager();</span>
+<span class="fc" id="L168">      connectionManager.getParams().setConnectionTimeout(_config.getServerAdminRequestTimeoutSeconds());</span>
+      // register all the controller objects for injection to jersey resources
+<span class="fc" id="L170">      _adminApp.registerBinder(new AbstractBinder() {</span>
+        @Override
+        protected void configure() {
+<span class="fc" id="L173">          bind(_config).to(ControllerConf.class);</span>
+<span class="fc" id="L174">          bind(_helixResourceManager).to(PinotHelixResourceManager.class);</span>
+<span class="fc" id="L175">          bind(_helixTaskResourceManager).to(PinotHelixTaskResourceManager.class);</span>
+<span class="fc" id="L176">          bind(_taskManager).to(PinotTaskManager.class);</span>
+<span class="fc" id="L177">          bind(connectionManager).to(HttpConnectionManager.class);</span>
+<span class="fc" id="L178">          bind(_executorService).to(Executor.class);</span>
+<span class="fc" id="L179">          bind(_controllerMetrics).to(ControllerMetrics.class);</span>
+<span class="fc" id="L180">          bind(accessControlFactory).to(AccessControlFactory.class);</span>
+<span class="fc" id="L181">          bind(metadataEventNotifierFactory).to(MetadataEventNotifierFactory.class);</span>
+<span class="fc" id="L182">        }</span>
+      });
+
+<span class="fc" id="L185">      _adminApp.start(jerseyPort);</span>
+<span class="fc" id="L186">      LOGGER.info(&quot;Started Jersey API on port {}&quot;, jerseyPort);</span>
+<span class="fc" id="L187">      LOGGER.info(&quot;Pinot controller ready and listening on port {} for API requests&quot;, _config.getControllerPort());</span>
+<span class="fc" id="L188">      LOGGER.info(&quot;Controller services available at http://{}:{}/&quot;, _config.getControllerHost(),</span>
+          _config.getControllerPort());
+<span class="nc" id="L190">    } catch (final Exception e) {</span>
+<span class="nc" id="L191">      LOGGER.error(&quot;Caught exception while starting controller&quot;, e);</span>
+<span class="nc" id="L192">      Utils.rethrowException(e);</span>
+<span class="nc" id="L193">      throw new AssertionError(&quot;Should not reach this&quot;);</span>
+<span class="fc" id="L194">    }</span>
+
+<span class="fc" id="L196">    _controllerMetrics.addCallbackGauge(</span>
+            &quot;helix.connected&quot;,
+<span class="fc" id="L198">            new Callable&lt;Long&gt;() {</span>
+              @Override
+              public Long call() throws Exception {
+<span class="nc bnc" id="L201" title="All 2 branches missed.">                return _helixResourceManager.getHelixZkManager().isConnected() ? 1L : 0L;</span>
+              }
+            });
+
+<span class="fc" id="L205">    _controllerMetrics.addCallbackGauge(</span>
+<span class="fc" id="L206">        &quot;helix.leader&quot;, new Callable&lt;Long&gt;() {</span>
+              @Override
+              public Long call() throws Exception {
+<span class="nc bnc" id="L209" title="All 2 branches missed.">                return _helixResourceManager.getHelixZkManager().isLeader() ? 1L : 0L;</span>
+              }
+            });
+
+<span class="fc" id="L213">    _controllerMetrics.addCallbackGauge(&quot;dataDir.exists&quot;, new Callable&lt;Long&gt;() {</span>
+      @Override
+      public Long call() throws Exception {
+<span class="nc bnc" id="L216" title="All 2 branches missed.">        return new File(_config.getDataDir()).exists() ? 1L : 0L;</span>
+      }
+    });
+
+<span class="fc" id="L220">    _controllerMetrics.addCallbackGauge(&quot;dataDir.fileOpLatencyMs&quot;, new Callable&lt;Long&gt;() {</span>
+      @Override
+      public Long call() throws Exception {
+<span class="nc" id="L223">        File dataDir = new File(_config.getDataDir());</span>
+
+<span class="nc bnc" id="L225" title="All 2 branches missed.">        if (dataDir.exists()) {</span>
+          try {
+<span class="nc" id="L227">            long startTime = System.currentTimeMillis();</span>
+<span class="nc" id="L228">            final File testFile = new File(dataDir, _config.getControllerHost());</span>
+<span class="nc" id="L229">            FileOutputStream outputStream = new FileOutputStream(testFile, false);</span>
+<span class="nc" id="L230">            outputStream.write(Longs.toByteArray(System.currentTimeMillis()));</span>
+<span class="nc" id="L231">            outputStream.flush();</span>
+<span class="nc" id="L232">            outputStream.close();</span>
+<span class="nc" id="L233">            FileUtils.deleteQuietly(testFile);</span>
+<span class="nc" id="L234">            long endTime = System.currentTimeMillis();</span>
+
+<span class="nc" id="L236">            return endTime - startTime;</span>
+<span class="nc" id="L237">          } catch (IOException e) {</span>
+<span class="nc" id="L238">            LOGGER.warn(&quot;Caught exception while checking the data directory operation latency&quot;, e);</span>
+<span class="nc" id="L239">            return DATA_DIRECTORY_EXCEPTION_VALUE;</span>
+          }
+        } else {
+<span class="nc" id="L242">          return DATA_DIRECTORY_MISSING_VALUE;</span>
+        }
+      }
+    });
+
+<span class="fc" id="L247">    ServiceStatus.setServiceStatusCallback(new ServiceStatus.ServiceStatusCallback() {</span>
+<span class="fc" id="L248">      private boolean _isStarted = false;</span>
+<span class="fc" id="L249">      private String _statusDescription = &quot;Helix ZK Not connected&quot;;</span>
+      @Override
+      public ServiceStatus.Status getServiceStatus() {
+<span class="nc bnc" id="L252" title="All 2 branches missed.">        if(_isStarted) {</span>
+          // If we've connected to Helix at some point, the instance status depends on being connected to ZK
+<span class="nc bnc" id="L254" title="All 2 branches missed.">          if (_helixResourceManager.getHelixZkManager().isConnected()) {</span>
+<span class="nc" id="L255">            return ServiceStatus.Status.GOOD;</span>
+          } else {
+<span class="nc" id="L257">            return ServiceStatus.Status.BAD;</span>
+          }
+        }
+
+        // Return starting until zk is connected
+<span class="nc bnc" id="L262" title="All 2 branches missed.">        if (!_helixResourceManager.getHelixZkManager().isConnected()) {</span>
+<span class="nc" id="L263">          return ServiceStatus.Status.STARTING;</span>
+        } else {
+<span class="nc" id="L265">          _isStarted = true;</span>
+<span class="nc" id="L266">          _statusDescription = ServiceStatus.STATUS_DESCRIPTION_NONE;</span>
+<span class="nc" id="L267">          return ServiceStatus.Status.GOOD;</span>
+        }
+      }
+      @Override
+      public String getStatusDescription() {
+<span class="nc" id="L272">        return _statusDescription;</span>
+      }
+    });
+
+<span class="fc" id="L276">    _helixResourceManager.getHelixZkManager().addPreConnectCallback(new PreConnectCallback() {</span>
+      @Override
+      public void onPreConnect() {
+<span class="nc" id="L279">        _controllerMetrics.addMeteredGlobalValue(ControllerMeter.HELIX_ZOOKEEPER_RECONNECTS, 1L);</span>
+<span class="nc" id="L280">      }</span>
+    });
+<span class="fc" id="L282">    _controllerMetrics.initializeGlobalMeters();</span>
+<span class="fc" id="L283">  }</span>
+
+  public void stop() {
+    try {
+<span class="fc" id="L287">      LOGGER.info(&quot;Stopping validation manager&quot;);</span>
+<span class="fc" id="L288">      _validationManager.stop();</span>
+
+<span class="fc" id="L290">      LOGGER.info(&quot;Stopping retention manager&quot;);</span>
+<span class="fc" id="L291">      _retentionManager.stop();</span>
+
+<span class="fc" id="L293">      LOGGER.info(&quot;Stopping Jersey admin API&quot;);</span>
+<span class="fc" id="L294">      _adminApp.stop();</span>
+
+<span class="fc" id="L296">      LOGGER.info(&quot;Stopping realtime segment manager&quot;);</span>
+<span class="fc" id="L297">      _realtimeSegmentsManager.stop();</span>
+
+<span class="fc" id="L299">      LOGGER.info(&quot;Stopping resource manager&quot;);</span>
+<span class="fc" id="L300">      _helixResourceManager.stop();</span>
+
+<span class="fc" id="L302">      LOGGER.info(&quot;Stopping segment status manager&quot;);</span>
+<span class="fc" id="L303">      _segmentStatusChecker.stop();</span>
+
+<span class="fc" id="L305">      LOGGER.info(&quot;Stopping task manager&quot;);</span>
+<span class="fc" id="L306">      _taskManager.stopScheduler();</span>
+
+<span class="fc" id="L308">      _executorService.shutdownNow();</span>
+<span class="nc" id="L309">    } catch (final Exception e) {</span>
+<span class="nc" id="L310">      LOGGER.error(&quot;Caught exception while shutting down&quot;, e);</span>
+<span class="fc" id="L311">    }</span>
+<span class="fc" id="L312">  }</span>
+
+  public MetricsRegistry getMetricsRegistry() {
+<span class="nc" id="L315">    return _metricsRegistry;</span>
+  }
+
+  public static ControllerStarter startDefault() {
+<span class="nc" id="L319">    return startDefault(null);</span>
+  }
+
+  public static ControllerStarter startDefault(File webappPath) {
+<span class="nc" id="L323">    final ControllerConf conf = new ControllerConf();</span>
+<span class="nc" id="L324">    conf.setControllerHost(&quot;localhost&quot;);</span>
+<span class="nc" id="L325">    conf.setControllerPort(&quot;9000&quot;);</span>
+<span class="nc" id="L326">    conf.setDataDir(&quot;/tmp/PinotController&quot;);</span>
+<span class="nc" id="L327">    conf.setZkStr(&quot;localhost:2122&quot;);</span>
+<span class="nc" id="L328">    conf.setHelixClusterName(&quot;quickstart&quot;);</span>
+<span class="nc bnc" id="L329" title="All 2 branches missed.">    if (webappPath == null) {</span>
+<span class="nc" id="L330">      String path = ControllerStarter.class.getClassLoader().getResource(&quot;webapp&quot;).getFile();</span>
+<span class="nc bnc" id="L331" title="All 2 branches missed.">      if (!path.startsWith(&quot;file://&quot;)) {</span>
+<span class="nc" id="L332">        path = &quot;file://&quot; + path;</span>
+      }
+<span class="nc" id="L334">      conf.setQueryConsolePath(path);</span>
+<span class="nc" id="L335">    } else {</span>
+<span class="nc" id="L336">      conf.setQueryConsolePath(&quot;file://&quot; + webappPath.getAbsolutePath());</span>
+    }
+
+<span class="nc" id="L339">    conf.setControllerVipHost(&quot;localhost&quot;);</span>
+<span class="nc" id="L340">    conf.setControllerVipProtocol(&quot;http&quot;);</span>
+<span class="nc" id="L341">    conf.setRetentionControllerFrequencyInSeconds(3600 * 6);</span>
+<span class="nc" id="L342">    conf.setValidationControllerFrequencyInSeconds(3600);</span>
+<span class="nc" id="L343">    conf.setStatusCheckerFrequencyInSeconds(5*60);</span>
+<span class="nc" id="L344">    conf.setStatusCheckerWaitForPushTimeInSeconds(10*60);</span>
+<span class="nc" id="L345">    conf.setTenantIsolationEnabled(true);</span>
+<span class="nc" id="L346">    final ControllerStarter starter = new ControllerStarter(conf);</span>
+
+<span class="nc" id="L348">    starter.start();</span>
+<span class="nc" id="L349">    return starter;</span>
+  }
+
+  public static void main(String[] args) throws InterruptedException {
+<span class="nc" id="L353">    startDefault();</span>
+<span class="nc" id="L354">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

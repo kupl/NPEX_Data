@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>BoundedAccountingExecutor.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-hadoop</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.query.scheduler.resources</a> &gt; <span class="el_source">BoundedAccountingExecutor.java</span></div><h1>BoundedAccountingExecutor.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.linkedin.pinot.core.query.scheduler.resources;
+
+import com.google.common.base.Preconditions;
+import com.linkedin.pinot.core.query.scheduler.SchedulerGroupAccountant;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Semaphore;
+import javax.annotation.Nonnull;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * Bounded accounting executor service that puts an upper bound on the
+ * number of concurrent jobs that can be executed using this service. This service
+ * allows us to divide the resources (threads) of an existing executor service between
+ * different clients and limit the concurrent executions each client can run.
+ *
+ * This class also supports a resource accounting interface to accurately track resources
+ * utilization based on submission time and end time of a task. This does not require
+ * any changes to client code which continue to use ExecutorService interface.
+ */
+public class BoundedAccountingExecutor extends QueryExecutorService {
+<span class="fc" id="L39">  private static Logger LOGGER = LoggerFactory.getLogger(BoundedAccountingExecutor.class);</span>
+
+  private final Executor delegateExecutor;
+  private final int bounds;
+  private Semaphore semaphore;
+  private final SchedulerGroupAccountant accountant;
+
+  public BoundedAccountingExecutor(@Nonnull Executor s, int bounds,
+<span class="fc" id="L47">      @Nonnull SchedulerGroupAccountant accountant) {</span>
+<span class="fc" id="L48">    Preconditions.checkNotNull(s);</span>
+<span class="fc" id="L49">    Preconditions.checkNotNull(accountant);</span>
+<span class="pc bpc" id="L50" title="1 of 2 branches missed.">    Preconditions.checkArgument(bounds &gt; 0);</span>
+<span class="fc" id="L51">    this.delegateExecutor = s;</span>
+<span class="fc" id="L52">    this.bounds = bounds;</span>
+<span class="fc" id="L53">    this.semaphore = new Semaphore(bounds);</span>
+<span class="fc" id="L54">    this.accountant = accountant;</span>
+<span class="fc" id="L55">  }</span>
+
+  @Override
+  public void execute(Runnable command) {
+<span class="fc" id="L59">    delegateExecutor.execute(toAccountingRunnable(command));</span>
+<span class="fc" id="L60">  }</span>
+
+  @Override
+  public void releaseWorkers()  {
+<span class="fc" id="L64">    accountant.releasedReservedThreads(bounds);</span>
+<span class="fc" id="L65">  }</span>
+
+  private QueryAccountingRunnable toAccountingRunnable(Runnable runnable) {
+<span class="fc" id="L68">    acquirePermits(1);</span>
+<span class="fc" id="L69">    return new QueryAccountingRunnable(runnable, semaphore, accountant);</span>
+  }
+
+  private void acquirePermits(int permits) {
+    try {
+<span class="fc" id="L74">      semaphore.acquire(permits);</span>
+<span class="nc" id="L75">    } catch (InterruptedException e) {</span>
+<span class="nc" id="L76">      LOGGER.error(&quot;Thread interrupted while waiting for semaphore&quot;, e);</span>
+<span class="nc" id="L77">      throw new RuntimeException(e);</span>
+<span class="fc" id="L78">    }</span>
+<span class="fc" id="L79">  }</span>
+
+  private class QueryAccountingRunnable implements Runnable {
+    private final Runnable runnable;
+    private final Semaphore semaphore;
+    private final SchedulerGroupAccountant accountant;
+
+<span class="fc" id="L86">    QueryAccountingRunnable(Runnable r, Semaphore semaphore, SchedulerGroupAccountant accountant) {</span>
+<span class="fc" id="L87">      this.runnable = r;</span>
+<span class="fc" id="L88">      this.semaphore = semaphore;</span>
+<span class="fc" id="L89">      this.accountant = accountant;</span>
+<span class="fc" id="L90">    }</span>
+
+    @Override
+    public void run() {
+      try {
+<span class="pc bpc" id="L95" title="1 of 2 branches missed.">        if (accountant != null) {</span>
+<span class="fc" id="L96">          accountant.incrementThreads();</span>
+        }
+<span class="fc" id="L98">        runnable.run();</span>
+      } finally {
+<span class="pc bpc" id="L100" title="3 of 4 branches missed.">        if (accountant != null) {</span>
+<span class="pc" id="L101">          accountant.decrementThreads();</span>
+        }
+<span class="pc" id="L103">        semaphore.release();</span>
+<span class="fc" id="L104">      }</span>
+<span class="fc" id="L105">    }</span>
+  }
+}
+
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

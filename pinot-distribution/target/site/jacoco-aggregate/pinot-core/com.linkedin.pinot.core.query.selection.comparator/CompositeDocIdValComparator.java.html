@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>CompositeDocIdValComparator.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.query.selection.comparator</a> &gt; <span class="el_source">CompositeDocIdValComparator.java</span></div><h1>CompositeDocIdValComparator.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.query.selection.comparator;
+
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.List;
+
+import com.linkedin.pinot.common.request.SelectionSort;
+import com.linkedin.pinot.core.common.Block;
+
+/**
+ * Comparator to order the doc id based on sort sequence across multiple blocks
+ */
+public final class CompositeDocIdValComparator implements Comparator&lt;Integer&gt; {
+  private final List&lt;SelectionSort&gt; sortSequence;
+  private final Block[] blocks;
+  IDocIdValComparator[] docIdValComparators;
+  boolean[] eligibleToCompare;
+
+<span class="fc" id="L34">  public CompositeDocIdValComparator(List&lt;SelectionSort&gt; sortSequence, Block[] blocks) {</span>
+<span class="fc" id="L35">    this.sortSequence = sortSequence;</span>
+<span class="fc" id="L36">    this.blocks = blocks;</span>
+<span class="fc" id="L37">    docIdValComparators = new IDocIdValComparator[blocks.length];</span>
+<span class="fc" id="L38">    eligibleToCompare = new boolean[blocks.length];</span>
+<span class="fc" id="L39">    Arrays.fill(eligibleToCompare, true);</span>
+<span class="fc bfc" id="L40" title="All 2 branches covered.">    for (int i = 0; i &lt; sortSequence.size(); ++i) {</span>
+<span class="pc bpc" id="L41" title="1 of 2 branches missed.">      if (!blocks[i].getMetadata().isSingleValue()) {</span>
+<span class="nc" id="L42">        eligibleToCompare[i] = false;</span>
+<span class="nc" id="L43">        continue;</span>
+      }
+
+<span class="pc bpc" id="L46" title="1 of 2 branches missed.">      if (blocks[i].getMetadata().hasDictionary()) {</span>
+<span class="fc" id="L47">        docIdValComparators[i] =</span>
+            new DocIdIntValComparator(blocks[i], sortSequence.get(i).isIsAsc());
+      } else {
+<span class="nc bnc" id="L50" title="All 5 branches missed.">        switch (blocks[i].getMetadata().getDataType()) {</span>
+        case INT:
+<span class="nc" id="L52">          docIdValComparators[i] =</span>
+              new DocIdIntValComparator(blocks[i], sortSequence.get(i).isIsAsc());
+<span class="nc" id="L54">          break;</span>
+        case LONG:
+<span class="nc" id="L56">          docIdValComparators[i] =</span>
+              new DocIdLongValComparator(blocks[i], sortSequence.get(i).isIsAsc());
+<span class="nc" id="L58">          break;</span>
+        case FLOAT:
+<span class="nc" id="L60">          docIdValComparators[i] =</span>
+              new DocIdFloatValComparator(blocks[i], sortSequence.get(i).isIsAsc());
+<span class="nc" id="L62">          break;</span>
+        case DOUBLE:
+<span class="nc" id="L64">          docIdValComparators[i] =</span>
+              new DocIdDoubleValComparator(blocks[i], sortSequence.get(i).isIsAsc());
+<span class="nc" id="L66">          break;</span>
+        default:
+<span class="nc" id="L68">          eligibleToCompare[i] = false;</span>
+        }
+      }
+
+    }
+<span class="fc" id="L73">  }</span>
+
+  @Override
+  public int compare(Integer docId1, Integer docId2) {
+<span class="fc" id="L77">    int ret = 0;</span>
+<span class="fc bfc" id="L78" title="All 2 branches covered.">    for (int i = 0; i &lt; sortSequence.size(); ++i) {</span>
+<span class="pc bpc" id="L79" title="1 of 2 branches missed.">      if (eligibleToCompare[i]) {</span>
+<span class="fc" id="L80">        ret = docIdValComparators[i].compare(docId1, docId2);</span>
+<span class="fc bfc" id="L81" title="All 2 branches covered.">        if (ret != 0) {</span>
+<span class="fc" id="L82">          return ret;</span>
+        }
+      }
+    }
+<span class="fc" id="L86">    return ret;</span>
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

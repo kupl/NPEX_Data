@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>BenchmarkOffHeapDictionaryMemory.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-perf</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.perf</a> &gt; <span class="el_source">BenchmarkOffHeapDictionaryMemory.java</span></div><h1>BenchmarkOffHeapDictionaryMemory.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.linkedin.pinot.perf;
+
+import com.linkedin.pinot.core.io.readerwriter.PinotDataBufferMemoryManager;
+import com.linkedin.pinot.core.io.writer.impl.DirectMemoryManager;
+import com.linkedin.pinot.core.realtime.impl.dictionary.BaseOffHeapMutableDictionary;
+import com.linkedin.pinot.core.realtime.impl.dictionary.LongOffHeapMutableDictionary;
+import org.openjdk.jmh.annotations.Setup;
+import org.openjdk.jmh.annotations.TearDown;
+
+
+// Test to get memory statistics for off-heap dictionary
+<span class="nc" id="L28">public class BenchmarkOffHeapDictionaryMemory {</span>
+  private Long[] _colValues;
+<span class="nc" id="L30">  private final int _nRuns = 10;</span>
+<span class="nc" id="L31">  private final int _nDivs = 10;</span>
+<span class="nc" id="L32">  final int _cardinality = 1_000_000;</span>
+<span class="nc" id="L33">  final int _nRows = 2_500_000;</span>
+<span class="nc" id="L34">  private final long[] _totalMem = new long[_nDivs + 1];</span>
+<span class="nc" id="L35">  private final int[] _nBufs = new int[_nDivs + 1];</span>
+<span class="nc" id="L36">  private final int[] _overflowSize = new int[_nDivs + 1];</span>
+  private PinotDataBufferMemoryManager _memoryManager;
+
+  @Setup
+  public void setUp() {
+<span class="nc" id="L41">    _memoryManager = new DirectMemoryManager(BenchmarkOffHeapDictionaryMemory.class.getName());</span>
+<span class="nc" id="L42">  }</span>
+
+  @TearDown
+  public void tearDown()
+      throws Exception {
+<span class="nc" id="L47">    _memoryManager.close();</span>
+<span class="nc" id="L48">  }</span>
+
+  private void setupValues(final int cardinality, final int nRows) {
+    // Create a list of values to insert into the hash map
+<span class="nc" id="L52">    long[] uniqueColValues = new long[cardinality];</span>
+<span class="nc bnc" id="L53" title="All 2 branches missed.">    for (int i = 0; i &lt; uniqueColValues.length; i++) {</span>
+<span class="nc" id="L54">      uniqueColValues[i] = (long) (Math.random() * Long.MAX_VALUE);</span>
+    }
+<span class="nc" id="L56">    _colValues = new Long[nRows];</span>
+<span class="nc bnc" id="L57" title="All 2 branches missed.">    for (int i = 0; i &lt; _colValues.length; i++) {</span>
+<span class="nc" id="L58">      _colValues[i] = uniqueColValues[(int) (Math.random() * cardinality)];</span>
+    }
+<span class="nc" id="L60">  }</span>
+
+  private BaseOffHeapMutableDictionary testMem(final int initialCardinality, final int maxOverflowSize)
+      throws Exception {
+<span class="nc" id="L64">    LongOffHeapMutableDictionary dictionary =</span>
+        new LongOffHeapMutableDictionary(initialCardinality, maxOverflowSize, _memoryManager, &quot;longColumn&quot;);
+
+<span class="nc bnc" id="L67" title="All 2 branches missed.">    for (Long colValue : _colValues) {</span>
+<span class="nc" id="L68">      dictionary.index(colValue);</span>
+    }
+<span class="nc" id="L70">    return dictionary;</span>
+  }
+
+  private void addStats(BaseOffHeapMutableDictionary dictionary, int div) {
+<span class="nc" id="L74">    _totalMem[div] += dictionary.getTotalOffHeapMemUsed();</span>
+<span class="nc" id="L75">    _overflowSize[div] += dictionary.getNumberOfOveflowValues();</span>
+<span class="nc" id="L76">    _nBufs[div] += dictionary.getNumberOfHeapBuffersUsed();</span>
+
+    /*
+    System.out.println(&quot;Cardinality:&quot; + actualCardinality + &quot;,initialCardinality:&quot; + initialCardinality +
+        &quot;,OffHeapMem:&quot; + dictionary.getTotalOffHeapMemUsed()/1024/1024 + &quot;MB&quot; +
+            &quot;,NumBuffers=&quot; + dictionary.getNumberOfHeapBuffersUsed() +
+            &quot;,maxOverflowSize=&quot; + maxOverflowSize +
+            &quot;,actualOverflowSize=&quot; + dictionary.getNumberOfOveflowValues() +
+            &quot;,rowFills=&quot; + Arrays.toString(dictionary.getRowFillCount())
+    );
+    */
+<span class="nc" id="L87">  }</span>
+
+  private void printStats() {
+<span class="nc bnc" id="L90" title="All 2 branches missed.">    for (int div = 1; div &lt; _nDivs; div++) {</span>
+<span class="nc" id="L91">      _totalMem[div] /= _nRuns;</span>
+<span class="nc" id="L92">      _nBufs[div] /= _nRuns;</span>
+<span class="nc" id="L93">      _overflowSize[div] /= _nRuns;</span>
+<span class="nc" id="L94">      System.out.println(</span>
+          &quot;Div=&quot; + div + &quot;,TotalMem:&quot; + _totalMem[div] / 1024 / 1024 + &quot;MB,_nBufs=&quot; + _nBufs[div] + &quot;,numOverflows=&quot;
+              + _overflowSize[div]);
+    }
+<span class="nc" id="L98">  }</span>
+
+  private void clearStats() {
+<span class="nc bnc" id="L101" title="All 2 branches missed.">    for (int div = 1; div &lt; _nDivs; div++) {</span>
+<span class="nc" id="L102">      _totalMem[div] = 0;</span>
+<span class="nc" id="L103">      _nBufs[div] = 0;</span>
+<span class="nc" id="L104">      _overflowSize[div] = 0;</span>
+    }
+<span class="nc" id="L106">  }</span>
+
+  private void testMem(final int maxOverflowSize)
+      throws Exception {
+<span class="nc" id="L110">    clearStats();</span>
+
+<span class="nc bnc" id="L112" title="All 2 branches missed.">    for (int div = 1; div &lt;= _nDivs; div++) {</span>
+<span class="nc" id="L113">      setupValues(_cardinality, _nRows);</span>
+<span class="nc bnc" id="L114" title="All 2 branches missed.">      for (int i = 0; i &lt; _nRuns; i++) {</span>
+<span class="nc" id="L115">        int initialCardinality = _cardinality / div;</span>
+<span class="nc" id="L116">        BaseOffHeapMutableDictionary dictionary = testMem(initialCardinality, maxOverflowSize);</span>
+<span class="nc" id="L117">        addStats(dictionary, div);</span>
+<span class="nc" id="L118">        dictionary.close();</span>
+      }
+    }
+
+<span class="nc" id="L122">    printStats();</span>
+<span class="nc" id="L123">  }</span>
+
+  public static void main(String[] args)
+      throws Exception {
+<span class="nc" id="L127">    BenchmarkOffHeapDictionaryMemory benchmark = new BenchmarkOffHeapDictionaryMemory();</span>
+<span class="nc" id="L128">    System.out.println(&quot;Results with overflow:&quot;);</span>
+<span class="nc" id="L129">    benchmark.testMem(1000);</span>
+<span class="nc" id="L130">    System.out.println(&quot;Results without overflow:&quot;);</span>
+<span class="nc" id="L131">    benchmark.testMem(0);</span>
+<span class="nc" id="L132">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

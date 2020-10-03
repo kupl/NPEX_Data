@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>SegmentPreIndexStatsCollectorImpl.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-minion</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.segment.creator.impl.stats</a> &gt; <span class="el_source">SegmentPreIndexStatsCollectorImpl.java</span></div><h1>SegmentPreIndexStatsCollectorImpl.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.segment.creator.impl.stats;
+
+import com.linkedin.pinot.core.segment.creator.StatsCollectorConfig;
+import java.util.HashMap;
+import java.util.Map;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.linkedin.pinot.common.data.FieldSpec;
+import com.linkedin.pinot.common.data.Schema;
+import com.linkedin.pinot.core.data.GenericRow;
+import com.linkedin.pinot.core.segment.creator.ColumnStatistics;
+import com.linkedin.pinot.core.segment.creator.SegmentPreIndexStatsCollector;
+
+
+public class SegmentPreIndexStatsCollectorImpl implements SegmentPreIndexStatsCollector {
+<span class="fc" id="L33">  private static final Logger LOGGER = LoggerFactory.getLogger(SegmentPreIndexStatsCollectorImpl.class);</span>
+
+  private final StatsCollectorConfig _statsCollectorConfig;
+  private Map&lt;String, AbstractColumnStatisticsCollector&gt; columnStatsCollectorMap;
+
+  private int rawDocCount;
+  private int aggregatedDocCount;
+  private int totalDocCount;
+
+<span class="fc" id="L42">  public SegmentPreIndexStatsCollectorImpl(StatsCollectorConfig statsCollectorConfig) {</span>
+<span class="fc" id="L43">    this._statsCollectorConfig = statsCollectorConfig;</span>
+<span class="fc" id="L44">  }</span>
+
+  @Override
+  public void init() {
+<span class="fc" id="L48">    columnStatsCollectorMap = new HashMap&lt;&gt;();</span>
+
+<span class="fc" id="L50">    Schema dataSchema = _statsCollectorConfig.getSchema();</span>
+<span class="fc bfc" id="L51" title="All 2 branches covered.">    for (final FieldSpec spec : dataSchema.getAllFieldSpecs()) {</span>
+<span class="fc" id="L52">      String column = spec.getName();</span>
+<span class="pc bpc" id="L53" title="1 of 6 branches missed.">      switch (spec.getDataType()) {</span>
+        case BOOLEAN:
+        case STRING:
+<span class="fc" id="L56">          columnStatsCollectorMap.put(spec.getName(), new StringColumnPreIndexStatsCollector(column,</span>
+              _statsCollectorConfig));
+<span class="fc" id="L58">          break;</span>
+        case INT:
+<span class="fc" id="L60">          columnStatsCollectorMap.put(spec.getName(), new IntColumnPreIndexStatsCollector(column, _statsCollectorConfig));</span>
+<span class="fc" id="L61">          break;</span>
+        case LONG:
+<span class="fc" id="L63">          columnStatsCollectorMap.put(spec.getName(), new LongColumnPreIndexStatsCollector(column,</span>
+              _statsCollectorConfig));
+<span class="fc" id="L65">          break;</span>
+        case FLOAT:
+<span class="fc" id="L67">          columnStatsCollectorMap.put(spec.getName(), new FloatColumnPreIndexStatsCollector(column,</span>
+              _statsCollectorConfig));
+<span class="fc" id="L69">          break;</span>
+        case DOUBLE:
+<span class="fc" id="L71">          columnStatsCollectorMap.put(spec.getName(), new DoubleColumnPreIndexStatsCollector(column,</span>
+              _statsCollectorConfig));
+<span class="fc" id="L73">          break;</span>
+        default:
+          break;
+      }
+<span class="fc" id="L77">    }</span>
+<span class="fc" id="L78">  }</span>
+
+  @Override
+  public void build() {
+<span class="fc bfc" id="L82" title="All 2 branches covered.">    for (final String column : columnStatsCollectorMap.keySet()) {</span>
+<span class="fc" id="L83">      columnStatsCollectorMap.get(column).seal();</span>
+<span class="fc" id="L84">    }</span>
+<span class="fc" id="L85">  }</span>
+
+  @Override
+  public ColumnStatistics getColumnProfileFor(String column) {
+<span class="fc" id="L89">    return columnStatsCollectorMap.get(column);</span>
+  }
+
+  @Override
+  public void collectRow(GenericRow row) throws Exception {
+<span class="fc" id="L94">    collectRow(row, false);</span>
+<span class="fc" id="L95">  }</span>
+
+  @Override
+  public void collectRow(GenericRow row, boolean isAggregated) throws Exception {
+<span class="fc bfc" id="L99" title="All 2 branches covered.">    for (Map.Entry&lt;String, Object&gt; columnNameAndValue : row.getEntrySet()) {</span>
+<span class="fc" id="L100">      final String columnName = columnNameAndValue.getKey();</span>
+<span class="fc" id="L101">      final Object value = columnNameAndValue.getValue();</span>
+
+<span class="pc bpc" id="L103" title="1 of 2 branches missed.">      if (columnStatsCollectorMap.containsKey(columnName)) {</span>
+        try {
+<span class="fc" id="L105">          columnStatsCollectorMap.get(columnName).collect(value, isAggregated);</span>
+<span class="nc" id="L106">        } catch (Exception e) {</span>
+<span class="nc" id="L107">          LOGGER.error(&quot;Exception while collecting stats for column:{} in row:{}&quot;, columnName, row);</span>
+<span class="nc" id="L108">          throw e;</span>
+<span class="fc" id="L109">        }</span>
+      }
+<span class="fc" id="L111">    }</span>
+
+<span class="fc" id="L113">    ++totalDocCount;</span>
+<span class="fc bfc" id="L114" title="All 2 branches covered.">    if (!isAggregated) {</span>
+<span class="fc" id="L115">      ++rawDocCount;</span>
+    } else {
+<span class="fc" id="L117">      ++aggregatedDocCount;</span>
+    }
+<span class="fc" id="L119">  }</span>
+
+  @Override
+  public int getRawDocCount() {
+<span class="fc" id="L123">    return rawDocCount;</span>
+  }
+
+  @Override
+  public int getAggregatedDocCount() {
+<span class="fc" id="L128">    return aggregatedDocCount;</span>
+  }
+
+  @Override
+  public int getTotalDocCount() {
+<span class="fc" id="L133">    return totalDocCount;</span>
+  }
+
+  @Override
+  public void logStats() {
+    try {
+<span class="nc bnc" id="L139" title="All 2 branches missed.">      for (final String column : columnStatsCollectorMap.keySet()) {</span>
+<span class="nc" id="L140">        AbstractColumnStatisticsCollector statisticsCollector = columnStatsCollectorMap.get(column);</span>
+
+<span class="nc" id="L142">        LOGGER.info(&quot;********** logging for column : &quot; + column + &quot; ********************* &quot;);</span>
+<span class="nc" id="L143">        LOGGER.info(&quot;min value : &quot; + statisticsCollector.getMinValue());</span>
+<span class="nc" id="L144">        LOGGER.info(&quot;max value : &quot; + statisticsCollector.getMaxValue());</span>
+<span class="nc" id="L145">        LOGGER.info(&quot;cardinality : &quot; + statisticsCollector.getCardinality());</span>
+<span class="nc" id="L146">        LOGGER.info(&quot;length of largest column : &quot; + statisticsCollector.getLengthOfLargestElement());</span>
+<span class="nc" id="L147">        LOGGER.info(&quot;is sorted : &quot; + statisticsCollector.isSorted());</span>
+<span class="nc" id="L148">        LOGGER.info(&quot;column type : &quot; + _statsCollectorConfig.getSchema().getFieldSpecFor(column).getDataType());</span>
+
+<span class="nc bnc" id="L150" title="All 2 branches missed.">        if (statisticsCollector.getPartitionFunction() != null) {</span>
+<span class="nc" id="L151">          LOGGER.info(&quot;min partition value: &quot; + statisticsCollector.getPartitionRanges().toString());</span>
+        }
+<span class="nc" id="L153">        LOGGER.info(&quot;***********************************************&quot;);</span>
+<span class="nc" id="L154">      }</span>
+<span class="nc" id="L155">    } catch (final Exception e) {</span>
+<span class="nc" id="L156">      LOGGER.error(&quot;Caught exception while logging column stats&quot;, e);</span>
+<span class="nc" id="L157">    }</span>
+
+<span class="nc" id="L159">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

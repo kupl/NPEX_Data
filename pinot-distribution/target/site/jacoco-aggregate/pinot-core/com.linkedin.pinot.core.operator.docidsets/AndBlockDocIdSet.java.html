@@ -1,0 +1,268 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>AndBlockDocIdSet.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.operator.docidsets</a> &gt; <span class="el_source">AndBlockDocIdSet.java</span></div><h1>AndBlockDocIdSet.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.operator.docidsets;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
+import org.roaringbitmap.IntIterator;
+import org.roaringbitmap.buffer.ImmutableRoaringBitmap;
+import org.roaringbitmap.buffer.MutableRoaringBitmap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import com.linkedin.pinot.common.utils.Pairs.IntPair;
+import com.linkedin.pinot.core.common.BlockDocIdIterator;
+import com.linkedin.pinot.core.common.BlockDocIdSet;
+import com.linkedin.pinot.core.common.Constants;
+import com.linkedin.pinot.core.operator.dociditerators.AndDocIdIterator;
+import com.linkedin.pinot.core.operator.dociditerators.BitmapDocIdIterator;
+import com.linkedin.pinot.core.operator.dociditerators.RangelessBitmapDocIdIterator;
+import com.linkedin.pinot.core.operator.dociditerators.ScanBasedDocIdIterator;
+import com.linkedin.pinot.core.operator.filter.AndOperator;
+import com.linkedin.pinot.core.util.SortedRangeIntersection;
+
+<span class="pc bpc" id="L37" title="1 of 2 branches missed.">public final class AndBlockDocIdSet implements FilterBlockDocIdSet {</span>
+  /**
+   *
+   */
+<span class="fc" id="L41">  static final Logger LOGGER = LoggerFactory.getLogger(AndOperator.class);</span>
+<span class="fc" id="L42">  public final AtomicLong timeMeasure = new AtomicLong(0);</span>
+  private List&lt;FilterBlockDocIdSet&gt; blockDocIdSets;
+<span class="fc" id="L44">  private int minDocId = Integer.MIN_VALUE;</span>
+<span class="fc" id="L45">  private int maxDocId = Integer.MAX_VALUE;</span>
+<span class="fc" id="L46">  MutableRoaringBitmap answer = null;</span>
+<span class="fc" id="L47">  boolean validate = false;</span>
+
+<span class="fc" id="L49">  public AndBlockDocIdSet(List&lt;FilterBlockDocIdSet&gt; blockDocIdSets) {</span>
+<span class="fc" id="L50">    this.blockDocIdSets = blockDocIdSets;</span>
+<span class="fc" id="L51">    updateMinMaxRange();</span>
+<span class="fc" id="L52">  }</span>
+
+  private void updateMinMaxRange() {
+<span class="fc bfc" id="L55" title="All 2 branches covered.">    for (FilterBlockDocIdSet blockDocIdSet : blockDocIdSets) {</span>
+<span class="fc" id="L56">      minDocId = Math.max(minDocId, blockDocIdSet.getMinDocId());</span>
+<span class="fc" id="L57">      maxDocId = Math.min(maxDocId, blockDocIdSet.getMaxDocId());</span>
+<span class="fc" id="L58">    }</span>
+<span class="fc bfc" id="L59" title="All 2 branches covered.">    for (FilterBlockDocIdSet blockDocIdSet : blockDocIdSets) {</span>
+<span class="fc" id="L60">      blockDocIdSet.setStartDocId(minDocId);</span>
+<span class="fc" id="L61">      blockDocIdSet.setEndDocId(maxDocId);</span>
+<span class="fc" id="L62">    }</span>
+<span class="fc" id="L63">  }</span>
+
+  @Override
+  public BlockDocIdIterator iterator() {
+    //TODO: Remove this validation code once we have enough testing
+<span class="pc bpc" id="L68" title="1 of 2 branches missed.">    if (validate) {</span>
+<span class="nc" id="L69">      BlockDocIdIterator slowIterator = slowIterator();</span>
+<span class="nc" id="L70">      BlockDocIdIterator fastIterator = fastIterator();</span>
+<span class="nc" id="L71">      List&lt;Integer&gt; matchedIds = new ArrayList&lt;&gt;();</span>
+      while (true) {
+<span class="nc" id="L73">        int docId1 = slowIterator.next();</span>
+<span class="nc" id="L74">        int docId2 = fastIterator.next();</span>
+<span class="nc bnc" id="L75" title="All 2 branches missed.">        if (docId1 != docId2) {</span>
+<span class="nc" id="L76">          LOGGER.error(&quot;ERROR docId1:&quot; + docId1 + &quot; docId2:&quot; + docId2);</span>
+        } else {
+<span class="nc" id="L78">          matchedIds.add(docId1);</span>
+        }
+<span class="nc bnc" id="L80" title="All 4 branches missed.">        if (docId1 == Constants.EOF || docId2 == Constants.EOF) {</span>
+<span class="nc" id="L81">          break;</span>
+        }
+<span class="nc" id="L83">      }</span>
+<span class="nc" id="L84">      answer = null;</span>
+    }
+<span class="fc" id="L86">    return fastIterator();</span>
+
+  }
+
+  public BlockDocIdIterator slowIterator() {
+<span class="nc" id="L91">    List&lt;BlockDocIdIterator&gt; rawIterators = new ArrayList&lt;&gt;();</span>
+<span class="nc" id="L92">    boolean useBitmapBasedIntersection = false;</span>
+<span class="nc bnc" id="L93" title="All 2 branches missed.">    for (BlockDocIdSet docIdSet : blockDocIdSets) {</span>
+<span class="nc bnc" id="L94" title="All 2 branches missed.">      if (docIdSet instanceof BitmapDocIdSet) {</span>
+<span class="nc" id="L95">        useBitmapBasedIntersection = true;</span>
+      }
+<span class="nc" id="L97">    }</span>
+    BlockDocIdIterator[] docIdIterators;
+<span class="nc bnc" id="L99" title="All 2 branches missed.">    if (useBitmapBasedIntersection) {</span>
+<span class="nc" id="L100">      List&lt;ImmutableRoaringBitmap&gt; allBitmaps = new ArrayList&lt;ImmutableRoaringBitmap&gt;();</span>
+<span class="nc bnc" id="L101" title="All 2 branches missed.">      for (BlockDocIdSet docIdSet : blockDocIdSets) {</span>
+<span class="nc bnc" id="L102" title="All 2 branches missed.">        if (docIdSet instanceof SortedDocIdSet) {</span>
+<span class="nc" id="L103">          MutableRoaringBitmap bitmap = new MutableRoaringBitmap();</span>
+<span class="nc" id="L104">          SortedDocIdSet sortedDocIdSet = (SortedDocIdSet) docIdSet;</span>
+<span class="nc" id="L105">          List&lt;IntPair&gt; pairs = sortedDocIdSet.getRaw();</span>
+<span class="nc bnc" id="L106" title="All 2 branches missed.">          for (IntPair pair : pairs) {</span>
+<span class="nc" id="L107">            bitmap.add(pair.getLeft(), pair.getRight() + 1); // add takes [start, end) i.e inclusive</span>
+                                                             // start, exclusive end.
+<span class="nc" id="L109">          }</span>
+<span class="nc" id="L110">          allBitmaps.add(bitmap);</span>
+<span class="nc bnc" id="L111" title="All 2 branches missed.">        } else if (docIdSet instanceof BitmapDocIdSet) {</span>
+<span class="nc" id="L112">          BitmapDocIdSet bitmapDocIdSet = (BitmapDocIdSet) docIdSet;</span>
+<span class="nc" id="L113">          ImmutableRoaringBitmap childBitmap = bitmapDocIdSet.getRaw();</span>
+<span class="nc" id="L114">          allBitmaps.add(childBitmap);</span>
+<span class="nc" id="L115">        } else {</span>
+<span class="nc" id="L116">          BlockDocIdIterator iterator = docIdSet.iterator();</span>
+<span class="nc" id="L117">          rawIterators.add(iterator);</span>
+        }
+<span class="nc" id="L119">      }</span>
+      IntIterator intIterator;
+<span class="nc bnc" id="L121" title="All 2 branches missed.">      if (allBitmaps.size() &gt; 1) {</span>
+<span class="nc" id="L122">        MutableRoaringBitmap answer = (MutableRoaringBitmap) allBitmaps.get(0).clone();</span>
+<span class="nc bnc" id="L123" title="All 2 branches missed.">        for (int i = 1; i &lt; allBitmaps.size(); i++) {</span>
+<span class="nc" id="L124">          answer.and(allBitmaps.get(i));</span>
+        }
+<span class="nc" id="L126">        intIterator = answer.getIntIterator();</span>
+<span class="nc" id="L127">      } else {</span>
+<span class="nc" id="L128">        intIterator = allBitmaps.get(0).getIntIterator();</span>
+      }
+
+<span class="nc" id="L131">      BitmapDocIdIterator singleBitmapBlockIdIterator = new BitmapDocIdIterator(intIterator);</span>
+<span class="nc" id="L132">      singleBitmapBlockIdIterator.setStartDocId(minDocId);</span>
+<span class="nc" id="L133">      singleBitmapBlockIdIterator.setEndDocId(maxDocId);</span>
+<span class="nc" id="L134">      rawIterators.add(0, singleBitmapBlockIdIterator);</span>
+<span class="nc" id="L135">      docIdIterators = new BlockDocIdIterator[rawIterators.size()];</span>
+<span class="nc" id="L136">      rawIterators.toArray(docIdIterators);</span>
+<span class="nc" id="L137">    } else {</span>
+<span class="nc" id="L138">      docIdIterators = new BlockDocIdIterator[blockDocIdSets.size()];</span>
+<span class="nc bnc" id="L139" title="All 2 branches missed.">      for (int srcId = 0; srcId &lt; blockDocIdSets.size(); srcId++) {</span>
+<span class="nc" id="L140">        docIdIterators[srcId] = blockDocIdSets.get(srcId).iterator();</span>
+      }
+    }
+<span class="nc" id="L143">    return new AndDocIdIterator(docIdIterators);</span>
+  }
+
+  public BlockDocIdIterator fastIterator() {
+<span class="fc" id="L147">    long start = System.currentTimeMillis();</span>
+<span class="fc" id="L148">    List&lt;List&lt;IntPair&gt;&gt; sortedRangeSets = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L149">    List&lt;ImmutableRoaringBitmap&gt; childBitmaps = new ArrayList&lt;ImmutableRoaringBitmap&gt;();</span>
+<span class="fc" id="L150">    List&lt;FilterBlockDocIdSet&gt; scanBasedDocIdSets = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L151">    List&lt;BlockDocIdIterator&gt; remainingIterators = new ArrayList&lt;&gt;();</span>
+
+<span class="fc bfc" id="L153" title="All 2 branches covered.">    for (BlockDocIdSet docIdSet : blockDocIdSets) {</span>
+<span class="fc bfc" id="L154" title="All 2 branches covered.">      if (docIdSet instanceof SortedDocIdSet) {</span>
+<span class="fc" id="L155">        SortedDocIdSet sortedDocIdSet = (SortedDocIdSet) docIdSet;</span>
+<span class="fc" id="L156">        List&lt;IntPair&gt; pairs = sortedDocIdSet.getRaw();</span>
+<span class="fc" id="L157">        sortedRangeSets.add(pairs);</span>
+<span class="fc bfc" id="L158" title="All 2 branches covered.">      } else if (docIdSet instanceof BitmapDocIdSet) {</span>
+<span class="fc" id="L159">        BitmapDocIdSet bitmapDocIdSet = (BitmapDocIdSet) docIdSet;</span>
+<span class="fc" id="L160">        ImmutableRoaringBitmap childBitmap = bitmapDocIdSet.getRaw();</span>
+<span class="fc" id="L161">        childBitmaps.add(childBitmap);</span>
+<span class="fc bfc" id="L162" title="All 2 branches covered.">      } else if (docIdSet instanceof ScanBasedSingleValueDocIdSet) {</span>
+<span class="fc" id="L163">        scanBasedDocIdSets.add((ScanBasedSingleValueDocIdSet) docIdSet);</span>
+<span class="pc bpc" id="L164" title="1 of 2 branches missed.">      } else if (docIdSet instanceof ScanBasedMultiValueDocIdSet) {</span>
+<span class="nc" id="L165">        scanBasedDocIdSets.add((ScanBasedMultiValueDocIdSet) docIdSet);</span>
+      } else {
+        // TODO:handle child OR/AND as bitmap if possible
+<span class="fc" id="L168">        remainingIterators.add(docIdSet.iterator());</span>
+      }
+<span class="fc" id="L170">    }</span>
+<span class="fc bfc" id="L171" title="All 4 branches covered.">    if (childBitmaps.size() == 0 &amp;&amp; sortedRangeSets.size() == 0) {</span>
+      // When one or more of the operands are operators themselves, then we don't have a sorted or
+      // bitmap index. In that case, just use the AndDocIdIterator to iterate over all of of the subtree.
+<span class="fc" id="L174">      BlockDocIdIterator[] docIdIterators = new BlockDocIdIterator[blockDocIdSets.size()];</span>
+<span class="fc bfc" id="L175" title="All 2 branches covered.">      for (int srcId = 0; srcId &lt; blockDocIdSets.size(); srcId++) {</span>
+<span class="fc" id="L176">        docIdIterators[srcId] = blockDocIdSets.get(srcId).iterator();</span>
+      }
+<span class="fc" id="L178">      return new AndDocIdIterator(docIdIterators);</span>
+    } else {
+      // handle sorted ranges
+      // TODO: will be nice to re-order sorted and bitmap index based on size
+<span class="fc bfc" id="L182" title="All 2 branches covered.">      if (sortedRangeSets.size() &gt; 0) {</span>
+        List&lt;IntPair&gt; pairList;
+<span class="fc" id="L184">        pairList = SortedRangeIntersection.intersectSortedRangeSets(sortedRangeSets);</span>
+<span class="fc" id="L185">        answer = new MutableRoaringBitmap();</span>
+<span class="fc bfc" id="L186" title="All 2 branches covered.">        for (IntPair pair : pairList) {</span>
+          // end is exclusive
+<span class="fc" id="L188">          answer.add(pair.getLeft(), pair.getRight() + 1);</span>
+<span class="fc" id="L189">        }</span>
+      }
+      // handle bitmaps
+<span class="fc bfc" id="L192" title="All 2 branches covered.">      if (childBitmaps.size() &gt; 0) {</span>
+<span class="pc bpc" id="L193" title="1 of 2 branches missed.">        if (answer == null) {</span>
+<span class="fc" id="L194">          answer = childBitmaps.get(0).toMutableRoaringBitmap();</span>
+<span class="pc bpc" id="L195" title="1 of 2 branches missed.">          for (int i = 1; i &lt; childBitmaps.size(); i++) {</span>
+<span class="nc" id="L196">            answer.and(childBitmaps.get(i));</span>
+          }
+        } else {
+<span class="nc bnc" id="L199" title="All 2 branches missed.">          for (int i = 0; i &lt; childBitmaps.size(); i++) {</span>
+<span class="nc" id="L200">            answer.and(childBitmaps.get(i));</span>
+          }
+        }
+      }
+
+      // At this point, we must have 'answer' to be non-null.
+<span class="pc bpc" id="L206" title="2 of 4 branches missed.">      assert (answer != null) : &quot;sortedRangeSets=&quot; + sortedRangeSets.size() + &quot;,childBitmaps=&quot; + childBitmaps.size();</span>
+
+      // handle raw iterators
+<span class="fc bfc" id="L209" title="All 2 branches covered.">      for (FilterBlockDocIdSet scanBasedDocIdSet : scanBasedDocIdSets) {</span>
+<span class="fc" id="L210">        ScanBasedDocIdIterator iterator = (ScanBasedDocIdIterator) scanBasedDocIdSet.iterator();</span>
+<span class="fc" id="L211">        MutableRoaringBitmap scanAnswer = iterator.applyAnd(answer);</span>
+<span class="fc" id="L212">        answer.and(scanAnswer);</span>
+<span class="fc" id="L213">      }</span>
+<span class="fc" id="L214">      long end = System.currentTimeMillis();</span>
+<span class="fc" id="L215">      LOGGER.debug(&quot;Time to evaluate and Filter:{}&quot;, (end - start));</span>
+      // if other iterators exists resort to iterator style intersection
+<span class="fc" id="L217">      BlockDocIdIterator answerDocIdIterator = new RangelessBitmapDocIdIterator(answer.getIntIterator());</span>
+<span class="fc bfc" id="L218" title="All 2 branches covered.">      if (remainingIterators.size() == 0) {</span>
+<span class="fc" id="L219">        return answerDocIdIterator;</span>
+      } else {
+<span class="fc" id="L221">        BlockDocIdIterator[] docIdIterators = new BlockDocIdIterator[remainingIterators.size() + 1];</span>
+<span class="fc" id="L222">        docIdIterators[0] = answerDocIdIterator;</span>
+<span class="fc bfc" id="L223" title="All 2 branches covered.">        for (int i = 0; i &lt; remainingIterators.size(); i++) {</span>
+<span class="fc" id="L224">          docIdIterators[i + 1] = remainingIterators.get(i);</span>
+        }
+<span class="fc" id="L226">        return new AndDocIdIterator(docIdIterators);</span>
+      }
+    }
+  }
+
+  @SuppressWarnings(&quot;unchecked&quot;)
+  @Override
+  public &lt;T&gt; T getRaw() {
+<span class="nc" id="L234">    return (T) answer;</span>
+  }
+
+  @Override
+  public int getMinDocId() {
+<span class="fc" id="L239">    return minDocId;</span>
+  }
+
+  @Override
+  public int getMaxDocId() {
+<span class="fc" id="L244">    return maxDocId;</span>
+  }
+
+  @Override
+  public void setStartDocId(int startDocId) {
+<span class="fc" id="L249">    minDocId = Math.max(minDocId, startDocId);</span>
+<span class="fc" id="L250">    updateMinMaxRange();</span>
+<span class="fc" id="L251">  }</span>
+
+  @Override
+  public void setEndDocId(int endDocId) {
+<span class="fc" id="L255">    maxDocId = Math.min(maxDocId, endDocId);</span>
+<span class="fc" id="L256">    updateMinMaxRange();</span>
+<span class="fc" id="L257">  }</span>
+
+  @Override
+  public long getNumEntriesScannedInFilter() {
+<span class="fc" id="L261">    long numEntriesScannedInFilter = 0L;</span>
+<span class="fc bfc" id="L262" title="All 2 branches covered.">    for (FilterBlockDocIdSet blockDocIdSet : blockDocIdSets) {</span>
+<span class="fc" id="L263">      numEntriesScannedInFilter += blockDocIdSet.getNumEntriesScannedInFilter();</span>
+<span class="fc" id="L264">    }</span>
+<span class="fc" id="L265">    return numEntriesScannedInFilter;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

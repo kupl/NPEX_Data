@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>FixedBitMultiValueWriter.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.io.writer.impl.v1</a> &gt; <span class="el_source">FixedBitMultiValueWriter.java</span></div><h1>FixedBitMultiValueWriter.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.io.writer.impl.v1;
+
+import com.google.common.base.Preconditions;
+import com.linkedin.pinot.common.segment.ReadMode;
+import com.linkedin.pinot.core.io.util.FixedBitIntReaderWriter;
+import com.linkedin.pinot.core.io.util.FixedByteValueReaderWriter;
+import com.linkedin.pinot.core.io.util.PinotDataBitSet;
+import com.linkedin.pinot.core.io.writer.SingleColumnMultiValueWriter;
+import com.linkedin.pinot.core.segment.memory.PinotDataBuffer;
+import java.io.File;
+import java.nio.channels.FileChannel;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * Storage Layout
+ * ==============
+ * There will be three sections HEADER section, BITMAP and RAW DATA
+ * CHUNK OFFSET HEADER will contain one line per chunk, each line corresponding to the start offset
+ * and length of the chunk
+ * BITMAP This will contain sequence of bits. The number of bits will be equal to the
+ * totalNumberOfValues.A bit is set to 1 if its start of a new docId. The number of bits set to 1
+ * will be equal to the number of docs.
+ * RAWDATA This simply has the actual multivalued data stored in sequence of int's. The number of
+ * ints is equal to the totalNumberOfValues
+ * We divide all the documents into groups referred to as CHUNK. Each CHUNK will
+ * - Have the same number of documents.
+ * - Started Offset of each CHUNK in the BITMAP will stored in the HEADER section. This is to speed
+ * the look up.
+ * Over all each look up will take log(NUM CHUNKS) for binary search + CHUNK to linear scan on the
+ * bitmap to find the right offset in the raw data section
+ */
+<span class="pc bpc" id="L48" title="1 of 2 branches missed.">public class FixedBitMultiValueWriter implements SingleColumnMultiValueWriter {</span>
+<span class="fc" id="L49">  private static final Logger LOGGER = LoggerFactory.getLogger(FixedBitMultiValueWriter.class);</span>
+
+<span class="fc" id="L51">  private static int SIZE_OF_INT = 4;</span>
+<span class="fc" id="L52">  private static int NUM_COLS_IN_HEADER = 1;</span>
+  private static final int PREFERRED_NUM_VALUES_PER_CHUNK = 2048;
+
+  private PinotDataBuffer indexDataBuffer;
+  private PinotDataBuffer chunkOffsetsBuffer;
+  private PinotDataBuffer bitsetBuffer;
+  private PinotDataBuffer rawDataBuffer;
+
+  private FixedByteValueReaderWriter chunkOffsetsWriter;
+  private PinotDataBitSet customBitSet;
+  private FixedBitIntReaderWriter rawDataWriter;
+  private int numChunks;
+<span class="fc" id="L64">  int prevRowStartIndex = 0;</span>
+<span class="fc" id="L65">  int prevRowLength = 0;</span>
+<span class="fc" id="L66">  int prevRowId = -1;</span>
+  private int chunkOffsetHeaderSize;
+  private int bitsetSize;
+  private long rawDataSize;
+  private long totalSize;
+  private int docsPerChunk;
+
+  public FixedBitMultiValueWriter(File file, int numDocs, int totalNumValues, int columnSizeInBits)
+<span class="fc" id="L74">      throws Exception {</span>
+<span class="fc" id="L75">    float averageValuesPerDoc = totalNumValues / numDocs;</span>
+<span class="fc" id="L76">    this.docsPerChunk = (int) (Math.ceil(PREFERRED_NUM_VALUES_PER_CHUNK / averageValuesPerDoc));</span>
+<span class="fc" id="L77">    this.numChunks = (numDocs + docsPerChunk - 1) / docsPerChunk;</span>
+<span class="fc" id="L78">    chunkOffsetHeaderSize = numChunks * SIZE_OF_INT * NUM_COLS_IN_HEADER;</span>
+<span class="fc" id="L79">    bitsetSize = (totalNumValues + 7) / 8;</span>
+<span class="fc" id="L80">    rawDataSize = ((long) totalNumValues * columnSizeInBits + 7) / 8;</span>
+<span class="fc" id="L81">    totalSize = chunkOffsetHeaderSize + bitsetSize + rawDataSize;</span>
+<span class="pc bpc" id="L82" title="2 of 4 branches missed.">    Preconditions.checkState(totalSize &gt; 0 &amp;&amp; totalSize &lt; Integer.MAX_VALUE, &quot;Total size can not exceed 2GB for file: &quot;, file.toString());</span>
+<span class="fc" id="L83">    indexDataBuffer = PinotDataBuffer.fromFile(file, 0, totalSize, ReadMode.mmap, FileChannel.MapMode.READ_WRITE,</span>
+        file.getAbsolutePath() + &quot;.fixedBitMVWriter&quot;);
+
+<span class="fc" id="L86">    chunkOffsetsBuffer = indexDataBuffer.view(0, chunkOffsetHeaderSize);</span>
+<span class="fc" id="L87">    int bitsetEndPos = chunkOffsetHeaderSize + bitsetSize;</span>
+<span class="fc" id="L88">    bitsetBuffer = indexDataBuffer.view(chunkOffsetHeaderSize, bitsetEndPos);</span>
+<span class="fc" id="L89">    rawDataBuffer = indexDataBuffer.view(bitsetEndPos, bitsetEndPos + rawDataSize);</span>
+
+<span class="fc" id="L91">    chunkOffsetsWriter = new FixedByteValueReaderWriter(chunkOffsetsBuffer);</span>
+<span class="fc" id="L92">    customBitSet = new PinotDataBitSet(bitsetBuffer);</span>
+<span class="fc" id="L93">    rawDataWriter = new FixedBitIntReaderWriter(rawDataBuffer, totalNumValues, columnSizeInBits);</span>
+<span class="fc" id="L94">  }</span>
+
+  public int getChunkOffsetHeaderSize() {
+<span class="nc" id="L97">    return chunkOffsetHeaderSize;</span>
+  }
+
+  public int getBitsetSize() {
+<span class="nc" id="L101">    return bitsetSize;</span>
+  }
+
+  public long getRawDataSize() {
+<span class="nc" id="L105">    return rawDataSize;</span>
+  }
+
+  public long getTotalSize() {
+<span class="nc" id="L109">    return totalSize;</span>
+  }
+
+  public int getNumChunks() {
+<span class="nc" id="L113">    return numChunks;</span>
+  }
+
+  public int getRowsPerChunk() {
+<span class="nc" id="L117">    return docsPerChunk;</span>
+  }
+
+  @Override
+  public void close() {
+<span class="fc" id="L122">    customBitSet.close();</span>
+<span class="fc" id="L123">    chunkOffsetsWriter.close();</span>
+<span class="fc" id="L124">    rawDataWriter.close();</span>
+<span class="fc" id="L125">    indexDataBuffer.close();</span>
+
+<span class="fc" id="L127">    chunkOffsetsBuffer = null;</span>
+<span class="fc" id="L128">    bitsetBuffer = null;</span>
+<span class="fc" id="L129">    rawDataBuffer = null;</span>
+<span class="fc" id="L130">    customBitSet = null;</span>
+<span class="fc" id="L131">    chunkOffsetsWriter = null;</span>
+<span class="fc" id="L132">    rawDataWriter = null;</span>
+<span class="fc" id="L133">  }</span>
+
+  private int updateHeader(int rowId, int length) {
+<span class="pc bpc" id="L136" title="2 of 4 branches missed.">    assert (rowId == prevRowId + 1);</span>
+<span class="fc" id="L137">    int newStartIndex = prevRowStartIndex + prevRowLength;</span>
+<span class="fc bfc" id="L138" title="All 2 branches covered.">    if (rowId % docsPerChunk == 0) {</span>
+<span class="fc" id="L139">      int chunkId = rowId / docsPerChunk;</span>
+<span class="fc" id="L140">      chunkOffsetsWriter.writeInt(chunkId, newStartIndex);</span>
+    }
+<span class="fc" id="L142">    customBitSet.setBit(newStartIndex);</span>
+<span class="fc" id="L143">    prevRowStartIndex = newStartIndex;</span>
+<span class="fc" id="L144">    prevRowLength = length;</span>
+<span class="fc" id="L145">    prevRowId = rowId;</span>
+<span class="fc" id="L146">    return newStartIndex;</span>
+  }
+
+  @Override
+  public void setCharArray(int row, char[] charArray) {
+<span class="nc" id="L151">    throw new UnsupportedOperationException(&quot;Only int data type is supported in fixedbit format&quot;);</span>
+  }
+
+  @Override
+  public void setShortArray(int row, short[] shortsArray) {
+<span class="nc" id="L156">    throw new UnsupportedOperationException(&quot;Only int data type is supported in fixedbit format&quot;);</span>
+  }
+
+  @Override
+  public void setIntArray(int row, int[] intArray) {
+<span class="fc" id="L161">    rawDataWriter.writeInt(updateHeader(row, intArray.length), intArray.length, intArray);</span>
+<span class="fc" id="L162">  }</span>
+
+  @Override
+  public void setLongArray(int row, long[] longArray) {
+<span class="nc" id="L166">    throw new UnsupportedOperationException(&quot;Only int data type is supported in fixedbit format&quot;);</span>
+  }
+
+  @Override
+  public void setFloatArray(int row, float[] floatArray) {
+<span class="nc" id="L171">    throw new UnsupportedOperationException(&quot;Only int data type is supported in fixedbit format&quot;);</span>
+  }
+
+  @Override
+  public void setDoubleArray(int row, double[] doubleArray) {
+<span class="nc" id="L176">    throw new UnsupportedOperationException(&quot;Only int data type is supported in fixedbit format&quot;);</span>
+
+  }
+
+  @Override
+  public void setStringArray(int row, String[] stringArray) {
+<span class="nc" id="L182">    throw new UnsupportedOperationException(&quot;Only int data type is supported in fixedbit format&quot;);</span>
+  }
+
+  @Override
+  public void setBytesArray(int row, byte[][] bytesArray) {
+<span class="nc" id="L187">    throw new UnsupportedOperationException(&quot;Only int data type is supported in fixedbit format&quot;);</span>
+  }
+
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

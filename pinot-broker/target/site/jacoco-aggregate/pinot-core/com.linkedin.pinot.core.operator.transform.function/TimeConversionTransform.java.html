@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>TimeConversionTransform.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-broker</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.operator.transform.function</a> &gt; <span class="el_source">TimeConversionTransform.java</span></div><h1>TimeConversionTransform.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.operator.transform.function;
+
+import com.google.common.base.Preconditions;
+import com.linkedin.pinot.common.data.FieldSpec;
+import com.linkedin.pinot.core.common.BlockValSet;
+import com.linkedin.pinot.core.operator.transform.function.time.converter.TimeConverterFactory;
+import com.linkedin.pinot.core.operator.transform.function.time.converter.TimeUnitConverter;
+import com.linkedin.pinot.core.plan.DocIdSetPlanNode;
+import com.linkedin.pinot.core.query.exception.BadQueryRequestException;
+import java.util.concurrent.TimeUnit;
+import javax.annotation.concurrent.NotThreadSafe;
+
+
+/**
+ * This class implements the time conversion transform.
+ * &lt;ul&gt;
+ *   &lt;li&gt; Inputs: &lt;/li&gt;
+ *   &lt;ul&gt;
+ *     &lt;li&gt; Input time values &lt;/li&gt;
+ *     &lt;li&gt; Input time unit as defined in {@link TimeUnit} &lt;/li&gt;
+ *     &lt;li&gt; Desired output time unit as defined in {@link TimeUnit} &lt;/li&gt;
+ *   &lt;/ul&gt;
+ * &lt;/ul&gt;
+ *
+ * &lt;ul&gt;
+ *   &lt;li&gt; Outputs: &lt;/li&gt;
+ *   &lt;ul&gt;
+ *     &lt;li&gt; Time values converted into desired time unit. &lt;/li&gt;
+ *   &lt;/ul&gt;
+ * &lt;/ul&gt;
+ */
+@NotThreadSafe
+<span class="fc" id="L48">public class TimeConversionTransform implements TransformFunction {</span>
+  private static final String TRANSFORM_NAME = &quot;timeConvert&quot;;
+<span class="fc" id="L50">  private long[] _output = null;</span>
+
+  @Override
+  public &lt;T&gt; T transform(int length, BlockValSet... input) {
+<span class="pc bpc" id="L54" title="1 of 2 branches missed.">    Preconditions.checkArgument(input.length == 3, TRANSFORM_NAME + &quot; expects three arguments&quot;);</span>
+
+<span class="fc" id="L56">    long[] inputTime = input[0].getLongValuesSV();</span>
+<span class="fc" id="L57">    String[] inputTimeUnits = input[1].getStringValuesSV();</span>
+<span class="fc" id="L58">    String[] outputTimeUnits = input[2].getStringValuesSV();</span>
+
+<span class="pc bpc" id="L60" title="3 of 6 branches missed.">    Preconditions.checkState(inputTime.length &gt;= length &amp;&amp; inputTimeUnits.length &gt;= length,</span>
+        outputTimeUnits.length &gt;= length);
+
+<span class="fc" id="L63">    TimeUnit inputTimeUnit = getTimeUnit(inputTimeUnits[0]);</span>
+<span class="fc" id="L64">    TimeUnitConverter converter = TimeConverterFactory.getTimeConverter(outputTimeUnits[0]);</span>
+
+<span class="pc bpc" id="L66" title="3 of 4 branches missed.">    if (_output == null || _output.length &lt; length) {</span>
+<span class="fc" id="L67">      _output = new long[Math.max(length, DocIdSetPlanNode.MAX_DOC_PER_CALL)];</span>
+    }
+<span class="fc" id="L69">    converter.convert(inputTime, inputTimeUnit, length, _output);</span>
+<span class="fc" id="L70">    return (T) _output;</span>
+  }
+
+  /**
+   * Helper method to get TimeUnit enum from string name.
+   *
+   * @param timeUnitName String name of time unit.
+   * @return TimeUnit enum value
+   */
+  private TimeUnit getTimeUnit(String timeUnitName) {
+    try {
+<span class="fc" id="L81">      return TimeUnit.valueOf(timeUnitName);</span>
+<span class="nc" id="L82">    } catch (IllegalArgumentException e) {</span>
+<span class="nc" id="L83">      throw new BadQueryRequestException(&quot;Illegal input time unit specified for timeConvert UDF: '&quot; + timeUnitName</span>
+          + &quot;', only values defined in java.util.concurrent.TimeUnit supported currently.&quot;);
+    }
+  }
+
+  @Override
+  public FieldSpec.DataType getOutputType() {
+<span class="fc" id="L90">    return FieldSpec.DataType.LONG;</span>
+  }
+
+  @Override
+  public String getName() {
+<span class="fc" id="L95">    return TRANSFORM_NAME;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

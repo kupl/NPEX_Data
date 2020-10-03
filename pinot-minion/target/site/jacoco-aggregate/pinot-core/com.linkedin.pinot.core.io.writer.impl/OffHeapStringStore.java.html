@@ -1,0 +1,226 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>OffHeapStringStore.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-minion</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.io.writer.impl</a> &gt; <span class="el_source">OffHeapStringStore.java</span></div><h1>OffHeapStringStore.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.linkedin.pinot.core.io.writer.impl;
+
+import com.linkedin.pinot.core.io.readerwriter.PinotDataBufferMemoryManager;
+import com.linkedin.pinot.core.segment.creator.impl.V1Constants;
+import com.linkedin.pinot.core.segment.memory.PinotDataBuffer;
+import java.io.Closeable;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.LinkedList;
+import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * @class OffHeapStringStore
+ *
+ * An off-heap string store that provides APIs to add a string, retrieve a string, and compare string at an index
+ * No verification is made as to whether the string added already exists or not. Strings are stored by
+ * copying one 'char' at a time into a CharBuffer, and keeping the offsets in the CharBuffer in another IntBuffer.
+ * Empty strings are supported.
+ *
+ * @note The class is thread-safe for single writer and multiple readers.
+ *
+ * This class has a list of OffHeapStringStore.Buffer objects. As Buffer objects get filled, new Buffer objects
+ * are added to the list. New Buffers objects have twice the capacity of the previous Buffer
+ *
+ * Within a Buffer object strings are stored as below:
+ *
+ *                  __________________________________
+ *                  |  start offset of string 1      |
+ *                  |  start offset of string 2      |
+ *                  |        .....                   |
+ *                  |  start offset of string N      |
+ *                  |                                |
+ *                  |         UNUSED                 |
+ *                  |                                |
+ *                  | STRING N .....                 |
+ *                  |          .....                 |
+ *                  |          .....                 |
+ *                  | STRING N-1                     |
+ *                  |          .....                 |
+ *                  |          .....                 |
+ *                  | STRING 0 .....                 |
+ *                  |          .....                 |
+ *                  |          .....                 |
+ *                  |________________________________|
+ *
+ *
+ * We fill the buffer as follows:
+ * - The strings are added from the bottom, each new string appearing nearer to the top of the buffer, leaving no
+ *   room between them. Each string is stored as a sequence of 'char' elements. (In Java, each char element takes 2
+ *   bytes. A string has string.length() char elements in it).
+ *
+ * - The start offsets of the strings are added from the top. Each start offset is stored as an integer, taking 4 bytes.
+ *
+ * Each time we want to add a new string, we check if we have space to add the length of the string, and the string
+ * string itself. If we do, then we compute the start offset of the new string as:
+ *
+ *    new-start-offset = (start offset of prev string added) - (length of this string)
+ *
+ * The new start offset value is stored in the offset
+ *
+ *    buffer[numStringsSoFar * 4]
+ *
+ * and the string itself is stored starting at new-start-offset
+ *
+ */
+public class OffHeapStringStore implements Closeable {
+<span class="fc" id="L87">  private static final Logger LOGGER = LoggerFactory.getLogger(OffHeapStringStore.class);</span>
+
+  private static final int START_SIZE = 32 * 1024;
+  private static final int INT_SIZE = V1Constants.Numbers.INTEGER_SIZE;
+
+  public static int getStartSize() {
+<span class="fc" id="L93">    return START_SIZE;</span>
+  }
+
+  private static class Buffer implements Closeable {
+    private static final int CHAR_SIZE = Character.SIZE / 8;
+
+    private final PinotDataBuffer _pinotDataBuffer;
+    private final ByteBuffer _byteBuffer;
+    private final int _startIndex;
+    private final long _size;
+
+<span class="fc" id="L104">    private int _numStrings = 0;</span>
+    private int _availEndOffset;  // Exclusive
+
+<span class="fc" id="L107">    private Buffer(long size, int startIndex, PinotDataBufferMemoryManager memoryManager, String columnName) {</span>
+<span class="pc bpc" id="L108" title="1 of 2 branches missed.">      if (size &gt;= Integer.MAX_VALUE) {</span>
+<span class="nc" id="L109">        size = Integer.MAX_VALUE - 1;</span>
+      }
+<span class="fc" id="L111">      LOGGER.info(&quot;Allocationg string buffer of size {} for column {}&quot;, size, columnName);</span>
+<span class="fc" id="L112">      _pinotDataBuffer = memoryManager.allocate(size, columnName);</span>
+<span class="fc" id="L113">      _pinotDataBuffer.order(ByteOrder.nativeOrder());</span>
+<span class="fc" id="L114">      _byteBuffer = _pinotDataBuffer.toDirectByteBuffer(0, (int) size);</span>
+<span class="fc" id="L115">      _startIndex = startIndex;</span>
+<span class="fc" id="L116">      _availEndOffset = _byteBuffer.capacity();</span>
+<span class="fc" id="L117">      _size = size;</span>
+<span class="fc" id="L118">    }</span>
+
+    private int add(String string) {
+<span class="fc" id="L121">      int startOffset = _availEndOffset - string.length() * CHAR_SIZE;</span>
+<span class="fc bfc" id="L122" title="All 2 branches covered.">      if (startOffset &lt; (_numStrings + 1) * INT_SIZE) {</span>
+        // full
+<span class="fc" id="L124">        return -1;</span>
+      }
+<span class="fc bfc" id="L126" title="All 2 branches covered.">      for (int i = 0, j = startOffset; i &lt; string.length(); i++, j = j + CHAR_SIZE) {</span>
+<span class="fc" id="L127">        _byteBuffer.putChar(j, string.charAt(i));</span>
+      }
+<span class="fc" id="L129">      _byteBuffer.putInt(_numStrings * INT_SIZE, startOffset);</span>
+<span class="fc" id="L130">      _availEndOffset = startOffset;</span>
+<span class="fc" id="L131">      return _numStrings++;</span>
+    }
+
+    private String get(final int index) {
+<span class="fc" id="L135">      int startOffset = _byteBuffer.getInt(index * INT_SIZE);</span>
+<span class="fc" id="L136">      int endOffset = _byteBuffer.capacity();</span>
+<span class="fc bfc" id="L137" title="All 2 branches covered.">      if (index &gt; 0) {</span>
+<span class="fc" id="L138">        endOffset = _byteBuffer.getInt((index - 1) * INT_SIZE);</span>
+      }
+<span class="fc" id="L140">      char[] chars = new char[(endOffset - startOffset) / CHAR_SIZE];</span>
+<span class="fc bfc" id="L141" title="All 2 branches covered.">      for (int i = 0, j = startOffset; i &lt; chars.length; i++, j = j + CHAR_SIZE) {</span>
+<span class="fc" id="L142">        chars[i] = _byteBuffer.getChar(j);</span>
+      }
+<span class="fc" id="L144">      return new String(chars);</span>
+    }
+
+    @Override
+    public void close()
+        throws IOException {
+<span class="fc" id="L150">      _pinotDataBuffer.close();</span>
+<span class="fc" id="L151">    }</span>
+
+    private long getSize() {
+<span class="fc" id="L154">      return _size;</span>
+    }
+
+    private int getStartIndex() {
+<span class="fc" id="L158">      return _startIndex;</span>
+    }
+  }
+
+<span class="fc" id="L162">  private volatile List&lt;Buffer&gt; _buffers = new LinkedList&lt;&gt;();</span>
+<span class="fc" id="L163">  private int _numElements = 0;</span>
+  private volatile Buffer _currentBuffer;
+  private final PinotDataBufferMemoryManager _memoryManager;
+  private final String _allocationContext;
+
+<span class="fc" id="L168">  public OffHeapStringStore(PinotDataBufferMemoryManager memoryManager, String allocationContext) {</span>
+<span class="fc" id="L169">    _memoryManager = memoryManager;</span>
+<span class="fc" id="L170">    this._allocationContext = allocationContext;</span>
+<span class="fc" id="L171">    expand(START_SIZE, 0L);</span>
+<span class="fc" id="L172">  }</span>
+
+  // Expand the buffer size, allocating a min of 32k for strings.
+  @SuppressWarnings(&quot;Duplicates&quot;)
+  private Buffer expand(long suggestedSize, long minSize) {
+<span class="fc" id="L177">    Buffer buffer = new Buffer(Math.max(suggestedSize, minSize), _numElements, _memoryManager, _allocationContext);</span>
+<span class="fc" id="L178">    List&lt;Buffer&gt; newList = new LinkedList&lt;&gt;();</span>
+<span class="fc bfc" id="L179" title="All 2 branches covered.">    for (Buffer b : _buffers) {</span>
+<span class="fc" id="L180">      newList.add(b);</span>
+<span class="fc" id="L181">    }</span>
+<span class="fc" id="L182">    newList.add(buffer);</span>
+<span class="fc" id="L183">    _buffers = newList;</span>
+<span class="fc" id="L184">    _currentBuffer = buffer;</span>
+<span class="fc" id="L185">    return buffer;</span>
+  }
+
+  private Buffer expand(long sizeOfNewValue) {
+<span class="fc" id="L189">    return expand(_currentBuffer.getSize() * 2, sizeOfNewValue + INT_SIZE);</span>
+  }
+
+  // Returns a string, given an index
+  public String get(int index) {
+<span class="fc" id="L194">    List&lt;Buffer&gt; bufList = _buffers;</span>
+<span class="pc bpc" id="L195" title="1 of 2 branches missed.">    for (int x = bufList.size() - 1; x &gt;= 0; x--) {</span>
+<span class="fc" id="L196">      Buffer buffer = bufList.get(x);</span>
+<span class="fc bfc" id="L197" title="All 2 branches covered.">      if (index &gt;= buffer.getStartIndex()) {</span>
+<span class="fc" id="L198">        return buffer.get(index - buffer.getStartIndex());</span>
+      }
+    }
+    // Assumed that we will never ask for an index that does not exist.
+<span class="nc" id="L202">    throw new RuntimeException(&quot;dictionary ID '&quot; + index + &quot;' too low&quot;);</span>
+  }
+
+  // Adds a string and returns the index. No verification is made as to whether the string already exists or not
+  public int add(String string) {
+<span class="fc" id="L207">    Buffer buffer = _currentBuffer;</span>
+<span class="fc" id="L208">    int index = buffer.add(string);</span>
+<span class="fc bfc" id="L209" title="All 2 branches covered.">    if (index &lt; 0) {</span>
+<span class="fc" id="L210">      buffer = expand(string.length());</span>
+<span class="fc" id="L211">      index = buffer.add(string);</span>
+    }
+<span class="fc" id="L213">    _numElements++;</span>
+<span class="fc" id="L214">    return index + buffer.getStartIndex();</span>
+  }
+
+  @Override
+  public void close() throws IOException {
+<span class="fc" id="L219">    _numElements = 0;</span>
+<span class="fc bfc" id="L220" title="All 2 branches covered.">    for (Buffer buffer : _buffers) {</span>
+<span class="fc" id="L221">      buffer.close();</span>
+<span class="fc" id="L222">    }</span>
+<span class="fc" id="L223">    _buffers.clear();</span>
+<span class="fc" id="L224">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

@@ -1,0 +1,499 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>BaseOffHeapMutableDictionary.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-minion</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.realtime.impl.dictionary</a> &gt; <span class="el_source">BaseOffHeapMutableDictionary.java</span></div><h1>BaseOffHeapMutableDictionary.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.linkedin.pinot.core.realtime.impl.dictionary;
+
+import com.google.common.base.Preconditions;
+import com.linkedin.pinot.core.io.readerwriter.PinotDataBufferMemoryManager;
+import com.linkedin.pinot.core.segment.creator.impl.V1Constants;
+import com.linkedin.pinot.core.segment.memory.PinotDataBuffer;
+import java.io.IOException;
+import java.nio.ByteOrder;
+import java.nio.IntBuffer;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import javax.annotation.Nonnull;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * Off-heap mutable dictionaries have the following elements:
+ * - A forward map from dictionary ID to the actual value.
+ * - A reverse map from the value to the dictionary ID.
+ *
+ * This base class provides the reverse map functionality. The reverse map is realized using a list of off-heap
+ * IntBuffers directly allocated.
+ *
+ * An on-heap overflow hashmap holds items that have hash collisions, until the overflow hashmap reaches a threshold
+ * size. At this point, we add a new IntBuffer, and transfer items from the overflow hashmap into the newly allocated
+ * buffer, and also create a new overflow hashmap to handle future collisions.
+ *
+ * Overflow on-heap hashmap is set to contain a max number of values as provided in the constructor. If number is 0
+ * then overflow on-heap hashmap is disabled.
+ *
+ * To start with, we only have the on-heap overflow buffer. The IntBuffers are allocated when overflow hashmap reaches
+ * a threshold number of entries.
+ *
+ * A buffer has N rows (N being a prime number) and NUM_COLUMNS columns, as below.
+ * - The actual value for NUM_COLUMNS is yet to be tuned.
+ * - Each cell in the buffer can hold one integer.
+ *
+ *                | col 0 | col 1 | ..... | col M-1 |
+ *        ==========================================|
+ *        row 0   |       |       |       |         |
+ *        ==========================================|
+ *        row 1   |       |       |       |
+ *        ==========================================|
+ *          .
+ *          .
+ *          .
+ *        ==========================================|
+ *        row N-1 |       |       |       |         |
+ *        ==========================================|
+ *
+ * To start with, all cells are initialized to have NULL_VALUE_INDEX (indicating empty cell)
+ * Here is the pseudo-code for indexing an item or finding the dictionary ID of an item.
+ *
+ * index(item) {
+ *   foreach (iBuf: iBufList) {
+ *     hash value into a row for the buffer.
+ *     foreach (cell: rowOfCells) {
+ *       if (cell is not occupied) {
+ *         set it to dictId
+ *         return
+ *       } else if (item.equals(get(dictId)) {
+ *         // item already present in dictionary
+ *         return
+ *       }
+ *     }
+ *   }
+ *   oveflow.put(item, dictId)
+ *   if (overflow.size() &gt; threshold) {
+ *     newSize = lastBufSize * expansionMultiple
+ *     newBuf = allocateDirect(newSize)
+ *     add newBuf to iBufList
+ *     newOverflow = new HashMap()
+ *     foreach (entry: overflow) {
+ *       hash entry.key() into a row for newBuf
+ *       foreach (cell : rowOfCells) {
+ *         if (cell empty) {
+ *           set cell to entry.value();
+ *         }
+ *       }
+ *       if (we did not enter value above) {
+ *         newOverflow.put(entry.key(), entry.value());
+ *       }
+ *     }
+ *   }
+ * }
+ *
+ * indexOf(item) {
+ *   foreach (iBuf: iBufList) {
+ *     hash value into a row for the buffer;
+ *     foreach (cell : rowOfCells) {
+ *       if (cell is not occupied) {
+ *         return NULL_VALUE_INDEX;
+ *       }
+ *       if (cell is occupied &amp;&amp; item.equals(get(dictId))) {
+ *         return dictId;
+ *       }
+ *     }
+ *   }
+ *   if (overflow.contains(item)) {
+ *     return overflow.get(item);
+ *   }
+ *   return NULL_VALUE_INDEX;
+ * }
+ *
+ * The list of buffers and the overflow hash are maintained in a class (ValueToDictId) that is referenced via an
+ * AtomicReference. This ensures that readers always get either the new version of these objects or the old version,
+ * but not some inconsistent versions of these.
+ *
+ * It should be noted that this class assumes that there is one writer and multiple readers of the dictionary. It is
+ * NOT safe for a multiple writer scenario.
+ *
+ * TODO
+ * - It may be useful to implement a way to stop adding new items when the the number of buffers reaches a certain
+ *   threshold. In this case, we could close the realtime segment, and start a new one with bigger buffers.
+ */
+public abstract class BaseOffHeapMutableDictionary extends MutableDictionary {
+<span class="fc" id="L136">  private static final Logger LOGGER = LoggerFactory.getLogger(BaseOffHeapMutableDictionary.class);</span>
+
+  // List of primes from http://compoasso.free.fr/primelistweb/page/prime/liste_online_en.php
+<span class="fc" id="L139">  private static final int[] PRIME_NUMBERS =</span>
+      new int[]{13, 127, 547, 1009, 2003, 3001, 4003, 5003, 7001, 9001, 10007, 12007, 14009, 16001, 18013, 20011,
+          40009, 60013, 80021, 100003, 125113, 150011, 175003, 200003, 225023, 250007, 275003, 300007, 350003, 400009,
+          450001, 500009, 600011, 700001, 800011, 900001, 1000003};
+
+  // expansionMultiple setting as we add new buffers. A setting of 1 sets the new buffer to be
+  // the same size as the last one added. Setting of 2 allocates a buffer twice as big as the
+  // previous one. It is assumed that these values are powers of 2. It is a good idea to restrict
+  // these to 1 or 2, but not higher values. This array can be arbitrarily long. If the number of
+  // buffers exceeds the number of elements in the array, we use the last value.
+<span class="fc" id="L149">  private static final int[] EXPANSION_MULTIPLES = new int[]{1, 1, 2, 2, 2};</span>
+
+  // Number of columns in each row of an IntBuffer.
+  private static final int NUM_COLUMNS = 3;
+
+  // Whether to start with 0 off-heap storage. Items are added to the overflow map first, until it reaches
+  // a threshold, and then the off-heap structures are allocated.
+  @SuppressWarnings(&quot;FieldCanBeLocal&quot;)
+<span class="fc" id="L157">  private static boolean _heapFirst = true;</span>
+
+  private final int _maxItemsInOverflowHash;
+
+  // Number of entries in the dictionary. Max dictId is _numEntries-1.
+  private int _numEntries;
+
+  // We keep a list of PinotDataBuffer items from which we get the IntBuffer items, so
+  // that we can call close() on these.
+<span class="fc" id="L166">  private List&lt;PinotDataBuffer&gt; _pinotDataBuffers = new ArrayList&lt;&gt;();</span>
+  private final int _initialRowCount;
+  protected final PinotDataBufferMemoryManager _memoryManager;
+  protected final String _allocationContext;
+
+  /**
+   * A class to hold all the objects needed for the reverse mapping.
+   */
+  private static class ValueToDictId {
+    // Each iBuf layout is as described in comments above.
+    private final List&lt;IntBuffer&gt; _iBufList;
+    // The map should be a concurrent one.
+    private final Map&lt;Object, Integer&gt; _overflowMap;
+
+<span class="fc" id="L180">    private ValueToDictId(List&lt;IntBuffer&gt; iBufList, Map&lt;Object, Integer&gt; overflowMap) {</span>
+<span class="fc" id="L181">      _iBufList = iBufList;</span>
+<span class="fc" id="L182">      _overflowMap = overflowMap;</span>
+<span class="fc" id="L183">    }</span>
+
+    private List&lt;IntBuffer&gt; getIBufList() {
+<span class="fc" id="L186">      return _iBufList;</span>
+    }
+
+    private Map&lt;Object, Integer&gt; getOverflowMap() {
+<span class="fc" id="L190">      return _overflowMap;</span>
+    }
+  }
+
+  private volatile ValueToDictId _valueToDict;
+
+  protected BaseOffHeapMutableDictionary(int estimatedCardinality, int maxOverflowHashSize,
+<span class="fc" id="L197">      PinotDataBufferMemoryManager memoryManager, String allocationContext) {</span>
+<span class="fc" id="L198">    _memoryManager = memoryManager;</span>
+<span class="fc" id="L199">    _allocationContext = allocationContext;</span>
+<span class="fc" id="L200">    int initialRowCount = nearestPrime(estimatedCardinality);</span>
+<span class="fc" id="L201">    _numEntries = 0;</span>
+<span class="fc" id="L202">    _maxItemsInOverflowHash = maxOverflowHashSize;</span>
+<span class="fc" id="L203">    _valueToDict = new ValueToDictId(new ArrayList&lt;IntBuffer&gt;(0), new ConcurrentHashMap&lt;Object, Integer&gt;(0));</span>
+<span class="fc" id="L204">    _initialRowCount = initialRowCount;</span>
+<span class="pc bpc" id="L205" title="1 of 4 branches missed.">    if (!_heapFirst || (maxOverflowHashSize == 0)) {</span>
+<span class="fc" id="L206">      expand(_initialRowCount, 1);</span>
+    }
+<span class="fc" id="L208">  }</span>
+
+  @Override
+  public int indexOf(Object rawValue) {
+<span class="nc" id="L212">    throw new UnsupportedOperationException();</span>
+  }
+
+  @Override
+  public Object get(int dictionaryId) {
+<span class="nc" id="L217">    throw new UnsupportedOperationException();</span>
+  }
+
+  @Override
+  public long getLongValue(int dictionaryId) {
+<span class="nc" id="L222">    throw new UnsupportedOperationException();</span>
+  }
+
+  @Override
+  public double getDoubleValue(int dictionaryId) {
+<span class="nc" id="L227">    throw new UnsupportedOperationException();</span>
+  }
+
+  @Override
+  public float getFloatValue(int dictionaryId) {
+<span class="nc" id="L232">    throw new UnsupportedOperationException();</span>
+  }
+
+  @Override
+  public int getIntValue(int dictionaryId) {
+<span class="nc" id="L237">    throw new UnsupportedOperationException();</span>
+  }
+
+  @Override
+  public int length() {
+<span class="nc" id="L242">    return _numEntries;</span>
+  }
+
+  @Override
+  public boolean isEmpty() {
+<span class="nc bnc" id="L247" title="All 2 branches missed.">    return _numEntries == 0;</span>
+  }
+
+  @Override
+  public void close()
+      throws IOException {
+<span class="fc" id="L253">    doClose();</span>
+
+<span class="fc" id="L255">    ValueToDictId valueToDictId = _valueToDict;</span>
+<span class="fc" id="L256">    _valueToDict = null;</span>
+<span class="fc" id="L257">    Map&lt;Object, Integer&gt; overflowMap = valueToDictId.getOverflowMap();</span>
+<span class="fc" id="L258">    overflowMap.clear();</span>
+<span class="fc" id="L259">    List&lt;IntBuffer&gt; iBufs = valueToDictId.getIBufList();</span>
+<span class="fc" id="L260">    iBufs.clear();</span>
+
+<span class="fc bfc" id="L262" title="All 2 branches covered.">    for (PinotDataBuffer pinotDataBuffer : _pinotDataBuffers) {</span>
+<span class="fc" id="L263">      pinotDataBuffer.close();</span>
+<span class="fc" id="L264">    }</span>
+<span class="fc" id="L265">    _pinotDataBuffers.clear();</span>
+<span class="fc" id="L266">  }</span>
+
+  private int nearestPrime(int size) {
+<span class="pc bpc" id="L269" title="1 of 2 branches missed.">    for (int primeNumber : PRIME_NUMBERS) {</span>
+<span class="fc bfc" id="L270" title="All 2 branches covered.">      if (primeNumber &gt;= size) {</span>
+<span class="fc" id="L271">        return primeNumber;</span>
+      }
+    }
+<span class="nc" id="L274">    return PRIME_NUMBERS[PRIME_NUMBERS.length - 1];</span>
+  }
+
+  private long computeBBsize(long numRows) {
+<span class="fc" id="L278">    return numRows * NUM_COLUMNS * V1Constants.Numbers.INTEGER_SIZE;</span>
+  }
+
+  // Assume prevNumRows is a valid value, and return it if the new one overflows.
+  private int validatedNumRows(int prevNumRows, int multiple) {
+<span class="fc" id="L283">    long newNumRows = (long) prevNumRows * multiple;</span>
+
+<span class="pc bpc" id="L285" title="1 of 2 branches missed.">    if (newNumRows &gt; Integer.MAX_VALUE) {</span>
+<span class="nc" id="L286">      return prevNumRows;</span>
+    }
+
+<span class="pc bpc" id="L289" title="1 of 2 branches missed.">    if (computeBBsize(newNumRows) &gt; Integer.MAX_VALUE) {</span>
+<span class="nc" id="L290">      return prevNumRows;</span>
+    }
+<span class="fc" id="L292">    return (int) newNumRows;</span>
+  }
+
+  private IntBuffer expand(int prevNumRows, int multiple) {
+<span class="fc" id="L296">    final int newNumRows = validatedNumRows(prevNumRows, multiple);</span>
+<span class="fc" id="L297">    final int bbSize = (int) computeBBsize(newNumRows);</span>
+
+<span class="fc" id="L299">    final ValueToDictId valueToDictId = _valueToDict;</span>
+<span class="fc" id="L300">    List&lt;IntBuffer&gt; oldList = valueToDictId.getIBufList();</span>
+<span class="fc" id="L301">    List&lt;IntBuffer&gt; newList = new ArrayList&lt;&gt;(oldList.size() + 1);</span>
+<span class="fc bfc" id="L302" title="All 2 branches covered.">    for (IntBuffer iBuf : oldList) {</span>
+<span class="fc" id="L303">      newList.add(iBuf);</span>
+<span class="fc" id="L304">    }</span>
+<span class="fc" id="L305">    LOGGER.info(&quot;Allocating {} bytes for: {}&quot;, bbSize, _allocationContext);</span>
+<span class="fc" id="L306">    PinotDataBuffer buffer = _memoryManager.allocate(bbSize, _allocationContext);</span>
+<span class="fc" id="L307">    _pinotDataBuffers.add(buffer);</span>
+<span class="fc" id="L308">    buffer.order(ByteOrder.nativeOrder());</span>
+<span class="fc" id="L309">    IntBuffer iBuf = buffer.toDirectByteBuffer(0L, bbSize).asIntBuffer();</span>
+<span class="fc bfc" id="L310" title="All 2 branches covered.">    for (int i = 0; i &lt; iBuf.capacity(); i++) {</span>
+<span class="fc" id="L311">      iBuf.put(i, NULL_VALUE_INDEX);</span>
+    }
+<span class="fc" id="L313">    newList.add(iBuf);</span>
+<span class="fc" id="L314">    Map&lt;Object, Integer&gt; newOverflowMap = new ConcurrentHashMap&lt;&gt;(_maxItemsInOverflowHash);</span>
+<span class="fc bfc" id="L315" title="All 2 branches covered.">    if (_maxItemsInOverflowHash &gt; 0) {</span>
+<span class="fc" id="L316">      Map&lt;Object, Integer&gt; oldOverflowMap = valueToDictId.getOverflowMap();</span>
+<span class="fc bfc" id="L317" title="All 2 branches covered.">      for (Map.Entry&lt;Object, Integer&gt; entry : oldOverflowMap.entrySet()) {</span>
+<span class="fc" id="L318">        final int hashVal = entry.getKey().hashCode() &amp; Integer.MAX_VALUE;</span>
+<span class="fc" id="L319">        final int offsetInBuf = (hashVal % newNumRows) * NUM_COLUMNS;</span>
+<span class="fc" id="L320">        boolean done = false;</span>
+<span class="fc bfc" id="L321" title="All 2 branches covered.">        for (int i = offsetInBuf; i &lt; offsetInBuf + NUM_COLUMNS; i++) {</span>
+<span class="fc bfc" id="L322" title="All 2 branches covered.">          if (iBuf.get(i) == NULL_VALUE_INDEX) {</span>
+<span class="fc" id="L323">            iBuf.put(i, entry.getValue());</span>
+<span class="fc" id="L324">            done = true;</span>
+<span class="fc" id="L325">            break;</span>
+          }
+        }
+<span class="fc bfc" id="L328" title="All 2 branches covered.">        if (!done) {</span>
+<span class="fc" id="L329">          newOverflowMap.put(entry.getKey(), entry.getValue());</span>
+        }
+<span class="fc" id="L331">      }</span>
+    }
+<span class="fc" id="L333">    _valueToDict = new ValueToDictId(newList, newOverflowMap);</span>
+    // We should not clear oldOverflowMap or oldList here, as readers may still be accessing those.
+    // We let GC take care of those elements.
+<span class="fc" id="L336">    return iBuf;</span>
+  }
+
+  private IntBuffer expand() {
+<span class="fc" id="L340">    final ValueToDictId valueToDictId = _valueToDict;</span>
+<span class="fc" id="L341">    List&lt;IntBuffer&gt; iBufList = valueToDictId.getIBufList();</span>
+<span class="fc" id="L342">    final int numBuffers = iBufList.size();</span>
+<span class="fc bfc" id="L343" title="All 2 branches covered.">    if (numBuffers == 0) {</span>
+<span class="fc" id="L344">      return expand(_initialRowCount, 1);</span>
+    }
+<span class="fc" id="L346">    final int lastCapacity = iBufList.get(numBuffers - 1).capacity();</span>
+<span class="fc" id="L347">    int expansionMultiple = EXPANSION_MULTIPLES[EXPANSION_MULTIPLES.length - 1];</span>
+<span class="pc bpc" id="L348" title="1 of 2 branches missed.">    if (numBuffers &lt; EXPANSION_MULTIPLES.length) {</span>
+<span class="fc" id="L349">      expansionMultiple = EXPANSION_MULTIPLES[numBuffers];</span>
+    }
+<span class="fc" id="L351">    int prevNumRows = lastCapacity / NUM_COLUMNS;</span>
+<span class="fc" id="L352">    return expand(prevNumRows, expansionMultiple);</span>
+  }
+
+  protected int nearestPowerOf2(int num) {
+<span class="pc bpc" id="L356" title="1 of 2 branches missed.">    if ((num &amp; (num - 1)) == 0) {</span>
+<span class="nc" id="L357">      return num;</span>
+    }
+<span class="fc" id="L359">    int power = Integer.SIZE - Integer.numberOfLeadingZeros(num);</span>
+<span class="pc bpc" id="L360" title="1 of 2 branches missed.">    Preconditions.checkState(power &lt; Integer.SIZE - 1);</span>
+<span class="fc" id="L361">    return 1 &lt;&lt; power;</span>
+  }
+
+  /**
+   * Given a raw value, get the dictionary ID from the reverse map.
+   *
+   * Since the dictionary IDs are stored in a hash map, multiple dictionary
+   * IDs may match to the same raw value. Use the methods provided by sub-class
+   * to compare the raw values with those in the forward map.
+   *
+   * @param rawValue value of object for which we need to get dictionary ID
+   * @param serializedValue serialized form of the
+   * @return dictionary ID if found, NULL_VALUE_INDEX otherwise.
+   */
+  protected int getDictId(@Nonnull Object rawValue, byte[] serializedValue) {
+<span class="fc" id="L376">    final int hashVal = rawValue.hashCode() &amp; Integer.MAX_VALUE;</span>
+<span class="fc" id="L377">    final ValueToDictId valueToDictId = _valueToDict;</span>
+<span class="fc" id="L378">    final List&lt;IntBuffer&gt; iBufList = valueToDictId.getIBufList();</span>
+<span class="fc bfc" id="L379" title="All 2 branches covered.">    for (IntBuffer iBuf : iBufList) {</span>
+<span class="fc" id="L380">      final int modulo = iBuf.capacity() / NUM_COLUMNS;</span>
+<span class="fc" id="L381">      final int offsetInBuf = (hashVal % modulo) * NUM_COLUMNS;</span>
+<span class="fc bfc" id="L382" title="All 2 branches covered.">      for (int i = offsetInBuf; i &lt; offsetInBuf + NUM_COLUMNS; i++) {</span>
+<span class="fc" id="L383">        int dictId = iBuf.get(i);</span>
+<span class="fc bfc" id="L384" title="All 2 branches covered.">        if (dictId != NULL_VALUE_INDEX) {</span>
+<span class="fc bfc" id="L385" title="All 2 branches covered.">          if (equalsValueAt(dictId, rawValue, serializedValue)) {</span>
+<span class="fc" id="L386">            return dictId;</span>
+          }
+        }
+      }
+<span class="fc" id="L390">    }</span>
+<span class="pc bpc" id="L391" title="1 of 2 branches missed.">    if (_maxItemsInOverflowHash == 0) {</span>
+<span class="nc" id="L392">      return NULL_VALUE_INDEX;</span>
+    }
+<span class="fc" id="L394">    Integer dictId = valueToDictId.getOverflowMap().get(rawValue);</span>
+<span class="fc bfc" id="L395" title="All 2 branches covered.">    if (dictId == null) {</span>
+<span class="fc" id="L396">      return NULL_VALUE_INDEX;</span>
+    }
+<span class="fc" id="L398">    return dictId;</span>
+  }
+
+  /**
+   * Index a value into the forward map (dictionary ID to value) and the reverse map
+   * (value to dictionary). Take care to set the reverse map last so as to make it
+   * work correctly for single writer multiple reader threads. Insertion and comparison
+   * methods for the forward map are provided by sub-classes.
+   *
+   * @param value value to be inserted into the dictionary
+   * @param serializedValue serialized representation of the value, may be null.
+   */
+  protected void indexValue(@Nonnull Object value, byte[] serializedValue) {
+<span class="fc" id="L411">    final int hashVal = value.hashCode() &amp; Integer.MAX_VALUE;</span>
+<span class="fc" id="L412">    ValueToDictId valueToDictId = _valueToDict;</span>
+<span class="fc" id="L413">    final List&lt;IntBuffer&gt; iBufList = valueToDictId.getIBufList();</span>
+
+<span class="fc bfc" id="L415" title="All 2 branches covered.">    for (IntBuffer iBuf : iBufList) {</span>
+<span class="fc" id="L416">      final int modulo = iBuf.capacity() / NUM_COLUMNS;</span>
+<span class="fc" id="L417">      final int offsetInBuf = (hashVal % modulo) * NUM_COLUMNS;</span>
+<span class="fc bfc" id="L418" title="All 2 branches covered.">      for (int i = offsetInBuf; i &lt; offsetInBuf + NUM_COLUMNS; i++) {</span>
+<span class="fc" id="L419">        final int dictId = iBuf.get(i);</span>
+<span class="fc bfc" id="L420" title="All 2 branches covered.">        if (dictId == NULL_VALUE_INDEX) {</span>
+<span class="fc" id="L421">          setRawValueAt(_numEntries, value, serializedValue);</span>
+<span class="fc" id="L422">          iBuf.put(i, _numEntries++);</span>
+<span class="fc" id="L423">          return;</span>
+        }
+<span class="fc bfc" id="L425" title="All 2 branches covered.">        if (equalsValueAt(dictId, value, serializedValue)) {</span>
+<span class="fc" id="L426">          return;</span>
+        }
+      }
+<span class="fc" id="L429">    }</span>
+    // We know that we had a hash collision beyond the number of columns in the buffer.
+<span class="fc" id="L431">    Map&lt;Object, Integer&gt; overflowMap = valueToDictId.getOverflowMap();</span>
+<span class="fc bfc" id="L432" title="All 2 branches covered.">    if (_maxItemsInOverflowHash &gt; 0) {</span>
+<span class="fc" id="L433">      Integer dictId = overflowMap.get(value);</span>
+<span class="fc bfc" id="L434" title="All 2 branches covered.">      if (dictId != null) {</span>
+<span class="fc" id="L435">        return;</span>
+      }
+    }
+
+<span class="fc" id="L439">    setRawValueAt(_numEntries, value, serializedValue);</span>
+
+<span class="fc bfc" id="L441" title="All 2 branches covered.">    if (_maxItemsInOverflowHash &gt; 0) {</span>
+<span class="fc bfc" id="L442" title="All 2 branches covered.">      if (overflowMap.size() &lt; _maxItemsInOverflowHash) {</span>
+<span class="fc" id="L443">        overflowMap.put(value, _numEntries++);</span>
+<span class="fc" id="L444">        return;</span>
+      }
+    }
+    // Need a new buffer
+<span class="fc" id="L448">    IntBuffer buf = expand();</span>
+<span class="fc" id="L449">    final int modulo = buf.capacity() / NUM_COLUMNS;</span>
+<span class="fc" id="L450">    final int offsetInBuf = (hashVal % modulo) * NUM_COLUMNS;</span>
+<span class="fc" id="L451">    boolean done = false;</span>
+<span class="pc bpc" id="L452" title="1 of 2 branches missed.">    for (int i = offsetInBuf; i &lt; offsetInBuf + NUM_COLUMNS; i++) {</span>
+<span class="fc bfc" id="L453" title="All 2 branches covered.">      if (buf.get(i) == NULL_VALUE_INDEX) {</span>
+<span class="fc" id="L454">        buf.put(i, _numEntries++);</span>
+<span class="fc" id="L455">        done = true;</span>
+<span class="fc" id="L456">        break;</span>
+      }
+    }
+<span class="fc bfc" id="L459" title="All 2 branches covered.">    if (_maxItemsInOverflowHash == 0) {</span>
+<span class="pc bpc" id="L460" title="1 of 2 branches missed.">      if (!done) {</span>
+<span class="nc" id="L461">        throw new RuntimeException(&quot;Impossible&quot;);</span>
+      }
+    }
+<span class="pc bpc" id="L464" title="1 of 2 branches missed.">    if (!done) {</span>
+<span class="nc" id="L465">      valueToDictId = _valueToDict;</span>
+<span class="nc" id="L466">      overflowMap = valueToDictId.getOverflowMap();</span>
+<span class="nc" id="L467">      overflowMap.put(value, _numEntries++);</span>
+    }
+<span class="fc" id="L469">  }</span>
+
+  public long getTotalOffHeapMemUsed() {
+<span class="nc" id="L472">    ValueToDictId valueToDictId = _valueToDict;</span>
+<span class="nc" id="L473">    long size = 0;</span>
+<span class="nc bnc" id="L474" title="All 2 branches missed.">    for (IntBuffer iBuf : valueToDictId._iBufList) {</span>
+<span class="nc" id="L475">      size = size + iBuf.capacity() * V1Constants.Numbers.INTEGER_SIZE;</span>
+<span class="nc" id="L476">    }</span>
+<span class="nc" id="L477">    return size;</span>
+  }
+
+  public int getNumberOfHeapBuffersUsed() {
+<span class="nc" id="L481">    ValueToDictId valueToDictId = _valueToDict;</span>
+<span class="nc" id="L482">    return valueToDictId._iBufList.size();</span>
+  }
+
+  public int getNumberOfOveflowValues() {
+<span class="nc" id="L486">    ValueToDictId valueToDictId = _valueToDict;</span>
+<span class="nc" id="L487">    return valueToDictId._overflowMap.size();</span>
+  }
+
+  protected boolean equalsValueAt(int dictId, Object value, byte[] serializedValue) {
+<span class="fc" id="L491">    return value.equals(get(dictId));</span>
+  }
+
+  public abstract void doClose()
+      throws IOException;
+
+  protected abstract void setRawValueAt(int dictId, Object rawValue, byte[] serializedValue);
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>AvgAggregationFunction.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-hadoop</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.query.aggregation.function</a> &gt; <span class="el_source">AvgAggregationFunction.java</span></div><h1>AvgAggregationFunction.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.query.aggregation.function;
+
+import com.linkedin.pinot.common.data.FieldSpec;
+import com.linkedin.pinot.core.common.BlockValSet;
+import com.linkedin.pinot.core.query.aggregation.AggregationResultHolder;
+import com.linkedin.pinot.core.query.aggregation.ObjectAggregationResultHolder;
+import com.linkedin.pinot.core.query.aggregation.function.customobject.AvgPair;
+import com.linkedin.pinot.core.query.aggregation.groupby.GroupByResultHolder;
+import com.linkedin.pinot.core.query.aggregation.groupby.ObjectGroupByResultHolder;
+import javax.annotation.Nonnull;
+
+
+<span class="fc" id="L28">public class AvgAggregationFunction implements AggregationFunction&lt;AvgPair, Double&gt; {</span>
+<span class="fc" id="L29">  private static final String NAME = AggregationFunctionFactory.AggregationFunctionType.AVG.getName();</span>
+  private static final double DEFAULT_FINAL_RESULT = Double.NEGATIVE_INFINITY;
+
+  @Nonnull
+  @Override
+  public String getName() {
+<span class="fc" id="L35">    return NAME;</span>
+  }
+
+  @Nonnull
+  @Override
+  public String getColumnName(@Nonnull String[] columns) {
+<span class="fc" id="L41">    return NAME + &quot;_&quot; + columns[0];</span>
+  }
+
+  @Override
+  public void accept(@Nonnull AggregationFunctionVisitorBase visitor) {
+<span class="fc" id="L46">    visitor.visit(this);</span>
+<span class="fc" id="L47">  }</span>
+
+  @Nonnull
+  @Override
+  public AggregationResultHolder createAggregationResultHolder() {
+<span class="fc" id="L52">    return new ObjectAggregationResultHolder();</span>
+  }
+
+  @Nonnull
+  @Override
+  public GroupByResultHolder createGroupByResultHolder(int initialCapacity, int maxCapacity, int trimSize) {
+<span class="fc" id="L58">    return new ObjectGroupByResultHolder(initialCapacity, maxCapacity, trimSize);</span>
+  }
+
+  @Override
+  public void aggregate(int length, @Nonnull AggregationResultHolder aggregationResultHolder,
+      @Nonnull BlockValSet... blockValSets) {
+<span class="fc" id="L64">    double[] valueArray = blockValSets[0].getDoubleValuesSV();</span>
+<span class="fc" id="L65">    double sum = 0.0;</span>
+<span class="fc bfc" id="L66" title="All 2 branches covered.">    for (int i = 0; i &lt; length; i++) {</span>
+<span class="fc" id="L67">      sum += valueArray[i];</span>
+    }
+<span class="fc" id="L69">    setAggregationResult(aggregationResultHolder, sum, (long) length);</span>
+<span class="fc" id="L70">  }</span>
+
+  protected void setAggregationResult(@Nonnull AggregationResultHolder aggregationResultHolder, double sum,
+      long count) {
+<span class="fc" id="L74">    AvgPair avgPair = aggregationResultHolder.getResult();</span>
+<span class="fc bfc" id="L75" title="All 2 branches covered.">    if (avgPair == null) {</span>
+<span class="fc" id="L76">      aggregationResultHolder.setValue(new AvgPair(sum, count));</span>
+    } else {
+<span class="fc" id="L78">      avgPair.apply(sum, count);</span>
+    }
+<span class="fc" id="L80">  }</span>
+
+  @Override
+  public void aggregateGroupBySV(int length, @Nonnull int[] groupKeyArray,
+      @Nonnull GroupByResultHolder groupByResultHolder, @Nonnull BlockValSet... blockValSets) {
+<span class="fc" id="L85">    double[] valueArray = blockValSets[0].getDoubleValuesSV();</span>
+<span class="fc bfc" id="L86" title="All 2 branches covered.">    for (int i = 0; i &lt; length; i++) {</span>
+<span class="fc" id="L87">      setGroupByResult(groupKeyArray[i], groupByResultHolder, valueArray[i], 1L);</span>
+    }
+<span class="fc" id="L89">  }</span>
+
+  @Override
+  public void aggregateGroupByMV(int length, @Nonnull int[][] groupKeysArray,
+      @Nonnull GroupByResultHolder groupByResultHolder, @Nonnull BlockValSet... blockValSets) {
+<span class="fc" id="L94">    double[] valueArray = blockValSets[0].getDoubleValuesSV();</span>
+<span class="fc bfc" id="L95" title="All 2 branches covered.">    for (int i = 0; i &lt; length; i++) {</span>
+<span class="fc" id="L96">      double value = valueArray[i];</span>
+<span class="fc bfc" id="L97" title="All 2 branches covered.">      for (int groupKey : groupKeysArray[i]) {</span>
+<span class="fc" id="L98">        setGroupByResult(groupKey, groupByResultHolder, value, 1L);</span>
+      }
+    }
+<span class="fc" id="L101">  }</span>
+
+  protected void setGroupByResult(int groupKey, @Nonnull GroupByResultHolder groupByResultHolder, double sum,
+      long count) {
+<span class="fc" id="L105">    AvgPair avgPair = groupByResultHolder.getResult(groupKey);</span>
+<span class="fc bfc" id="L106" title="All 2 branches covered.">    if (avgPair == null) {</span>
+<span class="fc" id="L107">      groupByResultHolder.setValueForKey(groupKey, new AvgPair(sum, count));</span>
+    } else {
+<span class="fc" id="L109">      avgPair.apply(sum, count);</span>
+    }
+<span class="fc" id="L111">  }</span>
+
+  @Nonnull
+  @Override
+  public AvgPair extractAggregationResult(@Nonnull AggregationResultHolder aggregationResultHolder) {
+<span class="fc" id="L116">    AvgPair avgPair = aggregationResultHolder.getResult();</span>
+<span class="pc bpc" id="L117" title="1 of 2 branches missed.">    if (avgPair == null) {</span>
+<span class="nc" id="L118">      return new AvgPair(0.0, 0L);</span>
+    } else {
+<span class="fc" id="L120">      return avgPair;</span>
+    }
+  }
+
+  @Nonnull
+  @Override
+  public AvgPair extractGroupByResult(@Nonnull GroupByResultHolder groupByResultHolder, int groupKey) {
+<span class="fc" id="L127">    AvgPair avgPair = groupByResultHolder.getResult(groupKey);</span>
+<span class="pc bpc" id="L128" title="1 of 2 branches missed.">    if (avgPair == null) {</span>
+<span class="nc" id="L129">      return new AvgPair(0.0, 0L);</span>
+    } else {
+<span class="fc" id="L131">      return avgPair;</span>
+    }
+  }
+
+  @Nonnull
+  @Override
+  public AvgPair merge(@Nonnull AvgPair intermediateResult1, @Nonnull AvgPair intermediateResult2) {
+<span class="fc" id="L138">    intermediateResult1.apply(intermediateResult2);</span>
+<span class="fc" id="L139">    return intermediateResult1;</span>
+  }
+
+  @Override
+  public boolean isIntermediateResultComparable() {
+<span class="nc" id="L144">    return true;</span>
+  }
+
+  @Nonnull
+  @Override
+  public FieldSpec.DataType getIntermediateResultDataType() {
+<span class="fc" id="L150">    return FieldSpec.DataType.OBJECT;</span>
+  }
+
+  @Nonnull
+  @Override
+  public Double extractFinalResult(@Nonnull AvgPair intermediateResult) {
+<span class="fc" id="L156">    long count = intermediateResult.getCount();</span>
+<span class="pc bpc" id="L157" title="1 of 2 branches missed.">    if (count == 0L) {</span>
+<span class="nc" id="L158">      return DEFAULT_FINAL_RESULT;</span>
+    } else {
+<span class="fc" id="L160">      return intermediateResult.getSum() / count;</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

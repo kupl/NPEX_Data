@@ -1,0 +1,344 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>PinotHelixTaskResourceManager.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-perf</a> &gt; <a href="../index.html" class="el_bundle">pinot-controller</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.controller.helix.core.minion</a> &gt; <span class="el_source">PinotHelixTaskResourceManager.java</span></div><h1>PinotHelixTaskResourceManager.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.controller.helix.core.minion;
+
+import com.google.common.base.Preconditions;
+import com.google.common.util.concurrent.Uninterruptibles;
+import com.linkedin.pinot.common.config.PinotTaskConfig;
+import com.linkedin.pinot.common.utils.CommonConstants;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
+import javax.annotation.Nonnull;
+import org.apache.helix.AccessOption;
+import org.apache.helix.HelixManager;
+import org.apache.helix.ZNRecord;
+import org.apache.helix.store.zk.ZkHelixPropertyStore;
+import org.apache.helix.task.JobConfig;
+import org.apache.helix.task.JobQueue;
+import org.apache.helix.task.TaskConfig;
+import org.apache.helix.task.TaskConstants;
+import org.apache.helix.task.TaskDriver;
+import org.apache.helix.task.TaskState;
+import org.apache.helix.task.WorkflowConfig;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * The class &lt;code&gt;PinotHelixTaskResourceManager&lt;/code&gt; manages all the task resources in Pinot cluster.
+ */
+public class PinotHelixTaskResourceManager {
+<span class="fc" id="L50">  private static final Logger LOGGER = LoggerFactory.getLogger(PinotHelixTaskResourceManager.class);</span>
+
+  // Do not change this because Helix uses the same separator
+  public static final String TASK_NAME_SEPARATOR = &quot;_&quot;;
+
+  private static final String TASK_QUEUE_PREFIX = &quot;TaskQueue&quot; + TASK_NAME_SEPARATOR;
+  private static final String TASK_PREFIX = &quot;Task&quot; + TASK_NAME_SEPARATOR;
+
+  private final TaskDriver _taskDriver;
+  private final ZkHelixPropertyStore&lt;ZNRecord&gt; _propertyStore;
+
+<span class="fc" id="L61">  public PinotHelixTaskResourceManager(@Nonnull HelixManager helixManager) {</span>
+<span class="fc" id="L62">    _taskDriver = new TaskDriver(helixManager);</span>
+<span class="fc" id="L63">    _propertyStore = helixManager.getHelixPropertyStore();</span>
+<span class="fc" id="L64">  }</span>
+
+  /**
+   * Get all task types.
+   *
+   * @return Set of all task types
+   */
+  @Nonnull
+  public synchronized Set&lt;String&gt; getTaskTypes() {
+<span class="nc" id="L73">    Set&lt;String&gt; helixJobQueues = _taskDriver.getWorkflows().keySet();</span>
+<span class="nc" id="L74">    Set&lt;String&gt; taskTypes = new HashSet&lt;&gt;(helixJobQueues.size());</span>
+<span class="nc bnc" id="L75" title="All 2 branches missed.">    for (String helixJobQueue : helixJobQueues) {</span>
+<span class="nc" id="L76">      taskTypes.add(getTaskType(helixJobQueue));</span>
+<span class="nc" id="L77">    }</span>
+<span class="nc" id="L78">    return taskTypes;</span>
+  }
+
+  /**
+   * Ensure the task queue for the given task type exists.
+   *
+   * @param taskType Task type
+   */
+  public void ensureTaskQueueExists(String taskType) {
+<span class="fc" id="L87">    String helixJobQueueName = getHelixJobQueueName(taskType);</span>
+<span class="fc" id="L88">    WorkflowConfig workflowConfig = _taskDriver.getWorkflowConfig(helixJobQueueName);</span>
+
+<span class="fc bfc" id="L90" title="All 2 branches covered.">    if (workflowConfig == null) {</span>
+      // Task queue does not exist
+<span class="fc" id="L92">      LOGGER.info(&quot;Creating task queue: {} for task type: {}&quot;, helixJobQueueName, taskType);</span>
+
+      // Set full parallelism
+<span class="fc" id="L95">      JobQueue jobQueue = new JobQueue.Builder(helixJobQueueName).setWorkflowConfig(</span>
+          new WorkflowConfig.Builder().setParallelJobs(Integer.MAX_VALUE).build()).build();
+<span class="fc" id="L97">      _taskDriver.createQueue(jobQueue);</span>
+    }
+
+    // Wait until task queue context shows up
+<span class="fc bfc" id="L101" title="All 2 branches covered.">    while (_taskDriver.getWorkflowContext(helixJobQueueName) == null) {</span>
+<span class="fc" id="L102">      Uninterruptibles.sleepUninterruptibly(100, TimeUnit.MILLISECONDS);</span>
+    }
+<span class="fc" id="L104">  }</span>
+
+  /**
+   * Clean up a task queue for the given task type.
+   *
+   * @param taskType Task type
+   */
+  public synchronized void cleanUpTaskQueue(@Nonnull String taskType) {
+    // NOTE: There is a Helix bug that causes task contexts not removed properly. Need to explicitly remove them
+    // TODO: After Helix bug gets fixed, remove the extra logic
+
+<span class="fc" id="L115">    String helixJobQueueName = getHelixJobQueueName(taskType);</span>
+<span class="fc" id="L116">    Set&lt;String&gt; helixJobsBeforeCleaningUp = _taskDriver.getWorkflowConfig(helixJobQueueName).getJobDag().getAllNodes();</span>
+<span class="fc bfc" id="L117" title="All 2 branches covered.">    if (helixJobsBeforeCleaningUp.isEmpty()) {</span>
+<span class="fc" id="L118">      return;</span>
+    }
+
+<span class="fc" id="L121">    LOGGER.info(&quot;Cleaning up task queue: {} for task type: {}&quot;, helixJobQueueName, taskType);</span>
+<span class="fc" id="L122">    _taskDriver.cleanupJobQueue(helixJobQueueName);</span>
+
+    // Explicitly remove the task contexts
+<span class="fc" id="L125">    Set&lt;String&gt; helixJobsAfterCleaningUp = _taskDriver.getWorkflowConfig(helixJobQueueName).getJobDag().getAllNodes();</span>
+<span class="fc bfc" id="L126" title="All 2 branches covered.">    for (String helixJobName : helixJobsBeforeCleaningUp) {</span>
+<span class="pc bpc" id="L127" title="1 of 2 branches missed.">      if (!helixJobsAfterCleaningUp.contains(helixJobName)) {</span>
+<span class="nc" id="L128">        _propertyStore.remove(TaskConstants.REBALANCER_CONTEXT_ROOT + &quot;/&quot; + helixJobName, AccessOption.PERSISTENT);</span>
+      }
+<span class="fc" id="L130">    }</span>
+<span class="fc" id="L131">  }</span>
+
+  /**
+   * Stop the task queue for the given task type.
+   *
+   * @param taskType Task type
+   */
+  public synchronized void stopTaskQueue(@Nonnull String taskType) throws InterruptedException {
+<span class="fc" id="L139">    String helixJobQueueName = getHelixJobQueueName(taskType);</span>
+<span class="fc" id="L140">    LOGGER.info(&quot;Stopping task queue: {} for task type: {}&quot;, helixJobQueueName, taskType);</span>
+<span class="fc" id="L141">    _taskDriver.stop(helixJobQueueName);</span>
+<span class="fc" id="L142">  }</span>
+
+  /**
+   * Resume the task queue for the given task type.
+   *
+   * @param taskType Task type
+   */
+  public synchronized void resumeTaskQueue(@Nonnull String taskType) {
+<span class="fc" id="L150">    String helixJobQueueName = getHelixJobQueueName(taskType);</span>
+<span class="fc" id="L151">    LOGGER.info(&quot;Resuming task queue: {} for task type: {}&quot;, helixJobQueueName, taskType);</span>
+<span class="fc" id="L152">    _taskDriver.resume(helixJobQueueName);</span>
+<span class="fc" id="L153">  }</span>
+
+  /**
+   * Delete the task queue for the given task type.
+   *
+   * @param taskType Task type
+   */
+  public synchronized void deleteTaskQueue(@Nonnull String taskType) {
+<span class="fc" id="L161">    String helixJobQueueName = getHelixJobQueueName(taskType);</span>
+<span class="fc" id="L162">    LOGGER.info(&quot;Deleting task queue: {} for task type: {}&quot;, helixJobQueueName, taskType);</span>
+<span class="fc" id="L163">    _taskDriver.delete(helixJobQueueName);</span>
+<span class="fc" id="L164">  }</span>
+
+  /**
+   * Get all task queues.
+   *
+   * @return Set of task queue names
+   */
+  public synchronized Set&lt;String&gt; getTaskQueues() {
+<span class="fc" id="L172">    return _taskDriver.getWorkflows().keySet();</span>
+  }
+
+  /**
+   * Get the task queue state for the given task type.
+   *
+   * @param taskType Task type
+   * @return Task queue state
+   */
+  public synchronized TaskState getTaskQueueState(@Nonnull String taskType) {
+<span class="nc" id="L182">    return _taskDriver.getWorkflowContext(getHelixJobQueueName(taskType)).getWorkflowState();</span>
+  }
+
+  /**
+   * Submit a list of child tasks with same task type to the Minion instances with the default tag.
+   *
+   * @param pinotTaskConfigs List of child task configs to be submitted
+   * @return Name of the submitted parent task
+   */
+  @Nonnull
+  public synchronized String submitTask(@Nonnull List&lt;PinotTaskConfig&gt; pinotTaskConfigs) {
+<span class="fc" id="L193">    return submitTask(pinotTaskConfigs, CommonConstants.Minion.UNTAGGED_INSTANCE);</span>
+  }
+
+  /**
+   * Submit a list of child tasks with same task type to the Minion instances with the given tag.
+   *
+   * @param pinotTaskConfigs List of child task configs to be submitted
+   * @param minionInstanceTag Tag of the Minion instances to submit the task to
+   * @return Name of the submitted parent task
+   */
+  @Nonnull
+  public synchronized String submitTask(@Nonnull List&lt;PinotTaskConfig&gt; pinotTaskConfigs,
+      @Nonnull String minionInstanceTag) {
+<span class="fc" id="L206">    int numChildTasks = pinotTaskConfigs.size();</span>
+<span class="pc bpc" id="L207" title="1 of 2 branches missed.">    Preconditions.checkState(numChildTasks &gt; 0);</span>
+
+<span class="fc" id="L209">    String taskType = pinotTaskConfigs.get(0).getTaskType();</span>
+<span class="fc" id="L210">    String parentTaskName = TASK_PREFIX + taskType + TASK_NAME_SEPARATOR + System.nanoTime();</span>
+<span class="fc" id="L211">    LOGGER.info(</span>
+        &quot;Submitting parent task: {} of type: {} with {} child task configs: {} to Minion instances with tag: {}&quot;,
+        parentTaskName, taskType, numChildTasks, pinotTaskConfigs, minionInstanceTag);
+<span class="fc" id="L214">    List&lt;TaskConfig&gt; helixTaskConfigs = new ArrayList&lt;&gt;(numChildTasks);</span>
+<span class="fc bfc" id="L215" title="All 2 branches covered.">    for (int i = 0; i &lt; numChildTasks; i++) {</span>
+<span class="fc" id="L216">      PinotTaskConfig pinotTaskConfig = pinotTaskConfigs.get(i);</span>
+<span class="fc" id="L217">      Preconditions.checkState(pinotTaskConfig.getTaskType().equals(taskType));</span>
+<span class="fc" id="L218">      helixTaskConfigs.add(pinotTaskConfig.toHelixTaskConfig(parentTaskName + TASK_NAME_SEPARATOR + i));</span>
+    }
+<span class="fc" id="L220">    JobConfig.Builder jobBuilder = new JobConfig.Builder().setInstanceGroupTag(minionInstanceTag)</span>
+        .addTaskConfigs(helixTaskConfigs)
+        .setNumConcurrentTasksPerInstance(Integer.MAX_VALUE);
+<span class="fc" id="L223">    _taskDriver.enqueueJob(getHelixJobQueueName(taskType), parentTaskName, jobBuilder);</span>
+
+    // Wait until task state is available
+<span class="fc bfc" id="L226" title="All 2 branches covered.">    while (getTaskState(parentTaskName) == null) {</span>
+<span class="fc" id="L227">      Uninterruptibles.sleepUninterruptibly(100, TimeUnit.MILLISECONDS);</span>
+    }
+
+<span class="fc" id="L230">    return parentTaskName;</span>
+  }
+
+  /**
+   * Get all tasks for the given task type.
+   *
+   * @param taskType Task type
+   * @return Set of task names
+   */
+  @Nonnull
+  public synchronized Set&lt;String&gt; getTasks(@Nonnull String taskType) {
+<span class="nc" id="L241">    Set&lt;String&gt; helixJobs = _taskDriver.getWorkflowContext(getHelixJobQueueName(taskType)).getJobStates().keySet();</span>
+<span class="nc" id="L242">    Set&lt;String&gt; tasks = new HashSet&lt;&gt;(helixJobs.size());</span>
+<span class="nc bnc" id="L243" title="All 2 branches missed.">    for (String helixJobName : helixJobs) {</span>
+<span class="nc" id="L244">      tasks.add(getPinotTaskName(helixJobName));</span>
+<span class="nc" id="L245">    }</span>
+<span class="nc" id="L246">    return tasks;</span>
+  }
+
+  /**
+   * Get all task states for the given task type.
+   *
+   * @param taskType Task type
+   * @return Map from task name to task state
+   */
+  @Nonnull
+  public synchronized Map&lt;String, TaskState&gt; getTaskStates(@Nonnull String taskType) {
+<span class="fc" id="L257">    Map&lt;String, TaskState&gt; helixJobStates =</span>
+        _taskDriver.getWorkflowContext(getHelixJobQueueName(taskType)).getJobStates();
+<span class="fc" id="L259">    Map&lt;String, TaskState&gt; taskStates = new HashMap&lt;&gt;(helixJobStates.size());</span>
+<span class="fc bfc" id="L260" title="All 2 branches covered.">    for (Map.Entry&lt;String, TaskState&gt; entry : helixJobStates.entrySet()) {</span>
+<span class="fc" id="L261">      taskStates.put(getPinotTaskName(entry.getKey()), entry.getValue());</span>
+<span class="fc" id="L262">    }</span>
+<span class="fc" id="L263">    return taskStates;</span>
+  }
+
+  /**
+   * Get the task state for the given task name.
+   *
+   * @param taskName Task name
+   * @return Task state
+   */
+  public synchronized TaskState getTaskState(@Nonnull String taskName) {
+<span class="fc" id="L273">    String taskType = getTaskType(taskName);</span>
+<span class="fc" id="L274">    return _taskDriver.getWorkflowContext(getHelixJobQueueName(taskType)).getJobState(getHelixJobName(taskName));</span>
+  }
+
+  /**
+   * Get the child task configs for the given task name.
+   *
+   * @param taskName Task name
+   * @return List of child task configs
+   */
+  @Nonnull
+  public synchronized List&lt;PinotTaskConfig&gt; getTaskConfigs(@Nonnull String taskName) {
+<span class="fc" id="L285">    Collection&lt;TaskConfig&gt; helixTaskConfigs =</span>
+        _taskDriver.getJobConfig(getHelixJobName(taskName)).getTaskConfigMap().values();
+<span class="fc" id="L287">    List&lt;PinotTaskConfig&gt; taskConfigs = new ArrayList&lt;&gt;(helixTaskConfigs.size());</span>
+<span class="fc bfc" id="L288" title="All 2 branches covered.">    for (TaskConfig helixTaskConfig : helixTaskConfigs) {</span>
+<span class="fc" id="L289">      taskConfigs.add(PinotTaskConfig.fromHelixTaskConfig(helixTaskConfig));</span>
+<span class="fc" id="L290">    }</span>
+<span class="fc" id="L291">    return taskConfigs;</span>
+  }
+
+  /**
+   * Helper method to convert task type to Helix JobQueue name.
+   * &lt;p&gt;E.g. DummyTask -&gt; TaskQueue_DummyTask
+   *
+   * @param taskType Task type
+   * @return Helix JobQueue name
+   */
+  @Nonnull
+  public static String getHelixJobQueueName(@Nonnull String taskType) {
+<span class="fc" id="L303">    return TASK_QUEUE_PREFIX + taskType;</span>
+  }
+
+  /**
+   * Helper method to convert Pinot task name to Helix Job name with JobQueue prefix.
+   * &lt;p&gt;E.g. Task_DummyTask_12345 -&gt; TaskQueue_DummyTask_Task_DummyTask_12345
+   *
+   * @param pinotTaskName Pinot task name
+   * @return helixJobName Helix Job name
+   */
+  @Nonnull
+  private static String getHelixJobName(@Nonnull String pinotTaskName) {
+<span class="fc" id="L315">    return getHelixJobQueueName(getTaskType(pinotTaskName)) + TASK_NAME_SEPARATOR + pinotTaskName;</span>
+  }
+
+  /**
+   * Helper method to convert Helix Job name with JobQueue prefix to Pinot task name.
+   * &lt;p&gt;E.g. TaskQueue_DummyTask_Task_DummyTask_12345 -&gt; Task_DummyTask_12345
+   *
+   * @param helixJobName Helix Job name
+   * @return Pinot task name
+   */
+  @Nonnull
+  private static String getPinotTaskName(@Nonnull String helixJobName) {
+<span class="fc" id="L327">    return helixJobName.substring(TASK_QUEUE_PREFIX.length() + getTaskType(helixJobName).length() + 1);</span>
+  }
+
+  /**
+   * Helper method to extract task type from Pinot task name, Helix JobQueue name or Helix Job name.
+   * &lt;p&gt;E.g. Task_DummyTask_12345 -&gt; DummyTask (from Pinot task name)
+   * &lt;p&gt;E.g. TaskQueue_DummyTask -&gt; DummyTask (from Helix JobQueue name)
+   * &lt;p&gt;E.g. TaskQueue_DummyTask_Task_DummyTask_12345 -&gt; DummyTask (from Helix Job name)
+   *
+   * @param name Pinot task name, Helix JobQueue name or Helix Job name
+   * @return Task type
+   */
+  @Nonnull
+  private static String getTaskType(@Nonnull String name) {
+<span class="fc" id="L341">    return name.split(TASK_NAME_SEPARATOR)[1];</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

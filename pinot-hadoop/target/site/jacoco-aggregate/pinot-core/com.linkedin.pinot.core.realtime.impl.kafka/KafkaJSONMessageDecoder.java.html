@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>KafkaJSONMessageDecoder.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-hadoop</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.realtime.impl.kafka</a> &gt; <span class="el_source">KafkaJSONMessageDecoder.java</span></div><h1>KafkaJSONMessageDecoder.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.realtime.impl.kafka;
+
+import com.linkedin.pinot.common.data.FieldSpec;
+import com.linkedin.pinot.common.data.Schema;
+import com.linkedin.pinot.common.data.TimeFieldSpec;
+import com.linkedin.pinot.core.data.GenericRow;
+import java.util.Arrays;
+import java.util.Map;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+<span class="nc" id="L31">public class KafkaJSONMessageDecoder implements KafkaMessageDecoder&lt;byte[]&gt; {</span>
+<span class="nc" id="L32">  private static final Logger LOGGER = LoggerFactory.getLogger(KafkaJSONMessageDecoder.class);</span>
+
+  private Schema schema;
+
+  @Override
+  public void init(Map&lt;String, String&gt; props, Schema indexingSchema, String kafkaTopicName) throws Exception {
+<span class="nc" id="L38">    this.schema = indexingSchema;</span>
+<span class="nc" id="L39">  }</span>
+
+  @Override
+  public GenericRow decode(byte[] payload, GenericRow destination) {
+    try {
+<span class="nc" id="L44">      String text = new String(payload, &quot;UTF-8&quot;);</span>
+<span class="nc" id="L45">      JSONObject message = new JSONObject(text);</span>
+
+<span class="nc bnc" id="L47" title="All 2 branches missed.">      for (FieldSpec dimensionSpec : schema.getDimensionFieldSpecs()) {</span>
+<span class="nc" id="L48">        readFieldValue(destination, message, dimensionSpec);</span>
+<span class="nc" id="L49">      }</span>
+
+<span class="nc bnc" id="L51" title="All 2 branches missed.">      for (FieldSpec metricSpec : schema.getMetricFieldSpecs()) {</span>
+<span class="nc" id="L52">        readFieldValue(destination, message, metricSpec);</span>
+<span class="nc" id="L53">      }</span>
+
+<span class="nc" id="L55">      TimeFieldSpec timeSpec = schema.getTimeFieldSpec();</span>
+<span class="nc" id="L56">      readFieldValue(destination, message, timeSpec);</span>
+
+<span class="nc" id="L58">      return destination;</span>
+<span class="nc" id="L59">    } catch (Exception e) {</span>
+<span class="nc" id="L60">      LOGGER.error(&quot;Caught exception while decoding row, discarding row.&quot;, e);</span>
+<span class="nc" id="L61">      return null;</span>
+    }
+  }
+
+  private void readFieldValue(GenericRow destination, JSONObject message, FieldSpec dimensionSpec)
+      throws JSONException {
+<span class="nc" id="L67">    String columnName = dimensionSpec.getName();</span>
+<span class="nc bnc" id="L68" title="All 4 branches missed.">    if (message.has(columnName) &amp;&amp; !message.isNull(columnName)) {</span>
+      Object entry;
+<span class="nc bnc" id="L70" title="All 2 branches missed.">      if (dimensionSpec.isSingleValueField()) {</span>
+<span class="nc" id="L71">        entry = stringToDataType(dimensionSpec, message.getString(columnName));</span>
+      } else {
+<span class="nc" id="L73">        JSONArray jsonArray = message.getJSONArray(columnName);</span>
+<span class="nc" id="L74">        Object[] array = new Object[jsonArray.length()];</span>
+<span class="nc bnc" id="L75" title="All 2 branches missed.">        for (int i = 0; i &lt; array.length; i++) {</span>
+<span class="nc" id="L76">          array[i] = stringToDataType(dimensionSpec, jsonArray.getString(i));</span>
+        }
+<span class="nc bnc" id="L78" title="All 2 branches missed.">        if (array.length == 0) {</span>
+<span class="nc" id="L79">          entry = new Object[]{dimensionSpec.getDefaultNullValue()};</span>
+        } else {
+<span class="nc" id="L81">          entry = array;</span>
+        }
+      }
+<span class="nc" id="L84">      destination.putField(columnName, entry);</span>
+<span class="nc" id="L85">    } else {</span>
+<span class="nc" id="L86">      Object entry = dimensionSpec.getDefaultNullValue();</span>
+<span class="nc" id="L87">      destination.putField(columnName, entry);</span>
+    }
+<span class="nc" id="L89">  }</span>
+
+  @Override
+  public GenericRow decode(byte[] payload, int offset, int length, GenericRow destination) {
+<span class="nc" id="L93">    return decode(Arrays.copyOfRange(payload, offset, offset + length), destination);</span>
+  }
+
+  private Object stringToDataType(FieldSpec spec, String inString) {
+<span class="nc bnc" id="L97" title="All 2 branches missed.">    if (inString == null) {</span>
+<span class="nc" id="L98">      return spec.getDefaultNullValue();</span>
+    }
+
+    try {
+<span class="nc bnc" id="L102" title="All 6 branches missed.">      switch (spec.getDataType()) {</span>
+        case INT:
+<span class="nc" id="L104">          return Integer.parseInt(inString);</span>
+        case LONG:
+<span class="nc" id="L106">          return Long.parseLong(inString);</span>
+        case FLOAT:
+<span class="nc" id="L108">          return Float.parseFloat(inString);</span>
+        case DOUBLE:
+<span class="nc" id="L110">          return Double.parseDouble(inString);</span>
+        case BOOLEAN:
+        case STRING:
+<span class="nc" id="L113">          return inString;</span>
+        default:
+<span class="nc" id="L115">          return null;</span>
+      }
+<span class="nc" id="L117">    } catch (NumberFormatException e) {</span>
+<span class="nc" id="L118">      Object nullValue = spec.getDefaultNullValue();</span>
+<span class="nc" id="L119">      LOGGER.warn(&quot;Failed to parse {} as a value of type {} for column {}, defaulting to {}&quot;, inString,</span>
+          spec.getDataType(), spec.getName(), nullValue, e);
+<span class="nc" id="L121">      return nullValue;</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

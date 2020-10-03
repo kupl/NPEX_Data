@@ -1,0 +1,278 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>KafkaAvroMessageDecoder.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-minion</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.realtime.impl.kafka</a> &gt; <span class="el_source">KafkaAvroMessageDecoder.java</span></div><h1>KafkaAvroMessageDecoder.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.realtime.impl.kafka;
+
+import com.linkedin.pinot.common.data.Schema;
+import com.linkedin.pinot.common.utils.retry.RetryPolicies;
+import com.linkedin.pinot.core.data.GenericRow;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.net.URLConnection;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.concurrent.Callable;
+import javax.annotation.concurrent.NotThreadSafe;
+import org.apache.avro.generic.GenericData;
+import org.apache.avro.generic.GenericData.Record;
+import org.apache.avro.generic.GenericDatumReader;
+import org.apache.avro.io.DatumReader;
+import org.apache.avro.io.DecoderFactory;
+import org.apache.commons.lang.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+@NotThreadSafe
+<span class="nc" id="L46">public class KafkaAvroMessageDecoder implements KafkaMessageDecoder&lt;byte[]&gt; {</span>
+<span class="nc" id="L47">  private static final Logger LOGGER = LoggerFactory.getLogger(KafkaAvroMessageDecoder.class);</span>
+
+  private static final String SCHEMA_REGISTRY_REST_URL = &quot;schema.registry.rest.url&quot;;
+  private static final String SCHEMA_REGISTRY_SCHEMA_NAME = &quot;schema.registry.schema.name&quot;;
+  private org.apache.avro.Schema defaultAvroSchema;
+  private MD5AvroSchemaMap md5ToAvroSchemaMap;
+
+  // A global cache for schemas across all threads.
+<span class="nc" id="L55">  private static final Map&lt;String, org.apache.avro.Schema&gt; globalSchemaCache = new HashMap&lt;&gt;();</span>
+  // Suffix for getting the latest schema
+  private static final String LATEST=&quot;-latest&quot;;
+
+  // Reusable byte[] to read MD5 from payload. This is OK as this class is used only by a single thread.
+<span class="nc" id="L60">  private final byte[] reusableMD5Bytes = new byte[SCHEMA_HASH_LENGTH];</span>
+
+  private DecoderFactory decoderFactory;
+  private AvroRecordToPinotRowGenerator avroRecordConvetrer;
+
+  private static final int MAGIC_BYTE_LENGTH = 1;
+  private static final int SCHEMA_HASH_LENGTH = 16;
+  private static final int HEADER_LENGTH = MAGIC_BYTE_LENGTH + SCHEMA_HASH_LENGTH;
+
+  private static final int SCHEMA_HASH_START_OFFSET = MAGIC_BYTE_LENGTH;
+
+  private static final int MAXIMUM_SCHEMA_FETCH_RETRY_COUNT = 5;
+  private static final int MINIMUM_SCHEMA_FETCH_RETRY_TIME_MILLIS = 500;
+  private static final float SCHEMA_FETCH_RETRY_EXPONENTIAL_BACKOFF_FACTOR = 2.0f;
+
+  private String[] schemaRegistryUrls;
+
+  @Override
+  public void init(Map&lt;String, String&gt; props, Schema indexingSchema, String topicName) throws Exception {
+<span class="nc" id="L79">    schemaRegistryUrls = parseSchemaRegistryUrls(props.get(SCHEMA_REGISTRY_REST_URL));</span>
+
+<span class="nc bnc" id="L81" title="All 2 branches missed.">    for (String schemaRegistryUrl : schemaRegistryUrls) {</span>
+<span class="nc" id="L82">      StringUtils.chomp(schemaRegistryUrl, &quot;/&quot;);</span>
+    }
+
+<span class="nc" id="L85">    String avroSchemaName = topicName;</span>
+<span class="nc bnc" id="L86" title="All 6 branches missed.">    if(props.containsKey(SCHEMA_REGISTRY_SCHEMA_NAME) &amp;&amp; props.get(SCHEMA_REGISTRY_SCHEMA_NAME) != null &amp;&amp;</span>
+        !props.get(SCHEMA_REGISTRY_SCHEMA_NAME).isEmpty()) {
+<span class="nc" id="L88">      avroSchemaName = props.get(SCHEMA_REGISTRY_SCHEMA_NAME);</span>
+    }
+    // With the logic below, we may not set defaultAvroSchema to be the latest one everytime.
+    // The schema is fetched once when the machine starts. Until the next restart. the latest schema is
+    // not fetched.
+    // But then we always pay attention to the exact MD5 hash and attempt to fetch the schema for that particular hash
+    // before decoding an incoming kafka event. We use defaultAvroSchema only if the fetch for the particular MD5 fails,
+    // but then we will retry that fetch on every event in case of failure.
+<span class="nc" id="L96">    synchronized (globalSchemaCache) {</span>
+<span class="nc" id="L97">      final String hashKey = avroSchemaName + LATEST;</span>
+<span class="nc" id="L98">      defaultAvroSchema = globalSchemaCache.get(hashKey);</span>
+<span class="nc bnc" id="L99" title="All 2 branches missed.">      if (defaultAvroSchema == null) {</span>
+<span class="nc" id="L100">        defaultAvroSchema = fetchSchema(&quot;/latest_with_type=&quot; + avroSchemaName);</span>
+<span class="nc" id="L101">        globalSchemaCache.put(hashKey, defaultAvroSchema);</span>
+<span class="nc" id="L102">        LOGGER.info(&quot;Populated schema cache with schema for {}&quot;, hashKey);</span>
+      }
+<span class="nc" id="L104">    }</span>
+<span class="nc" id="L105">    this.avroRecordConvetrer = new AvroRecordToPinotRowGenerator(indexingSchema);</span>
+<span class="nc" id="L106">    this.decoderFactory = new DecoderFactory();</span>
+<span class="nc" id="L107">    md5ToAvroSchemaMap = new MD5AvroSchemaMap();</span>
+<span class="nc" id="L108">  }</span>
+
+  @Override
+  public GenericRow decode(byte[] payload, GenericRow destination) {
+<span class="nc" id="L112">    return decode(payload, 0, payload.length, destination);</span>
+  }
+
+  @Override
+  public GenericRow decode(byte[] payload, int offset, int length, GenericRow destination) {
+<span class="nc bnc" id="L117" title="All 6 branches missed.">    if (payload == null || payload.length == 0 || length == 0) {</span>
+<span class="nc" id="L118">      return null;</span>
+    }
+
+<span class="nc" id="L121">    System.arraycopy(payload, SCHEMA_HASH_START_OFFSET + offset, reusableMD5Bytes, 0, SCHEMA_HASH_LENGTH);</span>
+
+<span class="nc" id="L123">    boolean schemaUpdateFailed = false;</span>
+<span class="nc" id="L124">    org.apache.avro.Schema schema = md5ToAvroSchemaMap.getSchema(reusableMD5Bytes);</span>
+<span class="nc bnc" id="L125" title="All 2 branches missed.">    if (schema == null) {</span>
+      // We will get here for the first row consumed in the segment, and every row that has a schema ID that is
+      // not yet in md5ToAvroSchemaMap.
+<span class="nc" id="L128">      synchronized (globalSchemaCache) {</span>
+<span class="nc" id="L129">        final String hashKey = hex(reusableMD5Bytes);</span>
+<span class="nc" id="L130">        schema = globalSchemaCache.get(hashKey);</span>
+<span class="nc bnc" id="L131" title="All 2 branches missed.">        if (schema == null) {</span>
+          // We will get here only if no partition of the table has populated the global schema cache.
+          // In that case, one of the consumers will fetch the schema and populate the cache, and the others
+          // should find it in the cache and po
+<span class="nc" id="L135">          final String schemaUri = &quot;/id=&quot; + hex(reusableMD5Bytes);</span>
+          try {
+<span class="nc" id="L137">            schema = fetchSchema(schemaUri);</span>
+<span class="nc" id="L138">            globalSchemaCache.put(hashKey, schema);</span>
+<span class="nc" id="L139">            md5ToAvroSchemaMap.addSchema(reusableMD5Bytes, schema);</span>
+<span class="nc" id="L140">          } catch (Exception e) {</span>
+<span class="nc" id="L141">            schema = defaultAvroSchema;</span>
+<span class="nc" id="L142">            LOGGER.error(&quot;Error fetching schema using url {}. Attempting to continue with previous schema&quot;, schemaUri, e);</span>
+<span class="nc" id="L143">            schemaUpdateFailed = true;</span>
+<span class="nc" id="L144">          }</span>
+<span class="nc" id="L145">        } else {</span>
+<span class="nc" id="L146">          LOGGER.info(&quot;Found schema for {} in cache&quot;, hashKey);</span>
+<span class="nc" id="L147">          md5ToAvroSchemaMap.addSchema(reusableMD5Bytes, schema);</span>
+        }
+<span class="nc" id="L149">      }</span>
+    }
+<span class="nc" id="L151">    DatumReader&lt;Record&gt; reader = new GenericDatumReader&lt;Record&gt;(schema);</span>
+    try {
+<span class="nc" id="L153">      GenericData.Record avroRecord = reader.read(null,</span>
+          decoderFactory.createBinaryDecoder(payload, HEADER_LENGTH + offset, length - HEADER_LENGTH, null));
+<span class="nc" id="L155">      return avroRecordConvetrer.transform(avroRecord, destination);</span>
+<span class="nc" id="L156">    } catch (IOException e) {</span>
+<span class="nc bnc" id="L157" title="All 4 branches missed.">      LOGGER.error(&quot;Caught exception while reading message using schema {}{}&quot;, (schema==null ? &quot;null&quot; : schema.getName()),</span>
+          (schemaUpdateFailed? &quot;(possibly due to schema update failure)&quot; : &quot;&quot;), e);
+<span class="nc" id="L159">      return null;</span>
+    }
+  }
+
+  private String hex(byte[] bytes) {
+<span class="nc" id="L164">    StringBuilder builder = new StringBuilder(2 * bytes.length);</span>
+<span class="nc bnc" id="L165" title="All 2 branches missed.">    for (byte aByte : bytes) {</span>
+<span class="nc" id="L166">      String hexString = Integer.toHexString(0xFF &amp; aByte);</span>
+<span class="nc bnc" id="L167" title="All 2 branches missed.">      if (hexString.length() &lt; 2) {</span>
+<span class="nc" id="L168">        hexString = &quot;0&quot; + hexString;</span>
+      }
+<span class="nc" id="L170">      builder.append(hexString);</span>
+    }
+<span class="nc" id="L172">    return builder.toString();</span>
+  }
+
+  private static class SchemaFetcher implements Callable&lt;Boolean&gt; {
+    private org.apache.avro.Schema _schema;
+    private URL url;
+<span class="nc" id="L178">    private boolean _isSuccessful = false;</span>
+
+<span class="nc" id="L180">    SchemaFetcher(URL url) {</span>
+<span class="nc" id="L181">      this.url = url;</span>
+<span class="nc" id="L182">    }</span>
+
+    @Override
+    public Boolean call() throws Exception {
+      try {
+<span class="nc" id="L187">        URLConnection conn = url.openConnection();</span>
+<span class="nc" id="L188">        conn.setConnectTimeout(15000);</span>
+<span class="nc" id="L189">        conn.setReadTimeout(15000);</span>
+<span class="nc" id="L190">        LOGGER.info(&quot;Fetching schema using url {}&quot;, url.toString());</span>
+
+<span class="nc" id="L192">        StringBuilder queryResp = new StringBuilder();</span>
+<span class="nc" id="L193">        try (BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), &quot;UTF-8&quot;))) {</span>
+<span class="nc bnc" id="L194" title="All 2 branches missed.">          for (String line = reader.readLine(); line != null; line = reader.readLine()) {</span>
+<span class="nc" id="L195">            queryResp.append(line);</span>
+          }
+<span class="nc bnc" id="L197" title="All 8 branches missed.">        }</span>
+
+<span class="nc" id="L199">        _schema = org.apache.avro.Schema.parse(queryResp.toString());</span>
+
+<span class="nc" id="L201">        LOGGER.info(&quot;Schema fetch succeeded on url {}&quot;, url.toString());</span>
+<span class="nc" id="L202">        return Boolean.TRUE;</span>
+<span class="nc" id="L203">      } catch (Exception e) {</span>
+<span class="nc" id="L204">        LOGGER.warn(&quot;Caught exception while fetching schema&quot;, e);</span>
+<span class="nc" id="L205">        return Boolean.FALSE;</span>
+      }
+    }
+
+    public org.apache.avro.Schema getSchema() {
+<span class="nc" id="L210">      return _schema;</span>
+    }
+  }
+
+  private org.apache.avro.Schema fetchSchema(String reference) throws Exception {
+<span class="nc" id="L215">    SchemaFetcher schemaFetcher = new SchemaFetcher(makeRandomUrl(reference));</span>
+<span class="nc" id="L216">    RetryPolicies.exponentialBackoffRetryPolicy(MAXIMUM_SCHEMA_FETCH_RETRY_COUNT,</span>
+        MINIMUM_SCHEMA_FETCH_RETRY_TIME_MILLIS, SCHEMA_FETCH_RETRY_EXPONENTIAL_BACKOFF_FACTOR).attempt(schemaFetcher);
+<span class="nc" id="L218">    return schemaFetcher.getSchema();</span>
+  }
+
+  /**
+   * Private class for encapsulating MD5 to Avro schema mapping.
+   * &lt;ul&gt;
+   *   &lt;li&gt; Maintains two lists, one for md5s and another for schema. &lt;/li&gt;
+   *   &lt;li&gt; MD5 at index i in the MD5 list, corresponds to Schema at index i in the schema list. &lt;/li&gt;
+   * &lt;/ul&gt;
+   */
+<span class="nc" id="L228">  private static class MD5AvroSchemaMap {</span>
+    private List&lt;byte[]&gt; md5s;
+    private List&lt;org.apache.avro.Schema&gt; schemas;
+
+    /**
+     * Constructor for the class.
+     */
+<span class="nc" id="L235">    private MD5AvroSchemaMap() {</span>
+<span class="nc" id="L236">      md5s = new ArrayList&lt;&gt;();</span>
+<span class="nc" id="L237">      schemas = new ArrayList&lt;&gt;();</span>
+<span class="nc" id="L238">    }</span>
+
+    /**
+     * Returns the Avro schema corresponding to the given MD5.
+     *
+     * @param md5ForSchema MD5 for which to get the avro schema.
+     * @return Avro schema for the given MD5.
+     */
+    private org.apache.avro.Schema getSchema(byte[] md5ForSchema) {
+<span class="nc bnc" id="L247" title="All 2 branches missed.">      for (int i = 0; i &lt; md5s.size(); i++) {</span>
+<span class="nc bnc" id="L248" title="All 2 branches missed.">        if (Arrays.equals(md5s.get(i), md5ForSchema)) {</span>
+<span class="nc" id="L249">          return schemas.get(i);</span>
+        }
+      }
+<span class="nc" id="L252">      return null;</span>
+    }
+
+    /**
+     * Adds mapping between MD5 and Avro schema.
+     * Caller to ensure that addSchema is called only once per MD5-Schema pair.
+     *
+     * @param md5 MD5 for the Schema
+     * @param schema Avro Schema
+     */
+    private void addSchema(byte[] md5, org.apache.avro.Schema schema) {
+<span class="nc" id="L263">      md5s.add(Arrays.copyOf(md5, md5.length));</span>
+<span class="nc" id="L264">      schemas.add(schema);</span>
+<span class="nc" id="L265">    }</span>
+  }
+
+  protected URL makeRandomUrl(String reference) throws MalformedURLException{
+<span class="nc" id="L269">    Random rand = new Random();</span>
+<span class="nc" id="L270">    int randomInteger = rand.nextInt(schemaRegistryUrls.length);</span>
+<span class="nc" id="L271">    return new URL(schemaRegistryUrls[randomInteger] + reference);</span>
+  }
+
+  protected String[] parseSchemaRegistryUrls(String schemaConfig) {
+<span class="nc" id="L275">    return schemaConfig.split(&quot;,&quot;);</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

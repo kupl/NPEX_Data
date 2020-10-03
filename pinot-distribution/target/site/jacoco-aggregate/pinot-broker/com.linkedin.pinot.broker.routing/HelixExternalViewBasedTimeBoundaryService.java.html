@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>HelixExternalViewBasedTimeBoundaryService.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-broker</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.broker.routing</a> &gt; <span class="el_source">HelixExternalViewBasedTimeBoundaryService.java</span></div><h1>HelixExternalViewBasedTimeBoundaryService.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.broker.routing;
+
+import com.linkedin.pinot.common.config.TableConfig;
+import com.linkedin.pinot.common.config.TableNameBuilder;
+import com.linkedin.pinot.common.metadata.ZKMetadataProvider;
+import com.linkedin.pinot.common.metadata.segment.OfflineSegmentZKMetadata;
+import com.linkedin.pinot.common.utils.CommonConstants.Helix.TableType;
+import com.linkedin.pinot.common.utils.time.TimeUtils;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
+import org.apache.helix.ZNRecord;
+import org.apache.helix.model.ExternalView;
+import org.apache.helix.store.zk.ZkHelixPropertyStore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+public class HelixExternalViewBasedTimeBoundaryService implements TimeBoundaryService {
+
+<span class="fc" id="L38">  private static final Logger LOGGER = LoggerFactory.getLogger(HelixExternalViewBasedTimeBoundaryService.class);</span>
+
+  private static final String DAYS_SINCE_EPOCH = &quot;daysSinceEpoch&quot;;
+  private static final String HOURS_SINCE_EPOCH = &quot;hoursSinceEpoch&quot;;
+  private static final String MINUTES_SINCE_EPOCH = &quot;minutesSinceEpoch&quot;;
+  private static final String SECONDS_SINCE_EPOCH = &quot;secondsSinceEpoch&quot;;
+
+  private final ZkHelixPropertyStore&lt;ZNRecord&gt; _propertyStore;
+<span class="fc" id="L46">  private final Map&lt;String, TimeBoundaryInfo&gt; _timeBoundaryInfoMap = new HashMap&lt;String, TimeBoundaryInfo&gt;();</span>
+
+<span class="fc" id="L48">  public HelixExternalViewBasedTimeBoundaryService(ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore) {</span>
+<span class="fc" id="L49">    _propertyStore = propertyStore;</span>
+<span class="fc" id="L50">  }</span>
+
+  public synchronized void updateTimeBoundaryService(ExternalView externalView) {
+<span class="pc bpc" id="L53" title="1 of 2 branches missed.">    if (_propertyStore == null) {</span>
+<span class="nc" id="L54">      return;</span>
+    }
+<span class="fc" id="L56">    String tableName = externalView.getResourceName();</span>
+    // Do nothing for realtime table.
+<span class="pc bpc" id="L58" title="1 of 2 branches missed.">    if (TableNameBuilder.getTableTypeFromTableName(tableName) == TableType.REALTIME) {</span>
+<span class="nc" id="L59">      return;</span>
+    }
+
+<span class="fc" id="L62">    Set&lt;String&gt; offlineSegmentsServing = externalView.getPartitionSet();</span>
+<span class="pc bpc" id="L63" title="1 of 2 branches missed.">    if (offlineSegmentsServing.isEmpty()) {</span>
+<span class="nc" id="L64">      LOGGER.info(&quot;Skipping updating time boundary service for table '{}' with no offline segments.&quot;, tableName);</span>
+<span class="nc" id="L65">      return;</span>
+    }
+
+<span class="fc" id="L68">    TableConfig offlineTableConfig = ZKMetadataProvider.getOfflineTableConfig(_propertyStore, tableName);</span>
+<span class="fc" id="L69">    String timeType = offlineTableConfig.getValidationConfig().getTimeType();</span>
+<span class="fc" id="L70">    TimeUnit tableTimeUnit = getTimeUnitFromString(timeType);</span>
+<span class="pc bpc" id="L71" title="1 of 2 branches missed.">    if (tableTimeUnit == null) {</span>
+<span class="nc" id="L72">      LOGGER.info(&quot;Skipping updating time boundary service for table '{}' with null timeUnit, config time type: {}.&quot;,</span>
+          tableName, timeType);
+<span class="nc" id="L74">      return;</span>
+    }
+
+    // Bulk reading all segment zk-metadata at once is more efficient than reading one at a time.
+<span class="fc" id="L78">    List&lt;OfflineSegmentZKMetadata&gt; segmentZKMetadataList =</span>
+        ZKMetadataProvider.getOfflineSegmentZKMetadataListForTable(_propertyStore, tableName);
+
+<span class="fc" id="L81">    long maxTimeValue = computeMaxSegmentEndTimeForTable(segmentZKMetadataList, tableTimeUnit);</span>
+<span class="fc" id="L82">    TimeBoundaryInfo timeBoundaryInfo = new TimeBoundaryInfo();</span>
+<span class="fc" id="L83">    timeBoundaryInfo.setTimeColumn(offlineTableConfig.getValidationConfig().getTimeColumnName());</span>
+
+<span class="fc" id="L85">    timeBoundaryInfo.setTimeValue(Long.toString(maxTimeValue));</span>
+<span class="fc" id="L86">    _timeBoundaryInfoMap.put(tableName, timeBoundaryInfo);</span>
+
+<span class="fc" id="L88">    LOGGER.info(&quot;Updated time boundary service for table '{}', maxTime: {}&quot;, tableName, maxTimeValue);</span>
+<span class="fc" id="L89">  }</span>
+
+  /**
+   * Compute maximum end time across a list of segment zk-metadata.
+   *
+   * @param segmentZKMetadataList List of Segment zk metadata for which to compute the max end time.
+   * @param tableTimeUnit Time Unit for table
+   * @return Max end time across all segments.
+   */
+  private long computeMaxSegmentEndTimeForTable(List&lt;OfflineSegmentZKMetadata&gt; segmentZKMetadataList,
+      TimeUnit tableTimeUnit) {
+<span class="fc" id="L100">    long maxTimeValue = -1;</span>
+
+<span class="fc bfc" id="L102" title="All 2 branches covered.">    for (OfflineSegmentZKMetadata metadata : segmentZKMetadataList) {</span>
+<span class="fc" id="L103">      long endTime = metadata.getEndTime();</span>
+<span class="fc bfc" id="L104" title="All 2 branches covered.">      if (endTime &lt;= 0) {</span>
+<span class="fc" id="L105">        continue;</span>
+      }
+
+      // Convert all segment times to table's time unit, before comparison.
+<span class="fc" id="L109">      TimeUnit segmentTimeUnit = metadata.getTimeUnit();</span>
+<span class="pc bpc" id="L110" title="1 of 2 branches missed.">      if (segmentTimeUnit != null) {</span>
+<span class="fc" id="L111">        endTime = tableTimeUnit.convert(endTime, segmentTimeUnit);</span>
+      }
+<span class="fc" id="L113">      maxTimeValue = Math.max(maxTimeValue, endTime);</span>
+<span class="fc" id="L114">    }</span>
+<span class="fc" id="L115">    return maxTimeValue;</span>
+  }
+
+  private TimeUnit getTimeUnitFromString(String timeTypeString) {
+    // If input data does not have a time column, no need to fire an exception.
+<span class="pc bpc" id="L120" title="2 of 4 branches missed.">    if ((timeTypeString == null) || timeTypeString.isEmpty()) {</span>
+<span class="nc" id="L121">      return null;</span>
+    }
+
+<span class="fc" id="L124">    TimeUnit timeUnit = TimeUtils.timeUnitFromString(timeTypeString);</span>
+
+    // Check legacy time formats
+<span class="pc bpc" id="L127" title="1 of 2 branches missed.">    if (timeUnit == null) {</span>
+<span class="nc bnc" id="L128" title="All 2 branches missed.">      if (timeTypeString.equalsIgnoreCase(DAYS_SINCE_EPOCH)) {</span>
+<span class="nc" id="L129">        timeUnit = TimeUnit.DAYS;</span>
+      }
+<span class="nc bnc" id="L131" title="All 2 branches missed.">      if (timeTypeString.equalsIgnoreCase(HOURS_SINCE_EPOCH)) {</span>
+<span class="nc" id="L132">        timeUnit = TimeUnit.HOURS;</span>
+      }
+<span class="nc bnc" id="L134" title="All 2 branches missed.">      if (timeTypeString.equalsIgnoreCase(MINUTES_SINCE_EPOCH)) {</span>
+<span class="nc" id="L135">        timeUnit = TimeUnit.MINUTES;</span>
+      }
+<span class="nc bnc" id="L137" title="All 2 branches missed.">      if (timeTypeString.equalsIgnoreCase(SECONDS_SINCE_EPOCH)) {</span>
+<span class="nc" id="L138">        timeUnit = TimeUnit.SECONDS;</span>
+      }
+    }
+
+<span class="pc bpc" id="L142" title="1 of 2 branches missed.">    if (timeUnit == null) {</span>
+<span class="nc" id="L143">      throw new RuntimeException(&quot;Not supported time type for: &quot; + timeTypeString);</span>
+    }
+<span class="fc" id="L145">    return timeUnit;</span>
+  }
+
+  @Override
+  public void remove(String tableName) {
+<span class="nc" id="L150">    _timeBoundaryInfoMap.remove(tableName);</span>
+<span class="nc" id="L151">  }</span>
+
+  @Override
+  public TimeBoundaryInfo getTimeBoundaryInfoFor(String table) {
+<span class="fc" id="L155">    return _timeBoundaryInfoMap.get(table);</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

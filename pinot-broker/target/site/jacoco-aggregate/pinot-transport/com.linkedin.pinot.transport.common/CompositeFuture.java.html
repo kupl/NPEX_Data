@@ -1,0 +1,222 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>CompositeFuture.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-broker</a> &gt; <a href="../index.html" class="el_bundle">pinot-transport</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.transport.common</a> &gt; <span class="el_source">CompositeFuture.java</span></div><h1>CompositeFuture.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.transport.common;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import com.linkedin.pinot.common.response.ServerInstance;
+
+
+/**
+ * A conjunctive type Composite future.
+ *
+ * Future completes only when
+ *  (a) All underlying futures completes successfully or (GatherModeOnError config : For both AND and SHORTCIRCUIT_AND
+ *  (b) When any underlying future fails or (GatherModeOnError config : SHORTCIRCUIT_AND)
+ *  (c) When all underlying futures completes successfully or with error ( GatherModeOnError Config : AND)
+ *
+ * The error gather mode determines if (b) or (c) has to be employed in case of errors in underlying futures.
+ * This future is static in the sense that all the underlying futures have to added before we call any operations
+ * on them.
+ *
+ * This future's value will be a map of each future's key and the corresponding underlying future's value.
+ *
+ * @param &lt;V&gt; Value type of the underlying future
+ */
+public class CompositeFuture&lt;V&gt; extends AbstractCompositeListenableFuture&lt;V&gt; {
+<span class="fc" id="L50">  protected static Logger LOGGER = LoggerFactory.getLogger(CompositeFuture.class);</span>
+
+<span class="pc" id="L52">  public static enum GatherModeOnError {</span>
+    /* Future completes only when all underlying futures complete or any one underlying future fails */
+<span class="fc" id="L54">    SHORTCIRCUIT_AND,</span>
+    /* Future completes only when all underlying futures completes successfully or fails. */
+<span class="fc" id="L56">    AND,</span>
+  };
+
+  private final Collection&lt;ServerResponseFuture&lt;V&gt;&gt; _futures;
+
+  // Composite Response
+  private final ConcurrentMap&lt;ServerInstance, V&gt; _delayedResponseMap;
+
+<span class="fc" id="L64">  private final ConcurrentMap&lt;ServerInstance, Long&gt; _responseTimeMap = new ConcurrentHashMap&lt;&gt;(10);</span>
+
+  // Exception in case of error
+  private final ConcurrentMap&lt;ServerInstance, Throwable&gt; _errorMap;
+
+  private final GatherModeOnError _gatherMode;
+
+  // Descriptive name of the future
+  private final String _name;
+
+<span class="fc" id="L74">  public CompositeFuture(String name, GatherModeOnError mode) {</span>
+<span class="fc" id="L75">    _name = name;</span>
+<span class="fc" id="L76">    _futures = new ArrayList&lt;ServerResponseFuture&lt;V&gt;&gt;();</span>
+<span class="fc" id="L77">    _delayedResponseMap = new ConcurrentHashMap&lt;ServerInstance, V&gt;();</span>
+<span class="fc" id="L78">    _errorMap = new ConcurrentHashMap&lt;ServerInstance, Throwable&gt;();</span>
+<span class="fc" id="L79">    _gatherMode = mode;</span>
+<span class="fc" id="L80">  }</span>
+
+  /**
+   * Start the future. This will add listener to the underlying futures. This method needs to be called
+   * as soon the composite future is constructed and before any other method is invoked.
+   */
+  public void start(Collection&lt;ServerResponseFuture&lt;V&gt;&gt; futureList) {
+<span class="fc" id="L87">    boolean started = super.start();</span>
+
+<span class="pc bpc" id="L89" title="1 of 2 branches missed.">    if (!started) {</span>
+<span class="nc" id="L90">      String msg = &quot;Unable to start the future. State is already : &quot; + _state;</span>
+<span class="nc" id="L91">      LOGGER.error(msg);</span>
+<span class="nc" id="L92">      throw new IllegalStateException(msg);</span>
+    }
+
+<span class="pc bpc" id="L95" title="1 of 2 branches missed.">    if ( null !=  futureList )</span>
+    {
+<span class="fc" id="L97">      _futures.addAll(futureList);</span>
+<span class="fc" id="L98">      _latch = new CountDownLatch(futureList.size());</span>
+    } else {
+<span class="nc" id="L100">      _latch = new CountDownLatch(0);</span>
+    }
+<span class="fc bfc" id="L102" title="All 2 branches covered.">    for (ServerResponseFuture&lt;V&gt; entry : _futures) {</span>
+<span class="pc bpc" id="L103" title="1 of 2 branches missed.">      if (null != entry) {</span>
+<span class="fc" id="L104">        addResponseFutureListener(entry);</span>
+      }
+<span class="fc" id="L106">    }</span>
+<span class="fc" id="L107">  }</span>
+
+  /**
+   * Call cancel on underlying futures. Dont worry if they are completed.
+   * If they are already completed, cancel will be discarded. THis is best-effort only !!.
+   */
+  @Override
+  protected void cancelUnderlyingFutures() {
+<span class="fc" id="L115">    LOGGER.info(&quot;Cancelling all underlying futures for {}&quot;, getName());</span>
+<span class="fc bfc" id="L116" title="All 2 branches covered.">    for (ServerResponseFuture&lt;V&gt; entry : _futures) {</span>
+<span class="fc" id="L117">      LOGGER.info(&quot;Cancelling future {}&quot;, entry.getName());</span>
+<span class="fc" id="L118">      entry.cancel(true);</span>
+<span class="fc" id="L119">    }</span>
+<span class="fc" id="L120">  }</span>
+
+  @Override
+  /**
+   *
+   */
+  public Map&lt;ServerInstance, V&gt; get() throws InterruptedException, ExecutionException {
+<span class="fc" id="L127">    _latch.await();</span>
+<span class="fc" id="L128">    return _delayedResponseMap;</span>
+  }
+
+  @Override
+  public V getOne() throws InterruptedException, ExecutionException {
+<span class="nc" id="L133">    _latch.await();</span>
+<span class="nc bnc" id="L134" title="All 2 branches missed.">    if (_delayedResponseMap.isEmpty()) {</span>
+<span class="nc" id="L135">      return null;</span>
+    }
+<span class="nc" id="L137">    return _delayedResponseMap.values().iterator().next();</span>
+  }
+
+  @Override
+  public V getOne(long timeout, TimeUnit unit)
+      throws InterruptedException, ExecutionException, TimeoutException {
+<span class="nc" id="L143">    boolean notElapsed = _latch.await(timeout,unit);</span>
+
+<span class="nc bnc" id="L145" title="All 2 branches missed.">    if (!notElapsed)</span>
+<span class="nc" id="L146">      throw new TimeoutException(&quot;Timedout waiting for async result for composite &quot;);</span>
+
+<span class="nc bnc" id="L148" title="All 2 branches missed.">    if (_delayedResponseMap.isEmpty()) {</span>
+<span class="nc" id="L149">      return null;</span>
+    }
+<span class="nc" id="L151">    return _delayedResponseMap.values().iterator().next();</span>
+  }
+
+  @Override
+  public Map&lt;ServerInstance, Throwable&gt; getError() {
+<span class="fc" id="L156">    return _errorMap;</span>
+  }
+
+  @Override
+  public long getDurationMillis() {
+    // The duration for a composite future (if it is called), may be defined as the max of all the durations of
+    // the individual futures that have completed. Typically, we are interested in getting the individual completion
+    // times, however.
+<span class="nc" id="L164">    long maxDuration = -1;</span>
+<span class="nc bnc" id="L165" title="All 2 branches missed.">    for (Map.Entry&lt;ServerInstance, Long&gt; entry:_responseTimeMap.entrySet()) {</span>
+<span class="nc bnc" id="L166" title="All 2 branches missed.">      if (entry.getValue() &gt; maxDuration) {</span>
+<span class="nc" id="L167">        maxDuration = entry.getValue();</span>
+      }
+<span class="nc" id="L169">    }</span>
+<span class="nc" id="L170">    return maxDuration;</span>
+  }
+
+  @Override
+  public Map&lt;ServerInstance, V&gt; get(long timeout, TimeUnit unit) throws InterruptedException, ExecutionException, TimeoutException {
+<span class="nc" id="L175">    _latch.await(timeout, unit);</span>
+<span class="nc" id="L176">    return _delayedResponseMap;</span>
+  }
+
+  /**
+   * This method must be called after the 'get' is called, so that all response times are recorded.
+   * For now, this method has not been added to the interface.
+   * @return A map of response times of each response in _delayedResponseMap.
+   */
+  public Map&lt;ServerInstance, Long&gt; getResponseTimes() {
+<span class="nc" id="L185">    return Collections.unmodifiableMap(_responseTimeMap);</span>
+  }
+
+  @Override
+  public ServerInstance getServerInstance() {
+<span class="nc" id="L190">    throw new RuntimeException(&quot;Invalid API call on a composite future&quot;);</span>
+  }
+
+  @Override
+  protected boolean processFutureResult(ServerInstance server, Map&lt;ServerInstance, V&gt; response, Map&lt;ServerInstance, Throwable&gt; error, long durationMillis) {
+    // Get the response time and create another map that can be invoked to get the end time when responses were received for each server.
+<span class="fc" id="L196">    boolean ret = false;</span>
+<span class="fc bfc" id="L197" title="All 2 branches covered.">    if (null != response) {</span>
+<span class="fc" id="L198">      LOGGER.debug(&quot;Response from {} is {}&quot;, server, response);</span>
+<span class="fc" id="L199">      _delayedResponseMap.putAll(response);</span>
+<span class="pc bpc" id="L200" title="1 of 2 branches missed.">    } else if (null != error) {</span>
+<span class="fc" id="L201">      LOGGER.debug(&quot;Error from {} is : {}&quot;, server, error);</span>
+<span class="fc" id="L202">      _errorMap.putAll(error);</span>
+
+<span class="fc bfc" id="L204" title="All 2 branches covered.">      if (_gatherMode == GatherModeOnError.SHORTCIRCUIT_AND) {</span>
+<span class="fc" id="L205">        ret = true; // We are done as we got an error</span>
+      }
+    }
+    // TODO May be limit the number of entries here to 10? We don't want to create too much garbage on the broker.
+<span class="fc" id="L209">    _responseTimeMap.put(server, durationMillis);</span>
+<span class="fc" id="L210">    return ret;</span>
+  }
+
+  @Override
+  public String getName() {
+<span class="fc" id="L215">    return _name;</span>
+  }
+
+  public int getNumFutures() {
+<span class="nc" id="L219">    return _futures.size();</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

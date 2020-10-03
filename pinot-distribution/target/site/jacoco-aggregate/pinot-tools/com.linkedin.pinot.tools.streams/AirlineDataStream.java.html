@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>AirlineDataStream.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-tools</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.tools.streams</a> &gt; <span class="el_source">AirlineDataStream.java</span></div><h1>AirlineDataStream.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.tools.streams;
+
+import com.linkedin.pinot.common.data.FieldSpec;
+import com.linkedin.pinot.common.data.Schema;
+import com.linkedin.pinot.common.data.TimeFieldSpec;
+import com.linkedin.pinot.common.utils.KafkaStarterUtils;
+import com.linkedin.pinot.tools.Quickstart;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.util.Properties;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import kafka.javaapi.producer.Producer;
+import kafka.producer.KeyedMessage;
+import kafka.producer.ProducerConfig;
+import org.apache.avro.file.DataFileStream;
+import org.apache.avro.generic.GenericDatumReader;
+import org.apache.avro.generic.GenericRecord;
+import org.json.JSONException;
+import org.json.JSONObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+public class AirlineDataStream {
+<span class="nc" id="L43">  private static final Logger logger = LoggerFactory.getLogger(AirlineDataStream.class);</span>
+
+  Schema pinotSchema;
+  File avroFile;
+  DataFileStream&lt;GenericRecord&gt; avroDataStream;
+<span class="nc" id="L48">  Integer currentTimeValue = 16102;</span>
+<span class="nc" id="L49">  boolean keepIndexing = true;</span>
+  private Producer&lt;String, byte[]&gt; producer;
+  ExecutorService service;
+<span class="nc" id="L52">  int counter = 0;</span>
+
+<span class="nc" id="L54">  public AirlineDataStream(Schema pinotSchema, File avroFile) throws FileNotFoundException, IOException {</span>
+<span class="nc" id="L55">    this.pinotSchema = pinotSchema;</span>
+<span class="nc" id="L56">    this.avroFile = avroFile;</span>
+<span class="nc" id="L57">    createStream();</span>
+<span class="nc" id="L58">    Properties properties = new Properties();</span>
+<span class="nc" id="L59">    properties.put(&quot;metadata.broker.list&quot;, KafkaStarterUtils.DEFAULT_KAFKA_BROKER);</span>
+<span class="nc" id="L60">    properties.put(&quot;serializer.class&quot;, &quot;kafka.serializer.DefaultEncoder&quot;);</span>
+<span class="nc" id="L61">    properties.put(&quot;request.required.acks&quot;, &quot;1&quot;);</span>
+
+<span class="nc" id="L63">    ProducerConfig producerConfig = new ProducerConfig(properties);</span>
+<span class="nc" id="L64">    producer = new Producer&lt;String, byte[]&gt;(producerConfig);</span>
+<span class="nc" id="L65">    service = Executors.newFixedThreadPool(1);</span>
+<span class="nc" id="L66">    Quickstart.printStatus(Quickstart.Color.YELLOW,</span>
+        &quot;***** Offine data has max time as 16101, realtime will start consuming from time 16102 and increment time every 3000 events *****&quot;);
+<span class="nc" id="L68">  }</span>
+
+  public void shutdown() {
+<span class="nc" id="L71">    keepIndexing = false;</span>
+<span class="nc" id="L72">    avroDataStream = null;</span>
+<span class="nc" id="L73">    producer.close();</span>
+<span class="nc" id="L74">    producer = null;</span>
+<span class="nc" id="L75">    service.shutdown();</span>
+<span class="nc" id="L76">  }</span>
+
+  private void createStream() throws FileNotFoundException, IOException {
+<span class="nc bnc" id="L79" title="All 2 branches missed.">    if (keepIndexing) {</span>
+<span class="nc" id="L80">      avroDataStream =</span>
+          new DataFileStream&lt;GenericRecord&gt;(new FileInputStream(avroFile), new GenericDatumReader&lt;GenericRecord&gt;());
+<span class="nc" id="L82">      return;</span>
+    }
+<span class="nc" id="L84">    avroDataStream = null;</span>
+<span class="nc" id="L85">  }</span>
+
+  private void publish(JSONObject message) throws JSONException, IOException {
+<span class="nc bnc" id="L88" title="All 2 branches missed.">    if (!keepIndexing) {</span>
+<span class="nc" id="L89">      avroDataStream.close();</span>
+<span class="nc" id="L90">      avroDataStream = null;</span>
+<span class="nc" id="L91">      return;</span>
+    }
+<span class="nc" id="L93">    KeyedMessage&lt;String, byte[]&gt; data =</span>
+        new KeyedMessage&lt;String, byte[]&gt;(&quot;airlineStatsEvents&quot;, message.toString().getBytes(&quot;UTF-8&quot;));
+<span class="nc" id="L95">    producer.send(data);</span>
+<span class="nc" id="L96">  }</span>
+
+  public void run() throws IOException, JSONException {
+
+<span class="nc" id="L100">    service.submit(new Runnable() {</span>
+
+      @Override
+      public void run() {
+        while (true) {
+<span class="nc bnc" id="L105" title="All 2 branches missed.">          while (avroDataStream.hasNext()) {</span>
+<span class="nc bnc" id="L106" title="All 2 branches missed.">            if (keepIndexing == false) {</span>
+<span class="nc" id="L107">              return;</span>
+            }
+
+<span class="nc" id="L110">            GenericRecord record = avroDataStream.next();</span>
+<span class="nc" id="L111">            JSONObject message = new JSONObject();</span>
+
+<span class="nc bnc" id="L113" title="All 2 branches missed.">            for (FieldSpec spec : pinotSchema.getDimensionFieldSpecs()) {</span>
+              try {
+<span class="nc" id="L115">                message.put(spec.getName(), record.get(spec.getName()));</span>
+<span class="nc" id="L116">              } catch (JSONException e) {</span>
+<span class="nc" id="L117">                logger.error(e.getMessage());</span>
+<span class="nc" id="L118">              }</span>
+<span class="nc" id="L119">            }</span>
+
+<span class="nc bnc" id="L121" title="All 2 branches missed.">            for (FieldSpec spec : pinotSchema.getDimensionFieldSpecs()) {</span>
+              try {
+<span class="nc" id="L123">                message.put(spec.getName(), record.get(spec.getName()));</span>
+<span class="nc" id="L124">              } catch (JSONException e) {</span>
+<span class="nc" id="L125">                logger.error(e.getMessage());</span>
+<span class="nc" id="L126">              }</span>
+<span class="nc" id="L127">            }</span>
+
+<span class="nc" id="L129">            TimeFieldSpec spec = pinotSchema.getTimeFieldSpec();</span>
+
+<span class="nc" id="L131">            String timeColumn = spec.getIncomingTimeColumnName();</span>
+            try {
+<span class="nc" id="L133">              message.put(timeColumn, currentTimeValue);</span>
+<span class="nc" id="L134">            } catch (JSONException e) {</span>
+<span class="nc" id="L135">              logger.error(e.getMessage());</span>
+<span class="nc" id="L136">            }</span>
+            try {
+<span class="nc" id="L138">              publish(message);</span>
+<span class="nc" id="L139">              counter++;</span>
+<span class="nc bnc" id="L140" title="All 2 branches missed.">              if (counter % 3000 == 0) {</span>
+<span class="nc" id="L141">                currentTimeValue = currentTimeValue + 1;</span>
+              }
+<span class="nc" id="L143">            } catch (Exception e) {</span>
+<span class="nc" id="L144">              logger.error(e.getMessage());</span>
+<span class="nc" id="L145">            }</span>
+<span class="nc" id="L146">          }</span>
+
+          try {
+<span class="nc" id="L149">            avroDataStream.close();</span>
+<span class="nc" id="L150">          } catch (IOException e) {</span>
+<span class="nc" id="L151">            logger.error(e.getMessage());</span>
+<span class="nc" id="L152">          }</span>
+
+          try {
+<span class="nc" id="L155">            createStream();</span>
+<span class="nc" id="L156">          } catch (IOException e) {</span>
+<span class="nc" id="L157">            logger.error(e.getMessage());</span>
+<span class="nc" id="L158">          }</span>
+        }
+      }
+    });
+
+<span class="nc" id="L163">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

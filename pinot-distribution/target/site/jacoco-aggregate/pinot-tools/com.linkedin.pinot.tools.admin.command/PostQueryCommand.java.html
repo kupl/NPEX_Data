@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>PostQueryCommand.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-tools</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.tools.admin.command</a> &gt; <span class="el_source">PostQueryCommand.java</span></div><h1>PostQueryCommand.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.tools.admin.command;
+
+import com.linkedin.pinot.tools.Command;
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.net.URL;
+import java.net.URLConnection;
+
+import org.json.JSONObject;
+import org.kohsuke.args4j.Option;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.linkedin.pinot.common.utils.CommonConstants;
+import com.linkedin.pinot.common.utils.NetUtil;
+
+
+<span class="nc" id="L35">public class PostQueryCommand extends AbstractBaseAdminCommand implements Command {</span>
+<span class="nc" id="L36">  private static final Logger LOGGER = LoggerFactory.getLogger(PostQueryCommand.class.getName());</span>
+
+  @Option(name = &quot;-brokerHost&quot;, required = false, metaVar = &quot;&lt;String&gt;&quot;, usage = &quot;host name for controller.&quot;)
+  private String _brokerHost;
+
+<span class="nc" id="L41">  @Option(name = &quot;-brokerPort&quot;, required = false, metaVar = &quot;&lt;int&gt;&quot;, usage = &quot;http port for broker.&quot;)</span>
+  private String _brokerPort = Integer.toString(CommonConstants.Helix.DEFAULT_BROKER_QUERY_PORT);
+
+  @Option(name = &quot;-query&quot;, required = true, metaVar = &quot;&lt;string&gt;&quot;, usage = &quot;Query string to perform.&quot;)
+  private String _query;
+
+<span class="nc" id="L47">  @Option(name = &quot;-help&quot;, required = false, help = true, aliases = { &quot;-h&quot;, &quot;--h&quot;, &quot;--help&quot; },</span>
+      usage = &quot;Print this message.&quot;)
+  private boolean _help = false;
+
+  @Override
+  public boolean getHelp() {
+<span class="nc" id="L53">    return _help;</span>
+  }
+
+  @Override
+  public String getName() {
+<span class="nc" id="L58">    return &quot;PostQuery&quot;;</span>
+  }
+
+  @Override
+  public String toString() {
+<span class="nc" id="L63">    return (&quot;PostQuery -brokerHost &quot; + _brokerHost + &quot; -brokerPort &quot; + _brokerPort + &quot; -query &quot; + _query);</span>
+  }
+
+  @Override
+  public void cleanup() {
+
+<span class="nc" id="L69">  }</span>
+
+  @Override
+  public String description() {
+<span class="nc" id="L73">    return &quot;Query the uploaded Pinot segments.&quot;;</span>
+  }
+
+  public PostQueryCommand setBrokerHost(String host) {
+<span class="nc" id="L77">    _brokerHost = host;</span>
+<span class="nc" id="L78">    return this;</span>
+  }
+  
+  public PostQueryCommand setBrokerPort(String port) {
+<span class="nc" id="L82">    _brokerPort = port;</span>
+<span class="nc" id="L83">    return this;</span>
+  }
+
+  public PostQueryCommand setQuery(String query) {
+<span class="nc" id="L87">    _query = query;</span>
+<span class="nc" id="L88">    return this;</span>
+  }
+
+  public String run() throws Exception {
+<span class="nc bnc" id="L92" title="All 2 branches missed.">    if (_brokerHost == null) {</span>
+<span class="nc" id="L93">      _brokerHost = NetUtil.getHostAddress();</span>
+    }
+<span class="nc" id="L95">    LOGGER.info(&quot;Executing command: &quot; + toString());</span>
+<span class="nc" id="L96">    final JSONObject json = new JSONObject();</span>
+<span class="nc" id="L97">    json.put(&quot;pql&quot;, _query);</span>
+
+<span class="nc" id="L99">    String brokerUrl = &quot;http://&quot; + _brokerHost + &quot;:&quot; + _brokerPort;</span>
+<span class="nc" id="L100">    final URLConnection conn = new URL(brokerUrl + &quot;/query&quot;).openConnection();</span>
+<span class="nc" id="L101">    conn.setDoOutput(true);</span>
+
+<span class="nc" id="L103">    final BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(conn.getOutputStream(), &quot;UTF-8&quot;));</span>
+<span class="nc" id="L104">    String request = json.toString();</span>
+
+<span class="nc" id="L106">    writer.write(request, 0, request.length());</span>
+<span class="nc" id="L107">    writer.flush();</span>
+
+<span class="nc" id="L109">    final BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), &quot;UTF-8&quot;));</span>
+<span class="nc" id="L110">    final StringBuilder sb = new StringBuilder();</span>
+
+<span class="nc" id="L112">    String line = null;</span>
+<span class="nc bnc" id="L113" title="All 2 branches missed.">    while ((line = reader.readLine()) != null) {</span>
+<span class="nc" id="L114">      sb.append(line);</span>
+    }
+
+<span class="nc" id="L117">    return sb.toString();</span>
+  }
+
+  @Override
+  public boolean execute() throws Exception {
+<span class="nc" id="L122">    String result = run();</span>
+<span class="nc" id="L123">    LOGGER.info(&quot;Result: &quot; + result);</span>
+<span class="nc" id="L124">    return true;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

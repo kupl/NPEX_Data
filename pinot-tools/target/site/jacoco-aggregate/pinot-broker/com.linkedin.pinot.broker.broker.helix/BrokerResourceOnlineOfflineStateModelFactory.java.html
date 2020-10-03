@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>BrokerResourceOnlineOfflineStateModelFactory.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-tools</a> &gt; <a href="../index.html" class="el_bundle">pinot-broker</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.broker.broker.helix</a> &gt; <span class="el_source">BrokerResourceOnlineOfflineStateModelFactory.java</span></div><h1>BrokerResourceOnlineOfflineStateModelFactory.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.broker.broker.helix;
+
+import com.linkedin.pinot.broker.routing.HelixExternalViewBasedRouting;
+import com.linkedin.pinot.common.Utils;
+import com.linkedin.pinot.common.config.TableConfig;
+import com.linkedin.pinot.common.metadata.ZKMetadataProvider;
+import com.linkedin.pinot.common.utils.helix.HelixHelper;
+
+import java.util.List;
+import org.apache.helix.HelixAdmin;
+import org.apache.helix.HelixDataAccessor;
+import org.apache.helix.HelixManager;
+import org.apache.helix.NotificationContext;
+import org.apache.helix.PropertyKey.Builder;
+import org.apache.helix.ZNRecord;
+import org.apache.helix.model.InstanceConfig;
+import org.apache.helix.model.Message;
+import org.apache.helix.participant.statemachine.StateModel;
+import org.apache.helix.participant.statemachine.StateModelFactory;
+import org.apache.helix.participant.statemachine.StateModelInfo;
+import org.apache.helix.participant.statemachine.Transition;
+import org.apache.helix.store.zk.ZkHelixPropertyStore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * Broker Resource layer state model to take over how to operate on:
+ * Adding an external view to routing table.
+ *
+ *
+ */
+public class BrokerResourceOnlineOfflineStateModelFactory extends StateModelFactory&lt;StateModel&gt; {
+<span class="fc" id="L49">  private static final Logger LOGGER = LoggerFactory.getLogger(BrokerResourceOnlineOfflineStateModelFactory.class);</span>
+
+  private final HelixManager _helixManager;
+  private final HelixAdmin _helixAdmin;
+  private final HelixExternalViewBasedRouting _helixExternalViewBasedRouting;
+
+  private ZkHelixPropertyStore&lt;ZNRecord&gt; _propertyStore;
+
+  public BrokerResourceOnlineOfflineStateModelFactory(HelixManager helixManager,
+<span class="fc" id="L58">      ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore, HelixExternalViewBasedRouting helixExternalViewBasedRouting) {</span>
+<span class="fc" id="L59">    _helixManager = helixManager;</span>
+<span class="fc" id="L60">    _propertyStore = propertyStore;</span>
+<span class="fc" id="L61">    _helixAdmin = helixManager.getClusterManagmentTool();</span>
+<span class="fc" id="L62">    _helixExternalViewBasedRouting = helixExternalViewBasedRouting;</span>
+<span class="fc" id="L63">  }</span>
+
+  public static String getStateModelDef() {
+<span class="fc" id="L66">    return &quot;BrokerResourceOnlineOfflineStateModel&quot;;</span>
+  }
+
+  @Override
+  public StateModel createNewStateModel(String resourceName) {
+<span class="fc" id="L71">    return new BrokerResourceOnlineOfflineStateModel();</span>
+  }
+
+  @StateModelInfo(states = &quot;{'OFFLINE','ONLINE', 'DROPPED'}&quot;, initialState = &quot;OFFLINE&quot;)
+<span class="fc" id="L75">  public class BrokerResourceOnlineOfflineStateModel extends StateModel {</span>
+
+    @Transition(from = &quot;OFFLINE&quot;, to = &quot;ONLINE&quot;)
+    public void onBecomeOnlineFromOffline(Message message, NotificationContext context) {
+      try {
+<span class="fc" id="L80">        LOGGER.info(&quot;BrokerResourceOnlineOfflineStateModel.onBecomeOnlineFromOffline() : &quot; + message);</span>
+<span class="fc" id="L81">        Builder keyBuilder = _helixManager.getHelixDataAccessor().keyBuilder();</span>
+<span class="fc" id="L82">        String tableName = message.getPartitionName();</span>
+<span class="fc" id="L83">        HelixDataAccessor helixDataAccessor = _helixManager.getHelixDataAccessor();</span>
+<span class="fc" id="L84">        List&lt;InstanceConfig&gt; instanceConfigList = helixDataAccessor.getChildValues(keyBuilder.instanceConfigs());</span>
+<span class="fc" id="L85">        TableConfig tableConfig = ZKMetadataProvider.getTableConfig(_propertyStore, tableName);</span>
+
+<span class="fc" id="L87">        _helixExternalViewBasedRouting.markDataResourceOnline(</span>
+            tableConfig,
+            HelixHelper.getExternalViewForResource(_helixAdmin, _helixManager.getClusterName(), tableName),
+            instanceConfigList);
+<span class="nc" id="L91">      } catch (Exception e) {</span>
+<span class="nc" id="L92">        LOGGER.error(&quot;Caught exception during OFFLINE -&gt; ONLINE transition&quot;, e);</span>
+<span class="nc" id="L93">        Utils.rethrowException(e);</span>
+<span class="nc" id="L94">        throw new AssertionError(&quot;Should not reach this&quot;);</span>
+<span class="fc" id="L95">      }</span>
+<span class="fc" id="L96">    }</span>
+
+    @Transition(from = &quot;ONLINE&quot;, to = &quot;OFFLINE&quot;)
+    public void onBecomeOfflineFromOnline(Message message, NotificationContext context) {
+      try {
+<span class="nc" id="L101">        LOGGER.info(&quot;BrokerResourceOnlineOfflineStateModel.onBecomeOfflineFromOnline() : &quot; + message);</span>
+<span class="nc" id="L102">        String tableName = message.getPartitionName();</span>
+<span class="nc" id="L103">        _helixExternalViewBasedRouting.markDataResourceOffline(tableName);</span>
+<span class="nc" id="L104">      } catch (Exception e) {</span>
+<span class="nc" id="L105">        LOGGER.error(&quot;Caught exception during ONLINE -&gt; OFFLINE transition&quot;, e);</span>
+<span class="nc" id="L106">        Utils.rethrowException(e);</span>
+<span class="nc" id="L107">        throw new AssertionError(&quot;Should not reach this&quot;);</span>
+<span class="nc" id="L108">      }</span>
+<span class="nc" id="L109">    }</span>
+
+    @Transition(from = &quot;OFFLINE&quot;, to = &quot;DROPPED&quot;)
+    public void onBecomeDroppedFromOffline(Message message, NotificationContext context) {
+      try {
+<span class="nc" id="L114">        LOGGER.info(&quot;BrokerResourceOnlineOfflineStateModel.onBecomeDroppedFromOffline() : &quot; + message);</span>
+<span class="nc" id="L115">        String tableName = message.getPartitionName();</span>
+<span class="nc" id="L116">        _helixExternalViewBasedRouting.markDataResourceOffline(tableName);</span>
+<span class="nc" id="L117">      } catch (Exception e) {</span>
+<span class="nc" id="L118">        LOGGER.error(&quot;Caught exception during OFFLINE -&gt; DROPPED transition&quot;, e);</span>
+<span class="nc" id="L119">        Utils.rethrowException(e);</span>
+<span class="nc" id="L120">        throw new AssertionError(&quot;Should not reach this&quot;);</span>
+<span class="nc" id="L121">      }</span>
+<span class="nc" id="L122">    }</span>
+
+    @Transition(from = &quot;ONLINE&quot;, to = &quot;DROPPED&quot;)
+    public void onBecomeDroppedFromOnline(Message message, NotificationContext context) {
+      try {
+<span class="nc" id="L127">        LOGGER.info(&quot;BrokerResourceOnlineOfflineStateModel.onBecomeDroppedFromOnline() : &quot; + message);</span>
+<span class="nc" id="L128">        String tableName = message.getPartitionName();</span>
+<span class="nc" id="L129">        _helixExternalViewBasedRouting.markDataResourceOffline(tableName);</span>
+<span class="nc" id="L130">      } catch (Exception e) {</span>
+<span class="nc" id="L131">        LOGGER.error(&quot;Caught exception during ONLINE -&gt; DROPPED transition&quot;, e);</span>
+<span class="nc" id="L132">        Utils.rethrowException(e);</span>
+<span class="nc" id="L133">        throw new AssertionError(&quot;Should not reach this&quot;);</span>
+<span class="nc" id="L134">      }</span>
+<span class="nc" id="L135">    }</span>
+
+    @Transition(from = &quot;ERROR&quot;, to = &quot;OFFLINE&quot;)
+    public void onBecomeOfflineFromError(Message message, NotificationContext context) {
+<span class="nc" id="L139">      LOGGER.info(&quot;Resetting the state for broker resource:{} from ERROR to OFFLINE&quot;, message.getPartitionName());</span>
+<span class="nc" id="L140">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

@@ -1,0 +1,397 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>RangePredicateEvaluatorFactory.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-perf</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.operator.filter.predicate</a> &gt; <span class="el_source">RangePredicateEvaluatorFactory.java</span></div><h1>RangePredicateEvaluatorFactory.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.operator.filter.predicate;
+
+import com.linkedin.pinot.common.data.FieldSpec;
+import com.linkedin.pinot.core.common.Predicate;
+import com.linkedin.pinot.core.common.predicate.RangePredicate;
+import com.linkedin.pinot.core.realtime.impl.dictionary.MutableDictionary;
+import com.linkedin.pinot.core.segment.index.readers.Dictionary;
+import com.linkedin.pinot.core.segment.index.readers.ImmutableDictionaryReader;
+import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
+import it.unimi.dsi.fastutil.ints.IntSet;
+
+
+/**
+ * Factory for RANGE predicate evaluators.
+ */
+public class RangePredicateEvaluatorFactory {
+<span class="nc" id="L32">  private RangePredicateEvaluatorFactory() {</span>
+<span class="nc" id="L33">  }</span>
+
+  /**
+   * Create a new instance of dictionary based RANGE predicate evaluator.
+   *
+   * @param rangePredicate RANGE predicate to evaluate
+   * @param dictionary Dictionary for the column
+   * @return Dictionary based RANGE predicate evaluator
+   */
+  public static BaseDictionaryBasedPredicateEvaluator newDictionaryBasedEvaluator(RangePredicate rangePredicate,
+      Dictionary dictionary) {
+<span class="fc bfc" id="L44" title="All 2 branches covered.">    if (dictionary instanceof ImmutableDictionaryReader) {</span>
+<span class="fc" id="L45">      return new OfflineDictionaryBasedRangePredicateEvaluator(rangePredicate, (ImmutableDictionaryReader) dictionary);</span>
+    } else {
+<span class="fc" id="L47">      return new RealtimeDictionaryBasedRangePredicateEvaluator(rangePredicate, (MutableDictionary) dictionary);</span>
+    }
+  }
+
+  /**
+   * Create a new instance of raw value based RANGE predicate evaluator.
+   *
+   * @param rangePredicate RANGE predicate to evaluate
+   * @param dataType Data type for the column
+   * @return Raw value based RANGE predicate evaluator
+   */
+  public static BaseRawValueBasedPredicateEvaluator newRawValueBasedEvaluator(RangePredicate rangePredicate,
+      FieldSpec.DataType dataType) {
+<span class="pc bpc" id="L60" title="1 of 6 branches missed.">    switch (dataType) {</span>
+      case INT:
+<span class="fc" id="L62">        return new IntRawValueBasedRangePredicateEvaluator(rangePredicate);</span>
+      case LONG:
+<span class="fc" id="L64">        return new LongRawValueBasedRangePredicateEvaluator(rangePredicate);</span>
+      case FLOAT:
+<span class="fc" id="L66">        return new FloatRawValueBasedRangePredicateEvaluator(rangePredicate);</span>
+      case DOUBLE:
+<span class="fc" id="L68">        return new DoubleRawValueBasedRangePredicateEvaluator(rangePredicate);</span>
+      case STRING:
+<span class="fc" id="L70">        return new StringRawValueBasedRangePredicateEvaluator(rangePredicate);</span>
+      default:
+<span class="nc" id="L72">        throw new UnsupportedOperationException(&quot;Unsupported data type: &quot; + dataType);</span>
+    }
+  }
+
+  private static final class OfflineDictionaryBasedRangePredicateEvaluator extends BaseDictionaryBasedPredicateEvaluator {
+    final int _startDictId;
+    // Exclusive
+    final int _endDictId;
+    int[] _matchingDictIds;
+
+<span class="fc" id="L82">    OfflineDictionaryBasedRangePredicateEvaluator(RangePredicate rangePredicate, ImmutableDictionaryReader dictionary) {</span>
+<span class="fc" id="L83">      String lowerBoundary = rangePredicate.getLowerBoundary();</span>
+<span class="fc" id="L84">      String upperBoundary = rangePredicate.getUpperBoundary();</span>
+<span class="fc" id="L85">      boolean includeLowerBoundary = rangePredicate.includeLowerBoundary();</span>
+<span class="fc" id="L86">      boolean includeUpperBoundary = rangePredicate.includeUpperBoundary();</span>
+
+<span class="fc bfc" id="L88" title="All 2 branches covered.">      if (lowerBoundary.equals(&quot;*&quot;)) {</span>
+<span class="fc" id="L89">        _startDictId = 0;</span>
+      } else {
+<span class="fc" id="L91">        int insertionIndex = dictionary.insertionIndexOf(lowerBoundary);</span>
+<span class="fc bfc" id="L92" title="All 2 branches covered.">        if (insertionIndex &lt; 0) {</span>
+<span class="fc" id="L93">          _startDictId = -(insertionIndex + 1);</span>
+        } else {
+<span class="fc bfc" id="L95" title="All 2 branches covered.">          if (includeLowerBoundary) {</span>
+<span class="fc" id="L96">            _startDictId = insertionIndex;</span>
+          } else {
+<span class="fc" id="L98">            _startDictId = insertionIndex + 1;</span>
+          }
+        }
+      }
+<span class="fc bfc" id="L102" title="All 2 branches covered.">      if (upperBoundary.equals(&quot;*&quot;)) {</span>
+<span class="fc" id="L103">        _endDictId = dictionary.length();</span>
+      } else {
+<span class="fc" id="L105">        int insertionIndex = dictionary.insertionIndexOf(upperBoundary);</span>
+<span class="fc bfc" id="L106" title="All 2 branches covered.">        if (insertionIndex &lt; 0) {</span>
+<span class="fc" id="L107">          _endDictId = -(insertionIndex + 1);</span>
+        } else {
+<span class="fc bfc" id="L109" title="All 2 branches covered.">          if (includeUpperBoundary) {</span>
+<span class="fc" id="L110">            _endDictId = insertionIndex + 1;</span>
+          } else {
+<span class="fc" id="L112">            _endDictId = insertionIndex;</span>
+          }
+        }
+      }
+<span class="fc" id="L116">    }</span>
+
+    @Override
+    public Predicate.Type getPredicateType() {
+<span class="fc" id="L120">      return Predicate.Type.RANGE;</span>
+    }
+
+    @Override
+    public boolean isAlwaysFalse() {
+<span class="fc bfc" id="L125" title="All 2 branches covered.">      return _startDictId &gt;= _endDictId;</span>
+    }
+
+    @Override
+    public boolean applySV(int dictId) {
+<span class="fc bfc" id="L130" title="All 4 branches covered.">      return _startDictId &lt;= dictId &amp;&amp; _endDictId &gt; dictId;</span>
+    }
+
+    @Override
+    public int[] getMatchingDictIds() {
+<span class="pc bpc" id="L135" title="1 of 2 branches missed.">      if (_matchingDictIds == null) {</span>
+<span class="fc" id="L136">        int numMatchingDictIds = _endDictId - _startDictId;</span>
+<span class="fc bfc" id="L137" title="All 2 branches covered.">        if (numMatchingDictIds &lt;= 0) {</span>
+<span class="fc" id="L138">          _matchingDictIds = new int[0];</span>
+        } else {
+<span class="fc" id="L140">          _matchingDictIds = new int[numMatchingDictIds];</span>
+<span class="fc bfc" id="L141" title="All 2 branches covered.">          for (int i = 0; i &lt; numMatchingDictIds; i++) {</span>
+<span class="fc" id="L142">            _matchingDictIds[i] = _startDictId + i;</span>
+          }
+        }
+      }
+<span class="fc" id="L146">      return _matchingDictIds;</span>
+    }
+  }
+
+  private static final class RealtimeDictionaryBasedRangePredicateEvaluator extends BaseDictionaryBasedPredicateEvaluator {
+    final IntSet _matchingDictIdSet;
+    int[] _matchingDictIds;
+
+<span class="fc" id="L154">    RealtimeDictionaryBasedRangePredicateEvaluator(RangePredicate rangePredicate, MutableDictionary dictionary) {</span>
+<span class="fc" id="L155">      _matchingDictIdSet = new IntOpenHashSet();</span>
+
+<span class="fc" id="L157">      int dictionarySize = dictionary.length();</span>
+<span class="pc bpc" id="L158" title="1 of 2 branches missed.">      if (dictionarySize == 0) {</span>
+<span class="nc" id="L159">        return;</span>
+      }
+
+<span class="fc" id="L162">      String lowerBoundary = rangePredicate.getLowerBoundary();</span>
+<span class="fc" id="L163">      String upperBoundary = rangePredicate.getUpperBoundary();</span>
+<span class="fc" id="L164">      boolean includeLowerBoundary = rangePredicate.includeLowerBoundary();</span>
+<span class="fc" id="L165">      boolean includeUpperBoundary = rangePredicate.includeUpperBoundary();</span>
+
+<span class="fc bfc" id="L167" title="All 2 branches covered.">      if (lowerBoundary.equals(&quot;*&quot;)) {</span>
+<span class="fc" id="L168">        lowerBoundary = dictionary.getMinVal().toString();</span>
+      }
+<span class="fc bfc" id="L170" title="All 2 branches covered.">      if (upperBoundary.equals(&quot;*&quot;)) {</span>
+<span class="fc" id="L171">        upperBoundary = dictionary.getMaxVal().toString();</span>
+      }
+
+<span class="fc bfc" id="L174" title="All 2 branches covered.">      for (int dictId = 0; dictId &lt; dictionarySize; dictId++) {</span>
+<span class="fc bfc" id="L175" title="All 2 branches covered.">        if (dictionary.inRange(lowerBoundary, upperBoundary, dictId, includeLowerBoundary, includeUpperBoundary)) {</span>
+<span class="fc" id="L176">          _matchingDictIdSet.add(dictId);</span>
+        }
+      }
+<span class="fc" id="L179">    }</span>
+
+    @Override
+    public Predicate.Type getPredicateType() {
+<span class="fc" id="L183">      return Predicate.Type.RANGE;</span>
+    }
+
+    @Override
+    public boolean applySV(int dictId) {
+<span class="fc" id="L188">      return _matchingDictIdSet.contains(dictId);</span>
+    }
+
+    @Override
+    public int[] getMatchingDictIds() {
+<span class="pc bpc" id="L193" title="1 of 2 branches missed.">      if (_matchingDictIds == null) {</span>
+<span class="fc" id="L194">        _matchingDictIds = _matchingDictIdSet.toIntArray();</span>
+      }
+<span class="fc" id="L196">      return _matchingDictIds;</span>
+    }
+
+    @Override
+    public int[] getNonMatchingDictIds() {
+<span class="nc" id="L201">      throw new UnsupportedOperationException();</span>
+    }
+
+    @Override
+    public boolean isAlwaysFalse() {
+<span class="fc" id="L206">      return _matchingDictIdSet.isEmpty();</span>
+    }
+  }
+
+  private static final class IntRawValueBasedRangePredicateEvaluator extends BaseRawValueBasedPredicateEvaluator {
+    final int _lowerBoundary;
+    final int _upperBoundary;
+    final boolean _includeLowerBoundary;
+    final boolean _includeUpperBoundary;
+
+<span class="fc" id="L216">    IntRawValueBasedRangePredicateEvaluator(RangePredicate rangePredicate) {</span>
+<span class="fc" id="L217">      _includeLowerBoundary = rangePredicate.includeLowerBoundary();</span>
+<span class="fc" id="L218">      _includeUpperBoundary = rangePredicate.includeUpperBoundary();</span>
+<span class="fc" id="L219">      String lowerBoundary = rangePredicate.getLowerBoundary();</span>
+<span class="fc" id="L220">      String upperBoundary = rangePredicate.getUpperBoundary();</span>
+<span class="fc bfc" id="L221" title="All 2 branches covered.">      _lowerBoundary = lowerBoundary.equals(&quot;*&quot;) ? Integer.MIN_VALUE : Integer.parseInt(lowerBoundary);</span>
+<span class="fc bfc" id="L222" title="All 2 branches covered.">      _upperBoundary = upperBoundary.equals(&quot;*&quot;) ? Integer.MAX_VALUE : Integer.parseInt(upperBoundary);</span>
+<span class="fc" id="L223">    }</span>
+
+    @Override
+    public Predicate.Type getPredicateType() {
+<span class="fc" id="L227">      return Predicate.Type.RANGE;</span>
+    }
+
+    @Override
+    public boolean applySV(int value) {
+      boolean result;
+<span class="fc bfc" id="L233" title="All 2 branches covered.">      if (_includeLowerBoundary) {</span>
+<span class="fc bfc" id="L234" title="All 2 branches covered.">        result = _lowerBoundary &lt;= value;</span>
+      } else {
+<span class="fc bfc" id="L236" title="All 2 branches covered.">        result = _lowerBoundary &lt; value;</span>
+      }
+<span class="fc bfc" id="L238" title="All 2 branches covered.">      if (_includeUpperBoundary) {</span>
+<span class="fc bfc" id="L239" title="All 2 branches covered.">        result &amp;= _upperBoundary &gt;= value;</span>
+      } else {
+<span class="fc bfc" id="L241" title="All 2 branches covered.">        result &amp;= _upperBoundary &gt; value;</span>
+      }
+<span class="fc" id="L243">      return result;</span>
+    }
+  }
+
+  private static final class LongRawValueBasedRangePredicateEvaluator extends BaseRawValueBasedPredicateEvaluator {
+    final long _lowerBoundary;
+    final long _upperBoundary;
+    final boolean _includeLowerBoundary;
+    final boolean _includeUpperBoundary;
+
+<span class="fc" id="L253">    LongRawValueBasedRangePredicateEvaluator(RangePredicate rangePredicate) {</span>
+<span class="fc" id="L254">      _includeLowerBoundary = rangePredicate.includeLowerBoundary();</span>
+<span class="fc" id="L255">      _includeUpperBoundary = rangePredicate.includeUpperBoundary();</span>
+<span class="fc" id="L256">      String lowerBoundary = rangePredicate.getLowerBoundary();</span>
+<span class="fc" id="L257">      String upperBoundary = rangePredicate.getUpperBoundary();</span>
+<span class="fc bfc" id="L258" title="All 2 branches covered.">      _lowerBoundary = lowerBoundary.equals(&quot;*&quot;) ? Integer.MIN_VALUE : Long.parseLong(lowerBoundary);</span>
+<span class="fc bfc" id="L259" title="All 2 branches covered.">      _upperBoundary = upperBoundary.equals(&quot;*&quot;) ? Integer.MAX_VALUE : Long.parseLong(upperBoundary);</span>
+<span class="fc" id="L260">    }</span>
+
+    @Override
+    public Predicate.Type getPredicateType() {
+<span class="nc" id="L264">      return Predicate.Type.RANGE;</span>
+    }
+
+    @Override
+    public boolean applySV(long value) {
+      boolean result;
+<span class="fc bfc" id="L270" title="All 2 branches covered.">      if (_includeLowerBoundary) {</span>
+<span class="fc bfc" id="L271" title="All 2 branches covered.">        result = _lowerBoundary &lt;= value;</span>
+      } else {
+<span class="fc bfc" id="L273" title="All 2 branches covered.">        result = _lowerBoundary &lt; value;</span>
+      }
+<span class="fc bfc" id="L275" title="All 2 branches covered.">      if (_includeUpperBoundary) {</span>
+<span class="fc bfc" id="L276" title="All 2 branches covered.">        result &amp;= _upperBoundary &gt;= value;</span>
+      } else {
+<span class="fc bfc" id="L278" title="All 2 branches covered.">        result &amp;= _upperBoundary &gt; value;</span>
+      }
+<span class="fc" id="L280">      return result;</span>
+    }
+  }
+
+  private static final class FloatRawValueBasedRangePredicateEvaluator extends BaseRawValueBasedPredicateEvaluator {
+    final float _lowerBoundary;
+    final float _upperBoundary;
+    final boolean _includeLowerBoundary;
+    final boolean _includeUpperBoundary;
+
+<span class="fc" id="L290">    FloatRawValueBasedRangePredicateEvaluator(RangePredicate rangePredicate) {</span>
+<span class="fc" id="L291">      _includeLowerBoundary = rangePredicate.includeLowerBoundary();</span>
+<span class="fc" id="L292">      _includeUpperBoundary = rangePredicate.includeUpperBoundary();</span>
+<span class="fc" id="L293">      String lowerBoundary = rangePredicate.getLowerBoundary();</span>
+<span class="fc" id="L294">      String upperBoundary = rangePredicate.getUpperBoundary();</span>
+<span class="fc bfc" id="L295" title="All 2 branches covered.">      _lowerBoundary = lowerBoundary.equals(&quot;*&quot;) ? Integer.MIN_VALUE : Float.parseFloat(lowerBoundary);</span>
+<span class="fc bfc" id="L296" title="All 2 branches covered.">      _upperBoundary = upperBoundary.equals(&quot;*&quot;) ? Integer.MAX_VALUE : Float.parseFloat(upperBoundary);</span>
+<span class="fc" id="L297">    }</span>
+
+    @Override
+    public Predicate.Type getPredicateType() {
+<span class="fc" id="L301">      return Predicate.Type.RANGE;</span>
+    }
+
+    @Override
+    public boolean applySV(float value) {
+      boolean result;
+<span class="fc bfc" id="L307" title="All 2 branches covered.">      if (_includeLowerBoundary) {</span>
+<span class="fc bfc" id="L308" title="All 2 branches covered.">        result = _lowerBoundary &lt;= value;</span>
+      } else {
+<span class="fc bfc" id="L310" title="All 2 branches covered.">        result = _lowerBoundary &lt; value;</span>
+      }
+<span class="fc bfc" id="L312" title="All 2 branches covered.">      if (_includeUpperBoundary) {</span>
+<span class="fc bfc" id="L313" title="All 2 branches covered.">        result &amp;= _upperBoundary &gt;= value;</span>
+      } else {
+<span class="fc bfc" id="L315" title="All 2 branches covered.">        result &amp;= _upperBoundary &gt; value;</span>
+      }
+<span class="fc" id="L317">      return result;</span>
+    }
+  }
+
+  private static final class DoubleRawValueBasedRangePredicateEvaluator extends BaseRawValueBasedPredicateEvaluator {
+    final double _lowerBoundary;
+    final double _upperBoundary;
+    final boolean _includeLowerBoundary;
+    final boolean _includeUpperBoundary;
+
+<span class="fc" id="L327">    DoubleRawValueBasedRangePredicateEvaluator(RangePredicate rangePredicate) {</span>
+<span class="fc" id="L328">      _includeLowerBoundary = rangePredicate.includeLowerBoundary();</span>
+<span class="fc" id="L329">      _includeUpperBoundary = rangePredicate.includeUpperBoundary();</span>
+<span class="fc" id="L330">      String lowerBoundary = rangePredicate.getLowerBoundary();</span>
+<span class="fc" id="L331">      String upperBoundary = rangePredicate.getUpperBoundary();</span>
+<span class="fc bfc" id="L332" title="All 2 branches covered.">      _lowerBoundary = lowerBoundary.equals(&quot;*&quot;) ? Integer.MIN_VALUE : Double.parseDouble(lowerBoundary);</span>
+<span class="fc bfc" id="L333" title="All 2 branches covered.">      _upperBoundary = upperBoundary.equals(&quot;*&quot;) ? Integer.MAX_VALUE : Double.parseDouble(upperBoundary);</span>
+<span class="fc" id="L334">    }</span>
+
+    @Override
+    public Predicate.Type getPredicateType() {
+<span class="fc" id="L338">      return Predicate.Type.RANGE;</span>
+    }
+
+    @Override
+    public boolean applySV(double value) {
+      boolean result;
+<span class="fc bfc" id="L344" title="All 2 branches covered.">      if (_includeLowerBoundary) {</span>
+<span class="fc bfc" id="L345" title="All 2 branches covered.">        result = _lowerBoundary &lt;= value;</span>
+      } else {
+<span class="fc bfc" id="L347" title="All 2 branches covered.">        result = _lowerBoundary &lt; value;</span>
+      }
+<span class="fc bfc" id="L349" title="All 2 branches covered.">      if (_includeUpperBoundary) {</span>
+<span class="fc bfc" id="L350" title="All 2 branches covered.">        result &amp;= _upperBoundary &gt;= value;</span>
+      } else {
+<span class="fc bfc" id="L352" title="All 2 branches covered.">        result &amp;= _upperBoundary &gt; value;</span>
+      }
+<span class="fc" id="L354">      return result;</span>
+    }
+  }
+
+  private static final class StringRawValueBasedRangePredicateEvaluator extends BaseRawValueBasedPredicateEvaluator {
+    final String _lowerBoundary;
+    final String _upperBoundary;
+    final boolean _includeLowerBoundary;
+    final boolean _includeUpperBoundary;
+
+<span class="fc" id="L364">    StringRawValueBasedRangePredicateEvaluator(RangePredicate rangePredicate) {</span>
+<span class="fc" id="L365">      _lowerBoundary = rangePredicate.getLowerBoundary();</span>
+<span class="fc" id="L366">      _upperBoundary = rangePredicate.getUpperBoundary();</span>
+<span class="fc" id="L367">      _includeLowerBoundary = rangePredicate.includeLowerBoundary();</span>
+<span class="fc" id="L368">      _includeUpperBoundary = rangePredicate.includeUpperBoundary();</span>
+<span class="fc" id="L369">    }</span>
+
+    @Override
+    public Predicate.Type getPredicateType() {
+<span class="nc" id="L373">      return Predicate.Type.RANGE;</span>
+    }
+
+    @Override
+    public boolean applySV(String value) {
+<span class="fc" id="L378">      boolean result = true;</span>
+<span class="fc bfc" id="L379" title="All 2 branches covered.">      if (!_lowerBoundary.equals(&quot;*&quot;)) {</span>
+<span class="fc bfc" id="L380" title="All 2 branches covered.">        if (_includeLowerBoundary) {</span>
+<span class="fc bfc" id="L381" title="All 2 branches covered.">          result = _lowerBoundary.compareTo(value) &lt;= 0;</span>
+        } else {
+<span class="fc bfc" id="L383" title="All 2 branches covered.">          result = _lowerBoundary.compareTo(value) &lt; 0;</span>
+        }
+      }
+<span class="fc bfc" id="L386" title="All 2 branches covered.">      if (!_upperBoundary.equals(&quot;*&quot;)) {</span>
+<span class="fc bfc" id="L387" title="All 2 branches covered.">        if (_includeUpperBoundary) {</span>
+<span class="fc bfc" id="L388" title="All 2 branches covered.">          result &amp;= _upperBoundary.compareTo(value) &gt;= 0;</span>
+        } else {
+<span class="fc bfc" id="L390" title="All 2 branches covered.">          result &amp;= _upperBoundary.compareTo(value) &gt; 0;</span>
+        }
+      }
+<span class="fc" id="L393">      return result;</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

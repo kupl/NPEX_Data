@@ -1,0 +1,339 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>AsyncResponseFuture.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-broker</a> &gt; <a href="../index.html" class="el_bundle">pinot-transport</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.transport.common</a> &gt; <span class="el_source">AsyncResponseFuture.java</span></div><h1>AsyncResponseFuture.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.transport.common;
+
+import com.linkedin.pinot.common.response.ServerInstance;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+public class AsyncResponseFuture&lt;T&gt; implements Callback&lt;T&gt;, ServerResponseFuture&lt;T&gt; {
+<span class="fc" id="L35">  protected static Logger LOGGER = LoggerFactory.getLogger(AsyncResponseFuture.class);</span>
+
+  private Cancellable _cancellable;
+
+  // Id for this future
+  private final ServerInstance _key;
+
+  // Lock for mutex
+<span class="pc" id="L43">  private final Lock _futureLock = new ReentrantLock();</span>
+  // Condition variable to wait for the response
+<span class="pc" id="L45">  private final Condition _finished = _futureLock.newCondition();</span>
+
+  /**
+   *  Delayed response.
+   *  If the future is cancelled or in case of error, this will be null.
+   *  In that case, clients will need to use specific APIs to distinguish
+   *  between cancel and errors.
+   */
+  private volatile T _delayedResponse;
+  // Exception in case of error
+  private volatile Throwable _error;
+  // List of runnables that needs to be executed on completion
+<span class="pc" id="L57">  private final List&lt;Runnable&gt; _pendingRunnable = new ArrayList&lt;Runnable&gt;();</span>
+  //List of executors that needs to run the runnables.
+<span class="pc" id="L59">  private final List&lt;Executor&gt; _pendingRunnableExecutors = new ArrayList&lt;Executor&gt;();</span>
+
+  // Cached response/errors
+  private volatile Map&lt;ServerInstance, T&gt; _responseMap;
+  private volatile Map&lt;ServerInstance, Throwable&gt; _errorMap;
+
+  // For  debug
+  private final String _ctxt;
+  private final long _startTime;
+  private long _endTime;
+
+  /**
+   * Response Future State
+   */
+<span class="pc" id="L73">  public enum State {</span>
+<span class="fc" id="L74">    PENDING,</span>
+<span class="fc" id="L75">    CANCELLED,</span>
+<span class="fc" id="L76">    DONE;</span>
+
+    public boolean isCompleted() {
+<span class="fc bfc" id="L79" title="All 2 branches covered.">      return this != PENDING;</span>
+    }
+  }
+
+  // State of the future
+  private State _state;
+
+<span class="fc" id="L86">  public AsyncResponseFuture(ServerInstance key, String ctxt) {</span>
+<span class="fc" id="L87">    _key = key;</span>
+<span class="fc" id="L88">    _state = State.PENDING;</span>
+<span class="fc" id="L89">    _cancellable = new NoopCancellable();</span>
+<span class="fc" id="L90">    _ctxt = ctxt;</span>
+<span class="fc" id="L91">    _startTime = System.currentTimeMillis();</span>
+<span class="fc" id="L92">  }</span>
+
+<span class="nc" id="L94">  public AsyncResponseFuture(ServerInstance key, Throwable t, String ctxt) {</span>
+<span class="nc" id="L95">    _key = key;</span>
+<span class="nc" id="L96">    _state = State.DONE;</span>
+<span class="nc" id="L97">    _error = t;</span>
+<span class="nc" id="L98">    _ctxt = ctxt;</span>
+<span class="nc" id="L99">    _startTime = System.currentTimeMillis();</span>
+<span class="nc" id="L100">  }</span>
+
+  public void setCancellable(Cancellable cancellable) {
+<span class="fc" id="L103">    _cancellable = cancellable;</span>
+<span class="fc" id="L104">  }</span>
+
+  @Override
+  public boolean cancel(boolean mayInterruptIfRunning) {
+<span class="fc" id="L108">    boolean isCancelled = false;</span>
+    try {
+<span class="fc" id="L110">      _futureLock.lock();</span>
+<span class="fc bfc" id="L111" title="All 2 branches covered.">      if (_state.isCompleted()) {</span>
+<span class="fc" id="L112">        LOGGER.info(&quot;{} Request is no longer pending. Cannot cancel !!&quot;, _ctxt);</span>
+<span class="fc" id="L113">        return false;</span>
+      }
+<span class="fc" id="L115">      isCancelled = _cancellable.cancel();</span>
+<span class="pc bpc" id="L116" title="1 of 2 branches missed.">      if (isCancelled) {</span>
+<span class="fc" id="L117">        setDone(State.CANCELLED);</span>
+      }
+    } finally {
+<span class="pc" id="L120">      _futureLock.unlock();</span>
+<span class="fc" id="L121">    }</span>
+<span class="fc" id="L122">    return isCancelled;</span>
+  }
+
+  @Override
+  public void onSuccess(T result) {
+    try {
+<span class="fc" id="L128">      _futureLock.lock();</span>
+<span class="fc bfc" id="L129" title="All 2 branches covered.">      if (_state.isCompleted()) {</span>
+<span class="fc" id="L130">        LOGGER.debug(&quot;{} Request has already been completed. Discarding this response !!&quot;, _ctxt, result);</span>
+        return;
+      }
+<span class="fc" id="L133">      _delayedResponse = result;</span>
+<span class="fc" id="L134">      setDone(State.DONE);</span>
+    } finally {
+<span class="pc" id="L136">      _futureLock.unlock();</span>
+<span class="fc" id="L137">    }</span>
+<span class="fc" id="L138">  }</span>
+
+  /**
+   * Set Exception and let the future listener get notified.
+   * @param t throwable
+   */
+  @Override
+  public void onError(Throwable t) {
+    try {
+<span class="fc" id="L147">      _futureLock.lock();</span>
+<span class="fc bfc" id="L148" title="All 2 branches covered.">      if (_state.isCompleted()) {</span>
+<span class="fc" id="L149">        LOGGER.debug(&quot;{} Request has already been completed. Discarding error message !!&quot;, _ctxt, t);</span>
+        return;
+      }
+<span class="fc" id="L152">      _error = t;</span>
+<span class="fc" id="L153">      setDone(State.DONE);</span>
+    } finally {
+<span class="pc" id="L155">      _futureLock.unlock();</span>
+<span class="fc" id="L156">    }</span>
+<span class="fc" id="L157">  }</span>
+
+  @Override
+  public boolean isCancelled() {
+<span class="fc bfc" id="L161" title="All 2 branches covered.">    return _state == State.CANCELLED;</span>
+  }
+
+  @Override
+  public boolean isDone() {
+<span class="fc" id="L166">    return _state.isCompleted();</span>
+  }
+
+  @Override
+  public Map&lt;ServerInstance, T&gt; get() throws InterruptedException, ExecutionException {
+    try {
+<span class="fc" id="L172">      _futureLock.lock();</span>
+<span class="pc bpc" id="L173" title="1 of 2 branches missed.">      while (!_state.isCompleted()) {</span>
+<span class="nc" id="L174">        _finished.await();</span>
+      }
+<span class="pc bpc" id="L176" title="1 of 2 branches missed.">      if (null == _responseMap) {</span>
+<span class="fc" id="L177">        setResponseMap();</span>
+      }
+    } finally {
+<span class="pc" id="L180">      _futureLock.unlock();</span>
+<span class="fc" id="L181">    }</span>
+<span class="fc" id="L182">    return _responseMap;</span>
+  }
+
+  @Override
+  public T getOne() throws InterruptedException, ExecutionException {
+    try {
+<span class="fc" id="L188">      _futureLock.lock();</span>
+<span class="fc bfc" id="L189" title="All 2 branches covered.">      while (!_state.isCompleted()) {</span>
+<span class="fc" id="L190">        _finished.await();</span>
+      }
+    } finally {
+<span class="pc" id="L193">      _futureLock.unlock();</span>
+<span class="fc" id="L194">    }</span>
+<span class="fc" id="L195">    return _delayedResponse;</span>
+  }
+
+  /**
+   * Get the duration between the time this future was created (approximately the time when the request was sent)
+   * and the time when the response was received.
+   * @return
+   */
+  public long getDurationMillis() {
+<span class="pc bpc" id="L204" title="1 of 2 branches missed.">    if (_endTime &gt; 0) {</span>
+<span class="fc" id="L205">      return _endTime - _startTime;</span>
+    }
+<span class="nc" id="L207">    return -1L;</span>
+  }
+
+  @Override
+  public T getOne(long timeout, TimeUnit unit)
+      throws InterruptedException, ExecutionException, TimeoutException {
+    try {
+<span class="fc" id="L214">      _futureLock.lock();</span>
+<span class="fc bfc" id="L215" title="All 2 branches covered.">      while (!_state.isCompleted()) {</span>
+<span class="fc" id="L216">        boolean notElapsed = _finished.await(timeout,unit);</span>
+<span class="pc bpc" id="L217" title="1 of 2 branches missed.">        if (!notElapsed)</span>
+<span class="fc" id="L218">          throw new TimeoutException(&quot;Timedout waiting for async result for key &quot; + _key);</span>
+<span class="nc" id="L219">      }</span>
+    } finally {
+<span class="fc" id="L221">      _futureLock.unlock();</span>
+<span class="fc" id="L222">    }</span>
+<span class="fc" id="L223">    return _delayedResponse;</span>
+  }
+
+  @Override
+  public Map&lt;ServerInstance, Throwable&gt; getError() {
+<span class="fc bfc" id="L228" title="All 4 branches covered.">    if ((null == _errorMap) &amp;&amp; (null != _error)) {</span>
+      try {
+<span class="fc" id="L230">        _futureLock.lock();</span>
+<span class="pc bpc" id="L231" title="2 of 4 branches missed.">        if ((null == _errorMap) &amp;&amp; (null != _error)) {</span>
+<span class="fc" id="L232">          _errorMap = new HashMap&lt;ServerInstance, Throwable&gt;();</span>
+<span class="fc" id="L233">          _errorMap.put(_key, _error);</span>
+        }
+      } finally {
+<span class="pc" id="L236">        _futureLock.unlock();</span>
+<span class="fc" id="L237">      }</span>
+    }
+<span class="fc" id="L239">    return _errorMap;</span>
+  }
+
+  private void setResponseMap() {
+<span class="fc bfc" id="L243" title="All 2 branches covered.">    if (null != _delayedResponse) {</span>
+<span class="fc" id="L244">      _responseMap = new HashMap&lt;ServerInstance, T&gt;();</span>
+<span class="fc" id="L245">      _responseMap.put(_key, _delayedResponse);</span>
+    }
+<span class="fc" id="L247">  }</span>
+
+  @Override
+  public Map&lt;ServerInstance, T&gt; get(long timeout, TimeUnit unit) throws InterruptedException, ExecutionException, TimeoutException {
+    try {
+<span class="fc" id="L252">      _futureLock.lock();</span>
+<span class="pc bpc" id="L253" title="1 of 2 branches missed.">      while (!_state.isCompleted()) {</span>
+<span class="fc" id="L254">        boolean notElapsed = _finished.await(timeout, unit);</span>
+<span class="pc bpc" id="L255" title="1 of 2 branches missed.">        if (!notElapsed) {</span>
+<span class="fc" id="L256">          throw new TimeoutException(&quot;Timeout awaiting response !!&quot;);</span>
+        }
+<span class="nc bnc" id="L258" title="All 2 branches missed.">        if (null == _responseMap) {</span>
+<span class="nc" id="L259">          setResponseMap();</span>
+        }
+<span class="nc" id="L261">      }</span>
+    } finally {
+<span class="pc" id="L263">      _futureLock.unlock();</span>
+<span class="nc" id="L264">    }</span>
+<span class="nc" id="L265">    return _responseMap;</span>
+  }
+
+  /**
+   * Mark complete and notify threads waiting for this condition
+   */
+  private void setDone(State state) {
+<span class="fc" id="L272">    LOGGER.debug(&quot;{} Setting state to : {}, Current State : {}&quot;, _ctxt, state, _state);</span>
+<span class="fc" id="L273">    _endTime = System.currentTimeMillis();</span>
+    try {
+<span class="fc" id="L275">      _futureLock.lock();</span>
+<span class="fc" id="L276">      _state = state;</span>
+<span class="fc" id="L277">      _finished.signalAll();</span>
+    } finally {
+<span class="pc" id="L279">      _futureLock.unlock();</span>
+<span class="fc" id="L280">    }</span>
+<span class="fc bfc" id="L281" title="All 2 branches covered.">    for (int i = 0; i &lt; _pendingRunnable.size(); i++) {</span>
+<span class="fc" id="L282">      LOGGER.debug(&quot;{} Running pending runnable :&quot; + i, _ctxt);</span>
+<span class="fc" id="L283">      Executor e = _pendingRunnableExecutors.get(i);</span>
+<span class="fc bfc" id="L284" title="All 2 branches covered.">      if (null != e) {</span>
+<span class="fc" id="L285">        e.execute(_pendingRunnable.get(i));</span>
+      } else {
+<span class="fc" id="L287">        _pendingRunnable.get(i).run(); // run in the current thread.</span>
+      }
+    }
+<span class="fc" id="L290">    _pendingRunnable.clear();</span>
+<span class="fc" id="L291">    _pendingRunnableExecutors.clear();</span>
+<span class="fc" id="L292">  }</span>
+
+  @Override
+  public void addListener(Runnable listener, Executor executor) {
+<span class="fc" id="L296">    boolean processed = false;</span>
+    try {
+<span class="fc" id="L298">      _futureLock.lock();</span>
+<span class="fc bfc" id="L299" title="All 2 branches covered.">      if (!_state.isCompleted()) {</span>
+<span class="fc" id="L300">        _pendingRunnable.add(listener);</span>
+<span class="fc" id="L301">        _pendingRunnableExecutors.add(executor);</span>
+<span class="fc" id="L302">        processed = true;</span>
+      }
+    } finally {
+<span class="pc" id="L305">      _futureLock.unlock();</span>
+<span class="fc" id="L306">    }</span>
+
+<span class="fc bfc" id="L308" title="All 2 branches covered.">    if (!processed) {</span>
+<span class="fc" id="L309">      LOGGER.debug(&quot;{} Executing the listener as the future event is already done !!&quot;, _ctxt);</span>
+<span class="pc bpc" id="L310" title="1 of 2 branches missed.">      if (null != executor) {</span>
+<span class="nc" id="L311">        executor.execute(listener);</span>
+      } else {
+<span class="fc" id="L313">        listener.run(); // run in the same thread</span>
+      }
+    }
+<span class="fc" id="L316">  }</span>
+
+<span class="fc" id="L318">  public static class NoopCancellable implements Cancellable {</span>
+    @Override
+    public boolean cancel() {
+<span class="fc" id="L321">      return true;</span>
+    }
+  }
+
+  @Override
+  public ServerInstance getServerInstance() {
+<span class="fc" id="L327">    return _key;</span>
+  }
+
+  @Override
+  public String getName() {
+<span class="fc" id="L332">    return _key.toString();</span>
+  }
+
+  public State getState() {
+<span class="nc" id="L336">    return _state;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

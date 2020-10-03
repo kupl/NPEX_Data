@@ -1,0 +1,340 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>BaseDefaultColumnHandler.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-controller</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.segment.index.loader.defaultcolumn</a> &gt; <span class="el_source">BaseDefaultColumnHandler.java</span></div><h1>BaseDefaultColumnHandler.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.segment.index.loader.defaultcolumn;
+
+import com.google.common.base.Preconditions;
+import com.linkedin.pinot.common.data.FieldSpec;
+import com.linkedin.pinot.common.data.Schema;
+import com.linkedin.pinot.core.segment.creator.ColumnIndexCreationInfo;
+import com.linkedin.pinot.core.segment.creator.ForwardIndexType;
+import com.linkedin.pinot.core.segment.creator.InvertedIndexType;
+import com.linkedin.pinot.core.segment.creator.impl.SegmentColumnarIndexCreator;
+import com.linkedin.pinot.core.segment.creator.impl.SegmentDictionaryCreator;
+import com.linkedin.pinot.core.segment.creator.impl.V1Constants;
+import com.linkedin.pinot.core.segment.creator.impl.fwd.MultiValueUnsortedForwardIndexCreator;
+import com.linkedin.pinot.core.segment.creator.impl.fwd.SingleValueSortedForwardIndexCreator;
+import com.linkedin.pinot.core.segment.index.ColumnMetadata;
+import com.linkedin.pinot.core.segment.index.SegmentMetadataImpl;
+import com.linkedin.pinot.core.segment.index.loader.LoaderUtils;
+import java.io.File;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import org.apache.commons.configuration.PropertiesConfiguration;
+import org.apache.commons.io.FileUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+public abstract class BaseDefaultColumnHandler implements DefaultColumnHandler {
+<span class="fc" id="L45">  private static final Logger LOGGER = LoggerFactory.getLogger(BaseDefaultColumnHandler.class);</span>
+
+<span class="pc" id="L47">  protected enum DefaultColumnAction {</span>
+    // Present in schema but not in segment.
+<span class="fc" id="L49">    ADD_DIMENSION,</span>
+<span class="fc" id="L50">    ADD_METRIC,</span>
+    // Present in schema &amp; segment but default value doesn't match.
+<span class="fc" id="L52">    UPDATE_DIMENSION,</span>
+<span class="fc" id="L53">    UPDATE_METRIC,</span>
+    // Present in segment but not in schema, auto-generated.
+<span class="fc" id="L55">    REMOVE_DIMENSION,</span>
+<span class="fc" id="L56">    REMOVE_METRIC;</span>
+
+    boolean isRemoveAction() {
+<span class="pc bpc" id="L59" title="2 of 4 branches missed.">      return this == REMOVE_DIMENSION || this == REMOVE_METRIC;</span>
+    }
+  }
+
+  protected final File _indexDir;
+  protected final Schema _schema;
+  protected final SegmentMetadataImpl _segmentMetadata;
+
+  private final PropertiesConfiguration _segmentProperties;
+
+<span class="fc" id="L69">  protected BaseDefaultColumnHandler(File indexDir, Schema schema, SegmentMetadataImpl segmentMetadata) {</span>
+<span class="fc" id="L70">    _indexDir = indexDir;</span>
+<span class="fc" id="L71">    _schema = schema;</span>
+<span class="fc" id="L72">    _segmentMetadata = segmentMetadata;</span>
+<span class="fc" id="L73">    _segmentProperties = segmentMetadata.getSegmentMetadataPropertiesConfiguration();</span>
+<span class="fc" id="L74">  }</span>
+
+  /**
+   * {@inheritDoc}
+   */
+  @Override
+  public void updateDefaultColumns()
+      throws Exception {
+    // Compute the action needed for each column.
+<span class="fc" id="L83">    Map&lt;String, DefaultColumnAction&gt; defaultColumnActionMap = computeDefaultColumnActionMap();</span>
+<span class="pc bpc" id="L84" title="1 of 2 branches missed.">    if (defaultColumnActionMap.isEmpty()) {</span>
+<span class="nc" id="L85">      return;</span>
+    }
+
+    // Update each default column based on the default column action.
+<span class="fc bfc" id="L89" title="All 2 branches covered.">    for (Map.Entry&lt;String, DefaultColumnAction&gt; entry : defaultColumnActionMap.entrySet()) {</span>
+      // This method updates the metadata properties, need to save it later.
+<span class="fc" id="L91">      updateDefaultColumn(entry.getKey(), entry.getValue());</span>
+<span class="fc" id="L92">    }</span>
+
+    // Update the segment metadata.
+<span class="fc" id="L95">    List&lt;String&gt; dimensionColumns =</span>
+        LoaderUtils.getStringListFromSegmentProperties(V1Constants.MetadataKeys.Segment.DIMENSIONS, _segmentProperties);
+<span class="fc" id="L97">    List&lt;String&gt; metricColumns =</span>
+        LoaderUtils.getStringListFromSegmentProperties(V1Constants.MetadataKeys.Segment.METRICS, _segmentProperties);
+<span class="fc bfc" id="L99" title="All 2 branches covered.">    for (Map.Entry&lt;String, DefaultColumnAction&gt; entry : defaultColumnActionMap.entrySet()) {</span>
+<span class="fc" id="L100">      String column = entry.getKey();</span>
+<span class="fc" id="L101">      DefaultColumnAction action = entry.getValue();</span>
+<span class="pc bpc" id="L102" title="2 of 5 branches missed.">      switch (action) {</span>
+        case ADD_DIMENSION:
+<span class="fc" id="L104">          dimensionColumns.add(column);</span>
+<span class="fc" id="L105">          break;</span>
+        case ADD_METRIC:
+<span class="fc" id="L107">          metricColumns.add(column);</span>
+<span class="fc" id="L108">          break;</span>
+        case REMOVE_DIMENSION:
+<span class="nc" id="L110">          dimensionColumns.remove(column);</span>
+<span class="nc" id="L111">          break;</span>
+        case REMOVE_METRIC:
+<span class="nc" id="L113">          metricColumns.remove(column);</span>
+<span class="nc" id="L114">          break;</span>
+        default:
+          break;
+      }
+<span class="fc" id="L118">    }</span>
+<span class="fc" id="L119">    _segmentProperties.setProperty(V1Constants.MetadataKeys.Segment.DIMENSIONS, dimensionColumns);</span>
+<span class="fc" id="L120">    _segmentProperties.setProperty(V1Constants.MetadataKeys.Segment.METRICS, metricColumns);</span>
+
+    // Create a back up for origin metadata.
+<span class="fc" id="L123">    File metadataFile = _segmentProperties.getFile();</span>
+<span class="fc" id="L124">    File metadataBackUpFile = new File(metadataFile + &quot;.bak&quot;);</span>
+<span class="fc bfc" id="L125" title="All 2 branches covered.">    if (!metadataBackUpFile.exists()) {</span>
+<span class="fc" id="L126">      FileUtils.copyFile(metadataFile, metadataBackUpFile);</span>
+    }
+
+    // Save the new metadata.
+<span class="fc" id="L130">    _segmentProperties.save();</span>
+<span class="fc" id="L131">  }</span>
+
+  /**
+   * Compute the action needed for each column.
+   * This method compares the column metadata across schema and segment.
+   *
+   * @return Action Map for each column.
+   */
+  private Map&lt;String, DefaultColumnAction&gt; computeDefaultColumnActionMap() {
+<span class="fc" id="L140">    Map&lt;String, DefaultColumnAction&gt; defaultColumnActionMap = new HashMap&lt;&gt;();</span>
+
+    // Compute ADD and UPDATE actions.
+<span class="fc" id="L143">    Collection&lt;String&gt; columnsInSchema = _schema.getColumnNames();</span>
+<span class="fc bfc" id="L144" title="All 2 branches covered.">    for (String column : columnsInSchema) {</span>
+<span class="fc" id="L145">      FieldSpec fieldSpecInSchema = _schema.getFieldSpecFor(column);</span>
+<span class="fc" id="L146">      Preconditions.checkNotNull(fieldSpecInSchema);</span>
+<span class="fc" id="L147">      FieldSpec.FieldType fieldTypeInSchema = fieldSpecInSchema.getFieldType();</span>
+<span class="fc" id="L148">      ColumnMetadata columnMetadata = _segmentMetadata.getColumnMetadataFor(column);</span>
+
+<span class="fc bfc" id="L150" title="All 2 branches covered.">      if (columnMetadata != null) {</span>
+        // Column exists in the segment, check if we need to update the value.
+
+        // Only check for auto-generated column.
+<span class="pc bpc" id="L154" title="1 of 2 branches missed.">        if (!columnMetadata.isAutoGenerated()) {</span>
+<span class="nc" id="L155">          continue;</span>
+        }
+
+        // Check the field type matches.
+<span class="fc" id="L159">        FieldSpec.FieldType fieldTypeInMetadata = columnMetadata.getFieldType();</span>
+<span class="pc bpc" id="L160" title="1 of 2 branches missed.">        if (fieldTypeInMetadata != fieldTypeInSchema) {</span>
+<span class="nc" id="L161">          String failureMessage = &quot;Field type: &quot; + fieldTypeInMetadata + &quot; for auto-generated column: &quot; + column</span>
+              + &quot; does not match field type: &quot; + fieldTypeInSchema
+              + &quot; in schema, throw exception to drop and re-download the segment.&quot;;
+<span class="nc" id="L164">          throw new RuntimeException(failureMessage);</span>
+        }
+
+        // Check the data type and default value matches.
+<span class="fc" id="L168">        FieldSpec.DataType dataTypeInMetadata = columnMetadata.getDataType();</span>
+<span class="fc" id="L169">        FieldSpec.DataType dataTypeInSchema = fieldSpecInSchema.getDataType();</span>
+<span class="fc" id="L170">        boolean isSingleValueInMetadata = columnMetadata.isSingleValue();</span>
+<span class="fc" id="L171">        boolean isSingleValueInSchema = fieldSpecInSchema.isSingleValueField();</span>
+<span class="fc" id="L172">        String defaultValueInMetadata = columnMetadata.getDefaultNullValueString();</span>
+<span class="fc" id="L173">        String defaultValueInSchema = fieldSpecInSchema.getDefaultNullValue().toString();</span>
+<span class="pc bpc" id="L174" title="2 of 6 branches missed.">        if (dataTypeInMetadata != dataTypeInSchema || isSingleValueInMetadata != isSingleValueInSchema</span>
+            || !defaultValueInSchema.equals(defaultValueInMetadata)) {
+<span class="fc bfc" id="L176" title="All 2 branches covered.">          if (fieldTypeInMetadata == FieldSpec.FieldType.DIMENSION) {</span>
+<span class="fc" id="L177">            defaultColumnActionMap.put(column, DefaultColumnAction.UPDATE_DIMENSION);</span>
+          } else {
+<span class="pc bpc" id="L179" title="1 of 2 branches missed.">            Preconditions.checkState(fieldTypeInMetadata == FieldSpec.FieldType.METRIC);</span>
+<span class="fc" id="L180">            defaultColumnActionMap.put(column, DefaultColumnAction.UPDATE_METRIC);</span>
+          }
+        }
+<span class="fc" id="L183">      } else {</span>
+        // Column does not exist in the segment, add default value for it.
+
+<span class="pc bpc" id="L186" title="1 of 3 branches missed.">        switch (fieldTypeInSchema) {</span>
+          case DIMENSION:
+<span class="fc" id="L188">            defaultColumnActionMap.put(column, DefaultColumnAction.ADD_DIMENSION);</span>
+<span class="fc" id="L189">            break;</span>
+          case METRIC:
+<span class="fc" id="L191">            defaultColumnActionMap.put(column, DefaultColumnAction.ADD_METRIC);</span>
+<span class="fc" id="L192">            break;</span>
+          default:
+<span class="nc" id="L194">            LOGGER.warn(&quot;Skip adding default column for column: {} with field type: {}&quot;, column, fieldTypeInSchema);</span>
+            break;
+        }
+      }
+<span class="fc" id="L198">    }</span>
+
+    // Compute REMOVE actions.
+<span class="fc" id="L201">    Set&lt;String&gt; columnsInMetadata = _segmentMetadata.getAllColumns();</span>
+<span class="fc bfc" id="L202" title="All 2 branches covered.">    for (String column : columnsInMetadata) {</span>
+<span class="fc bfc" id="L203" title="All 2 branches covered.">      if (!columnsInSchema.contains(column)) {</span>
+<span class="fc" id="L204">        ColumnMetadata columnMetadata = _segmentMetadata.getColumnMetadataFor(column);</span>
+
+        // Only remove auto-generated columns.
+<span class="pc bpc" id="L207" title="1 of 2 branches missed.">        if (columnMetadata.isAutoGenerated()) {</span>
+<span class="nc" id="L208">          FieldSpec.FieldType fieldTypeInMetadata = columnMetadata.getFieldType();</span>
+<span class="nc bnc" id="L209" title="All 2 branches missed.">          if (fieldTypeInMetadata == FieldSpec.FieldType.DIMENSION) {</span>
+<span class="nc" id="L210">            defaultColumnActionMap.put(column, DefaultColumnAction.REMOVE_DIMENSION);</span>
+          } else {
+<span class="nc bnc" id="L212" title="All 2 branches missed.">            Preconditions.checkState(fieldTypeInMetadata == FieldSpec.FieldType.METRIC);</span>
+<span class="nc" id="L213">            defaultColumnActionMap.put(column, DefaultColumnAction.REMOVE_METRIC);</span>
+          }
+        }
+      }
+<span class="fc" id="L217">    }</span>
+
+<span class="fc" id="L219">    return defaultColumnActionMap;</span>
+  }
+
+  /**
+   * Helper method to update default column indices.
+   * TODO: ADD SUPPORT TO STAR TREE INDEX.
+   *
+   * @param column column name.
+   * @param action default column action.
+   * @throws Exception
+   */
+  protected abstract void updateDefaultColumn(String column, DefaultColumnAction action)
+      throws Exception;
+
+  /**
+   * Helper method to remove the V1 indices (dictionary and forward index) for a column.
+   *
+   * @param column column name.
+   */
+  protected void removeColumnV1Indices(String column) {
+    // Delete existing dictionary and forward index for the column.
+<span class="fc" id="L240">    FileUtils.deleteQuietly(new File(_indexDir, column + V1Constants.Dict.FILE_EXTENSION));</span>
+<span class="fc" id="L241">    FileUtils.deleteQuietly(new File(_indexDir, column + V1Constants.Indexes.SORTED_SV_FORWARD_INDEX_FILE_EXTENSION));</span>
+<span class="fc" id="L242">    FileUtils.deleteQuietly(new File(_indexDir, column + V1Constants.Indexes.UNSORTED_MV_FORWARD_INDEX_FILE_EXTENSION));</span>
+
+    // Remove the column metadata information if exists.
+<span class="fc" id="L245">    SegmentColumnarIndexCreator.removeColumnMetadataInfo(_segmentProperties, column);</span>
+<span class="fc" id="L246">  }</span>
+
+  /**
+   * Helper method to create the V1 indices (dictionary and forward index) for a column.
+   *
+   * @param column column name.
+   */
+  protected void createColumnV1Indices(String column)
+      throws Exception {
+<span class="fc" id="L255">    FieldSpec fieldSpec = _schema.getFieldSpecFor(column);</span>
+<span class="fc" id="L256">    Preconditions.checkNotNull(fieldSpec);</span>
+
+    // Generate column index creation information.
+<span class="fc" id="L259">    int totalDocs = _segmentMetadata.getTotalDocs();</span>
+<span class="fc" id="L260">    int totalRawDocs = _segmentMetadata.getTotalRawDocs();</span>
+<span class="fc" id="L261">    int totalAggDocs = totalDocs - totalRawDocs;</span>
+<span class="fc" id="L262">    FieldSpec.DataType dataType = fieldSpec.getDataType();</span>
+<span class="fc" id="L263">    Object defaultValue = fieldSpec.getDefaultNullValue();</span>
+<span class="fc" id="L264">    boolean isSingleValue = fieldSpec.isSingleValueField();</span>
+<span class="fc bfc" id="L265" title="All 2 branches covered.">    int maxNumberOfMultiValueElements = isSingleValue ? 0 : 1;</span>
+<span class="fc" id="L266">    int dictionaryElementSize = 0;</span>
+
+    Object sortedArray;
+<span class="pc bpc" id="L269" title="1 of 6 branches missed.">    switch (dataType) {</span>
+      case STRING:
+<span class="fc" id="L271">        Preconditions.checkState(defaultValue instanceof String);</span>
+<span class="fc" id="L272">        String stringDefaultValue = (String) defaultValue;</span>
+        // Length of the UTF-8 encoded byte array.
+<span class="fc" id="L274">        dictionaryElementSize = stringDefaultValue.getBytes(&quot;UTF8&quot;).length;</span>
+<span class="fc" id="L275">        sortedArray = new String[]{stringDefaultValue};</span>
+<span class="fc" id="L276">        break;</span>
+      case INT:
+<span class="fc" id="L278">        Preconditions.checkState(defaultValue instanceof Integer);</span>
+<span class="fc" id="L279">        sortedArray = new int[]{(Integer) defaultValue};</span>
+<span class="fc" id="L280">        break;</span>
+      case LONG:
+<span class="fc" id="L282">        Preconditions.checkState(defaultValue instanceof Long);</span>
+<span class="fc" id="L283">        sortedArray = new long[]{(Long) defaultValue};</span>
+<span class="fc" id="L284">        break;</span>
+      case FLOAT:
+<span class="fc" id="L286">        Preconditions.checkState(defaultValue instanceof Float);</span>
+<span class="fc" id="L287">        sortedArray = new float[]{(Float) defaultValue};</span>
+<span class="fc" id="L288">        break;</span>
+      case DOUBLE:
+<span class="fc" id="L290">        Preconditions.checkState(defaultValue instanceof Double);</span>
+<span class="fc" id="L291">        sortedArray = new double[]{(Double) defaultValue};</span>
+<span class="fc" id="L292">        break;</span>
+      default:
+<span class="nc" id="L294">        throw new UnsupportedOperationException(&quot;Unsupported data type: &quot; + dataType + &quot; for column: &quot; + column);</span>
+    }
+
+<span class="fc" id="L297">    ColumnIndexCreationInfo columnIndexCreationInfo =</span>
+        new ColumnIndexCreationInfo(true/*createDictionary*/, defaultValue/*min*/, defaultValue/*max*/, sortedArray,
+            ForwardIndexType.FIXED_BIT_COMPRESSED, InvertedIndexType.SORTED_INDEX, isSingleValue/*isSortedColumn*/,
+            false/*hasNulls*/, totalDocs/*totalNumberOfEntries*/, maxNumberOfMultiValueElements, -1 /* Unused max length*/,
+            true/*isAutoGenerated*/, null/*partitionFunction*/, -1/*numPartitions*/, null/*partitionValue*/,
+            defaultValue/*defaultNullValue*/);
+
+    // Create dictionary.
+    // We will have only one value in the dictionary.
+<span class="pc" id="L306">    try (SegmentDictionaryCreator creator = new SegmentDictionaryCreator(false/*hasNulls*/, sortedArray, fieldSpec,</span>
+        _indexDir)) {
+<span class="fc" id="L308">      creator.build();</span>
+<span class="pc bpc" id="L309" title="6 of 8 branches missed.">    }</span>
+
+    // Create forward index.
+<span class="fc bfc" id="L312" title="All 2 branches covered.">    if (isSingleValue) {</span>
+      // Single-value column.
+
+<span class="fc" id="L315">      SingleValueSortedForwardIndexCreator svFwdIndexCreator =</span>
+          new SingleValueSortedForwardIndexCreator(_indexDir, 1/*cardinality*/, fieldSpec);
+<span class="fc bfc" id="L317" title="All 2 branches covered.">      for (int docId = 0; docId &lt; totalDocs; docId++) {</span>
+<span class="fc" id="L318">        svFwdIndexCreator.add(0/*dictionaryId*/, docId);</span>
+      }
+<span class="fc" id="L320">      svFwdIndexCreator.close();</span>
+<span class="fc" id="L321">    } else {</span>
+      // Multi-value column.
+
+<span class="fc" id="L324">      MultiValueUnsortedForwardIndexCreator mvFwdIndexCreator =</span>
+          new MultiValueUnsortedForwardIndexCreator(fieldSpec, _indexDir, 1/*cardinality*/, totalDocs/*numDocs*/,
+              totalDocs/*totalNumberOfValues*/, false/*hasNulls*/);
+<span class="fc" id="L327">      int[] dictionaryIds = {0};</span>
+<span class="fc bfc" id="L328" title="All 2 branches covered.">      for (int docId = 0; docId &lt; totalDocs; docId++) {</span>
+<span class="fc" id="L329">        mvFwdIndexCreator.index(docId, dictionaryIds);</span>
+      }
+<span class="fc" id="L331">      mvFwdIndexCreator.close();</span>
+    }
+
+    // Add the column metadata information to the metadata properties.
+<span class="fc" id="L335">    SegmentColumnarIndexCreator.addColumnMetadataInfo(_segmentProperties, column, columnIndexCreationInfo, totalDocs,</span>
+        totalRawDocs, totalAggDocs, fieldSpec, true/*hasDictionary*/, dictionaryElementSize, true/*hasInvertedIndex*/,
+        null/*hllOriginColumn*/);
+<span class="fc" id="L338">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

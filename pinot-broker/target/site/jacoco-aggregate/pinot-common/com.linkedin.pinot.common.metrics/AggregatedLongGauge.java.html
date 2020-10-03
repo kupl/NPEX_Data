@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>AggregatedLongGauge.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-broker</a> &gt; <a href="../index.html" class="el_bundle">pinot-common</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.common.metrics</a> &gt; <span class="el_source">AggregatedLongGauge.java</span></div><h1>AggregatedLongGauge.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.common.metrics;
+
+import java.util.Collection;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+
+import com.yammer.metrics.core.Gauge;
+
+
+/**
+ * An aggregated gauge that provides an average among the underlying gauges. You can have
+ * multi-level aggregations of gauges (long types)
+ *
+ *
+ * @param &lt;T&gt;
+ */
+public class AggregatedLongGauge&lt;T extends Number, V extends Gauge&lt;T&gt;&gt; extends Gauge&lt;Long&gt; {
+  // Container of inner meters
+<span class="nc" id="L34">  private final List&lt;Gauge&lt;T&gt;&gt; _gauges = new CopyOnWriteArrayList&lt;Gauge&lt;T&gt;&gt;();</span>
+
+  private static final long DEFAULT_REFRESH_MS = 60 * 1000L; // 1 minute
+
+  // Refresh Delay config
+  private final long _refreshMs;
+
+  // Last Refreshed timestamp
+  private volatile long _lastRefreshedTime;
+
+  // The mean instantaneous value
+  private volatile long _value;
+
+<span class="nc" id="L47">  public AggregatedLongGauge(long refreshMs) {</span>
+<span class="nc" id="L48">    _refreshMs = refreshMs;</span>
+<span class="nc" id="L49">  }</span>
+
+<span class="nc" id="L51">  public AggregatedLongGauge() {</span>
+<span class="nc" id="L52">    _refreshMs = DEFAULT_REFRESH_MS;</span>
+<span class="nc" id="L53">  }</span>
+
+  /**
+   * Add Collection of metrics to be aggregated
+   * @return this instance
+   */
+  public AggregatedLongGauge&lt;T, V&gt; addAll(Collection&lt;Gauge&lt;T&gt;&gt; gauges) {
+<span class="nc" id="L60">    _gauges.addAll(gauges);</span>
+<span class="nc" id="L61">    return this;</span>
+  }
+
+  /**
+   * Add a metric to be aggregated
+   * @return this instance
+   */
+  public AggregatedLongGauge&lt;T, V&gt; add(Gauge&lt;T&gt; gauge) {
+<span class="nc" id="L69">    _gauges.add(gauge);</span>
+<span class="nc" id="L70">    return this;</span>
+  }
+
+  /**
+   * Remove a metric which was already added
+   * @return true if the metric was present in the list
+   */
+  public boolean remove(Gauge&lt;T&gt; gauge) {
+<span class="nc" id="L78">    return _gauges.remove(gauge);</span>
+  }
+
+  /**
+   * Check elapsed time since last refresh and only refresh if time difference is
+   * greater than threshold.
+   */
+  private void refreshIfElapsed() {
+<span class="nc" id="L86">    long currentTime = System.currentTimeMillis();</span>
+<span class="nc bnc" id="L87" title="All 4 branches missed.">    if (currentTime - _lastRefreshedTime &gt; _refreshMs &amp;&amp; !_gauges.isEmpty()) {</span>
+<span class="nc" id="L88">      refresh();</span>
+<span class="nc" id="L89">      _lastRefreshedTime = currentTime;</span>
+    }
+<span class="nc" id="L91">  }</span>
+
+  public void refresh() {
+<span class="nc" id="L94">    long sum = 0;</span>
+<span class="nc bnc" id="L95" title="All 2 branches missed.">    for (Gauge&lt;T&gt; gauge : _gauges) {</span>
+<span class="nc" id="L96">      sum += gauge.value().longValue();</span>
+<span class="nc" id="L97">    }</span>
+<span class="nc" id="L98">    _value = sum / _gauges.size();</span>
+<span class="nc" id="L99">  }</span>
+
+  @Override
+  public Long value() {
+<span class="nc" id="L103">    refreshIfElapsed();</span>
+<span class="nc" id="L104">    return _value;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

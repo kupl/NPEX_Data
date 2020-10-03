@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>JsonAsyncHttpPinotClientTransport.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-api</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.client</a> &gt; <span class="el_source">JsonAsyncHttpPinotClientTransport.java</span></div><h1>JsonAsyncHttpPinotClientTransport.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.client;
+
+import com.ning.http.client.AsyncHttpClient;
+import com.ning.http.client.Response;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import org.json.JSONObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * JSON encoded Pinot client transport over AsyncHttpClient.
+ */
+<span class="fc" id="L32">class JsonAsyncHttpPinotClientTransport implements PinotClientTransport {</span>
+<span class="fc" id="L33">  private static final Logger LOGGER = LoggerFactory.getLogger(JsonAsyncHttpPinotClientTransport.class);</span>
+<span class="fc" id="L34">  AsyncHttpClient _httpClient = new AsyncHttpClient();</span>
+
+  @Override
+  public BrokerResponse executeQuery(String brokerAddress, String query) throws PinotClientException {
+    try {
+<span class="nc" id="L39">      return executeQueryAsync(brokerAddress, query).get();</span>
+<span class="nc" id="L40">    } catch (Exception e) {</span>
+<span class="nc" id="L41">      throw new PinotClientException(e);</span>
+    }
+  }
+
+  @Override
+  public Future&lt;BrokerResponse&gt; executeQueryAsync(String brokerAddress, final String query) {
+    try {
+<span class="nc" id="L48">      final JSONObject json = new JSONObject();</span>
+<span class="nc" id="L49">      json.put(&quot;pql&quot;, query);</span>
+
+<span class="nc" id="L51">      final String url = &quot;http://&quot; + brokerAddress + &quot;/query&quot;;</span>
+
+<span class="nc" id="L53">      final Future&lt;Response&gt; response = _httpClient.preparePost(url).setBody(json.toString()).execute();</span>
+
+<span class="nc" id="L55">      return new BrokerResponseFuture(response, query, url);</span>
+<span class="nc" id="L56">    } catch (Exception e) {</span>
+<span class="nc" id="L57">      throw new PinotClientException(e);</span>
+    }
+  }
+
+<span class="fc" id="L61">  private static class BrokerResponseFuture implements Future&lt;BrokerResponse&gt; {</span>
+    private final Future&lt;Response&gt; _response;
+    private final String _query;
+    private final String _url;
+
+<span class="nc" id="L66">    public BrokerResponseFuture(Future&lt;Response&gt; response, String query, String url) {</span>
+<span class="nc" id="L67">      _response = response;</span>
+<span class="nc" id="L68">      _query = query;</span>
+<span class="nc" id="L69">      _url = url;</span>
+<span class="nc" id="L70">    }</span>
+
+    @Override
+    public boolean cancel(boolean mayInterruptIfRunning) {
+<span class="nc" id="L74">      return _response.cancel(mayInterruptIfRunning);</span>
+    }
+
+    @Override
+    public boolean isCancelled() {
+<span class="nc" id="L79">      return _response.isCancelled();</span>
+    }
+
+    @Override
+    public boolean isDone() {
+<span class="nc" id="L84">      return _response.isDone();</span>
+    }
+
+    @Override
+    public BrokerResponse get()
+        throws InterruptedException, ExecutionException {
+      try {
+<span class="nc" id="L91">        return get(1000L, TimeUnit.DAYS);</span>
+<span class="nc" id="L92">      } catch (TimeoutException e) {</span>
+<span class="nc" id="L93">        LOGGER.error(&quot;Caught timeout during synchronous get&quot;, e);</span>
+<span class="nc" id="L94">        throw new InterruptedException();</span>
+      }
+    }
+
+    @Override
+    public BrokerResponse get(long timeout, TimeUnit unit)
+        throws InterruptedException, ExecutionException, TimeoutException {
+      try {
+<span class="nc" id="L102">        LOGGER.debug(&quot;Sending query {} to {}&quot;, _query, _url);</span>
+
+<span class="nc" id="L104">        Response httpResponse = _response.get(timeout, unit);</span>
+
+<span class="nc" id="L106">        LOGGER.debug(&quot;Completed query, HTTP status is {}&quot;, httpResponse.getStatusCode());</span>
+
+<span class="nc bnc" id="L108" title="All 2 branches missed.">        if (httpResponse.getStatusCode() != 200) {</span>
+<span class="nc" id="L109">          throw new PinotClientException(&quot;Pinot returned HTTP status &quot; + httpResponse.getStatusCode() +</span>
+              &quot;, expected 200&quot;);
+        }
+
+<span class="nc" id="L113">        String responseBody = httpResponse.getResponseBody();</span>
+<span class="nc" id="L114">        return BrokerResponse.fromJson(new JSONObject(responseBody));</span>
+<span class="nc" id="L115">      } catch (Exception e) {</span>
+<span class="nc" id="L116">        throw new ExecutionException(e);</span>
+      }
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

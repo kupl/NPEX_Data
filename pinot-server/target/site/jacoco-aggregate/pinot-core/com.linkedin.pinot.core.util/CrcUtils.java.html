@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>CrcUtils.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-server</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.util</a> &gt; <span class="el_source">CrcUtils.java</span></div><h1>CrcUtils.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.util;
+
+import com.google.common.base.Preconditions;
+import com.linkedin.pinot.core.segment.creator.impl.V1Constants;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.zip.Adler32;
+import java.util.zip.Checksum;
+
+
+@SuppressWarnings(&quot;Duplicates&quot;)
+public class CrcUtils {
+  private static final int BUFFER_SIZE = 65536;
+
+  private final List&lt;File&gt; _files;
+
+<span class="fc" id="L39">  private CrcUtils(List&lt;File&gt; files) {</span>
+<span class="fc" id="L40">    _files = files;</span>
+<span class="fc" id="L41">  }</span>
+
+  public static CrcUtils forAllFilesInFolder(File dir) {
+<span class="fc" id="L44">    List&lt;File&gt; normalFiles = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L45">    getAllNormalFiles(dir, normalFiles);</span>
+<span class="fc" id="L46">    Collections.sort(normalFiles);</span>
+<span class="fc" id="L47">    return new CrcUtils(normalFiles);</span>
+  }
+
+  /**
+   * Helper method to get all normal (non-directory) files under a directory recursively.
+   * &lt;p&gt;NOTE: do not include the segment creation meta file.
+   */
+  private static void getAllNormalFiles(File dir, List&lt;File&gt; normalFiles) {
+<span class="fc" id="L55">    File[] files = dir.listFiles();</span>
+<span class="fc" id="L56">    Preconditions.checkNotNull(files);</span>
+<span class="fc bfc" id="L57" title="All 2 branches covered.">    for (File file : files) {</span>
+<span class="fc bfc" id="L58" title="All 2 branches covered.">      if (file.isFile()) {</span>
+<span class="fc bfc" id="L59" title="All 2 branches covered.">        if (!file.getName().equals(V1Constants.SEGMENT_CREATION_META)) {</span>
+<span class="fc" id="L60">          normalFiles.add(file);</span>
+        }
+      } else {
+<span class="fc" id="L63">        getAllNormalFiles(file, normalFiles);</span>
+      }
+    }
+<span class="fc" id="L66">  }</span>
+
+  public long computeCrc() throws IOException {
+<span class="fc" id="L69">    byte[] buffer = new byte[BUFFER_SIZE];</span>
+<span class="fc" id="L70">    Checksum checksum = new Adler32();</span>
+
+<span class="fc bfc" id="L72" title="All 2 branches covered.">    for (File file : _files) {</span>
+<span class="pc" id="L73">      try (InputStream input = new FileInputStream(file)) {</span>
+        int len;
+<span class="fc bfc" id="L75" title="All 2 branches covered.">        while ((len = input.read(buffer)) &gt; 0) {</span>
+<span class="fc" id="L76">          checksum.update(buffer, 0, len);</span>
+        }
+<span class="pc bpc" id="L78" title="6 of 8 branches missed.">      }</span>
+<span class="fc" id="L79">    }</span>
+
+<span class="fc" id="L81">    return checksum.getValue();</span>
+  }
+
+  public String computeMD5() throws NoSuchAlgorithmException, IOException {
+<span class="fc" id="L85">    byte[] buffer = new byte[BUFFER_SIZE];</span>
+<span class="fc" id="L86">    MessageDigest digest = MessageDigest.getInstance(&quot;md5&quot;);</span>
+
+<span class="fc bfc" id="L88" title="All 2 branches covered.">    for (File file : _files) {</span>
+<span class="pc" id="L89">      try (InputStream input = new FileInputStream(file)) {</span>
+        int len;
+<span class="fc bfc" id="L91" title="All 2 branches covered.">        while ((len = input.read(buffer)) &gt; 0) {</span>
+<span class="fc" id="L92">          digest.update(buffer, 0, len);</span>
+        }
+<span class="pc bpc" id="L94" title="6 of 8 branches missed.">      }</span>
+<span class="fc" id="L95">    }</span>
+
+<span class="fc" id="L97">    return toHexaDecimal(digest.digest());</span>
+  }
+
+  public static String toHexaDecimal(byte[] bytesToConvert) {
+<span class="fc" id="L101">    final char[] hexCharactersAsArray = &quot;0123456789ABCDEF&quot;.toCharArray();</span>
+<span class="fc" id="L102">    final char[] convertedHexCharsArray = new char[bytesToConvert.length * 2];</span>
+<span class="fc bfc" id="L103" title="All 2 branches covered.">    for (int j = 0; j &lt; bytesToConvert.length; j++) {</span>
+<span class="fc" id="L104">      final int v = bytesToConvert[j] &amp; 0xFF;</span>
+<span class="fc" id="L105">      convertedHexCharsArray[j * 2] = hexCharactersAsArray[v &gt;&gt;&gt; 4];</span>
+<span class="fc" id="L106">      convertedHexCharsArray[j * 2 + 1] = hexCharactersAsArray[v &amp; 0x0F];</span>
+    }
+<span class="fc" id="L108">    return new String(convertedHexCharsArray);</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

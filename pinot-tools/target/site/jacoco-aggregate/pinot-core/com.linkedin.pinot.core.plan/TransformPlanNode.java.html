@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>TransformPlanNode.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-tools</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.plan</a> &gt; <span class="el_source">TransformPlanNode.java</span></div><h1>TransformPlanNode.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.plan;
+
+import com.linkedin.pinot.common.request.AggregationInfo;
+import com.linkedin.pinot.common.request.BrokerRequest;
+import com.linkedin.pinot.common.request.GroupBy;
+import com.linkedin.pinot.common.request.transform.TransformExpressionTree;
+import com.linkedin.pinot.core.common.Operator;
+import com.linkedin.pinot.core.indexsegment.IndexSegment;
+import com.linkedin.pinot.core.operator.MProjectionOperator;
+import com.linkedin.pinot.core.operator.transform.TransformExpressionOperator;
+import com.linkedin.pinot.core.query.aggregation.function.AggregationFunctionFactory;
+import com.linkedin.pinot.pql.parsers.Pql2Compiler;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import javax.annotation.Nonnull;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * The &lt;code&gt;TransformPlanNode&lt;/code&gt; class provides the execution plan for transforms on a single segment.
+ */
+public class TransformPlanNode implements PlanNode {
+<span class="fc" id="L42">  private static final Logger LOGGER = LoggerFactory.getLogger(TransformPlanNode.class);</span>
+
+  private final ProjectionPlanNode _projectionPlanNode;
+  private final List&lt;TransformExpressionTree&gt; _expressionTrees;
+  private final String _segmentName;
+
+<span class="fc" id="L48">  private static ThreadLocal&lt;Pql2Compiler&gt; _compiler = new ThreadLocal&lt;Pql2Compiler&gt;() {</span>
+    @Override
+    protected Pql2Compiler initialValue() {
+<span class="fc" id="L51">      return new Pql2Compiler();</span>
+    }
+  };
+
+  /**
+   * Constructor for the class
+   *
+   * @param indexSegment Segment to process
+   * @param brokerRequest BrokerRequest to process
+   */
+<span class="fc" id="L61">  public TransformPlanNode(@Nonnull IndexSegment indexSegment, @Nonnull BrokerRequest brokerRequest) {</span>
+
+<span class="fc" id="L63">    Set&lt;String&gt; projectionColumns = new HashSet&lt;&gt;();</span>
+<span class="fc" id="L64">    Set&lt;String&gt; transformExpressions = new HashSet&lt;&gt;();</span>
+<span class="fc" id="L65">    _segmentName = indexSegment.getSegmentName();</span>
+
+<span class="fc" id="L67">    extractColumnsAndTransforms(brokerRequest, projectionColumns, transformExpressions);</span>
+
+<span class="pc bpc" id="L69" title="1 of 2 branches missed.">    if (!transformExpressions.isEmpty()) {</span>
+<span class="nc" id="L70">      _expressionTrees = buildTransformExpressionTrees(transformExpressions);</span>
+<span class="nc" id="L71">      projectionColumns.addAll(getTransformColumns(_expressionTrees));</span>
+    } else {
+<span class="fc" id="L73">      _expressionTrees = null;</span>
+    }
+
+<span class="fc" id="L76">    _projectionPlanNode =</span>
+        new ProjectionPlanNode(indexSegment, projectionColumns.toArray(new String[projectionColumns.size()]),
+            new DocIdSetPlanNode(indexSegment, brokerRequest));
+<span class="fc" id="L79">  }</span>
+
+  /**
+   * Helper method to get all columns from expressions.
+   * @param expressionTrees List of expression trees for which to get the columns.
+   * @return List of columns from all the expression trees
+   */
+  private List&lt;String&gt; getTransformColumns(List&lt;TransformExpressionTree&gt; expressionTrees) {
+<span class="nc" id="L87">    List&lt;String&gt; columns = new ArrayList&lt;&gt;();</span>
+<span class="nc bnc" id="L88" title="All 2 branches missed.">    for (TransformExpressionTree expressionTree : expressionTrees) {</span>
+<span class="nc" id="L89">      expressionTree.getColumns(columns);</span>
+<span class="nc" id="L90">    }</span>
+<span class="nc" id="L91">    return columns;</span>
+  }
+
+  /**
+   * Helper method to build TransformExpressionTrees for a given set of transform expressions.
+   * Ignores any trees that are just columns.
+   *
+   * @param transformExpressions Set of expressions for which to build trees.
+   * @return List of expression trees for the given transform expressions.
+   */
+  public static List&lt;TransformExpressionTree&gt; buildTransformExpressionTrees(Set&lt;String&gt; transformExpressions) {
+<span class="fc" id="L102">    List&lt;TransformExpressionTree&gt; expressionTrees = new ArrayList&lt;&gt;(transformExpressions.size());</span>
+
+<span class="fc bfc" id="L104" title="All 2 branches covered.">    for (String transformExpression : transformExpressions) {</span>
+<span class="fc" id="L105">      TransformExpressionTree expressionTree = _compiler.get().compileToExpressionTree(transformExpression);</span>
+<span class="pc bpc" id="L106" title="1 of 2 branches missed.">      if (!expressionTree.isColumn()) {</span>
+<span class="fc" id="L107">        expressionTrees.add(expressionTree);</span>
+      }
+<span class="fc" id="L109">    }</span>
+<span class="fc" id="L110">    return expressionTrees;</span>
+  }
+
+  /**
+   * Helper method to extract projection columns and transform expressions from the given
+   * BrokerRequest.
+   *  @param brokerRequest BrokerRequest to process
+   * @param projectionColumns Output projection columns from broker request
+   * @param transformExpressions Output transform expression from broker request
+   */
+  private void extractColumnsAndTransforms(BrokerRequest brokerRequest, Set&lt;String&gt; projectionColumns,
+      Set&lt;String&gt; transformExpressions) {
+
+<span class="pc bpc" id="L123" title="1 of 2 branches missed.">    if (brokerRequest.isSetAggregationsInfo()) {</span>
+      // TODO: Add transform support.
+<span class="fc bfc" id="L125" title="All 2 branches covered.">      for (AggregationInfo aggregationInfo : brokerRequest.getAggregationsInfo()) {</span>
+<span class="fc bfc" id="L126" title="All 2 branches covered.">        if (!aggregationInfo.getAggregationType()</span>
+            .equalsIgnoreCase(AggregationFunctionFactory.AggregationFunctionType.COUNT.getName())) {
+<span class="fc" id="L128">          String columns = aggregationInfo.getAggregationParams().get(&quot;column&quot;).trim();</span>
+<span class="fc" id="L129">          projectionColumns.addAll(Arrays.asList(columns.split(&quot;,&quot;)));</span>
+        }
+<span class="fc" id="L131">      }</span>
+
+      // Collect all group by related columns.
+<span class="fc bfc" id="L134" title="All 2 branches covered.">      if (brokerRequest.isSetGroupBy()) {</span>
+<span class="fc" id="L135">        GroupBy groupBy = brokerRequest.getGroupBy();</span>
+<span class="fc" id="L136">        List&lt;String&gt; groupByColumns = groupBy.getColumns();</span>
+
+        // GroupByColumns can be null if all group-bys are transforms.
+<span class="pc bpc" id="L139" title="1 of 2 branches missed.">        if (groupByColumns != null) {</span>
+<span class="fc" id="L140">          projectionColumns.addAll(groupByColumns);</span>
+        }
+
+        // Check null for backward compatibility.
+<span class="fc" id="L144">        List&lt;String&gt; expressions = groupBy.getExpressions();</span>
+<span class="pc bpc" id="L145" title="1 of 2 branches missed.">        if (expressions != null) {</span>
+<span class="fc" id="L146">          transformExpressions.addAll(expressions);</span>
+<span class="pc bpc" id="L147" title="2 of 4 branches missed.">          if (groupByColumns != null &amp;&amp; !groupByColumns.isEmpty()) {</span>
+<span class="fc" id="L148">            transformExpressions.removeAll(groupByColumns);</span>
+          }
+        }
+<span class="fc" id="L151">      }</span>
+    } else {
+<span class="nc" id="L153">      throw new UnsupportedOperationException(&quot;Transforms not supported in selection queries.&quot;);</span>
+      // TODO: Add transform support.
+      // projectionColumns.addAll(brokerRequest.getSelections().getSelectionColumns());
+    }
+<span class="fc" id="L157">  }</span>
+
+  @Override
+  public Operator run() {
+<span class="fc" id="L161">    MProjectionOperator projectionOperator = (MProjectionOperator) _projectionPlanNode.run();</span>
+<span class="fc" id="L162">    return new TransformExpressionOperator(projectionOperator, _expressionTrees);</span>
+  }
+
+  @Override
+  public void showTree(String prefix) {
+<span class="nc" id="L167">    LOGGER.debug(prefix + &quot;Segment Level Inner-Segment Plan Node:&quot;);</span>
+<span class="nc" id="L168">    LOGGER.debug(prefix + &quot;Operator: TransformOperator&quot;);</span>
+<span class="nc" id="L169">    LOGGER.debug(prefix + &quot;Argument 0: IndexSegment - &quot; + _segmentName);</span>
+<span class="nc" id="L170">    LOGGER.debug(prefix + &quot;Argument 1: Projection -&quot;);</span>
+<span class="nc" id="L171">    _projectionPlanNode.showTree(prefix + &quot;    &quot;);</span>
+<span class="nc" id="L172">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

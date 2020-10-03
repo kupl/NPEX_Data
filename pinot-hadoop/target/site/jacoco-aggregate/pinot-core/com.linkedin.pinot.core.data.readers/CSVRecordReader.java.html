@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>CSVRecordReader.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-hadoop</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.data.readers</a> &gt; <span class="el_source">CSVRecordReader.java</span></div><h1>CSVRecordReader.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.data.readers;
+
+import com.linkedin.pinot.common.data.FieldSpec;
+import com.linkedin.pinot.common.data.Schema;
+import com.linkedin.pinot.core.data.GenericRow;
+import java.io.File;
+import java.io.IOException;
+import java.util.Iterator;
+import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVParser;
+import org.apache.commons.csv.CSVRecord;
+import org.apache.commons.lang.StringUtils;
+
+
+/**
+ * Record reader for CSV file.
+ */
+public class CSVRecordReader implements RecordReader {
+  private final File _dataFile;
+  private final Schema _schema;
+  private final CSVFormat _format;
+  private final char _multiValueDelimiter;
+
+  private CSVParser _parser;
+  private Iterator&lt;CSVRecord&gt; _iterator;
+
+<span class="fc" id="L42">  public CSVRecordReader(File dataFile, Schema schema, CSVRecordReaderConfig config) throws IOException {</span>
+<span class="fc" id="L43">    _dataFile = dataFile;</span>
+<span class="fc" id="L44">    _schema = schema;</span>
+
+<span class="fc bfc" id="L46" title="All 2 branches covered.">    if (config == null) {</span>
+<span class="fc" id="L47">      _format = CSVFormat.DEFAULT.withDelimiter(CSVRecordReaderConfig.DEFAULT_DELIMITER).withHeader();</span>
+<span class="fc" id="L48">      _multiValueDelimiter = CSVRecordReaderConfig.DEFAULT_MULTI_VALUE_DELIMITER;</span>
+    } else {
+      CSVFormat format;
+<span class="fc" id="L51">      String formatString = config.getFileFormat();</span>
+<span class="pc bpc" id="L52" title="1 of 2 branches missed.">      if (formatString == null) {</span>
+<span class="fc" id="L53">        format = CSVFormat.DEFAULT;</span>
+      } else {
+<span class="nc bnc" id="L55" title="All 18 branches missed.">        switch (formatString.toUpperCase()) {</span>
+          case &quot;EXCEL&quot;:
+<span class="nc" id="L57">            format = CSVFormat.EXCEL;</span>
+<span class="nc" id="L58">            break;</span>
+          case &quot;MYSQL&quot;:
+<span class="nc" id="L60">            format = CSVFormat.MYSQL;</span>
+<span class="nc" id="L61">            break;</span>
+          case &quot;RFC4180&quot;:
+<span class="nc" id="L63">            format = CSVFormat.RFC4180;</span>
+<span class="nc" id="L64">            break;</span>
+          case &quot;TDF&quot;:
+<span class="nc" id="L66">            format = CSVFormat.TDF;</span>
+<span class="nc" id="L67">            break;</span>
+          default:
+<span class="nc" id="L69">            format = CSVFormat.DEFAULT;</span>
+            break;
+        }
+      }
+<span class="fc" id="L73">      char delimiter = config.getDelimiter();</span>
+<span class="fc" id="L74">      format = format.withDelimiter(delimiter);</span>
+<span class="fc" id="L75">      String csvHeader = config.getHeader();</span>
+<span class="pc bpc" id="L76" title="1 of 2 branches missed.">      if (csvHeader == null) {</span>
+<span class="fc" id="L77">        format = format.withHeader();</span>
+      } else {
+<span class="nc" id="L79">        format = format.withHeader(StringUtils.split(csvHeader, delimiter));</span>
+      }
+<span class="fc" id="L81">      _format = format;</span>
+<span class="fc" id="L82">      _multiValueDelimiter = config.getMultiValueDelimiter();</span>
+    }
+
+<span class="fc" id="L85">    init();</span>
+<span class="fc" id="L86">  }</span>
+
+  private void init() throws IOException {
+<span class="fc" id="L89">    _parser = _format.parse(RecordReaderUtils.getFileReader(_dataFile));</span>
+<span class="fc" id="L90">    _iterator = _parser.iterator();</span>
+<span class="fc" id="L91">  }</span>
+
+  @Override
+  public boolean hasNext() {
+<span class="fc" id="L95">    return _iterator.hasNext();</span>
+  }
+
+  @Override
+  public GenericRow next() {
+<span class="fc" id="L100">    return next(new GenericRow());</span>
+  }
+
+  @Override
+  public GenericRow next(GenericRow reuse) {
+<span class="fc" id="L105">    CSVRecord record = _iterator.next();</span>
+
+<span class="fc bfc" id="L107" title="All 2 branches covered.">    for (FieldSpec fieldSpec : _schema.getAllFieldSpecs()) {</span>
+<span class="fc" id="L108">      String column = fieldSpec.getName();</span>
+<span class="pc bpc" id="L109" title="1 of 2 branches missed.">      String token = record.isSet(column) ? record.get(column) : null;</span>
+
+      Object value;
+<span class="fc bfc" id="L112" title="All 2 branches covered.">      if (fieldSpec.isSingleValueField()) {</span>
+<span class="fc" id="L113">        value = RecordReaderUtils.convertToDataType(token, fieldSpec);</span>
+      } else {
+<span class="pc bpc" id="L115" title="1 of 2 branches missed.">        String[] tokens = token != null ? StringUtils.split(token, _multiValueDelimiter) : null;</span>
+<span class="fc" id="L116">        value = RecordReaderUtils.convertToDataTypeArray(tokens, fieldSpec);</span>
+      }
+
+<span class="fc" id="L119">      reuse.putField(column, value);</span>
+<span class="fc" id="L120">    }</span>
+
+<span class="fc" id="L122">    return reuse;</span>
+  }
+
+  @Override
+  public void rewind() throws IOException {
+<span class="fc" id="L127">    _parser.close();</span>
+<span class="fc" id="L128">    init();</span>
+<span class="fc" id="L129">  }</span>
+
+  @Override
+  public Schema getSchema() {
+<span class="nc" id="L133">    return _schema;</span>
+  }
+
+  @Override
+  public void close() throws IOException {
+<span class="fc" id="L138">    _parser.close();</span>
+<span class="fc" id="L139">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>FilePerIndexDirectory.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-minion</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.segment.store</a> &gt; <span class="el_source">FilePerIndexDirectory.java</span></div><h1>FilePerIndexDirectory.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.segment.store;
+
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
+import com.linkedin.pinot.common.segment.ReadMode;
+import com.linkedin.pinot.core.segment.index.SegmentMetadataImpl;
+import com.linkedin.pinot.core.segment.memory.PinotDataBuffer;
+import java.io.File;
+import java.io.IOException;
+import java.nio.channels.FileChannel;
+import java.util.HashMap;
+import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+class FilePerIndexDirectory extends ColumnIndexDirectory {
+<span class="fc" id="L33">  private static Logger LOGGER = LoggerFactory.getLogger(FilePerIndexDirectory.class);</span>
+
+<span class="fc" id="L35">  private Map&lt;IndexKey, PinotDataBuffer&gt; indexBuffers = new HashMap&lt;&gt;();</span>
+
+  protected FilePerIndexDirectory(File segmentDirectory, SegmentMetadataImpl metadata, ReadMode readMode) {
+<span class="fc" id="L38">    super(segmentDirectory, metadata, readMode);</span>
+<span class="fc" id="L39">  }</span>
+
+  @Override
+  public PinotDataBuffer getDictionaryBufferFor(String column)
+      throws IOException {
+<span class="fc" id="L44">    IndexKey key = new IndexKey(column, ColumnIndexType.DICTIONARY);</span>
+<span class="fc" id="L45">    return getReadBufferFor(key);</span>
+  }
+
+  @Override
+  public PinotDataBuffer newDictionaryBuffer(String column, int sizeBytes)
+      throws IOException {
+<span class="fc" id="L51">    IndexKey key = new IndexKey(column, ColumnIndexType.DICTIONARY);</span>
+<span class="fc" id="L52">    return getWriteBufferFor(key, sizeBytes);</span>
+  }
+
+  @Override
+  public PinotDataBuffer getForwardIndexBufferFor(String column)
+      throws IOException {
+<span class="fc" id="L58">    IndexKey key = new IndexKey(column, ColumnIndexType.FORWARD_INDEX);</span>
+<span class="fc" id="L59">    return getReadBufferFor(key);</span>
+  }
+
+  @Override
+  public PinotDataBuffer newForwardIndexBuffer(String column, int sizeBytes)
+      throws IOException {
+<span class="fc" id="L65">    IndexKey key = new IndexKey(column, ColumnIndexType.FORWARD_INDEX);</span>
+<span class="fc" id="L66">    return getWriteBufferFor(key, sizeBytes);</span>
+  }
+
+  @Override
+  public PinotDataBuffer getInvertedIndexBufferFor(String column)
+      throws IOException {
+<span class="fc" id="L72">    IndexKey key = new IndexKey(column, ColumnIndexType.INVERTED_INDEX);</span>
+<span class="fc" id="L73">    return getReadBufferFor(key);</span>
+  }
+
+  @Override
+  public PinotDataBuffer newInvertedIndexBuffer(String column, int sizeBytes)
+      throws IOException {
+<span class="fc" id="L79">    IndexKey key = new IndexKey(column, ColumnIndexType.INVERTED_INDEX);</span>
+<span class="fc" id="L80">    return getWriteBufferFor(key, sizeBytes);</span>
+  }
+
+  @Override
+  public boolean hasIndexFor(String column, ColumnIndexType type) {
+<span class="fc" id="L85">    File indexFile = getFileFor(column, type);</span>
+<span class="fc" id="L86">    return indexFile.exists();</span>
+  }
+
+
+  @Override
+  public void close() {
+<span class="fc bfc" id="L92" title="All 2 branches covered.">    for (Map.Entry&lt;IndexKey, PinotDataBuffer&gt; keyBuffers : indexBuffers.entrySet()) {</span>
+<span class="fc" id="L93">      keyBuffers.getValue().close();</span>
+<span class="fc" id="L94">    }</span>
+<span class="fc" id="L95">    indexBuffers = null;</span>
+<span class="fc" id="L96">  }</span>
+
+  @Override
+  public void removeIndex(String columnName, ColumnIndexType indexType) {
+<span class="fc" id="L100">    File indexFile = getFileFor(columnName, indexType);</span>
+<span class="fc" id="L101">    indexFile.delete();</span>
+<span class="fc" id="L102">  }</span>
+
+  @Override
+  public boolean isIndexRemovalSupported() {
+<span class="fc" id="L106">    return true;</span>
+  }
+
+  private PinotDataBuffer getReadBufferFor(IndexKey key)
+      throws IOException {
+<span class="pc bpc" id="L111" title="1 of 2 branches missed.">    if (indexBuffers.containsKey(key)) {</span>
+<span class="nc" id="L112">      return indexBuffers.get(key).duplicate();</span>
+    }
+
+<span class="fc" id="L115">    File filename = getFileFor(key.name, key.type);</span>
+<span class="fc" id="L116">    PinotDataBuffer buffer = mapForReads(filename, key.type.toString() + &quot;.reader&quot;);</span>
+<span class="fc" id="L117">    indexBuffers.put(key, buffer);</span>
+<span class="fc" id="L118">    return buffer.duplicate();</span>
+  }
+
+  private PinotDataBuffer getWriteBufferFor(IndexKey key, int sizeBytes)
+      throws IOException {
+<span class="pc bpc" id="L123" title="1 of 2 branches missed.">    if (indexBuffers.containsKey(key)) {</span>
+<span class="nc" id="L124">      return indexBuffers.get(key).duplicate();</span>
+    }
+
+<span class="fc" id="L127">    File filename = getFileFor(key.name, key.type);</span>
+<span class="fc" id="L128">    PinotDataBuffer buffer = mapForWrites(filename, sizeBytes, key.type.toString() + &quot;.writer&quot;);</span>
+<span class="fc" id="L129">    indexBuffers.put(key, buffer);</span>
+<span class="fc" id="L130">    return buffer.duplicate();</span>
+  }
+
+  @VisibleForTesting
+  File getFileFor(String column, ColumnIndexType indexType) {
+    String filename;
+<span class="pc bpc" id="L136" title="1 of 4 branches missed.">    switch (indexType) {</span>
+      case DICTIONARY:
+<span class="fc" id="L138">        filename = metadata.getDictionaryFileName(column);</span>
+<span class="fc" id="L139">        break;</span>
+      case FORWARD_INDEX:
+<span class="fc" id="L141">        filename = metadata.getForwardIndexFileName(column);</span>
+<span class="fc" id="L142">        break;</span>
+      case INVERTED_INDEX:
+<span class="fc" id="L144">        filename = metadata.getBitmapInvertedIndexFileName(column);</span>
+<span class="fc" id="L145">        break;</span>
+      default:
+<span class="nc" id="L147">        throw new UnsupportedOperationException(&quot;Unknown index type: &quot; + indexType.toString());</span>
+    }
+<span class="fc" id="L149">    return new File(segmentDirectory, filename);</span>
+  }
+
+  private PinotDataBuffer mapForWrites(File file, int sizeBytes, String context)
+      throws IOException {
+<span class="fc" id="L154">    Preconditions.checkNotNull(file);</span>
+<span class="pc bpc" id="L155" title="2 of 4 branches missed.">    Preconditions.checkArgument(sizeBytes &gt;= 0 &amp;&amp; sizeBytes &lt; Integer.MAX_VALUE,</span>
+        &quot;File size must be less than 2GB, file: &quot; + file);
+<span class="fc bfc" id="L157" title="All 2 branches covered.">    Preconditions.checkState(!file.exists(), &quot;File: &quot; + file + &quot; already exists&quot;);</span>
+<span class="fc" id="L158">    String allocContext = allocationContext(file, context);</span>
+
+    // always mmap for writes
+<span class="fc" id="L161">    return PinotDataBuffer.fromFile(file, 0, sizeBytes, ReadMode.mmap,</span>
+        FileChannel.MapMode.READ_WRITE, allocContext);
+  }
+
+  private PinotDataBuffer mapForReads(File file, String context)
+      throws IOException {
+<span class="fc" id="L167">    Preconditions.checkNotNull(file);</span>
+<span class="fc" id="L168">    Preconditions.checkNotNull(context);</span>
+<span class="fc" id="L169">    Preconditions.checkArgument(file.exists(), &quot;File: &quot; + file + &quot; must exist&quot;);</span>
+<span class="fc" id="L170">    Preconditions.checkArgument(file.isFile(), &quot;File: &quot; + file + &quot; must be a regular file&quot;);</span>
+
+<span class="fc" id="L172">    String allocationContext = allocationContext(file, context);</span>
+<span class="fc" id="L173">    return PinotDataBuffer</span>
+        .fromFile(file, readMode, FileChannel.MapMode.READ_ONLY, allocationContext);
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

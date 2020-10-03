@@ -1,0 +1,333 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>SegmentStatusChecker.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-perf</a> &gt; <a href="../index.html" class="el_bundle">pinot-controller</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.controller.helix</a> &gt; <span class="el_source">SegmentStatusChecker.java</span></div><h1>SegmentStatusChecker.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.controller.helix;
+
+import com.linkedin.pinot.common.config.TableNameBuilder;
+import com.linkedin.pinot.common.metadata.ZKMetadataProvider;
+import com.linkedin.pinot.common.metadata.segment.OfflineSegmentZKMetadata;
+import com.linkedin.pinot.common.metrics.ControllerGauge;
+import com.linkedin.pinot.common.metrics.ControllerMetrics;
+import com.linkedin.pinot.common.utils.CommonConstants.Helix.TableType;
+import com.linkedin.pinot.controller.ControllerConf;
+import com.linkedin.pinot.controller.helix.core.PinotHelixResourceManager;
+import com.linkedin.pinot.controller.util.TableSizeReader;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
+import org.apache.commons.httpclient.HttpConnectionManager;
+import org.apache.commons.httpclient.MultiThreadedHttpConnectionManager;
+import org.apache.helix.ControllerChangeListener;
+import org.apache.helix.HelixAdmin;
+import org.apache.helix.NotificationContext;
+import org.apache.helix.ZNRecord;
+import org.apache.helix.model.ExternalView;
+import org.apache.helix.model.IdealState;
+import org.apache.helix.store.zk.ZkHelixPropertyStore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * Manages the segment status metrics, regarding tables with fewer replicas than requested
+ * and segments in error state
+ *
+ * May 15, 2016
+*/
+
+public class SegmentStatusChecker {
+<span class="fc" id="L54">  private static final Logger LOGGER = LoggerFactory.getLogger(SegmentStatusChecker.class);</span>
+  private static final int SegmentCheckerDefaultIntervalSeconds = 120;
+  private static final int SegmentCheckerDefaultWaitForPushTimeSeconds = 600 * 1000;
+  private static final int MaxOfflineSegmentsToLog = 5;
+  private static final String CONTROLLER_LEADER_CHANGE = &quot;CONTROLLER LEADER CHANGE&quot;;
+  public static final String ONLINE = &quot;ONLINE&quot;;
+  public static final String ERROR = &quot;ERROR&quot;;
+  public static final String CONSUMING = &quot;CONSUMING&quot;;
+  private ScheduledExecutorService _executorService;
+  private final ControllerMetrics _metricsRegistry;
+  private final ControllerConf _config;
+  private final PinotHelixResourceManager _pinotHelixResourceManager;
+  private final HelixAdmin _helixAdmin;
+  private final long _segmentStatusIntervalSeconds;
+  private final int _waitForPushTimeSeconds;
+  private final TableSizeReader _tableSizeReader;
+
+  /**
+   * Constructs the segment status checker.
+   * @param pinotHelixResourceManager The resource checker used to interact with Helix
+   * @param config The controller configuration object
+   */
+<span class="fc" id="L76">  public SegmentStatusChecker(PinotHelixResourceManager pinotHelixResourceManager, ControllerConf config, ControllerMetrics metricsRegistry) {</span>
+<span class="fc" id="L77">    _pinotHelixResourceManager = pinotHelixResourceManager;</span>
+<span class="fc" id="L78">    _helixAdmin = pinotHelixResourceManager.getHelixAdmin();</span>
+<span class="fc" id="L79">    _config = config;</span>
+<span class="fc" id="L80">    _segmentStatusIntervalSeconds = config.getStatusCheckerFrequencyInSeconds();</span>
+<span class="fc" id="L81">    _waitForPushTimeSeconds = config.getStatusCheckerWaitForPushTimeInSeconds();</span>
+<span class="fc" id="L82">    _metricsRegistry = metricsRegistry;</span>
+<span class="fc" id="L83">    HttpConnectionManager httpConnectionManager = new MultiThreadedHttpConnectionManager();</span>
+<span class="fc" id="L84">    _tableSizeReader = new TableSizeReader(Executors.newCachedThreadPool(), httpConnectionManager, _pinotHelixResourceManager);</span>
+<span class="fc" id="L85">  }</span>
+
+  /**
+   * Starts the segment status checker.
+   */
+  public void start() {
+<span class="pc bpc" id="L91" title="1 of 2 branches missed.">    if (_segmentStatusIntervalSeconds == -1) {</span>
+<span class="nc" id="L92">      return;</span>
+    }
+
+<span class="fc" id="L95">    setStatusToDefault();</span>
+    // Subscribe to leadership changes
+<span class="fc" id="L97">    _pinotHelixResourceManager.getHelixZkManager().addControllerListener(new ControllerChangeListener() {</span>
+      @Override
+      public void onControllerChange(NotificationContext changeContext) {
+<span class="fc" id="L100">        processLeaderChange(CONTROLLER_LEADER_CHANGE);</span>
+<span class="fc" id="L101">      }</span>
+    });
+<span class="fc" id="L103">  }</span>
+
+  private void startThread() {
+<span class="fc" id="L106">    LOGGER.info(&quot;Starting segment status checker&quot;);</span>
+
+<span class="fc bfc" id="L108" title="All 2 branches covered.">    if (_executorService == null) {</span>
+<span class="fc" id="L109">      _executorService = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {</span>
+        @Override
+        public Thread newThread(Runnable runnable) {
+<span class="fc" id="L112">          Thread thread = new Thread(runnable);</span>
+<span class="fc" id="L113">          thread.setName(&quot;SegStatChecker&quot;);</span>
+<span class="fc" id="L114">          return thread;</span>
+        }
+      });
+      // Set up an executor that executes segment status tasks periodically
+<span class="fc" id="L118">      _executorService.scheduleWithFixedDelay(new Runnable() {</span>
+        @Override
+        public void run() {
+          try {
+<span class="fc" id="L122">            runSegmentMetrics();</span>
+<span class="nc" id="L123">          } catch (Exception e) {</span>
+<span class="nc" id="L124">            LOGGER.warn(&quot;Caught exception while running segment status checker&quot;, e);</span>
+<span class="fc" id="L125">          }</span>
+<span class="fc" id="L126">        }</span>
+      }, SegmentCheckerDefaultIntervalSeconds, _segmentStatusIntervalSeconds, TimeUnit.SECONDS);
+    } else {
+<span class="fc" id="L129">      LOGGER.warn(&quot;SegmentStatusChecker already running. Attempt to start a duplicate thread&quot;);</span>
+    }
+<span class="fc" id="L131">  }</span>
+
+  /**
+   * Stops the segment status checker.
+   */
+  public void stop() {
+<span class="fc bfc" id="L137" title="All 2 branches covered.">    if (_executorService == null) {</span>
+<span class="fc" id="L138">      return;</span>
+    }
+<span class="fc" id="L140">    stopThread();</span>
+<span class="fc" id="L141">  }</span>
+
+  private void stopThread() {
+    // Shut down the executor
+<span class="fc" id="L145">    _executorService.shutdown();</span>
+    try {
+<span class="fc" id="L147">      _executorService.awaitTermination(SegmentCheckerDefaultIntervalSeconds, TimeUnit.SECONDS);</span>
+<span class="nc" id="L148">    } catch (InterruptedException e) {</span>
+<span class="fc" id="L149">    }</span>
+<span class="fc" id="L150">    _executorService = null;</span>
+<span class="fc" id="L151">  }</span>
+
+  /**
+   * Runs a segment status pass over the currently loaded tables.
+   */
+  public void runSegmentMetrics() {
+<span class="fc bfc" id="L157" title="All 2 branches covered.">    if (!_pinotHelixResourceManager.isLeader()) {</span>
+<span class="fc" id="L158">      LOGGER.info(&quot;Skipping Segment Status check, not leader!&quot;);</span>
+<span class="fc" id="L159">      setStatusToDefault();</span>
+<span class="fc" id="L160">      stop();</span>
+<span class="fc" id="L161">      return;</span>
+    }
+
+<span class="fc" id="L164">    long startTime = System.nanoTime();</span>
+
+<span class="fc" id="L166">    LOGGER.info(&quot;Starting Segment Status check for metrics&quot;);</span>
+
+    // Fetch the list of tables
+<span class="fc" id="L169">    List&lt;String&gt; allTableNames = _pinotHelixResourceManager.getAllTables();</span>
+<span class="fc" id="L170">    String helixClusterName = _pinotHelixResourceManager.getHelixClusterName();</span>
+<span class="fc" id="L171">    HelixAdmin helixAdmin = _pinotHelixResourceManager.getHelixAdmin();</span>
+<span class="fc" id="L172">    int realTimeTableCount = 0;</span>
+<span class="fc" id="L173">    int offlineTableCount = 0;</span>
+<span class="fc" id="L174">    ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore= _pinotHelixResourceManager.getPropertyStore();</span>
+
+<span class="fc bfc" id="L176" title="All 2 branches covered.">    for (String tableName : allTableNames) {</span>
+<span class="fc bfc" id="L177" title="All 2 branches covered.">      if (TableNameBuilder.getTableTypeFromTableName(tableName) == TableType.OFFLINE) {</span>
+<span class="fc" id="L178">        offlineTableCount++;</span>
+      } else {
+<span class="fc" id="L180">        realTimeTableCount++;</span>
+      }
+<span class="fc" id="L182">      IdealState idealState = helixAdmin.getResourceIdealState(helixClusterName, tableName);</span>
+<span class="fc bfc" id="L183" title="All 4 branches covered.">      if ((idealState == null) || (idealState.getPartitionSet().isEmpty())) {</span>
+<span class="fc" id="L184">        int nReplicasFromIdealState = 1;</span>
+        try {
+<span class="fc bfc" id="L186" title="All 2 branches covered.">          if (idealState != null) {</span>
+<span class="fc" id="L187">            nReplicasFromIdealState = Integer.valueOf(idealState.getReplicas());</span>
+          }
+<span class="fc" id="L189">        } catch (NumberFormatException e) {</span>
+          // Ignore
+<span class="fc" id="L191">        }</span>
+<span class="fc" id="L192">        _metricsRegistry.setValueOfTableGauge(tableName, ControllerGauge.NUMBER_OF_REPLICAS, nReplicasFromIdealState);</span>
+<span class="fc" id="L193">        _metricsRegistry.setValueOfTableGauge(tableName, ControllerGauge.PERCENT_OF_REPLICAS, 100);</span>
+<span class="fc" id="L194">        _metricsRegistry.setValueOfTableGauge(tableName, ControllerGauge.PERCENT_SEGMENTS_AVAILABLE, 100);</span>
+<span class="fc" id="L195">        continue;</span>
+      }
+<span class="fc" id="L197">      _metricsRegistry.setValueOfTableGauge(tableName, ControllerGauge.IDEALSTATE_ZNODE_SIZE, idealState.toString().length());</span>
+<span class="fc" id="L198">      ExternalView externalView = helixAdmin.getResourceExternalView(helixClusterName, tableName);</span>
+
+<span class="fc" id="L200">      int nReplicasIdealMax = 0; // Keeps track of maximum number of replicas in ideal state</span>
+<span class="fc" id="L201">      int nReplicasExternal = -1; // Keeps track of minimum number of replicas in external view</span>
+<span class="fc" id="L202">      int nErrors = 0; // Keeps track of number of segments in error state</span>
+<span class="fc" id="L203">      int nOffline = 0; // Keeps track of number segments with no online replicas</span>
+<span class="fc" id="L204">      int nSegments = 0; // Counts number of segments</span>
+<span class="fc bfc" id="L205" title="All 2 branches covered.">      for (String partitionName : idealState.getPartitionSet()) {</span>
+<span class="fc" id="L206">        int nReplicas = 0;</span>
+<span class="fc" id="L207">        int nIdeal = 0;</span>
+<span class="fc" id="L208">        nSegments++;</span>
+        // Skip segments not online in ideal state
+<span class="fc bfc" id="L210" title="All 2 branches covered.">        for (Map.Entry&lt;String, String&gt; serverAndState : idealState.getInstanceStateMap(partitionName).entrySet()) {</span>
+<span class="pc bpc" id="L211" title="1 of 2 branches missed.">          if (serverAndState == null) {</span>
+<span class="nc" id="L212">            break;</span>
+          }
+<span class="fc bfc" id="L214" title="All 2 branches covered.">          if (serverAndState.getValue().equals(ONLINE)) {</span>
+<span class="fc" id="L215">            nIdeal++;</span>
+<span class="fc" id="L216">            break;</span>
+          }
+<span class="fc" id="L218">        }</span>
+<span class="fc bfc" id="L219" title="All 2 branches covered.">        if (nIdeal == 0) {</span>
+          // No online segments in ideal state
+<span class="fc" id="L221">          continue;</span>
+        }
+<span class="fc bfc" id="L223" title="All 2 branches covered.">        nReplicasIdealMax = (idealState.getInstanceStateMap(partitionName).size() &gt; nReplicasIdealMax)</span>
+            ? idealState.getInstanceStateMap(partitionName).size() : nReplicasIdealMax;
+<span class="fc bfc" id="L225" title="All 4 branches covered.">        if ((externalView == null) || (externalView.getStateMap(partitionName) == null)) {</span>
+          // No replicas for this segment
+<span class="fc" id="L227">          TableType tableType = TableNameBuilder.getTableTypeFromTableName(tableName);</span>
+<span class="pc bpc" id="L228" title="1 of 4 branches missed.">          if ((tableType != null) &amp;&amp; (tableType.equals(TableType.OFFLINE))) {</span>
+<span class="fc" id="L229">            OfflineSegmentZKMetadata segmentZKMetadata =</span>
+                ZKMetadataProvider.getOfflineSegmentZKMetadata(propertyStore, tableName, partitionName);
+<span class="pc bpc" id="L231" title="1 of 4 branches missed.">            if (segmentZKMetadata != null &amp;&amp; segmentZKMetadata.getPushTime() &gt; System.currentTimeMillis() - _waitForPushTimeSeconds * 1000) {</span>
+              // push not yet finished, skip
+<span class="fc" id="L233">              continue;</span>
+            }
+          }
+<span class="fc" id="L236">          nOffline++;</span>
+<span class="pc bpc" id="L237" title="1 of 2 branches missed.">          if (nOffline &lt; MaxOfflineSegmentsToLog) {</span>
+<span class="fc" id="L238">            LOGGER.warn(&quot;Segment {} of table {} has no replicas&quot;, partitionName, tableName);</span>
+          }
+<span class="fc" id="L240">          nReplicasExternal = 0;</span>
+<span class="fc" id="L241">          continue;</span>
+        }
+<span class="fc bfc" id="L243" title="All 2 branches covered.">        for (Map.Entry&lt;String, String&gt; serverAndState : externalView.getStateMap(partitionName).entrySet()) {</span>
+          // Count number of online replicas. Ignore if state is CONSUMING.
+          // It is possible for a segment to be ONLINE in idealstate, and CONSUMING in EV for a short period of time.
+          // So, ignore this combination. If a segment exists in this combination for a long time, we will get
+          // kafka-partition-not-consuming alert anyway.
+<span class="fc bfc" id="L248" title="All 4 branches covered.">          if (serverAndState.getValue().equals(ONLINE) || serverAndState.getValue().equals(CONSUMING)) {</span>
+<span class="fc" id="L249">            nReplicas++;</span>
+          }
+<span class="fc bfc" id="L251" title="All 2 branches covered.">          if (serverAndState.getValue().equals(ERROR)) {</span>
+<span class="fc" id="L252">            nErrors++;</span>
+          }
+<span class="fc" id="L254">        }</span>
+<span class="pc bpc" id="L255" title="1 of 2 branches missed.">        if (nReplicas == 0) {</span>
+<span class="nc bnc" id="L256" title="All 2 branches missed.">          if (nOffline &lt; MaxOfflineSegmentsToLog) {</span>
+<span class="nc" id="L257">            LOGGER.warn(&quot;Segment {} of table {} has no online replicas&quot;, partitionName, tableName);</span>
+          }
+<span class="nc" id="L259">          nOffline++;</span>
+        }
+<span class="fc bfc" id="L261" title="All 4 branches covered.">        nReplicasExternal = ((nReplicasExternal &gt; nReplicas) || (nReplicasExternal == -1)) ? nReplicas : nReplicasExternal;</span>
+<span class="fc" id="L262">      }</span>
+<span class="fc bfc" id="L263" title="All 2 branches covered.">      if (nReplicasExternal == -1) {</span>
+<span class="pc bpc" id="L264" title="1 of 2 branches missed.">        nReplicasExternal = (nReplicasIdealMax == 0) ? 1 : 0;</span>
+      }
+      // Synchronization provided by Controller Gauge to make sure that only one thread updates the gauge
+<span class="fc" id="L267">      _metricsRegistry.setValueOfTableGauge(tableName, ControllerGauge.NUMBER_OF_REPLICAS,</span>
+          nReplicasExternal);
+<span class="fc bfc" id="L269" title="All 2 branches covered.">      _metricsRegistry.setValueOfTableGauge(tableName, ControllerGauge.PERCENT_OF_REPLICAS,</span>
+          (nReplicasIdealMax &gt; 0) ? (nReplicasExternal * 100 / nReplicasIdealMax) : 100);
+<span class="fc" id="L271">      _metricsRegistry.setValueOfTableGauge(tableName, ControllerGauge.SEGMENTS_IN_ERROR_STATE,</span>
+          nErrors);
+<span class="pc bpc" id="L273" title="1 of 2 branches missed.">      _metricsRegistry.setValueOfTableGauge(tableName, ControllerGauge.PERCENT_SEGMENTS_AVAILABLE,</span>
+          (nSegments &gt; 0) ? (100 - (nOffline * 100 / nSegments)) : 100);
+
+      // Emit estimated sizes of realtime/offline tables.
+<span class="fc" id="L277">      TableSizeReader.TableSizeDetails tableSizeDetails = _tableSizeReader.getTableSizeDetails(tableName,</span>
+          _config.getServerAdminRequestTimeoutSeconds() * 1000);
+<span class="pc bpc" id="L279" title="1 of 2 branches missed.">      if (tableSizeDetails != null) {</span>
+<span class="fc bfc" id="L280" title="All 2 branches covered.">        if (tableSizeDetails.realtimeSegments != null) {</span>
+<span class="fc" id="L281">          long realtimeTableEstimatedSize = tableSizeDetails.realtimeSegments.estimatedSizeInBytes;</span>
+<span class="fc" id="L282">          _metricsRegistry.setValueOfTableGauge(tableName, ControllerGauge.REALTIME_TABLE_ESTIMATED_SIZE, realtimeTableEstimatedSize);</span>
+        }
+<span class="fc bfc" id="L284" title="All 2 branches covered.">        if (tableSizeDetails.offlineSegments != null) {</span>
+<span class="fc" id="L285">          long offlineTableEstimatedSize = tableSizeDetails.offlineSegments.estimatedSizeInBytes;</span>
+<span class="fc" id="L286">          _metricsRegistry.setValueOfTableGauge(tableName, ControllerGauge.OFFLINE_TABLE_ESTIMATED_SIZE, offlineTableEstimatedSize);</span>
+        }
+      }
+
+<span class="fc bfc" id="L290" title="All 2 branches covered.">      if (nOffline &gt; 0) {</span>
+<span class="fc" id="L291">        LOGGER.warn(&quot;Table {} has {} segments with no online replicas&quot;, tableName, nOffline);</span>
+      }
+<span class="fc bfc" id="L293" title="All 2 branches covered.">      if (nReplicasExternal &lt; nReplicasIdealMax) {</span>
+<span class="fc" id="L294">        LOGGER.warn(&quot;Table {} has {} replicas, below replication threshold :{}&quot;, tableName,</span>
+            nReplicasExternal, nReplicasIdealMax);
+      }
+<span class="fc" id="L297">    }</span>
+<span class="fc" id="L298">    _metricsRegistry.setValueOfGlobalGauge(ControllerGauge.REALTIME_TABLE_COUNT, realTimeTableCount);</span>
+<span class="fc" id="L299">    _metricsRegistry.setValueOfGlobalGauge(ControllerGauge.OFFLINE_TABLE_COUNT, offlineTableCount);</span>
+<span class="fc" id="L300">    long totalNanos = System.nanoTime() - startTime;</span>
+<span class="fc" id="L301">    LOGGER.info(&quot;Segment status metrics completed in {}ms&quot;,</span>
+        TimeUnit.MILLISECONDS.convert(totalNanos, TimeUnit.NANOSECONDS));
+<span class="fc" id="L303">  }</span>
+
+  private void processLeaderChange(String path) {
+    try {
+<span class="fc" id="L307">      LOGGER.info(&quot;Processing change notification for path: {}&quot;, path);</span>
+
+<span class="pc bpc" id="L309" title="1 of 2 branches missed.">      if (_pinotHelixResourceManager.isLeader()) {</span>
+<span class="pc bpc" id="L310" title="1 of 2 branches missed.">        if (path.equals(CONTROLLER_LEADER_CHANGE)) {</span>
+<span class="fc" id="L311">          startThread();</span>
+        }
+      } else {
+<span class="nc" id="L314">        LOGGER.info(&quot;Not the leader of this cluster, stopping Status Checker.&quot;);</span>
+      }
+<span class="nc" id="L316">    } catch (Exception e) {</span>
+<span class="nc" id="L317">      LOGGER.error(&quot;Caught exception {} while processing leader change for path {}&quot;, e, path);</span>
+<span class="fc" id="L318">    }</span>
+<span class="fc" id="L319">  }</span>
+
+  private void setStatusToDefault() {
+    // Fetch the list of tables
+<span class="fc" id="L323">    List&lt;String&gt; allTableNames = _pinotHelixResourceManager.getAllTables();</span>
+    // Synchronization provided by Controller Gauge to make sure that only one thread updates the gauge
+<span class="fc bfc" id="L325" title="All 2 branches covered.">    for (String tableName : allTableNames) {</span>
+<span class="fc" id="L326">      _metricsRegistry.setValueOfTableGauge(tableName, ControllerGauge.NUMBER_OF_REPLICAS, 0);</span>
+<span class="fc" id="L327">      _metricsRegistry.setValueOfTableGauge(tableName, ControllerGauge.PERCENT_OF_REPLICAS, 0);</span>
+<span class="fc" id="L328">      _metricsRegistry.setValueOfTableGauge(tableName, ControllerGauge.SEGMENTS_IN_ERROR_STATE, 0);</span>
+<span class="fc" id="L329">      _metricsRegistry.setValueOfTableGauge(tableName, ControllerGauge.PERCENT_SEGMENTS_AVAILABLE, 0);</span>
+<span class="fc" id="L330">    }</span>
+<span class="fc" id="L331">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

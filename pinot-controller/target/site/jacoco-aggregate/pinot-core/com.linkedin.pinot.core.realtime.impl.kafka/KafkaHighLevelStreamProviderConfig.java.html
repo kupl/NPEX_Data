@@ -1,0 +1,294 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>KafkaHighLevelStreamProviderConfig.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-controller</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.realtime.impl.kafka</a> &gt; <span class="el_source">KafkaHighLevelStreamProviderConfig.java</span></div><h1>KafkaHighLevelStreamProviderConfig.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.realtime.impl.kafka;
+
+import com.linkedin.pinot.common.config.TableConfig;
+import com.linkedin.pinot.common.data.Schema;
+import com.linkedin.pinot.common.metadata.instance.InstanceZKMetadata;
+import com.linkedin.pinot.common.metadata.stream.KafkaStreamMetadata;
+import com.linkedin.pinot.common.utils.CommonConstants.Helix;
+import com.linkedin.pinot.core.realtime.StreamProviderConfig;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Properties;
+import kafka.consumer.ConsumerConfig;
+import org.joda.time.Duration;
+import org.joda.time.Period;
+import org.joda.time.format.PeriodFormatter;
+import org.joda.time.format.PeriodFormatterBuilder;
+
+import static com.linkedin.pinot.common.utils.EqualityUtils.hashCodeOf;
+import static com.linkedin.pinot.common.utils.EqualityUtils.isEqual;
+import static com.linkedin.pinot.common.utils.EqualityUtils.isNullOrNotSameClass;
+import static com.linkedin.pinot.common.utils.EqualityUtils.isSameReference;
+
+
+public class KafkaHighLevelStreamProviderConfig implements StreamProviderConfig {
+  private static final Map&lt;String, String&gt; defaultProps;
+
+  private static final int DEFAULT_MAX_REALTIME_ROWS_COUNT = 5000000;
+  private final static long ONE_MINUTE_IN_MILLSEC = 1000 * 60;
+  public static final long ONE_HOUR = ONE_MINUTE_IN_MILLSEC * 60;
+
+  private final static PeriodFormatter PERIOD_FORMATTER;
+
+  static {
+<span class="fc" id="L49">    defaultProps = new HashMap&lt;String, String&gt;();</span>
+    /*defaultProps.put(&quot;zookeeper.connect&quot;, zookeeper);
+    defaultProps.put(&quot;group.id&quot;, groupId);*/
+<span class="fc" id="L52">    defaultProps.put(&quot;zookeeper.session.timeout.ms&quot;, &quot;30000&quot;);</span>
+<span class="fc" id="L53">    defaultProps.put(&quot;zookeeper.connection.timeout.ms&quot;, &quot;10000&quot;);</span>
+<span class="fc" id="L54">    defaultProps.put(&quot;zookeeper.sync.time.ms&quot;, &quot;2000&quot;);</span>
+
+    // Rebalance retries will take up to 1 mins to fail.
+<span class="fc" id="L57">    defaultProps.put(&quot;rebalance.max.retries&quot;, &quot;30&quot;);</span>
+<span class="fc" id="L58">    defaultProps.put(&quot;rebalance.backoff.ms&quot;, &quot;2000&quot;);</span>
+
+<span class="fc" id="L60">    defaultProps.put(&quot;auto.commit.enable&quot;, &quot;false&quot;);</span>
+<span class="fc" id="L61">    defaultProps.put(Helix.DataSource.Realtime.Kafka.AUTO_OFFSET_RESET, &quot;largest&quot;);</span>
+
+    // A formatter for time specification that allows time to be specified in days, hours and minutes
+    // e.g. 1d2h3m, or 6h5m or simply 5h
+<span class="fc" id="L65">    PERIOD_FORMATTER =  new PeriodFormatterBuilder()</span>
+        .appendDays().appendSuffix(&quot;d&quot;)
+        .appendHours().appendSuffix(&quot;h&quot;)
+        .appendMinutes().appendSuffix(&quot;m&quot;)
+        .toFormatter();
+<span class="fc" id="L70">  }</span>
+
+  public static int getDefaultMaxRealtimeRowsCount() {
+<span class="fc" id="L73">    return DEFAULT_MAX_REALTIME_ROWS_COUNT;</span>
+  }
+
+  private String kafkaTopicName;
+  private String zkString;
+  private String groupId;
+  private KafkaMessageDecoder decoder;
+  private String decodeKlass;
+  private Schema indexingSchema;
+  private Map&lt;String, String&gt; decoderProps;
+  private Map&lt;String, String&gt; kafkaConsumerProps;
+<span class="fc" id="L84">  private long segmentTimeInMillis = ONE_HOUR;</span>
+<span class="fc" id="L85">  private int realtimeRecordsThreshold = DEFAULT_MAX_REALTIME_ROWS_COUNT;</span>
+
+<span class="fc" id="L87">  public KafkaHighLevelStreamProviderConfig() {</span>
+
+<span class="fc" id="L89">  }</span>
+
+  /*
+   * kafka.hlc.zk.connect.string : comma separated list of hosts
+   * kafka.hlc.broker.port : broker port
+   * kafka.hlc.group.id : group id
+   * kafka.decoder.class.name : the absolute path of the decoder class name
+   * kafka.decoder.props1 : every property that is prefixed with kafka.decoder.
+   * */
+
+  @Override
+  public void init(Map&lt;String, String&gt; properties, Schema schema) {
+<span class="nc" id="L101">    decoderProps = new HashMap&lt;String, String&gt;();</span>
+<span class="nc" id="L102">    kafkaConsumerProps = new HashMap&lt;&gt;();</span>
+
+<span class="nc" id="L104">    this.indexingSchema = schema;</span>
+<span class="nc bnc" id="L105" title="All 2 branches missed.">    if (properties.containsKey(Helix.DataSource.Realtime.Kafka.HighLevelConsumer.GROUP_ID)) {</span>
+<span class="nc" id="L106">      this.groupId = properties.get(Helix.DataSource.Realtime.Kafka.HighLevelConsumer.GROUP_ID);</span>
+    }
+
+<span class="nc bnc" id="L109" title="All 2 branches missed.">    if (properties.containsKey(Helix.DataSource.Realtime.Kafka.HighLevelConsumer.ZK_CONNECTION_STRING)) {</span>
+<span class="nc" id="L110">      this.zkString = properties.get(Helix.DataSource.Realtime.Kafka.HighLevelConsumer.ZK_CONNECTION_STRING);</span>
+    }
+
+<span class="nc bnc" id="L113" title="All 2 branches missed.">    if (properties.containsKey(Helix.DataSource.Realtime.Kafka.TOPIC_NAME)) {</span>
+<span class="nc" id="L114">      this.kafkaTopicName = properties.get(Helix.DataSource.Realtime.Kafka.TOPIC_NAME);</span>
+    }
+
+<span class="nc bnc" id="L117" title="All 2 branches missed.">    if (properties.containsKey(Helix.DataSource.Realtime.Kafka.DECODER_CLASS)) {</span>
+<span class="nc" id="L118">      this.decodeKlass = properties.get(Helix.DataSource.Realtime.Kafka.DECODER_CLASS);</span>
+    }
+
+<span class="nc bnc" id="L121" title="All 8 branches missed.">    if (groupId == null || zkString == null || kafkaTopicName == null || this.decodeKlass == null) {</span>
+<span class="nc" id="L122">      throw new RuntimeException(&quot;Cannot initialize KafkaHighLevelStreamProviderConfig as: &quot; + &quot;groupId = &quot; + groupId</span>
+          + &quot;, zkString = &quot; + zkString + &quot;, kafkaTopicName = &quot; + kafkaTopicName + &quot;, decodeKlass = &quot; + decodeKlass);
+    }
+
+<span class="nc bnc" id="L126" title="All 2 branches missed.">    if (properties.containsKey(Helix.DataSource.Realtime.REALTIME_SEGMENT_FLUSH_SIZE)) {</span>
+<span class="nc" id="L127">      realtimeRecordsThreshold =</span>
+          Integer.parseInt(properties.get(Helix.DataSource.Realtime.REALTIME_SEGMENT_FLUSH_SIZE));
+    }
+
+<span class="nc bnc" id="L131" title="All 2 branches missed.">    if (properties.containsKey(Helix.DataSource.Realtime.REALTIME_SEGMENT_FLUSH_TIME)) {</span>
+<span class="nc" id="L132">      segmentTimeInMillis =</span>
+          Long.parseLong(properties.get(Helix.DataSource.Realtime.REALTIME_SEGMENT_FLUSH_TIME));
+    }
+
+<span class="nc bnc" id="L136" title="All 2 branches missed.">    for (String key : properties.keySet()) {</span>
+<span class="nc bnc" id="L137" title="All 2 branches missed.">      if (key.startsWith(Helix.DataSource.Realtime.Kafka.DECODER_PROPS_PREFIX)) {</span>
+<span class="nc" id="L138">        decoderProps.put(Helix.DataSource.Realtime.Kafka.getDecoderPropertyKey(key), properties.get(key));</span>
+      }
+
+<span class="nc bnc" id="L141" title="All 2 branches missed.">      if (key.startsWith(Helix.DataSource.Realtime.Kafka.KAFKA_CONSUMER_PROPS_PREFIX)) {</span>
+<span class="nc" id="L142">        kafkaConsumerProps.put(Helix.DataSource.Realtime.Kafka.getConsumerPropertyKey(key), properties.get(key));</span>
+      }
+<span class="nc" id="L144">    }</span>
+<span class="nc" id="L145">  }</span>
+
+  @Override
+  public Schema getSchema() {
+<span class="nc" id="L149">    return indexingSchema;</span>
+  }
+
+  public String getTopicName() {
+<span class="nc" id="L153">    return this.kafkaTopicName;</span>
+  }
+
+  public Map&lt;String, Integer&gt; getTopicMap(int numThreads) {
+<span class="nc" id="L157">    Map&lt;String, Integer&gt; topicCountMap = new HashMap&lt;String, Integer&gt;();</span>
+<span class="nc" id="L158">    topicCountMap.put(kafkaTopicName, numThreads);</span>
+<span class="nc" id="L159">    return topicCountMap;</span>
+  }
+
+  public ConsumerConfig getKafkaConsumerConfig() {
+<span class="nc" id="L163">    Properties props = new Properties();</span>
+<span class="nc bnc" id="L164" title="All 2 branches missed.">    for (String key : defaultProps.keySet()) {</span>
+<span class="nc" id="L165">      props.put(key, defaultProps.get(key));</span>
+<span class="nc" id="L166">    }</span>
+
+<span class="nc bnc" id="L168" title="All 2 branches missed.">    for (String key : kafkaConsumerProps.keySet()) {</span>
+<span class="nc" id="L169">      props.put(key, kafkaConsumerProps.get(key));</span>
+<span class="nc" id="L170">    }</span>
+
+<span class="nc" id="L172">    props.put(&quot;group.id&quot;, groupId);</span>
+<span class="nc" id="L173">    props.put(&quot;zookeeper.connect&quot;, zkString);</span>
+<span class="nc" id="L174">    return new ConsumerConfig(props);</span>
+  }
+
+  public KafkaMessageDecoder getDecoder() throws Exception {
+<span class="nc" id="L178">    return getDecoder(decodeKlass);</span>
+  }
+
+  public KafkaMessageDecoder getDecoder(String decodeClass) throws Exception {
+<span class="nc" id="L182">    KafkaMessageDecoder ret = (KafkaMessageDecoder) Class.forName(decodeClass).newInstance();</span>
+<span class="nc" id="L183">    ret.init(decoderProps, indexingSchema, kafkaTopicName);</span>
+<span class="nc" id="L184">    return ret;</span>
+  }
+
+  @Override
+  public String getStreamProviderClass() {
+<span class="nc" id="L189">    return null;</span>
+  }
+
+  @Override
+  public void init(TableConfig tableConfig, InstanceZKMetadata instanceMetadata, Schema schema) {
+<span class="fc" id="L194">    this.indexingSchema = schema;</span>
+<span class="pc bpc" id="L195" title="1 of 2 branches missed.">    if (instanceMetadata != null) {</span>
+      // For LL segments, instanceZkMetadata will be null
+<span class="fc" id="L197">      this.groupId = instanceMetadata.getGroupId(tableConfig.getTableName());</span>
+    }
+<span class="fc" id="L199">    KafkaStreamMetadata kafkaMetadata = new KafkaStreamMetadata(tableConfig.getIndexingConfig().getStreamConfigs());</span>
+<span class="fc" id="L200">    this.kafkaTopicName = kafkaMetadata.getKafkaTopicName();</span>
+<span class="fc" id="L201">    this.decodeKlass = kafkaMetadata.getDecoderClass();</span>
+<span class="fc" id="L202">    this.decoderProps = kafkaMetadata.getDecoderProperties();</span>
+<span class="fc" id="L203">    this.kafkaConsumerProps = kafkaMetadata.getKafkaConsumerProperties();</span>
+<span class="fc" id="L204">    this.zkString = kafkaMetadata.getZkBrokerUrl();</span>
+<span class="pc bpc" id="L205" title="1 of 2 branches missed.">    if (tableConfig.getIndexingConfig().getStreamConfigs().containsKey(Helix.DataSource.Realtime.REALTIME_SEGMENT_FLUSH_SIZE)) {</span>
+<span class="fc" id="L206">      realtimeRecordsThreshold =</span>
+          Integer.parseInt(tableConfig.getIndexingConfig().getStreamConfigs().get(Helix.DataSource.Realtime.REALTIME_SEGMENT_FLUSH_SIZE));
+    }
+
+<span class="pc bpc" id="L210" title="1 of 2 branches missed.">    if (tableConfig.getIndexingConfig().getStreamConfigs().containsKey(Helix.DataSource.Realtime.REALTIME_SEGMENT_FLUSH_TIME)) {</span>
+<span class="fc" id="L211">      segmentTimeInMillis =</span>
+          convertToMs(tableConfig.getIndexingConfig().getStreamConfigs().get(Helix.DataSource.Realtime.REALTIME_SEGMENT_FLUSH_TIME));
+    }
+<span class="fc" id="L214">  }</span>
+
+  @Override
+  public String getStreamName() {
+<span class="nc" id="L218">    return getTopicName();</span>
+  }
+
+  @Override
+  public int getSizeThresholdToFlushSegment() {
+<span class="nc" id="L223">    return realtimeRecordsThreshold;</span>
+  }
+
+  @Override
+  public long getTimeThresholdToFlushSegment() {
+<span class="fc" id="L228">    return segmentTimeInMillis;</span>
+  }
+
+  String getGroupId() {
+<span class="nc" id="L232">    return groupId;</span>
+  }
+
+  String getZkString() {
+<span class="nc" id="L236">    return zkString;</span>
+  }
+
+  protected long convertToMs(String timeStr) {
+<span class="fc" id="L240">    long ms = -1;</span>
+    try {
+<span class="fc" id="L242">      ms = Long.valueOf(timeStr);</span>
+<span class="fc" id="L243">    } catch (NumberFormatException e1) {</span>
+      try {
+<span class="fc" id="L245">        Period p = PERIOD_FORMATTER.parsePeriod(timeStr);</span>
+<span class="fc" id="L246">        Duration d = p.toStandardDuration();</span>
+<span class="fc" id="L247">        ms = d.getStandardSeconds() * 1000L;</span>
+<span class="nc" id="L248">      } catch (Exception e2) {</span>
+<span class="nc" id="L249">        throw new RuntimeException(&quot;Invalid time spec '&quot; + timeStr + &quot;' (Valid examples: '3h', '4h30m')&quot;, e2);</span>
+<span class="fc" id="L250">      }</span>
+<span class="fc" id="L251">    }</span>
+<span class="fc" id="L252">    return ms;</span>
+  }
+
+  @Override
+  public boolean equals(Object o) {
+<span class="nc bnc" id="L257" title="All 2 branches missed.">    if (isSameReference(this, o)) {</span>
+<span class="nc" id="L258">      return true;</span>
+    }
+
+<span class="nc bnc" id="L261" title="All 2 branches missed.">    if (isNullOrNotSameClass(this, o)) {</span>
+<span class="nc" id="L262">      return false;</span>
+    }
+
+<span class="nc" id="L265">    KafkaHighLevelStreamProviderConfig that = (KafkaHighLevelStreamProviderConfig) o;</span>
+
+<span class="nc bnc" id="L267" title="All 20 branches missed.">    return isEqual(segmentTimeInMillis, that.segmentTimeInMillis) &amp;&amp;</span>
+        isEqual(realtimeRecordsThreshold, that.realtimeRecordsThreshold) &amp;&amp;
+        isEqual(kafkaTopicName, that.kafkaTopicName) &amp;&amp;
+        isEqual(zkString, that.zkString) &amp;&amp;
+        isEqual(groupId, that.groupId) &amp;&amp;
+        isEqual(decoder, that.decoder) &amp;&amp;
+        isEqual(decodeKlass, that.decodeKlass) &amp;&amp;
+        isEqual(indexingSchema, that.indexingSchema) &amp;&amp;
+        isEqual(decoderProps, that.decoderProps) &amp;&amp;
+        isEqual(kafkaConsumerProps, that.kafkaConsumerProps);
+  }
+
+  @Override
+  public int hashCode() {
+<span class="nc" id="L281">    int result = hashCodeOf(kafkaTopicName);</span>
+<span class="nc" id="L282">    result = hashCodeOf(result, zkString);</span>
+<span class="nc" id="L283">    result = hashCodeOf(result, groupId);</span>
+<span class="nc" id="L284">    result = hashCodeOf(result, decoder);</span>
+<span class="nc" id="L285">    result = hashCodeOf(result, decodeKlass);</span>
+<span class="nc" id="L286">    result = hashCodeOf(result, indexingSchema);</span>
+<span class="nc" id="L287">    result = hashCodeOf(result, decoderProps);</span>
+<span class="nc" id="L288">    result = hashCodeOf(result, kafkaConsumerProps);</span>
+<span class="nc" id="L289">    result = hashCodeOf(result, segmentTimeInMillis);</span>
+<span class="nc" id="L290">    result = hashCodeOf(result, realtimeRecordsThreshold);</span>
+<span class="nc" id="L291">    return result;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

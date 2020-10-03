@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>OrDocIdIterator.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-perf</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.operator.dociditerators</a> &gt; <span class="el_source">OrDocIdIterator.java</span></div><h1>OrDocIdIterator.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.operator.dociditerators;
+
+import com.linkedin.pinot.core.common.BlockDocIdIterator;
+import com.linkedin.pinot.core.common.Constants;
+
+
+public final class OrDocIdIterator implements BlockDocIdIterator {
+  private final BlockDocIdIterator[] _docIdIterators;
+  private final int[] _nextDocIds;
+  private final int _minDocId;
+  private final int _maxDocId;
+
+  private int _numNotExhaustedIterators;
+<span class="fc" id="L29">  private int _currentDocId = -1;</span>
+
+<span class="fc" id="L31">  public OrDocIdIterator(BlockDocIdIterator[] docIdIterators, int minDocId, int maxDocId) {</span>
+<span class="fc" id="L32">    _docIdIterators = docIdIterators;</span>
+<span class="fc" id="L33">    _numNotExhaustedIterators = docIdIterators.length;</span>
+<span class="fc" id="L34">    _nextDocIds = new int[_numNotExhaustedIterators];</span>
+<span class="fc bfc" id="L35" title="All 2 branches covered.">    for (int i = 0; i &lt; _numNotExhaustedIterators; i++) {</span>
+<span class="fc" id="L36">      _nextDocIds[i] = docIdIterators[i].advance(minDocId);</span>
+    }
+<span class="fc" id="L38">    _minDocId = minDocId;</span>
+<span class="fc" id="L39">    _maxDocId = maxDocId;</span>
+<span class="fc" id="L40">    removeExhaustedIterators();</span>
+<span class="fc" id="L41">  }</span>
+
+  /**
+   * Loop over the document id array and pick the smallest one so that the document ids returned are in ascending order.
+   * &lt;p&gt;For each child iterator, fetch the next document id when its current document id is the same as the current
+   * document id of parent iterator so that each document id is only returned once.
+   * &lt;p&gt;{@inheritDoc}
+   */
+  @Override
+  public int next() {
+<span class="pc bpc" id="L51" title="1 of 2 branches missed.">    if (_currentDocId == Constants.EOF) {</span>
+<span class="nc" id="L52">      return Constants.EOF;</span>
+    }
+
+<span class="fc" id="L55">    int nextDocId = Integer.MAX_VALUE;</span>
+<span class="fc" id="L56">    boolean hasExhaustedIterator = false;</span>
+<span class="fc bfc" id="L57" title="All 2 branches covered.">    for (int i = 0; i &lt; _numNotExhaustedIterators; i++) {</span>
+<span class="fc" id="L58">      int docId = _nextDocIds[i];</span>
+<span class="fc bfc" id="L59" title="All 2 branches covered.">      if (docId == _currentDocId) {</span>
+<span class="fc" id="L60">        docId = _docIdIterators[i].next();</span>
+<span class="fc" id="L61">        _nextDocIds[i] = docId;</span>
+      }
+<span class="fc bfc" id="L63" title="All 2 branches covered.">      if (docId != Constants.EOF) {</span>
+<span class="fc" id="L64">        nextDocId = Math.min(nextDocId, docId);</span>
+      } else {
+<span class="fc" id="L66">        hasExhaustedIterator = true;</span>
+      }
+    }
+<span class="fc bfc" id="L69" title="All 2 branches covered.">    if (nextDocId &gt; _maxDocId) {</span>
+<span class="fc" id="L70">      _currentDocId = Constants.EOF;</span>
+    } else {
+<span class="fc" id="L72">      _currentDocId = nextDocId;</span>
+<span class="fc bfc" id="L73" title="All 2 branches covered.">      if (hasExhaustedIterator) {</span>
+<span class="fc" id="L74">        removeExhaustedIterators();</span>
+      }
+    }
+<span class="fc" id="L77">    return _currentDocId;</span>
+  }
+
+  /**
+   * Loop over the document id array and pick the smallest one that is equal or grater than the given target document id
+   * so that the document ids returned are in ascending order.
+   * &lt;p&gt;For each child iterator, advance to the target document id when its current document id is smaller than the
+   * target document id  so that each document id is only returned once.
+   * &lt;p&gt;{@inheritDoc}
+   */
+  @Override
+  public int advance(int targetDocId) {
+<span class="pc bpc" id="L89" title="1 of 2 branches missed.">    if (_currentDocId == Constants.EOF) {</span>
+<span class="nc" id="L90">      return Constants.EOF;</span>
+    }
+<span class="fc bfc" id="L92" title="All 2 branches covered.">    if (targetDocId &gt; _maxDocId) {</span>
+<span class="fc" id="L93">      _currentDocId = Constants.EOF;</span>
+<span class="fc" id="L94">      return Constants.EOF;</span>
+    }
+<span class="fc bfc" id="L96" title="All 2 branches covered.">    if (targetDocId &lt;= _currentDocId) {</span>
+<span class="fc" id="L97">      return _currentDocId;</span>
+    }
+
+<span class="fc bfc" id="L100" title="All 2 branches covered.">    if (targetDocId &lt; _minDocId) {</span>
+<span class="fc" id="L101">      targetDocId = _minDocId;</span>
+    }
+
+<span class="fc" id="L104">    int nextDocId = Integer.MAX_VALUE;</span>
+<span class="fc" id="L105">    boolean hasExhaustedIterator = false;</span>
+<span class="fc bfc" id="L106" title="All 2 branches covered.">    for (int i = 0; i &lt; _numNotExhaustedIterators; i++) {</span>
+<span class="fc" id="L107">      int docId = _nextDocIds[i];</span>
+<span class="fc bfc" id="L108" title="All 2 branches covered.">      if (docId &lt; targetDocId) {</span>
+<span class="fc" id="L109">        docId = _docIdIterators[i].advance(targetDocId);</span>
+<span class="fc" id="L110">        _nextDocIds[i] = docId;</span>
+      }
+<span class="fc bfc" id="L112" title="All 2 branches covered.">      if (docId != Constants.EOF) {</span>
+<span class="fc" id="L113">        nextDocId = Math.min(nextDocId, docId);</span>
+      } else {
+<span class="fc" id="L115">        hasExhaustedIterator = true;</span>
+      }
+    }
+<span class="fc bfc" id="L118" title="All 2 branches covered.">    if (nextDocId &gt; _maxDocId) {</span>
+<span class="fc" id="L119">      _currentDocId = Constants.EOF;</span>
+    } else {
+<span class="fc" id="L121">      _currentDocId = nextDocId;</span>
+<span class="fc bfc" id="L122" title="All 2 branches covered.">      if (hasExhaustedIterator) {</span>
+<span class="fc" id="L123">        removeExhaustedIterators();</span>
+      }
+    }
+<span class="fc" id="L126">    return _currentDocId;</span>
+  }
+
+  /**
+   * Helper method to remove exhausted iterators.
+   * &lt;p&gt;Whenever we find an exhausted iterator, we replace it with the last one, and update number of not exhausted
+   * iterators until the first number of not exhausted iterators in the array are not exhausted.
+   */
+  private void removeExhaustedIterators() {
+<span class="fc" id="L135">    int i = 0;</span>
+<span class="fc bfc" id="L136" title="All 2 branches covered.">    while (i &lt; _numNotExhaustedIterators) {</span>
+<span class="fc bfc" id="L137" title="All 2 branches covered.">      if (_nextDocIds[i] == Constants.EOF) {</span>
+        // Need to check the new iterator moved to this index, so do not increase the index
+<span class="fc" id="L139">        _numNotExhaustedIterators--;</span>
+<span class="fc" id="L140">        _docIdIterators[i] = _docIdIterators[_numNotExhaustedIterators];</span>
+<span class="fc" id="L141">        _nextDocIds[i] = _nextDocIds[_numNotExhaustedIterators];</span>
+      } else {
+<span class="fc" id="L143">        i++;</span>
+      }
+    }
+<span class="fc" id="L146">  }</span>
+
+  @Override
+  public int currentDocId() {
+<span class="nc" id="L150">    return _currentDocId;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

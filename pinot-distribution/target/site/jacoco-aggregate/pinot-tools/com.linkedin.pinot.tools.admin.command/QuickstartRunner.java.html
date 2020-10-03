@@ -1,0 +1,217 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>QuickstartRunner.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-tools</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.tools.admin.command</a> &gt; <span class="el_source">QuickstartRunner.java</span></div><h1>QuickstartRunner.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.tools.admin.command;
+
+import com.linkedin.pinot.common.utils.CommonConstants.Helix.TableType;
+import com.linkedin.pinot.common.utils.TenantRole;
+import com.linkedin.pinot.tools.QuickstartTableRequest;
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Random;
+import org.apache.commons.io.FileUtils;
+import org.json.JSONObject;
+
+
+public class QuickstartRunner {
+<span class="nc" id="L31">  private static final Random RANDOM = new Random();</span>
+  private static final String CLUSTER_NAME = &quot;QuickStartCluster&quot;;
+
+  private static final int ZK_PORT = 2123;
+  private static final String ZK_ADDRESS = &quot;localhost:&quot; + ZK_PORT;
+
+  private static final int DEFAULT_SERVER_NETTY_PORT = 7000;
+  private static final int DEFAULT_SERVER_ADMIN_API_PORT = 7500;
+  private static final int DEFAULT_BROKER_PORT = 8000;
+  private static final int DEFAULT_CONTROLLER_PORT = 9000;
+
+  private final List&lt;QuickstartTableRequest&gt; _tableRequests;
+  private final int _numServers;
+  private final int _numBrokers;
+  private final int _numControllers;
+  private final File _tempDir;
+  private final boolean _enableTenantIsolation;
+
+<span class="nc" id="L49">  private final List&lt;Integer&gt; _brokerPorts = new ArrayList&lt;&gt;();</span>
+<span class="nc" id="L50">  private final List&lt;Integer&gt; _controllerPorts = new ArrayList&lt;&gt;();</span>
+<span class="nc" id="L51">  private final List&lt;String&gt; _segmentDirs = new ArrayList&lt;&gt;();</span>
+<span class="nc" id="L52">  private boolean _isStopped = false;</span>
+
+  public QuickstartRunner(List&lt;QuickstartTableRequest&gt; tableRequests, int numServers, int numBrokers,
+      int numControllers, File tempDir, boolean enableIsolation)
+<span class="nc" id="L56">      throws Exception {</span>
+<span class="nc" id="L57">    _tableRequests = tableRequests;</span>
+<span class="nc" id="L58">    _numServers = numServers;</span>
+<span class="nc" id="L59">    _numBrokers = numBrokers;</span>
+<span class="nc" id="L60">    _numControllers = numControllers;</span>
+<span class="nc" id="L61">    _tempDir = tempDir;</span>
+<span class="nc" id="L62">    _enableTenantIsolation = enableIsolation;</span>
+<span class="nc" id="L63">    clean();</span>
+<span class="nc" id="L64">  }</span>
+
+  public QuickstartRunner(List&lt;QuickstartTableRequest&gt; tableRequests, int numServers, int numBrokers,
+      int numControllers, File tempDir)
+      throws Exception {
+<span class="nc" id="L69">    this(tableRequests, numServers, numBrokers, numControllers, tempDir, true);</span>
+<span class="nc" id="L70">  }</span>
+
+  private void startZookeeper()
+      throws IOException {
+<span class="nc" id="L74">    StartZookeeperCommand zkStarter = new StartZookeeperCommand();</span>
+<span class="nc" id="L75">    zkStarter.setPort(ZK_PORT);</span>
+<span class="nc" id="L76">    zkStarter.execute();</span>
+<span class="nc" id="L77">  }</span>
+
+  private void startControllers()
+      throws Exception {
+<span class="nc bnc" id="L81" title="All 2 branches missed.">    for (int i = 0; i &lt; _numControllers; i++) {</span>
+<span class="nc" id="L82">      StartControllerCommand controllerStarter = new StartControllerCommand();</span>
+<span class="nc" id="L83">      controllerStarter.setControllerPort(String.valueOf(DEFAULT_CONTROLLER_PORT + i))</span>
+          .setZkAddress(ZK_ADDRESS)
+          .setClusterName(CLUSTER_NAME)
+          .setTenantIsolation(_enableTenantIsolation);
+<span class="nc" id="L87">      controllerStarter.execute();</span>
+<span class="nc" id="L88">      _controllerPorts.add(DEFAULT_CONTROLLER_PORT + i);</span>
+    }
+<span class="nc" id="L90">  }</span>
+
+  private void startBrokers()
+      throws Exception {
+<span class="nc bnc" id="L94" title="All 2 branches missed.">    for (int i = 0; i &lt; _numBrokers; i++) {</span>
+<span class="nc" id="L95">      StartBrokerCommand brokerStarter = new StartBrokerCommand();</span>
+<span class="nc" id="L96">      brokerStarter.setPort(DEFAULT_BROKER_PORT + i).setZkAddress(ZK_ADDRESS).setClusterName(CLUSTER_NAME);</span>
+<span class="nc" id="L97">      brokerStarter.execute();</span>
+<span class="nc" id="L98">      _brokerPorts.add(DEFAULT_BROKER_PORT + i);</span>
+    }
+<span class="nc" id="L100">  }</span>
+
+  private void startServers()
+      throws Exception {
+<span class="nc bnc" id="L104" title="All 2 branches missed.">    for (int i = 0; i &lt; _numServers; i++) {</span>
+<span class="nc" id="L105">      StartServerCommand serverStarter = new StartServerCommand();</span>
+<span class="nc" id="L106">      serverStarter.setPort(DEFAULT_SERVER_NETTY_PORT + i)</span>
+          .setAdminPort(DEFAULT_SERVER_ADMIN_API_PORT + i)
+          .setZkAddress(ZK_ADDRESS)
+          .setClusterName(CLUSTER_NAME)
+          .setDataDir(new File(_tempDir, &quot;PinotServerData&quot; + i).getAbsolutePath())
+          .setSegmentDir(new File(_tempDir, &quot;PinotServerSegment&quot; + i).getAbsolutePath());
+<span class="nc" id="L112">      serverStarter.execute();</span>
+    }
+<span class="nc" id="L114">  }</span>
+
+  private void clean()
+      throws Exception {
+<span class="nc" id="L118">    FileUtils.cleanDirectory(_tempDir);</span>
+<span class="nc" id="L119">  }</span>
+
+  public void startAll()
+      throws Exception {
+<span class="nc" id="L123">    startZookeeper();</span>
+<span class="nc" id="L124">    startControllers();</span>
+<span class="nc" id="L125">    startBrokers();</span>
+<span class="nc" id="L126">    startServers();</span>
+<span class="nc" id="L127">  }</span>
+
+  public void stop()
+      throws Exception {
+<span class="nc bnc" id="L131" title="All 2 branches missed.">    if (_isStopped) {</span>
+<span class="nc" id="L132">      return;</span>
+    }
+
+<span class="nc" id="L135">    StopProcessCommand stopper = new StopProcessCommand(false);</span>
+<span class="nc" id="L136">    stopper.stopController().stopBroker().stopServer().stopZookeeper();</span>
+<span class="nc" id="L137">    stopper.execute();</span>
+<span class="nc" id="L138">    clean();</span>
+
+<span class="nc" id="L140">    _isStopped = true;</span>
+<span class="nc" id="L141">  }</span>
+
+  public void createServerTenantWith(int numOffline, int numRealtime, String tenantName)
+      throws Exception {
+<span class="nc" id="L145">    new AddTenantCommand().setControllerUrl(&quot;http://localhost:&quot; + _controllerPorts.get(0))</span>
+        .setName(tenantName)
+        .setOffline(numOffline)
+        .setRealtime(numRealtime)
+        .setInstances(numOffline + numRealtime)
+        .setRole(TenantRole.SERVER)
+        .setExecute(true)
+        .execute();
+<span class="nc" id="L153">  }</span>
+
+  public void createBrokerTenantWith(int number, String tenantName)
+      throws Exception {
+<span class="nc" id="L157">    new AddTenantCommand().setControllerUrl(&quot;http://localhost:&quot; + _controllerPorts.get(0))</span>
+        .setName(tenantName)
+        .setInstances(number)
+        .setRole(TenantRole.BROKER)
+        .setExecute(true)
+        .execute();
+<span class="nc" id="L163">  }</span>
+
+  public void addSchema()
+      throws Exception {
+<span class="nc bnc" id="L167" title="All 2 branches missed.">    for (QuickstartTableRequest request : _tableRequests) {</span>
+<span class="nc" id="L168">      new AddSchemaCommand().setControllerPort(String.valueOf(_controllerPorts.get(0)))</span>
+          .setSchemaFilePath(request.getSchemaFile().getAbsolutePath())
+          .setExecute(true)
+          .execute();
+<span class="nc" id="L172">    }</span>
+<span class="nc" id="L173">  }</span>
+
+  public void addTable()
+      throws Exception {
+<span class="nc bnc" id="L177" title="All 2 branches missed.">    for (QuickstartTableRequest request : _tableRequests) {</span>
+<span class="nc" id="L178">      new AddTableCommand().setFilePath(request.getTableRequestFile().getAbsolutePath())</span>
+          .setControllerPort(String.valueOf(_controllerPorts.get(0)))
+          .setExecute(true)
+          .execute();
+<span class="nc" id="L182">    }</span>
+<span class="nc" id="L183">  }</span>
+
+  public void buildSegment()
+      throws Exception {
+<span class="nc bnc" id="L187" title="All 2 branches missed.">    for (QuickstartTableRequest request : _tableRequests) {</span>
+<span class="nc bnc" id="L188" title="All 2 branches missed.">      if (request.getTableType() == TableType.OFFLINE) {</span>
+<span class="nc" id="L189">        File tempDir = new File(_tempDir, request.getTableName() + &quot;_segment&quot;);</span>
+<span class="nc" id="L190">        new CreateSegmentCommand().setDataDir(request.getDataDir().getAbsolutePath())</span>
+            .setFormat(request.getSegmentFileFormat())
+            .setSchemaFile(request.getSchemaFile().getAbsolutePath())
+            .setTableName(request.getTableName())
+            .setSegmentName(request.getTableName() + &quot;_&quot; + System.currentTimeMillis())
+            .setOutDir(tempDir.getAbsolutePath())
+            .execute();
+<span class="nc" id="L197">        _segmentDirs.add(tempDir.getAbsolutePath());</span>
+      }
+<span class="nc" id="L199">    }</span>
+<span class="nc" id="L200">  }</span>
+
+  public void pushSegment()
+      throws Exception {
+<span class="nc bnc" id="L204" title="All 2 branches missed.">    for (String segmentDir : _segmentDirs) {</span>
+<span class="nc" id="L205">      new UploadSegmentCommand().setControllerPort(String.valueOf(_controllerPorts.get(0)))</span>
+          .setSegmentDir(segmentDir)
+          .execute();
+<span class="nc" id="L208">    }</span>
+<span class="nc" id="L209">  }</span>
+
+  public JSONObject runQuery(String query)
+      throws Exception {
+<span class="nc" id="L213">    int brokerPort = _brokerPorts.get(RANDOM.nextInt(_brokerPorts.size()));</span>
+<span class="nc" id="L214">    return new JSONObject(new PostQueryCommand().setBrokerPort(String.valueOf(brokerPort)).setQuery(query).run());</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

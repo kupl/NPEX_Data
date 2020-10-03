@@ -1,0 +1,387 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>PinotByteBuffer.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-minion</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.segment.memory</a> &gt; <span class="el_source">PinotByteBuffer.java</span></div><h1>PinotByteBuffer.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.segment.memory;
+
+import com.google.common.base.Preconditions;
+import com.linkedin.pinot.common.segment.ReadMode;
+import com.linkedin.pinot.common.utils.MmapUtils;
+import java.io.File;
+import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.channels.FileChannel;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+public class PinotByteBuffer extends PinotDataBuffer {
+
+<span class="fc" id="L32">  private static final Logger LOGGER = LoggerFactory.getLogger(PinotByteBuffer.class);</span>
+
+  private ByteBuffer buffer;
+<span class="fc" id="L35">  private RandomAccessFile raf = null;</span>
+
+  /**
+   * Fully load the file in to the in-memory buffer
+   * @param file file containing index data
+   * @param readMode mmap vs heap mode for the buffer
+   * @param openMode read or read_write mode for the index
+   * @param context context for buffer allocation. Use mainly for resource tracking
+   * @return in-memory buffer containing data
+   */
+  public static PinotDataBuffer fromFile(File file, ReadMode readMode, FileChannel.MapMode openMode, String context)
+      throws IOException {
+<span class="nc" id="L47">    return PinotByteBuffer.fromFile(file, 0, file.length(), readMode, openMode, context);</span>
+  }
+
+  /**
+   * Loads a portion of file in memory. This will load data from [startPosition, startPosition + length).
+   * @param file file to load
+   * @param startPosition (inclusive) start startPosition to the load the data from in the file
+   * @param length size of the data from
+   * @param readMode mmap vs heap
+   * @param openMode read vs read/write
+   * @param context context for buffer allocation. Use mainly for resource tracking
+   * @return in-memory buffer containing data
+   * @throws IOException
+   */
+  public static PinotDataBuffer fromFile(File file, long startPosition, long length,
+      ReadMode readMode, FileChannel.MapMode openMode, String context)
+      throws IOException {
+
+<span class="nc bnc" id="L65" title="All 2 branches missed.">    if (readMode == ReadMode.heap) {</span>
+<span class="nc" id="L66">      return PinotByteBuffer.loadFromFile(file, startPosition, length, context);</span>
+<span class="nc bnc" id="L67" title="All 2 branches missed.">    } else if (readMode == ReadMode.mmap) {</span>
+<span class="nc" id="L68">      return PinotByteBuffer.mapFromFile(file, startPosition, length, openMode, context);</span>
+    } else {
+<span class="nc" id="L70">      throw new RuntimeException(&quot;Unknown readmode: &quot; + readMode.name() + &quot;, file: &quot; + file);</span>
+    }
+
+  }
+
+  static PinotDataBuffer mapFromFile(File file, long start, long length, FileChannel.MapMode openMode, String context)
+      throws IOException {
+    // file may not exist if it's opened for writing
+<span class="fc" id="L78">    Preconditions.checkNotNull(file);</span>
+<span class="pc bpc" id="L79" title="1 of 2 branches missed.">    Preconditions.checkArgument(start &gt;= 0);</span>
+<span class="pc bpc" id="L80" title="2 of 4 branches missed.">    Preconditions.checkArgument(length &gt;= 0 &amp;&amp; length &lt; Integer.MAX_VALUE,</span>
+        &quot;Mapping files larger than 2GB is not supported, file: &quot; + file.toString() + &quot;, context: &quot; + context);
+<span class="fc" id="L82">    Preconditions.checkNotNull(context);</span>
+
+<span class="fc bfc" id="L84" title="All 2 branches covered.">    if (openMode == FileChannel.MapMode.READ_ONLY) {</span>
+<span class="pc bpc" id="L85" title="1 of 2 branches missed.">      if (!file.exists()) {</span>
+<span class="nc" id="L86">        throw new IllegalArgumentException(&quot;File: &quot; + file + &quot; must exist to open in read-only mode&quot;);</span>
+      }
+<span class="pc bpc" id="L88" title="1 of 2 branches missed.">      if (length &gt; (file.length() - start)) {</span>
+<span class="nc" id="L89">        throw new IllegalArgumentException(</span>
+            String.format(&quot;Mapping limits exceed file size, start: %d, length: %d, file size: %d&quot;,
+                start, length, file.length() ));
+      }
+    }
+
+
+<span class="fc bfc" id="L96" title="All 2 branches covered.">    String rafOpenMode = openMode == FileChannel.MapMode.READ_ONLY ? &quot;r&quot; : &quot;rw&quot;;</span>
+<span class="fc" id="L97">    RandomAccessFile raf = new RandomAccessFile(file, rafOpenMode);</span>
+<span class="fc" id="L98">    ByteBuffer bb = MmapUtils.mmapFile(raf, openMode, start, length, file, context);</span>
+<span class="fc" id="L99">    PinotByteBuffer pbb = new PinotByteBuffer(bb, true /*owner*/);</span>
+<span class="fc" id="L100">    pbb.raf = raf;</span>
+<span class="fc" id="L101">    return pbb;</span>
+  }
+
+  static PinotDataBuffer loadFromFile(File file, long startPosition, long length, String context)
+      throws IOException {
+<span class="pc bpc" id="L106" title="2 of 4 branches missed.">    Preconditions.checkArgument(length &gt;= 0 &amp;&amp; length &lt; Integer.MAX_VALUE);</span>
+<span class="fc" id="L107">    Preconditions.checkNotNull(file);</span>
+<span class="pc bpc" id="L108" title="1 of 2 branches missed.">    Preconditions.checkArgument(startPosition &gt;= 0);</span>
+<span class="fc" id="L109">    Preconditions.checkNotNull(context);</span>
+<span class="fc" id="L110">    Preconditions.checkState(file.exists(), &quot;File: {} does not exist&quot;, file);</span>
+<span class="fc" id="L111">    Preconditions.checkState(file.isFile(), &quot;File: {} is not a regular file&quot;, file);</span>
+
+<span class="fc" id="L113">    PinotByteBuffer buffer = allocateDirect((int)length, file.toString()  + &quot;-&quot; + context);</span>
+
+<span class="fc" id="L115">    buffer.readFrom(file, startPosition, length);</span>
+<span class="fc" id="L116">    return buffer;</span>
+  }
+
+  public static PinotByteBuffer allocateDirect(long size, String context) {
+<span class="pc bpc" id="L120" title="2 of 4 branches missed.">    Preconditions.checkArgument(size &gt;= 0 &amp;&amp; size &lt; Integer.MAX_VALUE, &quot;bad value for size &quot; + size);</span>
+<span class="fc" id="L121">    Preconditions.checkNotNull(context);</span>
+
+<span class="fc" id="L123">    ByteBuffer bb = MmapUtils.allocateDirectByteBuffer( (int)size, null, context);</span>
+<span class="fc" id="L124">    return new PinotByteBuffer(bb, true/*owner*/);</span>
+  }
+
+  // package-private
+<span class="fc" id="L128">  PinotByteBuffer(ByteBuffer buffer, boolean ownership) {</span>
+<span class="fc" id="L129">    this.buffer = buffer;</span>
+<span class="fc" id="L130">    this.owner = ownership;</span>
+<span class="fc" id="L131">  }</span>
+
+  @Override
+  public byte getByte(long index) {
+<span class="nc" id="L135">    throw new UnsupportedOperationException(&quot;Long index is not supported&quot;);</span>
+  }
+
+  @Override
+  public byte getByte(int index) {
+<span class="fc" id="L140">    return buffer.get(index);</span>
+  }
+
+  @Override
+  public void putByte(long index, byte val) {
+<span class="nc" id="L145">    throw new UnsupportedOperationException(&quot;Long index is not supported&quot;);</span>
+  }
+
+  @Override
+  public void putByte(int index, byte value) {
+<span class="fc" id="L150">    buffer.put(index, value);</span>
+<span class="fc" id="L151">  }</span>
+
+  @Override
+  public void putChar(long index, char c) {
+<span class="nc" id="L155">    throw new UnsupportedOperationException(&quot;Long index is not supported&quot;);</span>
+  }
+
+  @Override
+  public char getChar(long index) {
+<span class="nc" id="L160">    throw new UnsupportedOperationException(&quot;Long index is not supported&quot;);</span>
+  }
+
+  @Override
+  public char getChar(int index) {
+<span class="nc" id="L165">    return buffer.getChar(index);</span>
+  }
+
+  @Override
+  public void putChar(int index, char value) {
+<span class="nc" id="L170">    buffer.putChar(index, value);</span>
+<span class="nc" id="L171">  }</span>
+
+  @Override
+  public short getShort(int index) {
+<span class="fc" id="L175">    return buffer.getShort(index);</span>
+  }
+
+  @Override
+  public short getShort(long index) {
+<span class="nc" id="L180">    throw new UnsupportedOperationException(&quot;Long index is not supported&quot;);</span>
+  }
+
+  @Override
+  public void putShort(int index, short value) {
+<span class="fc" id="L185">    buffer.putShort(index, value);</span>
+<span class="fc" id="L186">  }</span>
+
+  @Override
+  public void putShort(long index, short value) {
+<span class="nc" id="L190">    throw new UnsupportedOperationException(&quot;Long index is not supported&quot;);</span>
+  }
+
+  @Override
+  public int getInt(int index) {
+<span class="fc" id="L195">    return buffer.getInt(index);</span>
+  }
+
+  @Override
+  public int getInt(long index) {
+<span class="nc" id="L200">    throw new UnsupportedOperationException(&quot;Long index is not supported&quot;);</span>
+  }
+
+  @Override
+  public void putInt(int index, int value) {
+<span class="fc" id="L205">    buffer.putInt(index, value);</span>
+<span class="fc" id="L206">  }</span>
+
+  @Override
+  public void putInt(long index, int value) {
+<span class="nc" id="L210">    throw new UnsupportedOperationException(&quot;Long index is not supported&quot;);</span>
+  }
+
+  @Override
+  public void putLong(long index, long l1) {
+<span class="nc" id="L215">    throw new UnsupportedOperationException(&quot;Long index is not supported&quot;);</span>
+  }
+
+  @Override
+  public long getLong(long index) {
+<span class="nc" id="L220">    throw new UnsupportedOperationException(&quot;Long index is not supported&quot;);</span>
+  }
+
+  @Override
+  public void putLong(int index, long value) {
+<span class="fc" id="L225">    buffer.putLong(index, value);</span>
+<span class="fc" id="L226">  }</span>
+
+  @Override
+  public long getLong(int index) {
+<span class="fc" id="L230">    return buffer.getLong(index);</span>
+  }
+
+
+  @Override
+  public void putFloat(long index, float v) {
+<span class="nc" id="L236">    throw new UnsupportedOperationException(&quot;Long index is not supported&quot;);</span>
+  }
+
+  @Override
+  public void putFloat(int index, float value) {
+<span class="fc" id="L241">    buffer.putFloat(index, value);</span>
+<span class="fc" id="L242">  }</span>
+
+  @Override
+  public float getFloat(int index) {
+<span class="fc" id="L246">    return buffer.getFloat(index);</span>
+  }
+
+  @Override
+  public float getFloat(long index) {
+<span class="nc" id="L251">    throw new UnsupportedOperationException(&quot;Long index is not supported&quot;);</span>
+  }
+
+  @Override
+  public double getDouble(int index) {
+<span class="fc" id="L256">    return buffer.getDouble(index);</span>
+  }
+
+  @Override
+  public double getDouble(long l) {
+<span class="nc" id="L261">    throw new UnsupportedOperationException(&quot;Long index is not supported&quot;);</span>
+  }
+
+  @Override
+  public void putDouble(int index, double value) {
+<span class="fc" id="L266">    buffer.putDouble(index, value);</span>
+<span class="fc" id="L267">  }</span>
+
+  @Override
+  public void putDouble(long index, double value) {
+<span class="nc" id="L271">    throw new UnsupportedOperationException(&quot;Long index is not supported&quot;);</span>
+  }
+
+  @Override
+  public PinotDataBuffer view(long start, long end) {
+<span class="pc bpc" id="L276" title="2 of 4 branches missed.">    Preconditions.checkArgument(start &gt;= 0 &amp;&amp; start &lt;= buffer.limit(),</span>
+        &quot;View start position is not valid, start: %s, end: %s, buffer limit: %s&quot;, start, end, buffer.limit());
+<span class="pc bpc" id="L278" title="2 of 4 branches missed.">    Preconditions.checkArgument(end &gt;= start &amp;&amp; end &lt;= buffer.limit(),</span>
+        &quot;View end position is not valid, start: %s, end: %s, buffer limit: %s&quot;, start, end, buffer.limit());
+
+<span class="fc" id="L281">    ByteBuffer bb = this.buffer.duplicate();</span>
+<span class="fc" id="L282">    bb.position((int)start);</span>
+<span class="fc" id="L283">    bb.limit((int)end);</span>
+<span class="fc" id="L284">    return new PinotByteBuffer(bb.slice(), false);</span>
+  }
+
+  @Override
+  public void copyTo(long srcOffset, byte[] destArray, int destOffset, int size) {
+<span class="fc" id="L289">    ByteBuffer srcBB = buffer.duplicate();</span>
+<span class="fc" id="L290">    srcBB.position((int)srcOffset);</span>
+<span class="fc" id="L291">    srcBB.get(destArray, destOffset, size);</span>
+<span class="fc" id="L292">  }</span>
+
+  @Override
+  public int readFrom(byte[] src, long destOffset) {
+<span class="fc" id="L296">    return readFrom(src, 0, destOffset, src.length);</span>
+  }
+
+  @Override
+  public int readFrom(byte[] src, int srcOffset, long destOffset, int length) {
+<span class="fc" id="L301">    ByteBuffer dup = buffer.duplicate();</span>
+<span class="fc" id="L302">    dup.position((int)destOffset);</span>
+<span class="fc" id="L303">    dup.put(src, srcOffset, length);</span>
+<span class="fc" id="L304">    return length;</span>
+  }
+
+  @Override
+  public int readFrom(ByteBuffer sourceBuffer, int srcOffset, long destOffset, int length) {
+<span class="fc" id="L309">    ByteBuffer srcDup = sourceBuffer.duplicate();</span>
+<span class="fc" id="L310">    ByteBuffer localDup = buffer.duplicate();</span>
+<span class="fc" id="L311">    srcDup.position(srcOffset);</span>
+<span class="fc" id="L312">    srcDup.limit(srcOffset + length);</span>
+<span class="fc" id="L313">    localDup.put(srcDup);</span>
+<span class="fc" id="L314">    return length;</span>
+  }
+
+  @Override
+  public void readFrom(File dataFile)
+      throws IOException {
+<span class="fc" id="L320">    readFrom(dataFile, 0, dataFile.length());</span>
+<span class="fc" id="L321">  }</span>
+
+  @Override
+  protected void readFrom(File file, long startPosition, long length)
+      throws IOException {
+<span class="pc" id="L326">    try (RandomAccessFile raf = new RandomAccessFile(file, &quot;r&quot;) ) {</span>
+<span class="fc" id="L327">      raf.getChannel().position(startPosition);</span>
+<span class="fc" id="L328">      ByteBuffer dup = buffer.duplicate();</span>
+<span class="fc" id="L329">      dup.position(0);</span>
+<span class="fc" id="L330">      dup.limit((int) length);</span>
+<span class="fc" id="L331">      raf.getChannel().read(dup, startPosition);</span>
+<span class="pc bpc" id="L332" title="6 of 8 branches missed.">    }</span>
+<span class="fc" id="L333">  }</span>
+
+  @Override
+  public long size() {
+<span class="fc" id="L337">    return buffer.capacity();</span>
+  }
+
+  @Override
+  public long address() {
+<span class="nc" id="L342">    return 0;</span>
+  }
+
+  @Override
+  public ByteBuffer toDirectByteBuffer(long bufferOffset, int size) {
+<span class="fc" id="L347">    ByteBuffer bb = buffer.duplicate();</span>
+<span class="fc" id="L348">    bb.position((int)bufferOffset);</span>
+<span class="fc" id="L349">    bb.limit((int)bufferOffset + size);</span>
+<span class="fc" id="L350">    return bb.slice();</span>
+  }
+
+  @Override
+  protected long start() {
+<span class="nc" id="L355">    return buffer.clear().position();</span>
+  }
+
+  @Override
+  public void order(ByteOrder byteOrder) {
+<span class="fc" id="L360">    buffer.order(byteOrder);</span>
+<span class="fc" id="L361">  }</span>
+
+  @Override
+  public PinotDataBuffer duplicate() {
+<span class="fc" id="L365">    PinotByteBuffer dup = new PinotByteBuffer(this.buffer.duplicate(), false);</span>
+<span class="fc" id="L366">    return dup;</span>
+  }
+
+  @Override
+  public void close() {
+<span class="fc bfc" id="L371" title="All 4 branches covered.">    if (!owner || buffer == null) {</span>
+<span class="fc" id="L372">      return;</span>
+    }
+<span class="fc" id="L374">    MmapUtils.unloadByteBuffer(buffer);</span>
+<span class="fc bfc" id="L375" title="All 2 branches covered.">    if (raf != null) {</span>
+      try {
+<span class="fc" id="L377">        raf.close();</span>
+<span class="nc" id="L378">      } catch (IOException e) {</span>
+<span class="nc" id="L379">        LOGGER.error(&quot;Failed to close file: {}. Continuing with errors&quot;, raf.toString(), e);</span>
+<span class="fc" id="L380">      }</span>
+    }
+
+<span class="fc" id="L383">    buffer = null;</span>
+<span class="fc" id="L384">    raf = null;</span>
+<span class="fc" id="L385">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

@@ -1,0 +1,454 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>PerfBenchmarkDriver.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-tools</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.tools.perf</a> &gt; <span class="el_source">PerfBenchmarkDriver.java</span></div><h1>PerfBenchmarkDriver.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.tools.perf;
+
+import com.google.common.base.Preconditions;
+import com.linkedin.pinot.broker.broker.helix.HelixBrokerStarter;
+import com.linkedin.pinot.common.config.TableConfig;
+import com.linkedin.pinot.common.config.TableNameBuilder;
+import com.linkedin.pinot.common.config.Tenant;
+import com.linkedin.pinot.common.config.Tenant.TenantBuilder;
+import com.linkedin.pinot.common.segment.SegmentMetadata;
+import com.linkedin.pinot.common.utils.CommonConstants;
+import com.linkedin.pinot.common.utils.FileUploadDownloadClient;
+import com.linkedin.pinot.common.utils.TenantRole;
+import com.linkedin.pinot.controller.ControllerConf;
+import com.linkedin.pinot.controller.ControllerStarter;
+import com.linkedin.pinot.controller.helix.core.PinotHelixResourceManager;
+import com.linkedin.pinot.server.starter.helix.HelixServerStarter;
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileReader;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.net.URI;
+import java.net.URL;
+import java.net.URLConnection;
+import java.sql.Timestamp;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import javax.annotation.Nullable;
+import org.apache.commons.configuration.Configuration;
+import org.apache.commons.configuration.PropertiesConfiguration;
+import org.apache.helix.manager.zk.ZKHelixAdmin;
+import org.apache.helix.model.ExternalView;
+import org.apache.helix.model.IdealState;
+import org.apache.helix.tools.ClusterStateVerifier;
+import org.json.JSONObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.yaml.snakeyaml.Yaml;
+
+
+@SuppressWarnings(&quot;FieldCanBeLocal&quot;)
+public class PerfBenchmarkDriver {
+<span class="nc" id="L61">  private static final Logger LOGGER = LoggerFactory.getLogger(PerfBenchmarkDriver.class);</span>
+  private static final long BROKER_TIMEOUT_MS = 60_000L;
+
+  private final PerfBenchmarkDriverConf _conf;
+  private final String _zkAddress;
+  private final String _clusterName;
+  private final String _tempDir;
+  private final String _loadMode;
+  private final String _segmentFormatVersion;
+  private final boolean _verbose;
+
+  private String _controllerHost;
+  private int _controllerPort;
+  private String _controllerAddress;
+  private String _controllerDataDir;
+
+  private String _brokerBaseApiUrl;
+
+  private String _serverInstanceDataDir;
+  private String _serverInstanceSegmentTarDir;
+  private String _serverInstanceName;
+
+  // TODO: read from configuration.
+<span class="nc" id="L84">  private final int _numReplicas = 1;</span>
+<span class="nc" id="L85">  private final String _segmentAssignmentStrategy = &quot;BalanceNumSegmentAssignmentStrategy&quot;;</span>
+<span class="nc" id="L86">  private final String _brokerTenantName = &quot;DefaultTenant&quot;;</span>
+<span class="nc" id="L87">  private final String _serverTenantName = &quot;DefaultTenant&quot;;</span>
+
+  private PinotHelixResourceManager _helixResourceManager;
+
+  public PerfBenchmarkDriver(PerfBenchmarkDriverConf conf) {
+<span class="nc" id="L92">    this(conf, &quot;/tmp/&quot;, &quot;HEAP&quot;, null, false);</span>
+<span class="nc" id="L93">  }</span>
+
+  public PerfBenchmarkDriver(PerfBenchmarkDriverConf conf, String tempDir, String loadMode, String segmentFormatVersion,
+<span class="nc" id="L96">      boolean verbose) {</span>
+<span class="nc" id="L97">    _conf = conf;</span>
+<span class="nc" id="L98">    _zkAddress = conf.getZkHost() + &quot;:&quot; + conf.getZkPort();</span>
+<span class="nc" id="L99">    _clusterName = conf.getClusterName();</span>
+<span class="nc bnc" id="L100" title="All 2 branches missed.">    if (tempDir.endsWith(&quot;/&quot;)) {</span>
+<span class="nc" id="L101">      _tempDir = tempDir;</span>
+    } else {
+<span class="nc" id="L103">      _tempDir = tempDir + '/';</span>
+    }
+<span class="nc" id="L105">    _loadMode = loadMode;</span>
+<span class="nc" id="L106">    _segmentFormatVersion = segmentFormatVersion;</span>
+<span class="nc" id="L107">    _verbose = verbose;</span>
+<span class="nc" id="L108">    init();</span>
+<span class="nc" id="L109">  }</span>
+
+  private void init() {
+    // Init controller.
+<span class="nc" id="L113">    String controllerHost = _conf.getControllerHost();</span>
+<span class="nc bnc" id="L114" title="All 2 branches missed.">    if (controllerHost != null) {</span>
+<span class="nc" id="L115">      _controllerHost = controllerHost;</span>
+    } else {
+<span class="nc" id="L117">      _controllerHost = &quot;localhost&quot;;</span>
+    }
+<span class="nc" id="L119">    int controllerPort = _conf.getControllerPort();</span>
+<span class="nc bnc" id="L120" title="All 2 branches missed.">    if (controllerPort &gt; 0) {</span>
+<span class="nc" id="L121">      _controllerPort = controllerPort;</span>
+    } else {
+<span class="nc" id="L123">      _controllerPort = 8300;</span>
+    }
+<span class="nc" id="L125">    _controllerAddress = _controllerHost + &quot;:&quot; + _controllerPort;</span>
+<span class="nc" id="L126">    String controllerDataDir = _conf.getControllerDataDir();</span>
+<span class="nc bnc" id="L127" title="All 2 branches missed.">    if (controllerDataDir != null) {</span>
+<span class="nc" id="L128">      _controllerDataDir = controllerDataDir;</span>
+    } else {
+<span class="nc" id="L130">      _controllerDataDir = _tempDir + &quot;controller/&quot; + _controllerAddress + &quot;/controller_data_dir&quot;;</span>
+    }
+
+    // Init broker.
+<span class="nc" id="L134">    _brokerBaseApiUrl = &quot;http://&quot; + _conf.getBrokerHost() + &quot;:&quot; + _conf.getBrokerPort();</span>
+
+    // Init server.
+<span class="nc" id="L137">    String serverInstanceName = _conf.getServerInstanceName();</span>
+<span class="nc bnc" id="L138" title="All 2 branches missed.">    if (serverInstanceName != null) {</span>
+<span class="nc" id="L139">      _serverInstanceName = serverInstanceName;</span>
+    } else {
+<span class="nc" id="L141">      _serverInstanceName = &quot;Server_localhost_&quot; + CommonConstants.Helix.DEFAULT_SERVER_NETTY_PORT;</span>
+    }
+<span class="nc" id="L143">    String serverInstanceDataDir = _conf.getServerInstanceDataDir();</span>
+<span class="nc bnc" id="L144" title="All 2 branches missed.">    if (serverInstanceDataDir != null) {</span>
+<span class="nc" id="L145">      _serverInstanceDataDir = serverInstanceDataDir;</span>
+    } else {
+<span class="nc" id="L147">      _serverInstanceDataDir = _tempDir + &quot;server/&quot; + _serverInstanceName + &quot;/index_data_dir&quot;;</span>
+    }
+<span class="nc" id="L149">    String serverInstanceSegmentTarDir = _conf.getServerInstanceSegmentTarDir();</span>
+<span class="nc bnc" id="L150" title="All 2 branches missed.">    if (serverInstanceSegmentTarDir != null) {</span>
+<span class="nc" id="L151">      _serverInstanceSegmentTarDir = serverInstanceSegmentTarDir;</span>
+    } else {
+<span class="nc" id="L153">      _serverInstanceSegmentTarDir = _tempDir + &quot;server/&quot; + _serverInstanceName + &quot;/segment_tar_dir&quot;;</span>
+    }
+<span class="nc" id="L155">  }</span>
+
+  public void run()
+      throws Exception {
+<span class="nc" id="L159">    startZookeeper();</span>
+<span class="nc" id="L160">    startController();</span>
+<span class="nc" id="L161">    startBroker();</span>
+<span class="nc" id="L162">    startServer();</span>
+<span class="nc" id="L163">    startHelixResourceManager();</span>
+<span class="nc" id="L164">    configureResources();</span>
+<span class="nc" id="L165">    uploadIndexSegments();</span>
+<span class="nc" id="L166">    waitForExternalViewUpdate(_zkAddress, _clusterName, 60 * 1000L);</span>
+<span class="nc" id="L167">    postQueries();</span>
+<span class="nc" id="L168">  }</span>
+
+  private void startZookeeper()
+      throws Exception {
+<span class="nc" id="L172">    int zkPort = _conf.getZkPort();</span>
+<span class="nc bnc" id="L173" title="All 2 branches missed.">    if (!_conf.isStartZookeeper()) {</span>
+<span class="nc" id="L174">      LOGGER.info(&quot;Skipping start zookeeper step. Assumes zookeeper is already started.&quot;);</span>
+<span class="nc" id="L175">      return;</span>
+    }
+<span class="nc" id="L177">    ZookeeperLauncher launcher = new ZookeeperLauncher(_tempDir);</span>
+<span class="nc" id="L178">    launcher.start(zkPort);</span>
+<span class="nc" id="L179">  }</span>
+
+  private void startController() {
+<span class="nc bnc" id="L182" title="All 2 branches missed.">    if (!_conf.shouldStartController()) {</span>
+<span class="nc" id="L183">      LOGGER.info(&quot;Skipping start controller step. Assumes controller is already started.&quot;);</span>
+<span class="nc" id="L184">      return;</span>
+    }
+<span class="nc" id="L186">    ControllerConf conf = getControllerConf();</span>
+<span class="nc" id="L187">    LOGGER.info(&quot;Starting controller at {}&quot;, _controllerAddress);</span>
+<span class="nc" id="L188">    new ControllerStarter(conf).start();</span>
+<span class="nc" id="L189">  }</span>
+
+  private ControllerConf getControllerConf() {
+<span class="nc" id="L192">    ControllerConf conf = new ControllerConf();</span>
+<span class="nc" id="L193">    conf.setHelixClusterName(_clusterName);</span>
+<span class="nc" id="L194">    conf.setZkStr(_zkAddress);</span>
+<span class="nc" id="L195">    conf.setControllerHost(_controllerHost);</span>
+<span class="nc" id="L196">    conf.setControllerPort(String.valueOf(_controllerPort));</span>
+<span class="nc" id="L197">    conf.setDataDir(_controllerDataDir);</span>
+<span class="nc" id="L198">    conf.setTenantIsolationEnabled(false);</span>
+<span class="nc" id="L199">    conf.setControllerVipHost(&quot;localhost&quot;);</span>
+<span class="nc" id="L200">    conf.setControllerVipProtocol(&quot;http&quot;);</span>
+<span class="nc" id="L201">    return conf;</span>
+  }
+
+  private void startBroker()
+      throws Exception {
+<span class="nc bnc" id="L206" title="All 2 branches missed.">    if (!_conf.isStartBroker()) {</span>
+<span class="nc" id="L207">      LOGGER.info(&quot;Skipping start broker step. Assumes broker is already started.&quot;);</span>
+<span class="nc" id="L208">      return;</span>
+    }
+<span class="nc" id="L210">    Configuration brokerConfiguration = new PropertiesConfiguration();</span>
+<span class="nc" id="L211">    String brokerInstanceName = &quot;Broker_localhost_&quot; + CommonConstants.Helix.DEFAULT_BROKER_QUERY_PORT;</span>
+<span class="nc" id="L212">    brokerConfiguration.setProperty(CommonConstants.Helix.Instance.INSTANCE_ID_KEY, brokerInstanceName);</span>
+<span class="nc" id="L213">    brokerConfiguration.setProperty(CommonConstants.Broker.CONFIG_OF_BROKER_TIMEOUT_MS, BROKER_TIMEOUT_MS);</span>
+<span class="nc" id="L214">    LOGGER.info(&quot;Starting broker instance: {}&quot;, brokerInstanceName);</span>
+<span class="nc" id="L215">    new HelixBrokerStarter(_clusterName, _zkAddress, brokerConfiguration);</span>
+<span class="nc" id="L216">  }</span>
+
+  private void startServer()
+      throws Exception {
+<span class="nc bnc" id="L220" title="All 2 branches missed.">    if (!_conf.shouldStartServer()) {</span>
+<span class="nc" id="L221">      LOGGER.info(&quot;Skipping start server step. Assumes server is already started.&quot;);</span>
+<span class="nc" id="L222">      return;</span>
+    }
+<span class="nc" id="L224">    Configuration serverConfiguration = new PropertiesConfiguration();</span>
+<span class="nc" id="L225">    serverConfiguration.addProperty(CommonConstants.Server.CONFIG_OF_INSTANCE_DATA_DIR, _serverInstanceDataDir);</span>
+<span class="nc" id="L226">    serverConfiguration.addProperty(CommonConstants.Server.CONFIG_OF_INSTANCE_SEGMENT_TAR_DIR,</span>
+        _serverInstanceSegmentTarDir);
+<span class="nc bnc" id="L228" title="All 2 branches missed.">    if (_segmentFormatVersion != null) {</span>
+<span class="nc" id="L229">      serverConfiguration.setProperty(CommonConstants.Server.CONFIG_OF_SEGMENT_FORMAT_VERSION, _segmentFormatVersion);</span>
+    }
+<span class="nc" id="L231">    serverConfiguration.setProperty(CommonConstants.Helix.Instance.INSTANCE_ID_KEY, _serverInstanceName);</span>
+<span class="nc" id="L232">    LOGGER.info(&quot;Starting server instance: {}&quot;, _serverInstanceName);</span>
+<span class="nc" id="L233">    new HelixServerStarter(_clusterName, _zkAddress, serverConfiguration);</span>
+<span class="nc" id="L234">  }</span>
+
+  private void startHelixResourceManager()
+      throws Exception {
+<span class="nc" id="L238">    _helixResourceManager = new PinotHelixResourceManager(getControllerConf());</span>
+<span class="nc" id="L239">    _helixResourceManager.start();</span>
+
+    // Create broker tenant.
+<span class="nc" id="L242">    Tenant brokerTenant = new TenantBuilder(_brokerTenantName).setRole(TenantRole.BROKER).setTotalInstances(1).build();</span>
+<span class="nc" id="L243">    _helixResourceManager.createBrokerTenant(brokerTenant);</span>
+
+    // Create server tenant.
+<span class="nc" id="L246">    Tenant serverTenant = new TenantBuilder(_serverTenantName).setRole(TenantRole.SERVER)</span>
+        .setTotalInstances(1)
+        .setOfflineInstances(1)
+        .build();
+<span class="nc" id="L250">    _helixResourceManager.createServerTenant(serverTenant);</span>
+<span class="nc" id="L251">  }</span>
+
+  private void configureResources()
+      throws Exception {
+<span class="nc bnc" id="L255" title="All 2 branches missed.">    if (!_conf.isConfigureResources()) {</span>
+<span class="nc" id="L256">      LOGGER.info(&quot;Skipping configure resources step.&quot;);</span>
+<span class="nc" id="L257">      return;</span>
+    }
+<span class="nc" id="L259">    String tableName = _conf.getTableName();</span>
+<span class="nc" id="L260">    configureTable(tableName);</span>
+<span class="nc" id="L261">  }</span>
+
+  public void configureTable(String tableName)
+      throws Exception {
+<span class="nc" id="L265">    configureTable(tableName, null);</span>
+<span class="nc" id="L266">  }</span>
+
+  public void configureTable(String tableName, List&lt;String&gt; invertedIndexColumns)
+      throws Exception {
+<span class="nc" id="L270">    TableConfig tableConfig = new TableConfig.Builder(CommonConstants.Helix.TableType.OFFLINE).setTableName(tableName)</span>
+        .setSegmentAssignmentStrategy(_segmentAssignmentStrategy)
+        .setNumReplicas(_numReplicas)
+        .setBrokerTenant(_brokerTenantName)
+        .setServerTenant(_serverTenantName)
+        .setLoadMode(_loadMode)
+        .setSegmentVersion(_segmentFormatVersion)
+        .setInvertedIndexColumns(invertedIndexColumns)
+        .build();
+<span class="nc" id="L279">    _helixResourceManager.addTable(tableConfig);</span>
+<span class="nc" id="L280">  }</span>
+
+  private void uploadIndexSegments() throws Exception {
+<span class="nc bnc" id="L283" title="All 2 branches missed.">    if (!_conf.isUploadIndexes()) {</span>
+<span class="nc" id="L284">      LOGGER.info(&quot;Skipping upload index segments step.&quot;);</span>
+<span class="nc" id="L285">      return;</span>
+    }
+<span class="nc" id="L287">    String indexDirectory = _conf.getIndexDirectory();</span>
+<span class="nc" id="L288">    File[] indexFiles = new File(indexDirectory).listFiles();</span>
+<span class="nc" id="L289">    Preconditions.checkNotNull(indexFiles);</span>
+<span class="nc" id="L290">    try (FileUploadDownloadClient fileUploadDownloadClient = new FileUploadDownloadClient()) {</span>
+<span class="nc" id="L291">      URI uploadSegmentHttpURI = FileUploadDownloadClient.getUploadSegmentHttpURI(_controllerHost, _controllerPort);</span>
+<span class="nc bnc" id="L292" title="All 2 branches missed.">      for (File indexFile : indexFiles) {</span>
+<span class="nc" id="L293">        LOGGER.info(&quot;Uploading index segment: {}&quot;, indexFile.getAbsolutePath());</span>
+<span class="nc" id="L294">        fileUploadDownloadClient.uploadSegment(uploadSegmentHttpURI, indexFile.getName(), indexFile);</span>
+      }
+<span class="nc bnc" id="L296" title="All 8 branches missed.">    }</span>
+<span class="nc" id="L297">  }</span>
+
+  /**
+   * Add segment while segment data is already in server data directory.
+   *
+   * @param segmentMetadata segment metadata.
+   */
+  public void addSegment(SegmentMetadata segmentMetadata) {
+<span class="nc" id="L305">    _helixResourceManager.addNewSegment(segmentMetadata, &quot;http://&quot; + _controllerAddress + &quot;/&quot; + segmentMetadata.getName());</span>
+<span class="nc" id="L306">  }</span>
+
+  public static void waitForExternalViewUpdate(String zkAddress, final String clusterName, long timeoutInMilliseconds) {
+<span class="nc" id="L309">    final ZKHelixAdmin helixAdmin = new ZKHelixAdmin(zkAddress);</span>
+
+    /* Use one of these three classes instead of deprecated ClusterStateVerifier.
+    BestPossibleExternalViewVerifier
+    StrictMatchExternalViewVerifier
+    ClusterLiveNodesVerifier
+    */
+
+<span class="nc" id="L317">    org.apache.helix.tools.ClusterVerifiers.ClusterStateVerifier.Verifier customVerifier = new org.apache.helix.tools.ClusterVerifiers.ClusterStateVerifier.Verifier() {</span>
+
+      @Override
+      public boolean verify() {
+<span class="nc" id="L321">        List&lt;String&gt; resourcesInCluster = helixAdmin.getResourcesInCluster(clusterName);</span>
+<span class="nc" id="L322">        LOGGER.info(&quot;Waiting for the cluster to be set up and indexes to be loaded on the servers&quot; + new Timestamp(</span>
+            System.currentTimeMillis()));
+<span class="nc bnc" id="L324" title="All 2 branches missed.">        for (String resourceName : resourcesInCluster) {</span>
+          // Only check table resources and broker resource
+<span class="nc bnc" id="L326" title="All 4 branches missed.">          if (!TableNameBuilder.isTableResource(resourceName) &amp;&amp; !resourceName.equals(</span>
+              CommonConstants.Helix.BROKER_RESOURCE_INSTANCE)) {
+<span class="nc" id="L328">            continue;</span>
+          }
+
+<span class="nc" id="L331">          IdealState idealState = helixAdmin.getResourceIdealState(clusterName, resourceName);</span>
+<span class="nc" id="L332">          ExternalView externalView = helixAdmin.getResourceExternalView(clusterName, resourceName);</span>
+<span class="nc bnc" id="L333" title="All 4 branches missed.">          if (idealState == null || externalView == null) {</span>
+<span class="nc" id="L334">            return false;</span>
+          }
+<span class="nc" id="L336">          Set&lt;String&gt; partitionSet = idealState.getPartitionSet();</span>
+<span class="nc bnc" id="L337" title="All 2 branches missed.">          for (String partition : partitionSet) {</span>
+<span class="nc" id="L338">            Map&lt;String, String&gt; instanceStateMapIS = idealState.getInstanceStateMap(partition);</span>
+<span class="nc" id="L339">            Map&lt;String, String&gt; instanceStateMapEV = externalView.getStateMap(partition);</span>
+<span class="nc bnc" id="L340" title="All 4 branches missed.">            if (instanceStateMapIS == null || instanceStateMapEV == null) {</span>
+<span class="nc" id="L341">              return false;</span>
+            }
+<span class="nc bnc" id="L343" title="All 2 branches missed.">            if (!instanceStateMapIS.equals(instanceStateMapEV)) {</span>
+<span class="nc" id="L344">              return false;</span>
+            }
+<span class="nc" id="L346">          }</span>
+<span class="nc" id="L347">        }</span>
+<span class="nc" id="L348">        LOGGER.info(&quot;Cluster is ready to serve queries&quot;);</span>
+<span class="nc" id="L349">        return true;</span>
+      }
+    };
+
+<span class="nc" id="L353">    ClusterStateVerifier.verifyByPolling(customVerifier, timeoutInMilliseconds);</span>
+<span class="nc" id="L354">  }</span>
+
+  private void postQueries()
+      throws Exception {
+<span class="nc bnc" id="L358" title="All 2 branches missed.">    if (!_conf.isRunQueries()) {</span>
+<span class="nc" id="L359">      LOGGER.info(&quot;Skipping run queries step.&quot;);</span>
+<span class="nc" id="L360">      return;</span>
+    }
+<span class="nc" id="L362">    String queriesDirectory = _conf.getQueriesDirectory();</span>
+<span class="nc" id="L363">    File[] queryFiles = new File(queriesDirectory).listFiles();</span>
+<span class="nc" id="L364">    Preconditions.checkNotNull(queryFiles);</span>
+<span class="nc bnc" id="L365" title="All 2 branches missed.">    for (File queryFile : queryFiles) {</span>
+<span class="nc bnc" id="L366" title="All 2 branches missed.">      if (!queryFile.getName().endsWith(&quot;.txt&quot;)) {</span>
+<span class="nc" id="L367">        continue;</span>
+      }
+<span class="nc" id="L369">      LOGGER.info(&quot;Running queries from: {}&quot;, queryFile);</span>
+<span class="nc" id="L370">      try (BufferedReader reader = new BufferedReader(new FileReader(queryFile))) {</span>
+        String query;
+<span class="nc bnc" id="L372" title="All 2 branches missed.">        while ((query = reader.readLine()) != null) {</span>
+<span class="nc" id="L373">          postQuery(query);</span>
+        }
+<span class="nc bnc" id="L375" title="All 8 branches missed.">      }</span>
+    }
+<span class="nc" id="L377">  }</span>
+
+  public JSONObject postQuery(String query)
+      throws Exception {
+<span class="nc" id="L381">    return postQuery(query, null);</span>
+  }
+
+  public JSONObject postQuery(String query, String optimizationFlags)
+      throws Exception {
+<span class="nc" id="L386">    JSONObject requestJson = new JSONObject();</span>
+<span class="nc" id="L387">    requestJson.put(&quot;pql&quot;, query);</span>
+
+<span class="nc bnc" id="L389" title="All 4 branches missed.">    if (optimizationFlags != null &amp;&amp; !optimizationFlags.isEmpty()) {</span>
+<span class="nc" id="L390">      requestJson.put(&quot;debugOptions&quot;, &quot;optimizationFlags=&quot; + optimizationFlags);</span>
+    }
+
+<span class="nc" id="L393">    long start = System.currentTimeMillis();</span>
+<span class="nc" id="L394">    URLConnection conn = new URL(_brokerBaseApiUrl + &quot;/query&quot;).openConnection();</span>
+<span class="nc" id="L395">    conn.setDoOutput(true);</span>
+
+<span class="nc" id="L397">    try (BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(conn.getOutputStream(), &quot;UTF-8&quot;))) {</span>
+<span class="nc" id="L398">      String requestString = requestJson.toString();</span>
+<span class="nc" id="L399">      writer.write(requestString);</span>
+<span class="nc" id="L400">      writer.flush();</span>
+
+<span class="nc" id="L402">      StringBuilder stringBuilder = new StringBuilder();</span>
+<span class="nc" id="L403">      try (BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), &quot;UTF-8&quot;))) {</span>
+        String line;
+<span class="nc bnc" id="L405" title="All 2 branches missed.">        while ((line = reader.readLine()) != null) {</span>
+<span class="nc" id="L406">          stringBuilder.append(line);</span>
+        }
+<span class="nc bnc" id="L408" title="All 8 branches missed.">      }</span>
+
+<span class="nc" id="L410">      long totalTime = System.currentTimeMillis() - start;</span>
+<span class="nc" id="L411">      String responseString = stringBuilder.toString();</span>
+<span class="nc" id="L412">      JSONObject responseJson = new JSONObject(responseString);</span>
+<span class="nc" id="L413">      responseJson.put(&quot;totalTime&quot;, totalTime);</span>
+
+<span class="nc bnc" id="L415" title="All 4 branches missed.">      if (_verbose &amp;&amp; (responseJson.getLong(&quot;numDocsScanned&quot;) &gt; 0)) {</span>
+<span class="nc" id="L416">        LOGGER.info(&quot;requestString: {}&quot;, requestString);</span>
+<span class="nc" id="L417">        LOGGER.info(&quot;responseString: {}&quot;, responseString);</span>
+      }
+<span class="nc" id="L419">      return responseJson;</span>
+<span class="nc bnc" id="L420" title="All 8 branches missed.">    }</span>
+  }
+
+  /**
+   * Start cluster components with default configuration.
+   *
+   * @param isStartZookeeper whether to start zookeeper.
+   * @param isStartController whether to start controller.
+   * @param isStartBroker whether to start broker.
+   * @param isStartServer whether to start server.
+   * @return perf benchmark driver.
+   * @throws Exception
+   */
+  public static PerfBenchmarkDriver startComponents(boolean isStartZookeeper, boolean isStartController,
+      boolean isStartBroker, boolean isStartServer, @Nullable String serverDataDir)
+      throws Exception {
+<span class="nc" id="L436">    PerfBenchmarkDriverConf conf = new PerfBenchmarkDriverConf();</span>
+<span class="nc" id="L437">    conf.setStartZookeeper(isStartZookeeper);</span>
+<span class="nc" id="L438">    conf.setStartController(isStartController);</span>
+<span class="nc" id="L439">    conf.setStartBroker(isStartBroker);</span>
+<span class="nc" id="L440">    conf.setStartServer(isStartServer);</span>
+<span class="nc" id="L441">    conf.setServerInstanceDataDir(serverDataDir);</span>
+<span class="nc" id="L442">    PerfBenchmarkDriver driver = new PerfBenchmarkDriver(conf);</span>
+<span class="nc" id="L443">    driver.run();</span>
+<span class="nc" id="L444">    return driver;</span>
+  }
+
+  public static void main(String[] args)
+      throws Exception {
+<span class="nc" id="L449">    PerfBenchmarkDriverConf conf = (PerfBenchmarkDriverConf) new Yaml().load(new FileInputStream(args[0]));</span>
+<span class="nc" id="L450">    PerfBenchmarkDriver perfBenchmarkDriver = new PerfBenchmarkDriver(conf);</span>
+<span class="nc" id="L451">    perfBenchmarkDriver.run();</span>
+<span class="nc" id="L452">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

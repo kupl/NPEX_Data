@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>DoubleGroupByResultHolder.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-broker</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.query.aggregation.groupby</a> &gt; <span class="el_source">DoubleGroupByResultHolder.java</span></div><h1>DoubleGroupByResultHolder.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.query.aggregation.groupby;
+
+import com.google.common.base.Preconditions;
+import com.linkedin.pinot.common.utils.Pairs.IntDoublePair;
+import com.linkedin.pinot.core.util.IntDoubleIndexedPriorityQueue;
+import it.unimi.dsi.fastutil.ints.Int2DoubleOpenHashMap;
+import java.util.Arrays;
+
+
+/**
+ * Result Holder implemented using DoubleArray.
+ */
+public class DoubleGroupByResultHolder implements GroupByResultHolder {
+  private final int _maxCapacity;
+  private final int _trimSize;
+  private final double _defaultValue;
+  private final boolean _minHeap;
+
+  private int _resultHolderCapacity;
+  private StorageMode _storageMode;
+  private double[] _resultArray;
+  private Int2DoubleOpenHashMap _resultMap;
+  private IntDoubleIndexedPriorityQueue _priorityQueue;
+
+  /**
+   * Constructor for the class.
+   *
+   * @param initialCapacity Initial capacity for storage
+   * @param maxCapacity Max capacity of storage, beyond which trimming kicks in
+   * @param trimSize maximum number of groups returned after trimming.
+   * @param defaultValue Default value of un-initialized results (in array mode)
+   * @param minOrder Min ordering (in case of min aggregation functions)
+   */
+  public DoubleGroupByResultHolder(int initialCapacity, int maxCapacity, int trimSize, double defaultValue,
+<span class="fc" id="L50">      boolean minOrder) {</span>
+<span class="fc" id="L51">    _resultHolderCapacity = initialCapacity;</span>
+<span class="fc" id="L52">    _defaultValue = defaultValue;</span>
+<span class="fc" id="L53">    _maxCapacity = maxCapacity;</span>
+<span class="fc" id="L54">    _trimSize = trimSize;</span>
+<span class="fc bfc" id="L55" title="All 2 branches covered.">    _minHeap = !minOrder; // Max ordering requires min-heap for trimming results, and vice-versa.</span>
+
+    // Used only when group keys need to be trimmed.
+<span class="fc" id="L58">    _resultMap = null;</span>
+<span class="fc" id="L59">    _priorityQueue = null;</span>
+
+<span class="fc" id="L61">    _storageMode = StorageMode.ARRAY_STORAGE;</span>
+<span class="fc" id="L62">    _resultArray = new double[initialCapacity];</span>
+<span class="fc bfc" id="L63" title="All 2 branches covered.">    if (defaultValue != 0.0) {</span>
+<span class="fc" id="L64">      Arrays.fill(_resultArray, defaultValue);</span>
+    }
+<span class="fc" id="L66">  }</span>
+
+  /**
+   * Constructor for the class, assumes max (max on top) ordering for trim.
+   *
+   * @param initialCapacity Initial capacity for storage
+   * @param maxCapacity Max capacity of storage, beyond which trimming kicks in
+   * @param trimSize maximum number of groups returned after trimming.
+   * @param defaultValue Default value of un-initialized results (in array mode)
+   */
+  public DoubleGroupByResultHolder(int initialCapacity, int maxCapacity, int trimSize, double defaultValue) {
+<span class="fc" id="L77">    this(initialCapacity, maxCapacity, trimSize, defaultValue, false /* minOrdering */);</span>
+<span class="fc" id="L78">  }</span>
+
+  /**
+   * {@inheritDoc}
+   * For array mode, expands the array size as long as it is under {@link #_maxCapacity},
+   * else switches to map mode. For map mode, trims the result.
+   *
+   * @param capacity Capacity required (number of group keys expected to be stored)
+   */
+  @Override
+  public void ensureCapacity(int capacity) {
+<span class="pc bpc" id="L89" title="1 of 2 branches missed.">    Preconditions.checkArgument(capacity &lt;= _maxCapacity);</span>
+
+    // Nothing to be done for map mode.
+<span class="pc bpc" id="L92" title="1 of 2 branches missed.">    if (_storageMode == StorageMode.MAP_STORAGE) {</span>
+<span class="nc" id="L93">      return;</span>
+    }
+
+<span class="fc bfc" id="L96" title="All 2 branches covered.">    if (capacity &gt; _trimSize) {</span>
+<span class="fc" id="L97">      switchToMapMode(capacity);</span>
+<span class="fc" id="L98">      return;</span>
+    }
+
+<span class="fc bfc" id="L101" title="All 2 branches covered.">    if (capacity &gt; _resultHolderCapacity) {</span>
+<span class="fc" id="L102">      int copyLength = _resultHolderCapacity;</span>
+<span class="fc" id="L103">      _resultHolderCapacity = Math.max(_resultHolderCapacity * 2, capacity);</span>
+
+      // Cap the growth to maximum possible number of group keys
+<span class="fc" id="L106">      _resultHolderCapacity = Math.min(_resultHolderCapacity, _maxCapacity);</span>
+
+<span class="fc" id="L108">      double[] current = _resultArray;</span>
+<span class="fc" id="L109">      _resultArray = new double[_resultHolderCapacity];</span>
+<span class="fc" id="L110">      System.arraycopy(current, 0, _resultArray, 0, copyLength);</span>
+
+<span class="fc bfc" id="L112" title="All 2 branches covered.">      if (_defaultValue != 0.0) {</span>
+<span class="fc" id="L113">        Arrays.fill(_resultArray, copyLength, _resultHolderCapacity, _defaultValue);</span>
+      }
+    }
+<span class="fc" id="L116">  }</span>
+
+  /**
+   * {@inheritDoc}
+   *
+   * Array based result holder assumes group by key fit within integer.
+   * This is a valid assumption as ArrayBasedResultHolder gets instantiated
+   * iff groupKey are less than 1M.
+   *
+   * @param groupKey
+   * @return
+   */
+  @Override
+  public double getDoubleResult(int groupKey) {
+<span class="fc bfc" id="L130" title="All 2 branches covered.">    return (_storageMode == StorageMode.ARRAY_STORAGE) ? _resultArray[groupKey] : _resultMap.get(groupKey);</span>
+  }
+
+  @Override
+  public &lt;T&gt; T getResult(int groupKey) {
+<span class="nc" id="L135">    throw new RuntimeException(&quot;Unsupported method getResult (returning Object) for class &quot; + getClass().getName());</span>
+  }
+
+  /**
+   * {@inheritDoc}
+   *
+   * @param groupKey
+   * @param newValue
+   */
+  @Override
+  public void setValueForKey(int groupKey, double newValue) {
+<span class="fc bfc" id="L146" title="All 2 branches covered.">    if (_storageMode == StorageMode.ARRAY_STORAGE) {</span>
+<span class="fc" id="L147">      _resultArray[groupKey] = newValue;</span>
+    } else {
+<span class="fc" id="L149">      _resultMap.put(groupKey, newValue);</span>
+<span class="fc" id="L150">      _priorityQueue.put(groupKey, newValue);</span>
+    }
+<span class="fc" id="L152">  }</span>
+
+  /**
+   * {@inheritDoc}
+   *
+   * @param groupKey Key for which to set the value
+   * @param newValue Value to set
+   */
+  @Override
+  public void setValueForKey(int groupKey, Object newValue) {
+<span class="nc" id="L162">    throw new RuntimeException(</span>
+        &quot;Unsupported method 'setValueForKey' (with Object param) for class &quot; + getClass().getName());
+  }
+
+  /**
+   * {@inheritDoc}
+   *
+   * Keys with 'lowest' values (as per the sort order) are trimmed away to reduce the size to _trimSize.
+   *
+   * @return Array of keys that were trimmed out.
+   */
+  @Override
+  public int[] trimResults() {
+<span class="fc bfc" id="L175" title="All 2 branches covered.">    if (_storageMode == StorageMode.ARRAY_STORAGE) {</span>
+<span class="fc" id="L176">      return EMPTY_ARRAY; // Still in array mode, trimming has not kicked in yet.</span>
+    }
+
+<span class="fc" id="L179">    int numKeysToRemove = _resultMap.size() - _trimSize;</span>
+<span class="fc" id="L180">    int[] removedGroupKeys = new int[numKeysToRemove];</span>
+
+<span class="fc bfc" id="L182" title="All 2 branches covered.">    for (int i = 0; i &lt; numKeysToRemove; i++) {</span>
+<span class="fc" id="L183">      IntDoublePair pair = _priorityQueue.poll();</span>
+<span class="fc" id="L184">      int groupKey = pair.getIntValue();</span>
+<span class="fc" id="L185">      _resultMap.remove(groupKey);</span>
+<span class="fc" id="L186">      removedGroupKeys[i] = groupKey;</span>
+    }
+<span class="fc" id="L188">    return removedGroupKeys;</span>
+  }
+
+  /**
+   * Helper method to switch the storage from array mode to map mode.
+   *
+   * @param initialPriorityQueueSize Initial size of priority queue
+   */
+  private void switchToMapMode(int initialPriorityQueueSize) {
+<span class="fc" id="L197">    _storageMode = StorageMode.MAP_STORAGE;</span>
+<span class="fc" id="L198">    _resultMap = new Int2DoubleOpenHashMap(_resultHolderCapacity);</span>
+<span class="fc" id="L199">    _priorityQueue = new IntDoubleIndexedPriorityQueue(initialPriorityQueueSize, _minHeap);</span>
+
+<span class="fc bfc" id="L201" title="All 2 branches covered.">    for (int id = 0; id &lt; _resultHolderCapacity; id++) {</span>
+<span class="fc" id="L202">      _resultMap.put(id, _resultArray[id]);</span>
+<span class="fc" id="L203">      _priorityQueue.put(id, _resultArray[id]);</span>
+    }
+<span class="fc" id="L205">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

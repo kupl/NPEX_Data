@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>WebHdfsV1Client.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-broker</a> &gt; <a href="../index.html" class="el_bundle">pinot-common</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.common.utils.webhdfs</a> &gt; <span class="el_source">WebHdfsV1Client.java</span></div><h1>WebHdfsV1Client.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.common.utils.webhdfs;
+
+import java.io.File;
+import java.io.IOException;
+
+import org.apache.commons.httpclient.HttpClient;
+import org.apache.commons.httpclient.HttpMethod;
+import org.apache.commons.httpclient.methods.FileRequestEntity;
+import org.apache.commons.httpclient.methods.PutMethod;
+import org.apache.commons.httpclient.methods.RequestEntity;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+public class WebHdfsV1Client {
+
+<span class="nc" id="L32">  private static final Logger LOGGER = LoggerFactory.getLogger(WebHdfsV1Client.class);</span>
+  private static final String LOCATION = &quot;Location&quot;;
+  private static final String DEFAULT_PROTOCOL = &quot;http&quot;;
+  private static final boolean DEFAULT_OVERWRITE = true;
+  private static final int DEFAULT_PERMISSION = 755;
+
+  //Web hdfs upload path template has 6 parameters: protocol/host/port/hdfs_path/overwrite/permission
+  private static final String WEB_HDFS_UPLOAD_PATH_TEMPLATE = &quot;%s://%s:%s/webhdfs/v1%s?op=CREATE&amp;overwrite=%s&amp;permission=%s&quot;;
+  //Web hdfs download path template has 4 parameters: protocol/host/port/hdfs_path
+  private static final String WEB_HDFS_DOWNLOAD_PATH_TEMPLATE = &quot;%s://%s:%s/webhdfs/v1%s?op=OPEN&quot;;
+
+  private final String _protocol;
+  private final String _host;
+  private final int _port;
+  private final boolean _overwrite;
+  private final int _permission;
+
+  private final HttpClient _httpClient;
+
+  public WebHdfsV1Client(String host, int port) {
+<span class="nc" id="L52">    this(host, port, DEFAULT_PROTOCOL, DEFAULT_OVERWRITE, DEFAULT_PERMISSION);</span>
+<span class="nc" id="L53">  }</span>
+
+<span class="nc" id="L55">  public WebHdfsV1Client(String host, int port, String protocol, boolean overwrite, int permission) {</span>
+<span class="nc" id="L56">    _host = host;</span>
+<span class="nc" id="L57">    _port = port;</span>
+<span class="nc" id="L58">    _protocol = protocol;</span>
+<span class="nc" id="L59">    _overwrite = overwrite;</span>
+<span class="nc" id="L60">    _permission = permission;</span>
+<span class="nc" id="L61">    _httpClient = new HttpClient();</span>
+<span class="nc" id="L62">  }</span>
+
+  // This method is based on:
+  // https://hadoop.apache.org/docs/r1.0.4/webhdfs.html#CREATE
+  public synchronized boolean uploadSegment(String webHdfsPath, String localFilePath) {
+    // Step 1: Submit a HTTP PUT request without automatically following
+    // redirects and without sending the file data.
+<span class="nc" id="L69">    String firstPutReqString = String.format(WEB_HDFS_UPLOAD_PATH_TEMPLATE, _protocol, _host, _port, webHdfsPath, _overwrite, _permission);</span>
+<span class="nc" id="L70">    HttpMethod firstPutReq = new PutMethod(firstPutReqString);</span>
+    try {
+<span class="nc" id="L72">      LOGGER.info(&quot;Trying to send request: {}.&quot;, firstPutReqString);</span>
+<span class="nc" id="L73">      int firstResponseCode = _httpClient.executeMethod(firstPutReq);</span>
+<span class="nc bnc" id="L74" title="All 2 branches missed.">      if (firstResponseCode != 307) {</span>
+<span class="nc" id="L75">        LOGGER.error(String.format(</span>
+            &quot;Failed to execute the first PUT request to upload segment to webhdfs: %s. &quot;
+                + &quot;Expected response code 307, but get %s. Response body: %s&quot;,
+            firstPutReqString, firstResponseCode, firstPutReq.getResponseBodyAsString()));
+<span class="nc" id="L79">        return false;</span>
+      }
+<span class="nc" id="L81">    } catch (Exception e) {</span>
+<span class="nc" id="L82">      LOGGER.error(String.format(&quot;Failed to execute the first request to upload segment to webhdfs: %s.&quot;, firstPutReqString), e);</span>
+<span class="nc" id="L83">      return false;</span>
+    } finally {
+<span class="nc" id="L85">      firstPutReq.releaseConnection();</span>
+<span class="nc" id="L86">    }</span>
+    // Step 2: Submit another HTTP PUT request using the URL in the Location
+    // header with the file data to be written.
+<span class="nc" id="L89">    String redirectedReqString = firstPutReq.getResponseHeader(LOCATION).getValue();</span>
+<span class="nc" id="L90">    PutMethod redirectedReq = new PutMethod(redirectedReqString);</span>
+<span class="nc" id="L91">    File localFile = new File(localFilePath);</span>
+<span class="nc" id="L92">    RequestEntity requestEntity = new FileRequestEntity(localFile, &quot;application/binary&quot;);</span>
+<span class="nc" id="L93">    redirectedReq.setRequestEntity(requestEntity);</span>
+
+    try {
+<span class="nc" id="L96">      LOGGER.info(&quot;Trying to send request: {}.&quot;, redirectedReqString);</span>
+<span class="nc" id="L97">      int redirectedResponseCode = _httpClient.executeMethod(redirectedReq);</span>
+<span class="nc bnc" id="L98" title="All 2 branches missed.">      if (redirectedResponseCode != 201) {</span>
+<span class="nc" id="L99">        LOGGER.error(String.format(</span>
+            &quot;Failed to execute the redirected PUT request to upload segment to webhdfs: %s. &quot;
+                + &quot;Expected response code 201, but get %s. Response: %s&quot;,
+            redirectedReqString, redirectedResponseCode, redirectedReq.getResponseBodyAsString()));
+      }
+<span class="nc" id="L104">      return true;</span>
+<span class="nc" id="L105">    } catch (IOException e) {</span>
+<span class="nc" id="L106">      LOGGER.error(String.format(&quot;Failed to execute the redirected request to upload segment to webhdfs: %s.&quot;, redirectedReqString), e);</span>
+<span class="nc" id="L107">      return false;</span>
+    } finally {
+<span class="nc" id="L109">      redirectedReq.releaseConnection();</span>
+    }
+  }
+
+  public String getDownloadUriPath(String webHdfsPath) {
+<span class="nc" id="L114">    return String.format(WEB_HDFS_DOWNLOAD_PATH_TEMPLATE, _protocol, _host, _port, webHdfsPath);</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

@@ -1,0 +1,466 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>PinotLByteBuffer.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-broker</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.segment.memory</a> &gt; <span class="el_source">PinotLByteBuffer.java</span></div><h1>PinotLByteBuffer.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.segment.memory;
+
+import java.io.File;
+import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.channels.FileChannel;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import com.google.common.base.Preconditions;
+import com.linkedin.pinot.common.segment.ReadMode;
+import xerial.larray.buffer.LBuffer;
+import xerial.larray.buffer.LBufferAPI;
+import xerial.larray.buffer.UnsafeUtil;
+import static xerial.larray.buffer.UnsafeUtil.unsafe;
+import xerial.larray.mmap.MMapBuffer;
+import xerial.larray.mmap.MMapMode;
+
+/**
+ * In-memory byte buffer for pinot data.
+ *
+ * The byte buffer may be memory mapped or off-heap (direct allocation).
+ * The main advantage of this class over ByteBuffer is to support buffers
+ * larger than 2GB. This also allows memory-mapping files larger than 2GB.
+ *
+ * &lt;b&gt;NOTE:&lt;/b&gt; All the acesses to this buffer are unchecked. Meaning, accessing
+ * index beyond the size of the buffer is undefined - it may crash or provide garbage
+ * value.
+ *
+ * The 'Index' part of the name is temporary to limit the usage scope
+ * in order to bake the class first. Use this as an interface only. It's
+ * implementation *will* change.
+ *
+ */
+public class PinotLByteBuffer extends PinotDataBuffer {
+<span class="nc" id="L52">  private static Logger LOGGER = LoggerFactory.getLogger(PinotLByteBuffer.class);</span>
+
+  private LBufferAPI buffer;
+<span class="nc" id="L55">  private long startPosition = 0L;</span>
+<span class="nc" id="L56">  private long size = 0L;</span>
+
+  /**
+   * Fully load the file in to the in-memory buffer
+   * @param file file containing index data
+   * @param readMode mmap vs heap mode for the buffer
+   * @param openMode read or read_write mode for the index
+   * @param context context for buffer allocation. Use mainly for resource tracking
+   * @return in-memory buffer containing data
+   */
+  public static PinotLByteBuffer fromFile(File file, ReadMode readMode, FileChannel.MapMode openMode, String context)
+      throws IOException {
+<span class="nc" id="L68">    return fromFile(file, 0, file.length(), readMode, openMode, context);</span>
+  }
+
+  /**
+   * Loads a portion of file in memory. This will load data from [startPosition, startPosition + length).
+   * @param file file to load
+   * @param startPosition (inclusive) start startPosition to the load the data from in the file
+   * @param length size of the data from
+   * @param readMode mmap vs heap
+   * @param openMode read vs read/write
+   * @param context context for buffer allocation. Use mainly for resource tracking
+   * @return in-memory buffer containing data
+   * @throws IOException
+   */
+  public static PinotLByteBuffer fromFile(File file, long startPosition, long length,
+      ReadMode readMode, FileChannel.MapMode openMode, String context)
+      throws IOException {
+<span class="nc" id="L85">    Preconditions.checkNotNull(file, &quot;Index file can not be null&quot;);</span>
+<span class="nc bnc" id="L86" title="All 2 branches missed.">    if (readMode == ReadMode.heap) {</span>
+<span class="nc" id="L87">      return loadFromFile(file, startPosition, length, context);</span>
+<span class="nc bnc" id="L88" title="All 2 branches missed.">    } else if (readMode == ReadMode.mmap) {</span>
+<span class="nc" id="L89">      return mapFromFile(file, startPosition, length, openMode, context);</span>
+    } else {
+<span class="nc" id="L91">      throw new RuntimeException(&quot;Unknown readmode: &quot; + readMode.name());</span>
+    }
+  }
+
+  static PinotLByteBuffer mapFromFile(File file, long start, long length, FileChannel.MapMode openMode, String context)
+      throws IOException {
+<span class="nc" id="L97">    MMapBuffer buffer = mapFromFileInternal(file, start, length, openMode, context);</span>
+<span class="nc" id="L98">    return new PinotLByteBuffer(buffer, true);</span>
+  }
+
+  private static MMapBuffer mapFromFileInternal(File file, long start, long length,
+      FileChannel.MapMode openMode, String context)
+      throws IOException {
+<span class="nc bnc" id="L104" title="All 2 branches missed.">    MMapMode mmapMode = (openMode == FileChannel.MapMode.READ_ONLY) ?</span>
+        MMapMode.READ_ONLY : MMapMode.READ_WRITE;
+    // TODO: add memory tracking MMapUtils
+<span class="nc" id="L107">    MMapBuffer buf = new MMapBuffer(file, start, length, mmapMode);</span>
+<span class="nc" id="L108">    return buf;</span>
+  }
+
+  static PinotLByteBuffer loadFromFile(File file, long startPosition, long length, String context)
+      throws IOException {
+    // TODO: track memory
+<span class="nc" id="L114">    LBuffer buf = new LBuffer(length);</span>
+<span class="nc" id="L115">    PinotLByteBuffer pinotDataBuffer = new PinotLByteBuffer(buf, true);</span>
+<span class="nc" id="L116">    pinotDataBuffer.readFrom(file, startPosition, length);</span>
+<span class="nc" id="L117">    return pinotDataBuffer;</span>
+  }
+
+  public static PinotLByteBuffer allocateDirect(long size) {
+<span class="nc" id="L121">    LBuffer buffer = new LBuffer(size);</span>
+<span class="nc" id="L122">    PinotLByteBuffer pinotDataBuffer = new PinotLByteBuffer(buffer, true);</span>
+<span class="nc" id="L123">    return pinotDataBuffer;</span>
+  }
+
+  private PinotLByteBuffer(LBufferAPI buffer, boolean isOwner)  {
+<span class="nc" id="L127">    this(buffer, isOwner, 0, buffer.size());</span>
+<span class="nc" id="L128">  }</span>
+
+<span class="nc" id="L130">  private PinotLByteBuffer(LBufferAPI buffer, boolean isOwner, long startPosition, long size) {</span>
+<span class="nc" id="L131">    Preconditions.checkNotNull(buffer);</span>
+<span class="nc" id="L132">    this.buffer = buffer;</span>
+<span class="nc" id="L133">    this.owner = isOwner;</span>
+<span class="nc" id="L134">    this.startPosition = startPosition;</span>
+<span class="nc" id="L135">    this.size = size;</span>
+<span class="nc" id="L136">  }</span>
+
+  /**
+   * Transfer the ownership of this buffer. Ownership is transferred only if
+   * this buffer is the owner. Otherwise, this method simply acts like a copy
+   * @param rhs
+   */
+  public void transferTo(PinotDataBuffer rhs) {
+<span class="nc" id="L144">    Preconditions.checkNotNull(rhs);</span>
+<span class="nc" id="L145">    Preconditions.checkArgument(rhs instanceof PinotLByteBuffer);</span>
+<span class="nc" id="L146">    PinotLByteBuffer rhsBuffer = (PinotLByteBuffer) rhs;</span>
+<span class="nc bnc" id="L147" title="All 2 branches missed.">    if (rhs != this) {</span>
+<span class="nc" id="L148">      rhsBuffer.buffer = buffer;</span>
+<span class="nc" id="L149">      rhsBuffer.owner = owner;</span>
+<span class="nc" id="L150">      this.owner = false;</span>
+    }
+<span class="nc" id="L152">  }</span>
+
+  /**
+   * Duplicate this buffer without transferring ownership.
+   * The new buffer will share the underlying data buffer (no data copy) and it's bounds.
+   * @return newly allocated buffer (does not own data)
+   */
+  public PinotLByteBuffer duplicate() {
+<span class="nc" id="L160">    PinotLByteBuffer duplicate = new PinotLByteBuffer(this.buffer, false, this.startPosition, this.size);</span>
+<span class="nc" id="L161">    return duplicate;</span>
+  }
+
+  /**
+   * Releases the data buffer if this is owner.
+   * Accesses after close() are undefined
+   * @throws Exception
+   */
+  @Override
+  public void close() {
+<span class="nc bnc" id="L171" title="All 4 branches missed.">    if (owner &amp;&amp; buffer != null) {</span>
+<span class="nc bnc" id="L172" title="All 2 branches missed.">      if (buffer instanceof MMapBuffer) {</span>
+<span class="nc" id="L173">        ((MMapBuffer) buffer).flush();</span>
+      }
+
+<span class="nc" id="L176">      buffer.release();</span>
+<span class="nc" id="L177">      buffer = null;</span>
+    }
+<span class="nc" id="L179">  }</span>
+
+  /**
+   * Returns the byte value at given index
+   */
+  public byte apply(int index) {
+<span class="nc" id="L185">    return buffer.apply(startPosition + index);</span>
+  }
+
+  /**
+   * Read the byte at index
+   * @param index position in bytebuffer
+   * @return
+   */
+  public byte getByte(long index) {
+<span class="nc" id="L194">    return buffer.getByte(startPosition + index);</span>
+  }
+  public byte getByte(int index) {
+<span class="nc" id="L197">    return buffer.getByte(startPosition + index);</span>
+  }
+
+  public void putByte(long index, byte val) {
+<span class="nc" id="L201">    buffer.putByte(startPosition + index, val);</span>
+<span class="nc" id="L202">  }</span>
+
+  public void putChar(long index, char c) {
+<span class="nc" id="L205">    buffer.putChar(startPosition + index, c);</span>
+<span class="nc" id="L206">  }</span>
+
+  public char getChar(long index) {
+<span class="nc" id="L209">    return buffer.getChar(startPosition + index);</span>
+  }
+
+  public void putFloat(long index, float v) {
+<span class="nc" id="L213">    buffer.putFloat(startPosition + index, v);</span>
+<span class="nc" id="L214">  }</span>
+
+  public void putFloat(int index, float value) {
+<span class="nc" id="L217">    buffer.putFloat(startPosition + index, value);</span>
+<span class="nc" id="L218">  }</span>
+  public void putLong(long index, long l1) {
+<span class="nc" id="L220">    buffer.putLong(startPosition + index, l1);</span>
+<span class="nc" id="L221">  }</span>
+
+  public long getLong(long index) {
+<span class="nc" id="L224">    return buffer.getLong(startPosition + index);</span>
+  }
+  public void putLong(int index, long value) {
+<span class="nc" id="L227">    buffer.putLong(startPosition + index, value);</span>
+<span class="nc" id="L228">  }</span>
+
+  public int getInt(int index) {
+<span class="nc" id="L231">    return buffer.getInt(startPosition + index);</span>
+  }
+  public int getInt(long index) {
+<span class="nc" id="L234">    return buffer.getInt(startPosition + index);</span>
+  }
+
+  public void putInt(int index, int value) {
+<span class="nc" id="L238">    buffer.putInt(startPosition + index, value);</span>
+<span class="nc" id="L239">  }</span>
+
+  public double getDouble(long l) {
+<span class="nc" id="L242">    return buffer.getDouble(startPosition + l);</span>
+  }
+
+  public void putDouble(long index, double value) {
+<span class="nc" id="L246">    buffer.putDouble(startPosition + index, value);</span>
+<span class="nc" id="L247">  }</span>
+
+
+  public short getShort(int index) {
+<span class="nc" id="L251">    return buffer.getShort(startPosition + index);</span>
+  }
+
+  public short getShort(long index) {
+<span class="nc" id="L255">    return buffer.getShort(startPosition + index);</span>
+  }
+
+  public void putShort(int index, short value) {
+<span class="nc" id="L259">    buffer.putShort(startPosition + index, value);</span>
+<span class="nc" id="L260">  }</span>
+
+  public void putShort(long index, short value) {
+<span class="nc" id="L263">    buffer.putShort(startPosition + index, value);</span>
+<span class="nc" id="L264">  }</span>
+
+  public void putInt(long index, int value) {
+<span class="nc" id="L267">    buffer.putInt(startPosition + index, value);</span>
+<span class="nc" id="L268">  }</span>
+
+  public long getLong(int index) {
+<span class="nc" id="L271">    return buffer.getLong(startPosition + index);</span>
+  }
+
+  public float getFloat(int index) {
+<span class="nc" id="L275">    return buffer.getFloat(startPosition + index);</span>
+  }
+
+  public float getFloat(long index) {
+<span class="nc" id="L279">    return buffer.getFloat(startPosition + index);</span>
+  }
+
+  public void putByte(int index, byte value) {
+<span class="nc" id="L283">    buffer.putByte(startPosition + index, value);</span>
+<span class="nc" id="L284">  }</span>
+
+  public void putDouble(int index, double value) {
+<span class="nc" id="L287">    buffer.putDouble(startPosition + index, value);</span>
+<span class="nc" id="L288">  }</span>
+  public double getDouble(int index) {
+<span class="nc" id="L290">    return buffer.getDouble(startPosition + index);</span>
+  }
+
+  public char getChar(int index) {
+<span class="nc" id="L294">    return buffer.getChar(startPosition + index);</span>
+  }
+  public void putChar(int index, char value) {
+<span class="nc" id="L297">    buffer.putChar(startPosition + index, value);</span>
+<span class="nc" id="L298">  }</span>
+
+  public void fill(long offset, long length, byte value) {
+<span class="nc" id="L301">    unsafe.setMemory(address() + offset, length, value);</span>
+<span class="nc" id="L302">  }</span>
+
+  /**
+   * creates a view on a slice of buffer with range [0, (end-start) ) mapped
+   * to [start, end) of the original buffer. New buffer will share the same
+   * underlying buffer as the original. Any changes will be visible in the original buffer.
+   *
+   * There is no data copy
+   * @param start start position
+   * @param end end position
+   * @return non-owning sliced buffer
+   */
+  public PinotLByteBuffer view(long start, long end) {
+<span class="nc" id="L315">    PinotLByteBuffer buffer = new PinotLByteBuffer(this.buffer, false, start, (end-start) );</span>
+<span class="nc" id="L316">    return buffer;</span>
+  }
+
+  /**
+   * Copy contents of this buffer from srcOffset to destArray
+   * @param srcOffset startPosition in this buffer to copy from
+   * @param destArray destination array to copy data to
+   * @param destOffset position in destArray to copy from
+   * @param size total size of data to copy
+   */
+  public void copyTo(long srcOffset, byte[] destArray, int destOffset, int size) {
+<span class="nc" id="L327">    int cursor = destOffset;</span>
+<span class="nc bnc" id="L328" title="All 2 branches missed.">    for (ByteBuffer bb : toDirectByteBuffers(srcOffset, size)) {</span>
+<span class="nc" id="L329">      int bbSize = bb.remaining();</span>
+<span class="nc bnc" id="L330" title="All 2 branches missed.">      if ((cursor + bbSize) &gt; destArray.length)</span>
+<span class="nc" id="L331">        throw new ArrayIndexOutOfBoundsException(String.format(&quot;cursor + bbSize = %,d&quot;, cursor + bbSize));</span>
+<span class="nc" id="L332">      bb.get(destArray, cursor, bbSize);</span>
+<span class="nc" id="L333">      cursor += bbSize;</span>
+    }
+<span class="nc" id="L335">  }</span>
+
+  /**
+   * Read the given source byte array, then overwrite the buffer contents
+   * @param src
+   * @param destOffset
+   * @return
+   */
+  public int readFrom(byte[] src, long destOffset) {
+<span class="nc" id="L344">    return readFrom(src, 0, destOffset, src.length);</span>
+  }
+
+  /**
+   * Read the given source byte arrey, then overwrite the buffer contents
+   * @param src
+   * @param srcOffset
+   * @param destOffset
+   * @param length
+   * @return
+   */
+  public int readFrom(byte[] src, int srcOffset, long destOffset, int length) {
+<span class="nc" id="L356">    return readFrom(ByteBuffer.wrap(src), srcOffset, destOffset, length);</span>
+
+  }
+
+  public int readFrom(ByteBuffer sourceBuffer, int srcOffset, long destOffset, int length) {
+<span class="nc" id="L361">    ByteBuffer dupBuffer = sourceBuffer.duplicate();</span>
+<span class="nc" id="L362">    int readLen = (int) Math.min(dupBuffer.limit() - srcOffset, Math.min(size() - destOffset, length));</span>
+<span class="nc" id="L363">    ByteBuffer b = toDirectByteBuffer(destOffset, readLen);</span>
+<span class="nc" id="L364">    dupBuffer.position(srcOffset);</span>
+    // we need to set the limit here (after the Math.min calculation above
+    // because of how b.put(dupBuffer) works. it will copy limit() - position()
+    // bytes
+<span class="nc" id="L368">    dupBuffer.limit(srcOffset + length);</span>
+<span class="nc" id="L369">    b.put(dupBuffer);</span>
+<span class="nc" id="L370">    return readLen;</span>
+  }
+
+  public void readFrom(File dataFile)
+      throws IOException {
+<span class="nc" id="L375">    readFrom(dataFile, 0, dataFile.length());</span>
+<span class="nc" id="L376">  }</span>
+
+  protected void readFrom(File file, long startPosition, long length)
+      throws IOException {
+
+<span class="nc" id="L381">    long bufPosition = 0;</span>
+<span class="nc" id="L382">    try (RandomAccessFile raf = new RandomAccessFile(file, &quot;rw&quot;)) {</span>
+      // arbitrary size..somewhat conservative to avoid impacting
+      // jvm configurations
+<span class="nc" id="L385">      int readSize = 10 * 1024 * 1024;</span>
+      // TODO: track memory
+<span class="nc" id="L387">      ByteBuffer readBuffer = ByteBuffer.allocateDirect(readSize);</span>
+<span class="nc" id="L388">      long endPosition = startPosition + length;</span>
+<span class="nc bnc" id="L389" title="All 2 branches missed.">      for (long offset = startPosition; offset &lt; endPosition; ) {</span>
+<span class="nc" id="L390">        int bytesRead = raf.getChannel().read(readBuffer, offset);</span>
+<span class="nc" id="L391">        this.readFrom(readBuffer, 0, bufPosition, bytesRead);</span>
+<span class="nc" id="L392">        readBuffer.clear();</span>
+<span class="nc" id="L393">        bufPosition += bytesRead;</span>
+<span class="nc" id="L394">        offset += bytesRead;</span>
+<span class="nc" id="L395">      }</span>
+<span class="nc bnc" id="L396" title="All 8 branches missed.">    }</span>
+<span class="nc" id="L397">  }</span>
+
+  public long size() {
+<span class="nc" id="L400">    return size;</span>
+  }
+
+  public long address() {
+<span class="nc" id="L404">    return buffer.address() + startPosition;</span>
+  }
+
+  /**
+   * Convert this buffer to a java array.
+   * @return
+   */
+  public byte[] toArray() {
+<span class="nc bnc" id="L412" title="All 2 branches missed.">    if (size() &gt; Integer.MAX_VALUE)</span>
+<span class="nc" id="L413">      throw new IllegalStateException(&quot;Cannot create byte array of more than 2GB&quot;);</span>
+
+<span class="nc" id="L415">    int len = (int) size();</span>
+<span class="nc" id="L416">    ByteBuffer bb = toDirectByteBuffer(0L, len);</span>
+<span class="nc" id="L417">    byte[] b = new byte[len];</span>
+    // Copy data to the array
+<span class="nc" id="L419">    bb.get(b, 0, len);</span>
+<span class="nc" id="L420">    return b;</span>
+  }
+
+  /**
+   * Gives an sequence of ByteBuffers. Writing to these ByteBuffers modifies the contents of this LBuffer.
+   * @return
+   */
+  public ByteBuffer[] toDirectByteBuffers() {
+<span class="nc" id="L428">    return toDirectByteBuffers(startPosition, size());</span>
+  }
+
+  public ByteBuffer[] toDirectByteBuffers(long startOffset, long size) {
+<span class="nc" id="L432">    long pos = startPosition + startOffset;</span>
+<span class="nc" id="L433">    long blockSize = Integer.MAX_VALUE;</span>
+<span class="nc" id="L434">    long limit = pos + size;</span>
+<span class="nc" id="L435">    int numBuffers = (int) ((size + (blockSize - 1)) / blockSize);</span>
+<span class="nc" id="L436">    ByteBuffer[] result = new ByteBuffer[numBuffers];</span>
+<span class="nc" id="L437">    int index = 0;</span>
+<span class="nc bnc" id="L438" title="All 2 branches missed.">    while (pos &lt; limit) {</span>
+<span class="nc" id="L439">      long blockLength = Math.min(limit - pos, blockSize);</span>
+<span class="nc" id="L440">      result[index++] = UnsafeUtil.newDirectByteBuffer(address() + pos, (int) blockLength).order(ByteOrder.nativeOrder());</span>
+<span class="nc" id="L441">      pos += blockLength;</span>
+<span class="nc" id="L442">    }</span>
+<span class="nc" id="L443">    return result;</span>
+  }
+
+  /**
+   * Gives a ByteBuffer view of the specified range. Writing to the returned ByteBuffer modifies the contenets of this LByteBuffer
+   * @param bufferOffset
+   * @param size
+   * @return
+   */
+  public ByteBuffer toDirectByteBuffer(long bufferOffset, int size) {
+<span class="nc" id="L453">    return UnsafeUtil.newDirectByteBuffer(address() + bufferOffset + startPosition, size);</span>
+  }
+
+  @Override
+  protected long start() {
+<span class="nc" id="L458">    return startPosition;</span>
+  }
+
+  @Override
+  public void order(ByteOrder byteOrder) {
+<span class="nc" id="L463">    throw new UnsupportedOperationException();</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

@@ -1,0 +1,264 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>NoDictionarySingleColumnGroupKeyGenerator.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-tools</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.query.aggregation.groupby</a> &gt; <span class="el_source">NoDictionarySingleColumnGroupKeyGenerator.java</span></div><h1>NoDictionarySingleColumnGroupKeyGenerator.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.query.aggregation.groupby;
+
+import com.linkedin.pinot.common.data.FieldSpec;
+import com.linkedin.pinot.core.common.BlockValSet;
+import com.linkedin.pinot.core.operator.blocks.TransformBlock;
+import it.unimi.dsi.fastutil.doubles.Double2IntMap;
+import it.unimi.dsi.fastutil.doubles.Double2IntOpenHashMap;
+import it.unimi.dsi.fastutil.floats.Float2IntMap;
+import it.unimi.dsi.fastutil.floats.Float2IntOpenHashMap;
+import it.unimi.dsi.fastutil.ints.Int2IntMap;
+import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
+import it.unimi.dsi.fastutil.longs.Long2IntMap;
+import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
+import it.unimi.dsi.fastutil.objects.Object2IntMap;
+import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
+import java.util.Iterator;
+import java.util.Map;
+
+
+/**
+ * Implementation of {@link GroupKeyGenerator} interface for single group by column,
+ * in absence of dictionary for the group by column.
+ *
+ */
+public class NoDictionarySingleColumnGroupKeyGenerator implements GroupKeyGenerator {
+
+  private final String _groupByColumn;
+  private final Map _groupKeyMap;
+<span class="fc" id="L44">  private int _numGroupKeys = 0;</span>
+
+  /**
+   * Constructor for the class.
+   *
+   * @param groupByColumn Column for which to generate group-by keys
+   */
+<span class="fc" id="L51">  public NoDictionarySingleColumnGroupKeyGenerator(String groupByColumn, FieldSpec.DataType dataType) {</span>
+<span class="fc" id="L52">    _groupByColumn = groupByColumn;</span>
+<span class="fc" id="L53">    _groupKeyMap = createGroupKeyMap(dataType);</span>
+<span class="fc" id="L54">  }</span>
+
+  @Override
+  public int getGlobalGroupKeyUpperBound() {
+    // Since there's no dictionary, we cannot find the cardinality
+<span class="fc" id="L59">    return Integer.MAX_VALUE;</span>
+  }
+
+  @Override
+  public void generateKeysForBlock(TransformBlock transformBlock, int[] docIdToGroupKey) {
+<span class="fc" id="L64">    BlockValSet blockValSet = transformBlock.getBlockValueSet(_groupByColumn);</span>
+<span class="fc" id="L65">    FieldSpec.DataType dataType = blockValSet.getValueType();</span>
+<span class="fc" id="L66">    int numDocs = transformBlock.getNumDocs();</span>
+
+<span class="pc bpc" id="L68" title="1 of 6 branches missed.">    switch (dataType) {</span>
+      case INT:
+<span class="fc" id="L70">        int[] intValues = blockValSet.getIntValuesSV();</span>
+<span class="fc bfc" id="L71" title="All 2 branches covered.">        for (int i = 0; i &lt; numDocs; i++) {</span>
+<span class="fc" id="L72">          docIdToGroupKey[i] = getKeyForValue(intValues[i]);</span>
+        }
+<span class="fc" id="L74">        break;</span>
+
+      case LONG:
+<span class="fc" id="L77">        long[] longValues = blockValSet.getLongValuesSV();</span>
+<span class="fc bfc" id="L78" title="All 2 branches covered.">        for (int i = 0; i &lt; numDocs; i++) {</span>
+<span class="fc" id="L79">          docIdToGroupKey[i] = getKeyForValue(longValues[i]);</span>
+        }
+<span class="fc" id="L81">        break;</span>
+
+      case FLOAT:
+<span class="fc" id="L84">        float[] floatValues = blockValSet.getFloatValuesSV();</span>
+<span class="fc bfc" id="L85" title="All 2 branches covered.">        for (int i = 0; i &lt; numDocs; i++) {</span>
+<span class="fc" id="L86">          docIdToGroupKey[i] = getKeyForValue(floatValues[i]);</span>
+        }
+<span class="fc" id="L88">        break;</span>
+
+      case DOUBLE:
+<span class="fc" id="L91">        double[] doubleValues = blockValSet.getDoubleValuesSV();</span>
+<span class="fc bfc" id="L92" title="All 2 branches covered.">        for (int i = 0; i &lt; numDocs; i++) {</span>
+<span class="fc" id="L93">          docIdToGroupKey[i] = getKeyForValue(doubleValues[i]);</span>
+        }
+<span class="fc" id="L95">        break;</span>
+
+      case STRING:
+<span class="fc" id="L98">        String[] stringValues = blockValSet.getStringValuesSV();</span>
+<span class="fc bfc" id="L99" title="All 2 branches covered.">        for (int i = 0; i &lt; numDocs; i++) {</span>
+<span class="fc" id="L100">          docIdToGroupKey[i] = getKeyForValue(stringValues[i]);</span>
+        }
+<span class="fc" id="L102">        break;</span>
+
+      default:
+<span class="nc" id="L105">        throw new IllegalArgumentException(&quot;Illegal data type for no-dictionary key generator: &quot; + dataType);</span>
+    }
+<span class="fc" id="L107">  }</span>
+
+  /**
+   * Helper method to create the group-key map, depending on the data type.
+   * Uses primitive maps when possible.
+   *
+   * @param keyType DataType for the key
+   * @return Map
+   */
+  private Map createGroupKeyMap(FieldSpec.DataType keyType) {
+    Map map;
+<span class="pc bpc" id="L118" title="1 of 6 branches missed.">    switch (keyType) {</span>
+      case INT:
+<span class="fc" id="L120">        Int2IntMap intMap = new Int2IntOpenHashMap();</span>
+<span class="fc" id="L121">        intMap.defaultReturnValue(INVALID_ID);</span>
+<span class="fc" id="L122">        map = intMap;</span>
+<span class="fc" id="L123">        break;</span>
+
+      case LONG:
+<span class="fc" id="L126">        Long2IntOpenHashMap longMap = new Long2IntOpenHashMap();</span>
+<span class="fc" id="L127">        longMap.defaultReturnValue(INVALID_ID);</span>
+<span class="fc" id="L128">        map = longMap;</span>
+<span class="fc" id="L129">        break;</span>
+
+      case FLOAT:
+<span class="fc" id="L132">        Float2IntOpenHashMap floatMap = new Float2IntOpenHashMap();</span>
+<span class="fc" id="L133">        floatMap.defaultReturnValue(INVALID_ID);</span>
+<span class="fc" id="L134">        map = floatMap;</span>
+<span class="fc" id="L135">        break;</span>
+
+      case DOUBLE:
+<span class="fc" id="L138">        Double2IntOpenHashMap doubleMap = new Double2IntOpenHashMap();</span>
+<span class="fc" id="L139">        doubleMap.defaultReturnValue(INVALID_ID);</span>
+<span class="fc" id="L140">        map = doubleMap;</span>
+<span class="fc" id="L141">        break;</span>
+
+      case STRING:
+<span class="fc" id="L144">        Object2IntOpenHashMap&lt;String&gt; stringMap = new Object2IntOpenHashMap&lt;&gt;();</span>
+<span class="fc" id="L145">        stringMap.defaultReturnValue(INVALID_ID);</span>
+<span class="fc" id="L146">        map = stringMap;</span>
+<span class="fc" id="L147">        break;</span>
+
+      default:
+<span class="nc" id="L150">        throw new IllegalArgumentException(&quot;Illegal data type for no-dictionary key generator: &quot; + keyType);</span>
+    }
+<span class="fc" id="L152">    return map;</span>
+  }
+
+  @Override
+  public void generateKeysForBlock(TransformBlock transformBlock, int[][] docIdToGroupKeys) {
+    // TODO: Support generating keys for multi-valued columns.
+<span class="nc" id="L158">    throw new UnsupportedOperationException(&quot;Operation not supported&quot;);</span>
+  }
+
+  @Override
+  public int getCurrentGroupKeyUpperBound() {
+<span class="fc" id="L163">    return _groupKeyMap.size();</span>
+  }
+
+  @Override
+  public Iterator&lt;GroupKey&gt; getUniqueGroupKeys() {
+<span class="fc" id="L168">    return new GroupKeyIterator(_groupKeyMap);</span>
+  }
+
+  @Override
+  public void purgeKeys(int[] keysToPurge) {
+    // TODO: Implement purging.
+<span class="nc" id="L174">    throw new UnsupportedOperationException(&quot;Purging keys not yet supported in GroupKeyGenerator without dictionary.&quot;);</span>
+  }
+
+  @SuppressWarnings(&quot;unchecked&quot;)
+  private int getKeyForValue(int value) {
+<span class="fc" id="L179">    Int2IntMap map = (Int2IntMap) _groupKeyMap;</span>
+<span class="fc" id="L180">    int groupId = map.get(value);</span>
+<span class="pc bpc" id="L181" title="1 of 2 branches missed.">    if (groupId == INVALID_ID) {</span>
+<span class="fc" id="L182">      groupId = _numGroupKeys;</span>
+<span class="fc" id="L183">      map.put(value, _numGroupKeys++);</span>
+    }
+<span class="fc" id="L185">    return groupId;</span>
+  }
+
+  @SuppressWarnings(&quot;unchecked&quot;)
+  private int getKeyForValue(long value) {
+<span class="fc" id="L190">    Long2IntMap map = (Long2IntMap) _groupKeyMap;</span>
+<span class="fc" id="L191">    int groupId = map.get(value);</span>
+<span class="fc bfc" id="L192" title="All 2 branches covered.">    if (groupId == INVALID_ID) {</span>
+<span class="fc" id="L193">      groupId = _numGroupKeys;</span>
+<span class="fc" id="L194">      map.put(value, _numGroupKeys++);</span>
+    }
+<span class="fc" id="L196">    return groupId;</span>
+  }
+
+  @SuppressWarnings(&quot;unchecked&quot;)
+  private int getKeyForValue(float value) {
+<span class="fc" id="L201">    Float2IntMap map = (Float2IntMap) _groupKeyMap;</span>
+<span class="fc" id="L202">    int groupId = map.get(value);</span>
+<span class="pc bpc" id="L203" title="1 of 2 branches missed.">    if (groupId == INVALID_ID) {</span>
+<span class="fc" id="L204">      groupId = _numGroupKeys;</span>
+<span class="fc" id="L205">      map.put(value, _numGroupKeys++);</span>
+    }
+<span class="fc" id="L207">    return groupId;</span>
+  }
+
+  @SuppressWarnings(&quot;unchecked&quot;)
+  private int getKeyForValue(double value) {
+<span class="fc" id="L212">    Double2IntMap map = (Double2IntMap) _groupKeyMap;</span>
+<span class="fc" id="L213">    int groupId = map.get(value);</span>
+<span class="pc bpc" id="L214" title="1 of 2 branches missed.">    if (groupId == INVALID_ID) {</span>
+<span class="fc" id="L215">      groupId = _numGroupKeys;</span>
+<span class="fc" id="L216">      map.put(value, _numGroupKeys++);</span>
+    }
+<span class="fc" id="L218">    return groupId;</span>
+  }
+
+  @SuppressWarnings(&quot;unchecked&quot;)
+  private int getKeyForValue(String value) {
+<span class="fc" id="L223">    Object2IntMap&lt;String&gt; map = (Object2IntMap&lt;String&gt;) _groupKeyMap;</span>
+<span class="fc" id="L224">    int groupId = map.getInt(value);</span>
+<span class="fc bfc" id="L225" title="All 2 branches covered.">    if (groupId == INVALID_ID) {</span>
+<span class="fc" id="L226">      groupId = _numGroupKeys;</span>
+<span class="fc" id="L227">      map.put(value, _numGroupKeys++);</span>
+    }
+<span class="fc" id="L229">    return groupId;</span>
+  }
+
+  /**
+   * Iterator for {Group-Key, Group-id) pair.
+   */
+  class GroupKeyIterator implements Iterator&lt;GroupKey&gt; {
+    Iterator&lt;Map.Entry&lt;Object, Integer&gt;&gt; _iterator;
+    GroupKey _groupKey;
+
+    @SuppressWarnings(&quot;unchecked&quot;)
+<span class="fc" id="L240">    public GroupKeyIterator(Map map) {</span>
+<span class="fc" id="L241">      _iterator = (Iterator&lt;Map.Entry&lt;Object, Integer&gt;&gt;) map.entrySet().iterator();</span>
+<span class="fc" id="L242">      _groupKey = new GroupKey();</span>
+<span class="fc" id="L243">    }</span>
+
+    @Override
+    public boolean hasNext() {
+<span class="fc" id="L247">      return _iterator.hasNext();</span>
+    }
+
+    @Override
+    public GroupKey next() {
+<span class="fc" id="L252">      Map.Entry&lt;Object, Integer&gt; entry = _iterator.next();</span>
+<span class="fc" id="L253">      _groupKey._groupId = entry.getValue();</span>
+<span class="fc" id="L254">      _groupKey._stringKey = entry.getKey().toString();</span>
+<span class="fc" id="L255">      return _groupKey;</span>
+    }
+
+    @Override
+    public void remove() {
+<span class="nc" id="L260">      throw new UnsupportedOperationException();</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

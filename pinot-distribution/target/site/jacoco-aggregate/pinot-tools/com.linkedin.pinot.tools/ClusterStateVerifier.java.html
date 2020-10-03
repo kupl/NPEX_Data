@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>ClusterStateVerifier.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-tools</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.tools</a> &gt; <span class="el_source">ClusterStateVerifier.java</span></div><h1>ClusterStateVerifier.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.tools;
+
+import com.linkedin.pinot.common.config.TableNameBuilder;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+public class ClusterStateVerifier extends PinotZKChanger {
+<span class="nc" id="L33">  private static final Logger LOGGER = LoggerFactory.getLogger(ClusterStateVerifier.class);</span>
+
+  public ClusterStateVerifier(String zkAddress, String clusterName) {
+<span class="nc" id="L36">    super(zkAddress, clusterName);</span>
+<span class="nc" id="L37">  }</span>
+
+  /**
+   * return true if all the tables are stable
+   * @param tableNames list of table names which are about to scan
+   * @param timeoutSec maximum timeout in second
+   * @return
+   */
+  private boolean isClusterStable(final List&lt;String&gt; tableNames, final long timeoutSec) {
+
+<span class="nc" id="L47">    final ExecutorService executor = Executors.newSingleThreadExecutor();</span>
+<span class="nc" id="L48">    final Future&lt;Boolean&gt; future = executor.submit(new Callable&lt;Boolean&gt;() {</span>
+      @Override
+      public Boolean call() {
+<span class="nc" id="L51">        return isClusterStable(tableNames);</span>
+      }
+    });
+
+<span class="nc" id="L55">    boolean isStable = false;</span>
+    try {
+<span class="nc" id="L57">      isStable = future.get(timeoutSec, TimeUnit.SECONDS);</span>
+<span class="nc" id="L58">    } catch (InterruptedException | ExecutionException ie) {</span>
+      /* Handle the interruption. Or ignore it. */
+<span class="nc" id="L60">      LOGGER.error(&quot;Exception occurred: &quot;, ie);</span>
+<span class="nc" id="L61">    } catch (TimeoutException te) {</span>
+      /* Handle the timeout. */
+<span class="nc" id="L63">      LOGGER.error(&quot;Reach timeout! timeoutSec: {}&quot;, timeoutSec);</span>
+    } finally {
+<span class="nc bnc" id="L65" title="All 8 branches missed.">      if (!executor.isTerminated()) {</span>
+<span class="nc" id="L66">        executor.shutdownNow();</span>
+      }
+    }
+<span class="nc" id="L69">    return isStable;</span>
+  }
+
+  /**
+   * return true if all the tables are stable
+   * @param tableNames list of table names which are about to scan
+   * @return
+   */
+  private boolean isClusterStable(final List&lt;String&gt; tableNames) {
+<span class="nc" id="L78">    LOGGER.info(&quot;Start scanning the stability of all the tables... Num of tables: {}&quot;, tableNames.size());</span>
+<span class="nc" id="L79">    int numUnstablePartitions = 0;</span>
+<span class="nc bnc" id="L80" title="All 2 branches missed.">    for (String tableName : tableNames) {</span>
+<span class="nc" id="L81">      numUnstablePartitions = super.isStable(tableName);</span>
+<span class="nc bnc" id="L82" title="All 2 branches missed.">      if (numUnstablePartitions != 0) {</span>
+<span class="nc" id="L83">        LOGGER.error(&quot;Attention: Table {} is not stable. numUnstablePartitions: {} &quot;, tableName, numUnstablePartitions);</span>
+<span class="nc" id="L84">        break;</span>
+      }
+<span class="nc" id="L86">    }</span>
+<span class="nc" id="L87">    LOGGER.info(&quot;Finish scanning.&quot;);</span>
+<span class="nc bnc" id="L88" title="All 2 branches missed.">    return numUnstablePartitions == 0;</span>
+  }
+
+  /**
+   * Assemble and scan the candidate table names, return true if all the tables are stable.
+   * @param tableName optional table names which is provided by user and about to scan
+   * @param timeoutSec maximum timeout in second
+   * @return
+   */
+  public boolean verifyClusterState(String tableName, long timeoutSec) {
+    List&lt;String&gt; tableNames;
+<span class="nc" id="L99">    List&lt;String&gt; allTables = getAllTables();</span>
+
+<span class="nc bnc" id="L101" title="All 2 branches missed.">    if (tableName == null) {</span>
+<span class="nc" id="L102">      tableNames = allTables;</span>
+    } else {
+<span class="nc" id="L104">      tableNames = new ArrayList&lt;&gt;();</span>
+<span class="nc bnc" id="L105" title="All 2 branches missed.">      if (allTables.contains(tableName)) {</span>
+<span class="nc" id="L106">        tableNames.add(tableName);</span>
+      } else {
+<span class="nc" id="L108">        LOGGER.error(&quot;Error: Table {} doesn't exist.&quot;, tableName);</span>
+<span class="nc" id="L109">        System.exit(1);</span>
+      }
+    }
+<span class="nc" id="L112">    return isClusterStable(tableNames, timeoutSec);</span>
+  }
+
+  private List&lt;String&gt; getAllTables() {
+<span class="nc" id="L116">    List&lt;String&gt; tableNames = new ArrayList&lt;&gt;();</span>
+<span class="nc" id="L117">    List&lt;String&gt; resources = helixAdmin.getResourcesInCluster(clusterName);</span>
+<span class="nc bnc" id="L118" title="All 2 branches missed.">    for (String resourceName : resources) {</span>
+<span class="nc bnc" id="L119" title="All 2 branches missed.">      if (TableNameBuilder.isTableResource(resourceName)) {</span>
+<span class="nc" id="L120">        tableNames.add(resourceName);</span>
+      }
+<span class="nc" id="L122">    }</span>
+<span class="nc" id="L123">    return tableNames;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

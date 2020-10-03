@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>ComparisonPredicateAstNode.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-server</a> &gt; <a href="../index.html" class="el_bundle">pinot-common</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.pql.parsers.pql2.ast</a> &gt; <span class="el_source">ComparisonPredicateAstNode.java</span></div><h1>ComparisonPredicateAstNode.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.pql.parsers.pql2.ast;
+
+import com.linkedin.pinot.common.request.FilterOperator;
+import com.linkedin.pinot.common.utils.request.FilterQueryTree;
+import com.linkedin.pinot.common.utils.request.HavingQueryTree;
+import com.linkedin.pinot.pql.parsers.Pql2CompilationException;
+import java.util.Collections;
+
+
+/**
+ * AST node for comparison predicates.
+ */
+public class ComparisonPredicateAstNode extends PredicateAstNode {
+  private String _operand;
+  private LiteralAstNode _literal;
+
+<span class="fc" id="L32">  public ComparisonPredicateAstNode(String operand) {</span>
+<span class="fc" id="L33">    _operand = operand;</span>
+<span class="fc" id="L34">  }</span>
+
+  public String getOperand() {
+<span class="nc" id="L37">    return _operand;</span>
+  }
+
+  public String getValue() {
+<span class="fc" id="L41">    return _literal.getValueAsString();</span>
+  }
+
+  @Override
+  public void addChild(AstNode childNode) {
+<span class="fc bfc" id="L46" title="All 2 branches covered.">    if (childNode instanceof IdentifierAstNode) {</span>
+<span class="pc bpc" id="L47" title="2 of 4 branches missed.">      if (_identifier == null &amp;&amp; _function == null) {</span>
+<span class="fc" id="L48">        _identifier = ((IdentifierAstNode) childNode).getName();</span>
+<span class="nc bnc" id="L49" title="All 2 branches missed.">      } else if (_identifier != null) {</span>
+<span class="nc" id="L50">        throw new Pql2CompilationException(&quot;Comparison between two columns is not supported.&quot;);</span>
+      } else {
+<span class="nc" id="L52">        throw new Pql2CompilationException(&quot;Comparison between function and column is not supported.&quot;);</span>
+      }
+<span class="fc bfc" id="L54" title="All 2 branches covered.">    } else if (childNode instanceof FunctionCallAstNode) {</span>
+<span class="pc bpc" id="L55" title="2 of 4 branches missed.">      if (_function == null &amp;&amp; _identifier == null) {</span>
+<span class="fc" id="L56">        _function = (FunctionCallAstNode) childNode;</span>
+<span class="nc bnc" id="L57" title="All 2 branches missed.">      } else if (_function != null) {</span>
+<span class="nc" id="L58">        throw new Pql2CompilationException(&quot;Comparison between two functions is not supported.&quot;);</span>
+      } else {
+<span class="nc" id="L60">        throw new Pql2CompilationException(&quot;Comparison between column and function is not supported.&quot;);</span>
+      }
+<span class="pc bpc" id="L62" title="1 of 2 branches missed.">    } else if (childNode instanceof LiteralAstNode) {</span>
+<span class="fc" id="L63">      LiteralAstNode node = (LiteralAstNode) childNode;</span>
+<span class="pc bpc" id="L64" title="1 of 2 branches missed.">      if (_literal == null) {</span>
+<span class="fc" id="L65">        _literal = node;</span>
+      } else {
+<span class="nc" id="L67">        throw new Pql2CompilationException(&quot;Comparison between two constants is not supported.&quot;);</span>
+      }
+    }
+
+    // Add the child nonetheless
+<span class="fc" id="L72">    super.addChild(childNode);</span>
+<span class="fc" id="L73">  }</span>
+
+  @Override
+  public String toString() {
+<span class="nc" id="L77">    return &quot;ComparisonPredicateAstNode{&quot; +</span>
+        &quot;_operand='&quot; + _operand + '\'' +
+        '}';
+  }
+
+  /**
+   * This function creates a standard unified shaped string for the value and operand side of the comparison
+   *
+   * @returns A String containing the range representation of the predicate
+   */
+  private String createRangeStringForComparison() {
+<span class="fc" id="L88">    String comparison = null;</span>
+<span class="fc" id="L89">    String value = _literal.getValueAsString();</span>
+
+<span class="fc" id="L91">    boolean identifierIsOnLeft = true;</span>
+<span class="pc bpc" id="L92" title="1 of 2 branches missed.">    if (getChildren().get(0) instanceof LiteralAstNode) {</span>
+<span class="nc" id="L93">      identifierIsOnLeft = false;</span>
+    }
+<span class="fc bfc" id="L95" title="All 2 branches covered.">    if (&quot;&lt;&quot;.equals(_operand)) {</span>
+<span class="pc bpc" id="L96" title="1 of 2 branches missed.">      if (identifierIsOnLeft) {</span>
+<span class="fc" id="L97">        comparison = &quot;(*\t\t&quot; + value + &quot;)&quot;;</span>
+      } else {
+<span class="nc" id="L99">        comparison = &quot;(&quot; + value + &quot;\t\t*)&quot;;</span>
+      }
+<span class="fc bfc" id="L101" title="All 2 branches covered.">    } else if (&quot;&lt;=&quot;.equals(_operand)) {</span>
+<span class="pc bpc" id="L102" title="1 of 2 branches missed.">      if (identifierIsOnLeft) {</span>
+<span class="fc" id="L103">        comparison = &quot;(*\t\t&quot; + value + &quot;]&quot;;</span>
+      } else {
+<span class="nc" id="L105">        comparison = &quot;[&quot; + value + &quot;\t\t*)&quot;;</span>
+      }
+<span class="fc bfc" id="L107" title="All 2 branches covered.">    } else if (&quot;&gt;&quot;.equals(_operand)) {</span>
+<span class="pc bpc" id="L108" title="1 of 2 branches missed.">      if (identifierIsOnLeft) {</span>
+<span class="fc" id="L109">        comparison = &quot;(&quot; + value + &quot;\t\t*)&quot;;</span>
+      } else {
+<span class="nc" id="L111">        comparison = &quot;(*\t\t&quot; + value + &quot;*)&quot;;</span>
+      }
+<span class="pc bpc" id="L113" title="1 of 2 branches missed.">    } else if (&quot;&gt;=&quot;.equals(_operand)) {</span>
+<span class="pc bpc" id="L114" title="1 of 2 branches missed.">      if (identifierIsOnLeft) {</span>
+<span class="fc" id="L115">        comparison = &quot;[&quot; + value + &quot;\t\t*)&quot;;</span>
+      } else {
+<span class="nc" id="L117">        comparison = &quot;(*\t\t&quot; + value + &quot;*)&quot;;</span>
+      }
+    }
+<span class="fc" id="L120">    return comparison;</span>
+  }
+
+  @Override
+  public FilterQueryTree buildFilterQueryTree() {
+<span class="pc bpc" id="L125" title="1 of 2 branches missed.">    if (_identifier == null) {</span>
+<span class="nc" id="L126">      throw new Pql2CompilationException(&quot;Comparison predicate has no identifier&quot;);</span>
+    }
+
+<span class="fc bfc" id="L129" title="All 2 branches covered.">    if (&quot;=&quot;.equals(_operand)) {</span>
+<span class="pc bpc" id="L130" title="2 of 4 branches missed.">      if (_identifier != null &amp;&amp; _literal != null) {</span>
+<span class="fc" id="L131">        return new FilterQueryTree(_identifier, Collections.singletonList(_literal.getValueAsString()),</span>
+            FilterOperator.EQUALITY, null);
+      } else {
+<span class="nc" id="L134">        throw new Pql2CompilationException(&quot;Comparison is not between a column and a constant&quot;);</span>
+      }
+<span class="fc bfc" id="L136" title="All 4 branches covered.">    } else if (&quot;&lt;&gt;&quot;.equals(_operand) || &quot;!=&quot;.equals(_operand)) {</span>
+<span class="pc bpc" id="L137" title="2 of 4 branches missed.">      if (_identifier != null &amp;&amp; _literal != null) {</span>
+<span class="fc" id="L138">        return new FilterQueryTree(_identifier, Collections.singletonList(_literal.getValueAsString()),</span>
+            FilterOperator.NOT, null);
+      } else {
+<span class="nc" id="L141">        throw new Pql2CompilationException(&quot;Comparison is not between a column and a constant&quot;);</span>
+      }
+    } else {
+<span class="fc" id="L144">      String comparison = createRangeStringForComparison();</span>
+<span class="pc bpc" id="L145" title="1 of 2 branches missed.">      if (comparison == null) {</span>
+<span class="nc" id="L146">        throw new Pql2CompilationException(&quot;The comparison operator is not valid/is not supported for HAVING query&quot;);</span>
+      }
+
+<span class="pc bpc" id="L149" title="1 of 2 branches missed.">      if (_identifier != null) {</span>
+<span class="fc" id="L150">        return new FilterQueryTree(_identifier, Collections.singletonList(comparison), FilterOperator.RANGE,</span>
+            null);
+      } else {
+<span class="nc" id="L153">        throw new Pql2CompilationException(&quot;One column is needed for comparison.&quot;);</span>
+      }
+    }
+  }
+
+  @Override
+  public HavingQueryTree buildHavingQueryTree() {
+<span class="pc bpc" id="L160" title="1 of 2 branches missed.">    if (_function == null) {</span>
+<span class="nc" id="L161">      throw new Pql2CompilationException(&quot;Comparison predicate has no function&quot;);</span>
+    }
+
+<span class="fc bfc" id="L164" title="All 2 branches covered.">    if (&quot;=&quot;.equals(_operand)) {</span>
+<span class="pc bpc" id="L165" title="2 of 4 branches missed.">      if (_function != null &amp;&amp; _literal != null) {</span>
+<span class="fc" id="L166">        return new HavingQueryTree(_function.buildAggregationInfo(),</span>
+            Collections.singletonList(_literal.getValueAsString()), FilterOperator.EQUALITY, null);
+      } else {
+<span class="nc" id="L169">        throw new Pql2CompilationException(&quot;Comparison is not between a function and a constant&quot;);</span>
+      }
+<span class="pc bpc" id="L171" title="2 of 4 branches missed.">    } else if (&quot;&lt;&gt;&quot;.equals(_operand) || &quot;!=&quot;.equals(_operand)) {</span>
+<span class="nc bnc" id="L172" title="All 4 branches missed.">      if (_function != null &amp;&amp; _literal != null) {</span>
+<span class="nc" id="L173">        return new HavingQueryTree(_function.buildAggregationInfo(),</span>
+            Collections.singletonList(_literal.getValueAsString()), FilterOperator.NOT, null);
+      } else {
+<span class="nc" id="L176">        throw new Pql2CompilationException(&quot;Comparison is not between a function and a constant&quot;);</span>
+      }
+    } else {
+<span class="fc" id="L179">      String comparison = createRangeStringForComparison();</span>
+<span class="pc bpc" id="L180" title="1 of 2 branches missed.">      if (_function != null) {</span>
+<span class="fc" id="L181">        return new HavingQueryTree(_function.buildAggregationInfo(), Collections.singletonList(comparison),</span>
+            FilterOperator.RANGE, null);
+      } else {
+<span class="nc" id="L184">        throw new Pql2CompilationException(&quot;Function call is needed for comparison.&quot;);</span>
+      }
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

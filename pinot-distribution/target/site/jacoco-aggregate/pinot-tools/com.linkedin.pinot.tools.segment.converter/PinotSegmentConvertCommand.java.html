@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>PinotSegmentConvertCommand.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-tools</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.tools.segment.converter</a> &gt; <span class="el_source">PinotSegmentConvertCommand.java</span></div><h1>PinotSegmentConvertCommand.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.tools.segment.converter;
+
+import com.linkedin.pinot.common.utils.TarGzCompressionUtils;
+import com.linkedin.pinot.core.data.readers.FileFormat;
+import com.linkedin.pinot.tools.AbstractBaseCommand;
+import com.linkedin.pinot.tools.Command;
+import java.io.File;
+import java.util.HashMap;
+import java.util.Map;
+import org.apache.commons.io.FileUtils;
+import org.kohsuke.args4j.Option;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * The &lt;code&gt;PinotSegmentConvertCommand&lt;/code&gt; class provides tools to convert Pinot segments into another format.
+ * &lt;p&gt;Currently support converting Pinot segments to:
+ * &lt;ul&gt;
+ *   &lt;li&gt;AVRO format&lt;/li&gt;
+ *   &lt;li&gt;CSV format&lt;/li&gt;
+ *   &lt;li&gt;JSON format&lt;/li&gt;
+ * &lt;/ul&gt;
+ */
+@SuppressWarnings(&quot;FieldCanBeLocal&quot;)
+<span class="nc" id="L41">public class PinotSegmentConvertCommand extends AbstractBaseCommand implements Command {</span>
+<span class="nc" id="L42">  private static final Logger LOGGER = LoggerFactory.getLogger(PinotSegmentConvertCommand.class);</span>
+  private static final String TEMP_DIR_NAME = &quot;temp&quot;;
+
+  @Option(name = &quot;-dataDir&quot;, required = true, metaVar = &quot;&lt;String&gt;&quot;,
+      usage = &quot;Path to data directory containing Pinot segments.&quot;)
+  private String _dataDir;
+
+  @Option(name = &quot;-outputDir&quot;, required = true, metaVar = &quot;&lt;String&gt;&quot;, usage = &quot;Path to output directory.&quot;)
+  private String _outputDir;
+
+  @Option(name = &quot;-outputFormat&quot;, required = true, metaVar = &quot;&lt;String&gt;&quot;,
+      usage = &quot;Format to convert to (AVRO/CSV/JSON).&quot;)
+  private String _outputFormat;
+
+<span class="nc" id="L56">  @Option(name = &quot;-csvDelimiter&quot;, required = false, metaVar = &quot;&lt;char&gt;&quot;, usage = &quot;CSV delimiter (default ',').&quot;)</span>
+  private char _csvDelimiter = ',';
+
+<span class="nc" id="L59">  @Option(name = &quot;-csvListDelimiter&quot;, required = false, metaVar = &quot;&lt;char&gt;&quot;,</span>
+      usage = &quot;CSV List delimiter for multi-value columns (default ';').&quot;)
+  private char _csvListDelimiter = ';';
+
+  @Option(name = &quot;-csvWithHeader&quot;, required = false, metaVar = &quot;&lt;boolean&gt;&quot;, usage = &quot;Print CSV Header (default false).&quot;)
+  private boolean _csvWithHeader;
+
+  @Option(name = &quot;-overwrite&quot;, required = false, metaVar = &quot;&lt;boolean&gt;&quot;,
+      usage = &quot;Overwrite the existing file (default false).&quot;)
+  private boolean _overwrite;
+
+  @Option(name = &quot;-help&quot;, required = false, help = true, aliases = {&quot;-h&quot;, &quot;--h&quot;, &quot;--help&quot;},
+      usage = &quot;Print this message.&quot;)
+  private boolean _help;
+
+  @Override
+  public boolean execute()
+      throws Exception {
+    // Make sure output directory is empty.
+<span class="nc" id="L78">    File outputDir = new File(_outputDir);</span>
+<span class="nc bnc" id="L79" title="All 2 branches missed.">    if (outputDir.exists()) {</span>
+<span class="nc bnc" id="L80" title="All 2 branches missed.">      if (_overwrite) {</span>
+<span class="nc bnc" id="L81" title="All 2 branches missed.">        if (!FileUtils.deleteQuietly(outputDir)) {</span>
+<span class="nc" id="L82">          throw new RuntimeException(</span>
+              &quot;Output directory: &quot; + outputDir.getAbsolutePath() + &quot; already exists and cannot be deleted.&quot;);
+        }
+      } else {
+<span class="nc" id="L86">        throw new RuntimeException(</span>
+            &quot;Output directory: &quot; + outputDir.getAbsolutePath() + &quot; already exists and overwrite flag is not set.&quot;);
+      }
+    }
+<span class="nc bnc" id="L90" title="All 2 branches missed.">    if (!outputDir.mkdirs()) {</span>
+<span class="nc" id="L91">      throw new RuntimeException(&quot;Output directory: &quot; + outputDir.getAbsolutePath() + &quot; cannot be created.&quot;);</span>
+    }
+
+<span class="nc" id="L94">    File tempDir = new File(outputDir, TEMP_DIR_NAME);</span>
+    try {
+      // Add all segments to the segment path map.
+<span class="nc" id="L97">      Map&lt;String, String&gt; segmentPath = new HashMap&lt;&gt;();</span>
+<span class="nc" id="L98">      File dataDir = new File(_dataDir);</span>
+<span class="nc" id="L99">      File[] files = dataDir.listFiles();</span>
+<span class="nc bnc" id="L100" title="All 4 branches missed.">      if (files == null || files.length == 0) {</span>
+<span class="nc" id="L101">        throw new RuntimeException(&quot;Data directory does not contain any files.&quot;);</span>
+      }
+<span class="nc bnc" id="L103" title="All 2 branches missed.">      for (File file : files) {</span>
+<span class="nc" id="L104">        String fileName = file.getName();</span>
+<span class="nc bnc" id="L105" title="All 2 branches missed.">        if (file.isDirectory()) {</span>
+          // Uncompressed segment.
+<span class="nc bnc" id="L107" title="All 2 branches missed.">          if (segmentPath.containsKey(fileName)) {</span>
+<span class="nc" id="L108">            throw new RuntimeException(&quot;Multiple segments with the same segment name: &quot; + fileName);</span>
+          }
+<span class="nc" id="L110">          segmentPath.put(fileName, file.getAbsolutePath());</span>
+<span class="nc bnc" id="L111" title="All 4 branches missed.">        } else if (fileName.toLowerCase().endsWith(&quot;.tar.gz&quot;) || fileName.toLowerCase().endsWith(&quot;.tgz&quot;)) {</span>
+          // Compressed segment.
+<span class="nc" id="L113">          File segment = TarGzCompressionUtils.unTar(file, new File(tempDir, fileName)).get(0);</span>
+<span class="nc" id="L114">          String segmentName = segment.getName();</span>
+<span class="nc bnc" id="L115" title="All 2 branches missed.">          if (segmentPath.containsKey(segmentName)) {</span>
+<span class="nc" id="L116">            throw new RuntimeException(&quot;Multiple segments with the same segment name: &quot; + fileName);</span>
+          }
+<span class="nc" id="L118">          segmentPath.put(segmentName, segment.getAbsolutePath());</span>
+        }
+      }
+
+      // Do the conversion according to the output format.
+<span class="nc bnc" id="L123" title="All 2 branches missed.">      for (Map.Entry&lt;String, String&gt; entry : segmentPath.entrySet()) {</span>
+<span class="nc" id="L124">        String segmentName = entry.getKey();</span>
+<span class="nc" id="L125">        String inputPath = entry.getValue();</span>
+<span class="nc" id="L126">        String outputPath = new File(outputDir, segmentName).getAbsolutePath();</span>
+<span class="nc bnc" id="L127" title="All 4 branches missed.">        switch (FileFormat.valueOf(_outputFormat.toUpperCase())) {</span>
+          case AVRO:
+<span class="nc" id="L129">            outputPath += &quot;.avro&quot;;</span>
+<span class="nc" id="L130">            new PinotSegmentToAvroConverter(inputPath, outputPath).convert();</span>
+<span class="nc" id="L131">            break;</span>
+          case CSV:
+<span class="nc" id="L133">            outputPath += &quot;.csv&quot;;</span>
+<span class="nc" id="L134">            new PinotSegmentToCsvConverter(inputPath, outputPath, _csvDelimiter, _csvDelimiter, _csvWithHeader)</span>
+                .convert();
+<span class="nc" id="L136">            break;</span>
+          case JSON:
+<span class="nc" id="L138">            outputPath += &quot;.json&quot;;</span>
+<span class="nc" id="L139">            new PinotSegmentToJsonConverter(inputPath, outputPath).convert();</span>
+<span class="nc" id="L140">            break;</span>
+          default:
+<span class="nc" id="L142">            throw new RuntimeException(&quot;Unsupported conversion to file format: &quot; + _outputFormat);</span>
+        }
+<span class="nc" id="L144">        LOGGER.info(&quot;Finish converting segment: {} into file: {}&quot;, segmentName, outputPath);</span>
+<span class="nc" id="L145">      }</span>
+
+<span class="nc" id="L147">      return true;</span>
+    } finally {
+<span class="nc" id="L149">      FileUtils.deleteQuietly(tempDir);</span>
+    }
+  }
+
+  @Override
+  public String description() {
+<span class="nc" id="L155">    return &quot;Convert Pinot segments to another format such as AVRO/CSV/JSON.&quot;;</span>
+  }
+
+  @Override
+  public boolean getHelp() {
+<span class="nc" id="L160">    return _help;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

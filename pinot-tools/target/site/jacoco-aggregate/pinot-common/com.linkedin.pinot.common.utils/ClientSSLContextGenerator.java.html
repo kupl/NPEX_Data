@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>ClientSSLContextGenerator.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-tools</a> &gt; <a href="../index.html" class="el_bundle">pinot-common</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.common.utils</a> &gt; <span class="el_source">ClientSSLContextGenerator.java</span></div><h1>ClientSSLContextGenerator.java</h1><pre class="source lang-java linenums">
+/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.linkedin.pinot.common.utils;
+
+import com.linkedin.pinot.common.Utils;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.cert.CertificateException;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
+import java.util.Collections;
+import java.util.Set;
+import javax.net.ssl.KeyManager;
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.TrustManagerFactory;
+import javax.net.ssl.X509TrustManager;
+import org.apache.commons.configuration.Configuration;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+public class ClientSSLContextGenerator {
+  private static final String CONFIG_OF_SERVER_CA_CERT = &quot;server.ca-cert&quot;;
+  private static final String CONFIG_OF_CLIENT_PKCS12_FILE = &quot;client.pkcs12.file&quot;;
+  private static final String CONFIG_OF_CLIENT_PKCS12_PASSWORD = &quot;client.pkcs12.password&quot;;
+  private static final String CONFIG_OF_ENABLE_SERVER_VERIFICATION = &quot;server.enable-verification&quot;;
+  private static final String SECURITY_ALGORITHM = &quot;TLS&quot;;
+  private static final String CERTIFICATE_TYPE = &quot;X509&quot;;
+  private static final String KEYSTORE_TYPE = &quot;PKCS12&quot;;
+  private static final String KEYMANAGER_FACTORY_ALGORITHM = &quot;SunX509&quot;;
+<span class="nc" id="L52">  private static final Logger LOGGER = LoggerFactory.getLogger(ClientSSLContextGenerator.class);</span>
+
+  private final String _serverCACertFile;
+  private final String _keyStoreFile;
+  private final String _keyStorePassword;
+
+  public static Set&lt;String&gt; getProtectedConfigKeys() {
+<span class="nc" id="L59">    return Collections.singleton(CONFIG_OF_CLIENT_PKCS12_PASSWORD);</span>
+  }
+
+<span class="nc" id="L62">  public ClientSSLContextGenerator(Configuration sslConfig) {</span>
+<span class="nc bnc" id="L63" title="All 2 branches missed.">    if (sslConfig.getBoolean(CONFIG_OF_ENABLE_SERVER_VERIFICATION, true)) {</span>
+<span class="nc" id="L64">      _serverCACertFile = sslConfig.getString(CONFIG_OF_SERVER_CA_CERT);</span>
+    } else {
+<span class="nc" id="L66">      _serverCACertFile = null;</span>
+<span class="nc" id="L67">      LOGGER.warn(&quot;Https Server CA file not configured.. All servers will be trusted!&quot;);</span>
+    }
+<span class="nc" id="L69">    _keyStoreFile = sslConfig.getString(CONFIG_OF_CLIENT_PKCS12_FILE);</span>
+<span class="nc" id="L70">    _keyStorePassword = sslConfig.getString(CONFIG_OF_CLIENT_PKCS12_PASSWORD);</span>
+<span class="nc bnc" id="L71" title="All 8 branches missed.">    if ((_keyStorePassword == null &amp;&amp; _keyStoreFile != null) ||</span>
+        (_keyStorePassword != null &amp;&amp; _keyStoreFile == null)) {
+<span class="nc" id="L73">      throw new IllegalArgumentException(&quot;Invalid configuration of keystore file and passowrd&quot;);</span>
+    }
+<span class="nc" id="L75">  }</span>
+
+  public SSLContext generate() {
+<span class="nc" id="L78">    SSLContext sslContext = null;</span>
+    try {
+<span class="nc" id="L80">      TrustManager[] trustManagers = setupTrustManagers();</span>
+<span class="nc" id="L81">      KeyManager[] keyManagers = setupKeyManagers();</span>
+
+<span class="nc" id="L83">      sslContext = SSLContext.getInstance(SECURITY_ALGORITHM);</span>
+<span class="nc" id="L84">      sslContext.init(keyManagers, trustManagers, null);</span>
+<span class="nc" id="L85">    } catch (Exception e) {</span>
+<span class="nc" id="L86">      Utils.rethrowException(e);</span>
+<span class="nc" id="L87">    }</span>
+<span class="nc" id="L88">    return sslContext;</span>
+  }
+
+  private TrustManager[] setupTrustManagers()
+      throws CertificateException, KeyStoreException, IOException, NoSuchAlgorithmException {
+    // This is the cert authority that validates server's cert, so we need to put it in our
+    // trustStore.
+<span class="nc bnc" id="L95" title="All 2 branches missed.">    if (_serverCACertFile != null) {</span>
+<span class="nc" id="L96">      LOGGER.info(&quot;Initializing trust store from {}&quot;, _serverCACertFile);</span>
+<span class="nc" id="L97">      FileInputStream is = new FileInputStream(new File(_serverCACertFile));</span>
+<span class="nc" id="L98">      KeyStore trustStore = KeyStore.getInstance(KeyStore.getDefaultType());</span>
+<span class="nc" id="L99">      trustStore.load(null);</span>
+<span class="nc" id="L100">      CertificateFactory certificateFactory = CertificateFactory.getInstance(CERTIFICATE_TYPE);</span>
+<span class="nc" id="L101">      int i = 0;</span>
+<span class="nc bnc" id="L102" title="All 2 branches missed.">      while (is.available() &gt; 0) {</span>
+<span class="nc" id="L103">        X509Certificate cert = (X509Certificate) certificateFactory.generateCertificate(is);</span>
+<span class="nc" id="L104">        LOGGER.info(&quot;Read certificate serial number {} by issuer {} &quot;, cert.getSerialNumber().toString(16), cert.getIssuerDN().toString());</span>
+
+<span class="nc" id="L106">        String serverKey = &quot;https-server-&quot; + i;</span>
+<span class="nc" id="L107">        trustStore.setCertificateEntry(serverKey, cert);</span>
+<span class="nc" id="L108">        i++;</span>
+<span class="nc" id="L109">      }</span>
+
+<span class="nc" id="L111">      TrustManagerFactory tmf = TrustManagerFactory.getInstance(CERTIFICATE_TYPE);</span>
+<span class="nc" id="L112">      tmf.init(trustStore);</span>
+<span class="nc" id="L113">      LOGGER.info(&quot;Successfully initialized trust store&quot;);</span>
+<span class="nc" id="L114">      return tmf.getTrustManagers();</span>
+    }
+    // Server verification disabled. Trust all servers
+<span class="nc" id="L117">    TrustManager[] trustAllCerts = new TrustManager[]{new X509TrustManager() {</span>
+      @Override
+      public void checkClientTrusted(X509Certificate[] x509Certificates, String s) throws CertificateException {
+<span class="nc" id="L120">      }</span>
+
+      @Override
+      public void checkServerTrusted(X509Certificate[] x509Certificates, String s) throws CertificateException {
+<span class="nc" id="L124">      }</span>
+
+      @Override
+      public X509Certificate[] getAcceptedIssuers() {
+<span class="nc" id="L128">        return new X509Certificate[0];</span>
+      }
+    }};
+<span class="nc" id="L131">    return trustAllCerts;</span>
+  }
+
+  private KeyManager[] setupKeyManagers() {
+<span class="nc bnc" id="L135" title="All 2 branches missed.">    if (_keyStoreFile == null) {</span>
+<span class="nc" id="L136">      return null;</span>
+    }
+    try {
+<span class="nc" id="L139">      KeyStore keyStore = KeyStore.getInstance(KEYSTORE_TYPE);</span>
+<span class="nc" id="L140">      LOGGER.info(&quot;Setting up keystore with file {}&quot;, _keyStoreFile);</span>
+<span class="nc" id="L141">      keyStore.load(new FileInputStream(new File(_keyStoreFile)), _keyStorePassword.toCharArray());</span>
+<span class="nc" id="L142">      KeyManagerFactory kmf = KeyManagerFactory.getInstance(KEYMANAGER_FACTORY_ALGORITHM);</span>
+<span class="nc" id="L143">      kmf.init(keyStore, _keyStorePassword.toCharArray());</span>
+<span class="nc" id="L144">      LOGGER.info(&quot;Successfully initialized keystore&quot;);</span>
+<span class="nc" id="L145">      return kmf.getKeyManagers();</span>
+<span class="nc" id="L146">    } catch (Exception e) {</span>
+<span class="nc" id="L147">      Utils.rethrowException(e);</span>
+    }
+<span class="nc" id="L149">    return null;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

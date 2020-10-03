@@ -1,0 +1,299 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>RawIndexBenchmark.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-perf</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.perf</a> &gt; <span class="el_source">RawIndexBenchmark.java</span></div><h1>RawIndexBenchmark.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.perf;
+
+import com.linkedin.pinot.common.data.DimensionFieldSpec;
+import com.linkedin.pinot.common.data.FieldSpec;
+import com.linkedin.pinot.common.data.Schema;
+import com.linkedin.pinot.common.segment.ReadMode;
+import com.linkedin.pinot.core.data.GenericRow;
+import com.linkedin.pinot.core.data.readers.GenericRowRecordReader;
+import com.linkedin.pinot.core.indexsegment.IndexSegment;
+import com.linkedin.pinot.core.indexsegment.generator.SegmentGeneratorConfig;
+import com.linkedin.pinot.core.operator.BReusableFilteredDocIdSetOperator;
+import com.linkedin.pinot.core.operator.BaseOperator;
+import com.linkedin.pinot.core.operator.MProjectionOperator;
+import com.linkedin.pinot.core.operator.blocks.ProjectionBlock;
+import com.linkedin.pinot.core.operator.docvalsets.ProjectionBlockValSet;
+import com.linkedin.pinot.core.operator.filter.BaseFilterOperator;
+import com.linkedin.pinot.core.plan.DocIdSetPlanNode;
+import com.linkedin.pinot.core.segment.creator.impl.SegmentIndexCreationDriverImpl;
+import com.linkedin.pinot.core.segment.creator.impl.V1Constants;
+import com.linkedin.pinot.core.segment.index.loader.Loaders;
+import com.linkedin.pinot.operator.filter.FilterOperatorTestUtils;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import org.apache.commons.io.FileUtils;
+import org.kohsuke.args4j.CmdLineParser;
+import org.kohsuke.args4j.Option;
+
+
+/**
+ * Class to perform benchmark on lookups for dictionary encoded fwd index v.s. raw index without dictionary.
+ * It can take an existing segment with two columns to compare. It can also create a segment on the fly with a
+ * given input file containing strings (one string per line).
+ */
+@SuppressWarnings({&quot;FieldCanBeLocal&quot;, &quot;unused&quot;})
+<span class="nc" id="L57">public class RawIndexBenchmark {</span>
+<span class="nc" id="L58">  private static final String SEGMENT_DIR_NAME = System.getProperty(&quot;java.io.tmpdir&quot;) + File.separator + &quot;rawIndexPerf&quot;;</span>
+  private static final String SEGMENT_NAME = &quot;perfTestSegment&quot;;
+  private static final int NUM_COLUMNS = 2;
+
+  private static final String DEFAULT_RAW_INDEX_COLUMN = &quot;column_0&quot;;
+  private static final String DEFAULT_FWD_INDEX_COLUMN = &quot;column_1&quot;;
+  private static final int DEFAULT_NUM_LOOKUP = 100_000;
+  private static final int DEFAULT_NUM_CONSECUTIVE_LOOKUP = 50;
+
+<span class="nc" id="L67">  @Option(name = &quot;-segmentDir&quot;, required = false, forbids = {&quot;-dataFile&quot;}, usage = &quot;Untarred segment&quot;)</span>
+  private String _segmentDir = null;
+
+<span class="nc" id="L70">  @Option(name = &quot;-fwdIndexColumn&quot;, required = false, usage = &quot;Name of column with dictionary encoded index&quot;)</span>
+  private String _fwdIndexColumn = DEFAULT_FWD_INDEX_COLUMN;
+
+<span class="nc" id="L73">  @Option(name = &quot;-rawIndexColumn&quot;, required = false, usage = &quot;Name of column with raw index (no-dictionary&quot;)</span>
+  private String _rawIndexColumn = DEFAULT_RAW_INDEX_COLUMN;
+
+<span class="nc" id="L76">  @Option(name = &quot;-dataFile&quot;, required = false, forbids = {&quot;-segmentDir&quot;}, usage = &quot;File containing input data (one string per line)&quot;)</span>
+  private String _dataFile = null;
+
+<span class="nc" id="L79">  @Option(name = &quot;-loadMode&quot;, required = false, usage = &quot;Load mode for data (mmap|heap&quot;)</span>
+  private String _loadMode = &quot;heap&quot;;
+
+<span class="nc" id="L82">  @Option(name = &quot;-numLookups&quot;, required = false, usage = &quot;Number of lookups to be performed for benchmark&quot;)</span>
+  private int _numLookups = DEFAULT_NUM_LOOKUP;
+
+<span class="nc" id="L85">  @Option(name = &quot;-numConsecutiveLookups&quot;, required = false, usage = &quot;Number of consecutive docIds to lookup&quot;)</span>
+  private int _numConsecutiveLookups = DEFAULT_NUM_CONSECUTIVE_LOOKUP;
+
+<span class="nc" id="L88">  @Option(name = &quot;-help&quot;, required = false, help = true, aliases = {&quot;-h&quot;}, usage = &quot;print this message&quot;)</span>
+  private boolean _help = false;
+
+<span class="nc" id="L91">  private int _numRows = 0;</span>
+
+  public void run()
+      throws Exception {
+<span class="nc bnc" id="L95" title="All 4 branches missed.">    if (_segmentDir == null &amp;&amp; _dataFile == null) {</span>
+<span class="nc" id="L96">      System.out.println(&quot;Error: One of 'segmentDir' or 'dataFile' must be specified&quot;);</span>
+<span class="nc" id="L97">      return;</span>
+    }
+
+<span class="nc bnc" id="L100" title="All 2 branches missed.">    File segmentFile = (_segmentDir == null) ? buildSegment() : new File(_segmentDir);</span>
+<span class="nc" id="L101">    IndexSegment segment = Loaders.IndexSegment.load(segmentFile, ReadMode.valueOf(_loadMode));</span>
+<span class="nc" id="L102">    compareIndexSizes(segment, segmentFile, _fwdIndexColumn, _rawIndexColumn);</span>
+<span class="nc" id="L103">    compareLookups(segment);</span>
+
+    // Cleanup the temporary directory
+<span class="nc bnc" id="L106" title="All 2 branches missed.">    if (_segmentDir != null) {</span>
+<span class="nc" id="L107">      FileUtils.deleteQuietly(new File(SEGMENT_DIR_NAME));</span>
+    }
+<span class="nc" id="L109">    segment.destroy();</span>
+<span class="nc" id="L110">  }</span>
+
+  /**
+   * Helper method that builds a segment containing two columns both with data from input file.
+   * The first column has raw indices (no dictionary), where as the second column is dictionary encoded.
+   *
+   * @throws Exception
+   */
+  private File buildSegment()
+      throws Exception {
+<span class="nc" id="L120">    Schema schema = new Schema();</span>
+
+<span class="nc bnc" id="L122" title="All 2 branches missed.">    for (int i = 0; i &lt; NUM_COLUMNS; i++) {</span>
+<span class="nc" id="L123">      String column = &quot;column_&quot; + i;</span>
+<span class="nc" id="L124">      DimensionFieldSpec dimensionFieldSpec = new DimensionFieldSpec(column, FieldSpec.DataType.STRING, true);</span>
+<span class="nc" id="L125">      schema.addField(dimensionFieldSpec);</span>
+    }
+
+<span class="nc" id="L128">    SegmentGeneratorConfig config = new SegmentGeneratorConfig(schema);</span>
+<span class="nc" id="L129">    config.setRawIndexCreationColumns(Collections.singletonList(_rawIndexColumn));</span>
+
+<span class="nc" id="L131">    config.setOutDir(SEGMENT_DIR_NAME);</span>
+<span class="nc" id="L132">    config.setSegmentName(SEGMENT_NAME);</span>
+
+<span class="nc" id="L134">    BufferedReader reader = new BufferedReader(new FileReader(_dataFile));</span>
+    String value;
+
+<span class="nc" id="L137">    final List&lt;GenericRow&gt; rows = new ArrayList&lt;&gt;();</span>
+
+<span class="nc" id="L139">    System.out.println(&quot;Reading data...&quot;);</span>
+<span class="nc bnc" id="L140" title="All 2 branches missed.">    while ((value = reader.readLine()) != null) {</span>
+<span class="nc" id="L141">      HashMap&lt;String, Object&gt; map = new HashMap&lt;&gt;();</span>
+
+<span class="nc bnc" id="L143" title="All 2 branches missed.">      for (FieldSpec fieldSpec : schema.getAllFieldSpecs()) {</span>
+<span class="nc" id="L144">        map.put(fieldSpec.getName(), value);</span>
+<span class="nc" id="L145">      }</span>
+
+<span class="nc" id="L147">      GenericRow genericRow = new GenericRow();</span>
+<span class="nc" id="L148">      genericRow.init(map);</span>
+<span class="nc" id="L149">      rows.add(genericRow);</span>
+<span class="nc" id="L150">      _numRows++;</span>
+
+<span class="nc bnc" id="L152" title="All 2 branches missed.">      if (_numRows % 1000000 == 0) {</span>
+<span class="nc" id="L153">        System.out.println(&quot;Read rows: &quot; + _numRows);</span>
+      }
+<span class="nc" id="L155">    }</span>
+
+<span class="nc" id="L157">    System.out.println(&quot;Generating segment...&quot;);</span>
+<span class="nc" id="L158">    SegmentIndexCreationDriverImpl driver = new SegmentIndexCreationDriverImpl();</span>
+<span class="nc" id="L159">    driver.init(config, new GenericRowRecordReader(rows, schema));</span>
+<span class="nc" id="L160">    driver.build();</span>
+
+<span class="nc" id="L162">    return new File(SEGMENT_DIR_NAME, SEGMENT_NAME);</span>
+  }
+
+  /**
+   * Compares and prints the index size for the raw and dictionary encoded columns.
+   *
+   * @param segment Segment to compare
+   */
+  private void compareIndexSizes(IndexSegment segment, File segmentDir, String fwdIndexColumn, String rawIndexColumn) {
+<span class="nc" id="L171">    String filePrefix = segmentDir.getAbsolutePath() + File.separator;</span>
+<span class="nc" id="L172">    File rawIndexFile = new File(filePrefix + rawIndexColumn + V1Constants.Indexes.RAW_SV_FORWARD_INDEX_FILE_EXTENSION);</span>
+
+<span class="nc bnc" id="L174" title="All 2 branches missed.">    String extension = (segment.getDataSource(_fwdIndexColumn).getDataSourceMetadata().isSorted())</span>
+        ? V1Constants.Indexes.SORTED_SV_FORWARD_INDEX_FILE_EXTENSION
+        : V1Constants.Indexes.UNSORTED_SV_FORWARD_INDEX_FILE_EXTENSION;
+
+<span class="nc" id="L178">    File fwdIndexFile = new File(filePrefix + _fwdIndexColumn + extension);</span>
+<span class="nc" id="L179">    File fwdIndexDictFile = new File(filePrefix + _fwdIndexColumn + V1Constants.Dict.FILE_EXTENSION);</span>
+
+<span class="nc" id="L181">    long rawIndexSize = rawIndexFile.length();</span>
+<span class="nc" id="L182">    long fwdIndexSize = fwdIndexFile.length() + fwdIndexDictFile.length();</span>
+
+<span class="nc" id="L184">    System.out.println(&quot;Raw index size: &quot; + toMegaBytes(rawIndexSize) + &quot; MB.&quot;);</span>
+<span class="nc" id="L185">    System.out.println(&quot;Fwd index size: &quot; + toMegaBytes(fwdIndexSize) + &quot; MB.&quot;);</span>
+<span class="nc" id="L186">    System.out.println(&quot;Storage space saving: &quot; + ((fwdIndexSize - rawIndexSize) * 100.0 / fwdIndexSize) + &quot; %&quot;);</span>
+<span class="nc" id="L187">  }</span>
+
+  /**
+   * Compares lookup times for the two columns.
+   * Performs {@link #_numConsecutiveLookups} on the two columns on randomly generated docIds.
+   *
+   * @param segment Segment to compare the columns for
+   */
+  private void compareLookups(IndexSegment segment) {
+<span class="nc" id="L196">    int[] filteredDocIds = generateDocIds(segment);</span>
+<span class="nc" id="L197">    long rawIndexTime = profileLookups(segment, _rawIndexColumn, filteredDocIds);</span>
+<span class="nc" id="L198">    long fwdIndexTime = profileLookups(segment, _fwdIndexColumn, filteredDocIds);</span>
+
+<span class="nc" id="L200">    System.out.println(&quot;Raw index lookup time: &quot; + rawIndexTime);</span>
+<span class="nc" id="L201">    System.out.println(&quot;Fwd index lookup time: &quot; + fwdIndexTime);</span>
+<span class="nc" id="L202">    System.out.println(&quot;Percentage change: &quot; + ((fwdIndexTime - rawIndexTime) * 100.0 / rawIndexTime) + &quot; %&quot;);</span>
+<span class="nc" id="L203">  }</span>
+
+  /**
+   * Profiles the lookup time for a given column, for the given docIds.
+   *
+   * @param segment Segment to profile
+   * @param column Column to profile
+   * @param docIds DocIds to lookup on the column
+   * @return Time take in millis for the lookups
+   */
+  private long profileLookups(IndexSegment segment, String column, int[] docIds) {
+<span class="nc" id="L214">    BaseFilterOperator filterOperator = FilterOperatorTestUtils.makeFilterOperator(docIds);</span>
+<span class="nc" id="L215">    BReusableFilteredDocIdSetOperator docIdSetOperator =</span>
+        new BReusableFilteredDocIdSetOperator(filterOperator, docIds.length, DocIdSetPlanNode.MAX_DOC_PER_CALL);
+
+    ProjectionBlock projectionBlock;
+<span class="nc" id="L219">    MProjectionOperator projectionOperator = new MProjectionOperator(buildDataSourceMap(segment), docIdSetOperator);</span>
+
+<span class="nc" id="L221">    long start = System.currentTimeMillis();</span>
+<span class="nc bnc" id="L222" title="All 2 branches missed.">    while ((projectionBlock = projectionOperator.nextBlock()) != null) {</span>
+<span class="nc" id="L223">      ProjectionBlockValSet blockValueSet = (ProjectionBlockValSet) projectionBlock.getBlockValueSet(column);</span>
+<span class="nc" id="L224">      blockValueSet.getDoubleValuesSV();</span>
+<span class="nc" id="L225">    }</span>
+<span class="nc" id="L226">    return (System.currentTimeMillis() - start);</span>
+  }
+
+  /**
+   * Convert from bytes to mega-bytes.
+   *
+   * @param sizeInBytes Size to convert
+   * @return Size in MB's
+   */
+  private double toMegaBytes(long sizeInBytes) {
+<span class="nc" id="L236">    return sizeInBytes / (1024 * 1024);</span>
+  }
+
+  /**
+   * Helper method to build map from column to data source
+   *
+   * @param segment Segment for which to build the map
+   * @return Column to data source map
+   */
+  private Map&lt;String, BaseOperator&gt; buildDataSourceMap(IndexSegment segment) {
+<span class="nc" id="L246">    Map&lt;String, BaseOperator&gt; dataSourceMap = new HashMap&lt;&gt;();</span>
+<span class="nc bnc" id="L247" title="All 2 branches missed.">    for (String column : segment.getColumnNames()) {</span>
+<span class="nc" id="L248">      dataSourceMap.put(column, segment.getDataSource(column));</span>
+<span class="nc" id="L249">    }</span>
+<span class="nc" id="L250">    return dataSourceMap;</span>
+  }
+
+  /**
+   * Generate random docIds.
+   * &lt;ul&gt;
+   *   &lt;li&gt; Total of {@link #_numLookups} docIds are generated. &lt;/li&gt;
+   *   &lt;li&gt; DocId's are in clusters containing {@link #_numConsecutiveLookups} ids. &lt;/li&gt;
+   * &lt;/ul&gt;
+   * @param segment
+   * @return
+   */
+  private int[] generateDocIds(IndexSegment segment) {
+<span class="nc" id="L263">    Random random = new Random();</span>
+<span class="nc" id="L264">    int numDocs = segment.getSegmentMetadata().getTotalDocs();</span>
+<span class="nc" id="L265">    int maxDocId = numDocs - _numConsecutiveLookups - 1;</span>
+
+<span class="nc" id="L267">    int[] docIdSet = new int[_numLookups];</span>
+<span class="nc" id="L268">    int j = 0;</span>
+<span class="nc bnc" id="L269" title="All 2 branches missed.">    for (int i = 0; i &lt; (_numLookups / _numConsecutiveLookups); i++) {</span>
+<span class="nc" id="L270">      int startDocId = random.nextInt(maxDocId);</span>
+<span class="nc" id="L271">      int endDocId = startDocId + _numConsecutiveLookups;</span>
+
+<span class="nc bnc" id="L273" title="All 2 branches missed.">      for (int docId = startDocId; docId &lt; endDocId; docId++) {</span>
+<span class="nc" id="L274">        docIdSet[j++] = docId;</span>
+      }
+    }
+
+<span class="nc" id="L278">    int docId = random.nextInt(maxDocId);</span>
+<span class="nc bnc" id="L279" title="All 2 branches missed.">    for (; j &lt; _numLookups; ++j) {</span>
+<span class="nc" id="L280">      docIdSet[j] = docId++;</span>
+    }
+<span class="nc" id="L282">    return docIdSet;</span>
+  }
+
+  /**
+   * Main method for the class. Parses the command line arguments, and invokes the benchmark.
+   *
+   * @param args Command line arguments.
+   * @throws Exception
+   */
+  public static void main(String[] args)
+      throws Exception {
+<span class="nc" id="L293">    RawIndexBenchmark benchmark = new RawIndexBenchmark();</span>
+<span class="nc" id="L294">    CmdLineParser parser = new CmdLineParser(benchmark);</span>
+<span class="nc" id="L295">    parser.parseArgument(args);</span>
+<span class="nc" id="L296">    benchmark.run();</span>
+<span class="nc" id="L297">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

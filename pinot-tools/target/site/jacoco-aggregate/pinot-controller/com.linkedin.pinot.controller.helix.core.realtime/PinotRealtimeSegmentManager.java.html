@@ -1,0 +1,410 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>PinotRealtimeSegmentManager.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-tools</a> &gt; <a href="../index.html" class="el_bundle">pinot-controller</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.controller.helix.core.realtime</a> &gt; <span class="el_source">PinotRealtimeSegmentManager.java</span></div><h1>PinotRealtimeSegmentManager.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.controller.helix.core.realtime;
+
+import com.google.common.base.Function;
+import com.linkedin.pinot.common.Utils;
+import com.linkedin.pinot.common.config.TableConfig;
+import com.linkedin.pinot.common.config.TableNameBuilder;
+import com.linkedin.pinot.common.metadata.ZKMetadataProvider;
+import com.linkedin.pinot.common.metadata.instance.InstanceZKMetadata;
+import com.linkedin.pinot.common.metadata.segment.RealtimeSegmentZKMetadata;
+import com.linkedin.pinot.common.metadata.stream.KafkaStreamMetadata;
+import com.linkedin.pinot.common.metrics.ControllerMeter;
+import com.linkedin.pinot.common.metrics.ControllerMetrics;
+import com.linkedin.pinot.common.utils.CommonConstants.Helix.TableType;
+import com.linkedin.pinot.common.utils.CommonConstants.Segment.Realtime.Status;
+import com.linkedin.pinot.common.utils.CommonConstants.Segment.SegmentType;
+import com.linkedin.pinot.common.utils.HLCSegmentName;
+import com.linkedin.pinot.common.utils.SegmentName;
+import com.linkedin.pinot.common.utils.helix.HelixHelper;
+import com.linkedin.pinot.common.utils.retry.RetryPolicies;
+import com.linkedin.pinot.controller.helix.core.PinotHelixResourceManager;
+import com.linkedin.pinot.controller.helix.core.PinotTableIdealStateBuilder;
+import com.linkedin.pinot.core.query.utils.Pair;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import org.I0Itec.zkclient.IZkChildListener;
+import org.I0Itec.zkclient.IZkDataListener;
+import org.apache.helix.ControllerChangeListener;
+import org.apache.helix.NotificationContext;
+import org.apache.helix.PropertyPathConfig;
+import org.apache.helix.PropertyType;
+import org.apache.helix.ZNRecord;
+import org.apache.helix.manager.zk.ZNRecordSerializer;
+import org.apache.helix.manager.zk.ZkClient;
+import org.apache.helix.model.IdealState;
+import org.apache.helix.store.HelixPropertyListener;
+import org.apache.zookeeper.data.Stat;
+import org.json.JSONException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * Realtime segment manager, which assigns realtime segments to server instances so that they can consume from Kafka.
+ */
+public class PinotRealtimeSegmentManager implements HelixPropertyListener, IZkChildListener, IZkDataListener {
+<span class="fc" id="L67">  private static final Logger LOGGER = LoggerFactory.getLogger(PinotRealtimeSegmentManager.class);</span>
+  private static final String TABLE_CONFIG = &quot;/CONFIGS/TABLE&quot;;
+  private static final String SEGMENTS_PATH = &quot;/SEGMENTS&quot;;
+  private static final String REALTIME_SEGMENT_PROPERTY_STORE_PATH_PATTERN =
+      &quot;.*/SEGMENTS/.*_REALTIME|.*/SEGMENTS/.*_REALTIME/.*&quot;;
+  private static final String REALTIME_TABLE_CONFIG_PROPERTY_STORE_PATH_PATTERN = &quot;.*/TABLE/.*REALTIME&quot;;
+  private static final String CONTROLLER_LEADER_CHANGE = &quot;CONTROLLER LEADER CHANGE&quot;;
+
+  private String _propertyStorePath;
+  private String _tableConfigPath;
+  private final PinotHelixResourceManager _pinotHelixResourceManager;
+  private ZkClient _zkClient;
+  private ControllerMetrics _controllerMetrics;
+
+<span class="fc" id="L81">  public PinotRealtimeSegmentManager(PinotHelixResourceManager pinotManager) {</span>
+<span class="fc" id="L82">    _pinotHelixResourceManager = pinotManager;</span>
+<span class="fc" id="L83">    String clusterName = _pinotHelixResourceManager.getHelixClusterName();</span>
+<span class="fc" id="L84">    _propertyStorePath = PropertyPathConfig.getPath(PropertyType.PROPERTYSTORE, clusterName);</span>
+<span class="fc" id="L85">    _tableConfigPath = _propertyStorePath + TABLE_CONFIG;</span>
+<span class="fc" id="L86">  }</span>
+
+  public void start(ControllerMetrics controllerMetrics) {
+<span class="fc" id="L89">    _controllerMetrics = controllerMetrics;</span>
+
+<span class="fc" id="L91">    LOGGER.info(&quot;Starting realtime segments manager, adding a listener on the property store table configs path.&quot;);</span>
+<span class="fc" id="L92">    String zkUrl = _pinotHelixResourceManager.getHelixZkURL();</span>
+<span class="fc" id="L93">    _zkClient = new ZkClient(zkUrl, ZkClient.DEFAULT_SESSION_TIMEOUT, ZkClient.DEFAULT_CONNECTION_TIMEOUT);</span>
+<span class="fc" id="L94">    _zkClient.setZkSerializer(new ZNRecordSerializer());</span>
+<span class="fc" id="L95">    _zkClient.waitUntilConnected();</span>
+
+    // Subscribe to any data/child changes to property
+<span class="fc" id="L98">    _zkClient.subscribeChildChanges(_tableConfigPath, this);</span>
+<span class="fc" id="L99">    _zkClient.subscribeDataChanges(_tableConfigPath, this);</span>
+
+    // Subscribe to leadership changes
+<span class="fc" id="L102">    _pinotHelixResourceManager.getHelixZkManager().addControllerListener(new ControllerChangeListener() {</span>
+      @Override
+      public void onControllerChange(NotificationContext changeContext) {
+<span class="fc" id="L105">        processPropertyStoreChange(CONTROLLER_LEADER_CHANGE);</span>
+<span class="fc" id="L106">      }</span>
+    });
+
+    // Setup change listeners for already existing tables, if any.
+<span class="fc" id="L110">    processPropertyStoreChange(_tableConfigPath);</span>
+<span class="fc" id="L111">  }</span>
+
+  public void stop() {
+<span class="fc" id="L114">    LOGGER.info(&quot;Stopping realtime segments manager, stopping property store.&quot;);</span>
+<span class="fc" id="L115">    _pinotHelixResourceManager.getPropertyStore().stop();</span>
+<span class="fc" id="L116">  }</span>
+
+  private synchronized void assignRealtimeSegmentsToServerInstancesIfNecessary()
+      throws JSONException, IOException {
+    // Fetch current ideal state snapshot
+<span class="fc" id="L121">    Map&lt;String, IdealState&gt; idealStateMap = new HashMap&lt;&gt;();</span>
+
+<span class="fc bfc" id="L123" title="All 2 branches covered.">    for (String realtimeTableName : _pinotHelixResourceManager.getAllRealtimeTables()) {</span>
+<span class="fc" id="L124">      TableConfig tableConfig = _pinotHelixResourceManager.getTableConfig(realtimeTableName);</span>
+
+      // Table config might have already been deleted
+<span class="pc bpc" id="L127" title="1 of 2 branches missed.">      if (tableConfig == null) {</span>
+<span class="nc" id="L128">        continue;</span>
+      }
+
+<span class="fc" id="L131">      KafkaStreamMetadata metadata = new KafkaStreamMetadata(tableConfig.getIndexingConfig().getStreamConfigs());</span>
+<span class="pc bpc" id="L132" title="1 of 2 branches missed.">      if (metadata.hasHighLevelKafkaConsumerType()) {</span>
+<span class="fc" id="L133">        idealStateMap.put(realtimeTableName, _pinotHelixResourceManager.getHelixAdmin()</span>
+            .getResourceIdealState(_pinotHelixResourceManager.getHelixClusterName(), realtimeTableName));
+      } else {
+<span class="nc" id="L136">        LOGGER.debug(&quot;Not considering table {} for realtime segment assignment&quot;);</span>
+      }
+<span class="fc" id="L138">    }</span>
+
+<span class="fc" id="L140">    List&lt;Pair&lt;String, String&gt;&gt; listOfSegmentsToAddToInstances = new ArrayList&lt;Pair&lt;String, String&gt;&gt;();</span>
+
+<span class="fc bfc" id="L142" title="All 2 branches covered.">    for (String realtimeTableName : idealStateMap.keySet()) {</span>
+      try {
+<span class="fc" id="L144">        IdealState state = idealStateMap.get(realtimeTableName);</span>
+
+        // Are there any partitions?
+<span class="fc bfc" id="L147" title="All 2 branches covered.">        if (state.getPartitionSet().size() == 0) {</span>
+          // No, this is a brand new ideal state, so we will add one new segment to every partition and replica
+<span class="fc" id="L149">          List&lt;String&gt; instancesInResource = new ArrayList&lt;&gt;();</span>
+          try {
+<span class="fc" id="L151">            instancesInResource.addAll(_pinotHelixResourceManager.getServerInstancesForTable(realtimeTableName, TableType.REALTIME));</span>
+<span class="nc" id="L152">          } catch (Exception e) {</span>
+<span class="nc" id="L153">            LOGGER.error(&quot;Caught exception while fetching instances for resource {}&quot;, realtimeTableName, e);</span>
+<span class="nc" id="L154">            _controllerMetrics.addMeteredGlobalValue(ControllerMeter.CONTROLLER_REALTIME_TABLE_SEGMENT_ASSIGNMENT_ERROR, 1L);</span>
+<span class="fc" id="L155">          }</span>
+
+          // Assign a new segment to all server instances
+<span class="fc bfc" id="L158" title="All 2 branches covered.">          for (String instanceId : instancesInResource) {</span>
+<span class="fc" id="L159">            InstanceZKMetadata instanceZKMetadata = _pinotHelixResourceManager.getInstanceZKMetadata(instanceId);</span>
+
+<span class="pc bpc" id="L161" title="1 of 2 branches missed.">            if (instanceZKMetadata == null) {</span>
+<span class="nc" id="L162">              LOGGER.warn(&quot;Instance {} has no associated instance metadata in ZK, ignoring for segment assignment.&quot;,</span>
+                  instanceId);
+<span class="nc" id="L164">              _controllerMetrics.addMeteredGlobalValue(ControllerMeter.CONTROLLER_REALTIME_TABLE_SEGMENT_ASSIGNMENT_ERROR, 1L);</span>
+<span class="nc" id="L165">              continue;</span>
+            }
+
+<span class="fc" id="L168">            String groupId = instanceZKMetadata.getGroupId(realtimeTableName);</span>
+<span class="fc" id="L169">            String partitionId = instanceZKMetadata.getPartition(realtimeTableName);</span>
+<span class="pc bpc" id="L170" title="4 of 8 branches missed.">            if (groupId != null &amp;&amp; !groupId.isEmpty() &amp;&amp; partitionId != null &amp;&amp; !partitionId.isEmpty()) {</span>
+<span class="fc" id="L171">              listOfSegmentsToAddToInstances.add(new Pair&lt;String, String&gt;(</span>
+                  new HLCSegmentName(groupId, partitionId, String.valueOf(System.currentTimeMillis())).getSegmentName(),
+                  instanceId));
+            } else {
+<span class="nc" id="L175">              LOGGER.warn(&quot;Instance {} has invalid groupId ({}) and/or partitionId ({}) for resource {}, ignoring for segment assignment.&quot;,</span>
+                  instanceId, groupId, partitionId, realtimeTableName);
+<span class="nc" id="L177">              _controllerMetrics.addMeteredGlobalValue(ControllerMeter.CONTROLLER_REALTIME_TABLE_SEGMENT_ASSIGNMENT_ERROR, 1L);</span>
+            }
+<span class="fc" id="L179">          }</span>
+<span class="fc" id="L180">        } else {</span>
+          // Add all server instances to the list of instances for which to assign a realtime segment
+<span class="fc" id="L182">          Set&lt;String&gt; instancesToAssignRealtimeSegment = new HashSet&lt;String&gt;();</span>
+          try {
+<span class="fc" id="L184">            instancesToAssignRealtimeSegment.addAll(</span>
+                _pinotHelixResourceManager.getServerInstancesForTable(realtimeTableName, TableType.REALTIME));
+<span class="nc" id="L186">          } catch (Exception e) {</span>
+<span class="nc" id="L187">            LOGGER.error(&quot;Caught exception while fetching instances for resource {}&quot;, realtimeTableName, e);</span>
+<span class="nc" id="L188">            _controllerMetrics.addMeteredGlobalValue(ControllerMeter.CONTROLLER_REALTIME_TABLE_SEGMENT_ASSIGNMENT_ERROR, 1L);</span>
+<span class="fc" id="L189">          }</span>
+
+          // Remove server instances that are currently processing a segment
+<span class="fc bfc" id="L192" title="All 2 branches covered.">          for (String partition : state.getPartitionSet()) {</span>
+            // Helix partition is the segment name
+<span class="pc bpc" id="L194" title="1 of 2 branches missed.">            if (SegmentName.isHighLevelConsumerSegmentName(partition)) {</span>
+<span class="fc" id="L195">              HLCSegmentName segName = new HLCSegmentName(partition);</span>
+<span class="fc" id="L196">              RealtimeSegmentZKMetadata realtimeSegmentZKMetadata = ZKMetadataProvider</span>
+                  .getRealtimeSegmentZKMetadata(_pinotHelixResourceManager.getPropertyStore(), segName.getTableName(),
+                      partition);
+<span class="pc bpc" id="L199" title="1 of 2 branches missed.">              if (realtimeSegmentZKMetadata == null) {</span>
+                // Segment was deleted by retention manager.
+<span class="nc" id="L201">                continue;</span>
+              }
+<span class="pc bpc" id="L203" title="1 of 2 branches missed.">              if (realtimeSegmentZKMetadata.getStatus() == Status.IN_PROGRESS) {</span>
+<span class="fc" id="L204">                instancesToAssignRealtimeSegment.removeAll(state.getInstanceSet(partition));</span>
+              }
+            }
+<span class="fc" id="L207">          }</span>
+
+          // Assign a new segment to the server instances not currently processing this segment
+<span class="pc bpc" id="L210" title="1 of 2 branches missed.">          for (String instanceId : instancesToAssignRealtimeSegment) {</span>
+<span class="nc" id="L211">            InstanceZKMetadata instanceZKMetadata = _pinotHelixResourceManager.getInstanceZKMetadata(instanceId);</span>
+<span class="nc" id="L212">            String groupId = instanceZKMetadata.getGroupId(realtimeTableName);</span>
+<span class="nc" id="L213">            String partitionId = instanceZKMetadata.getPartition(realtimeTableName);</span>
+<span class="nc" id="L214">            listOfSegmentsToAddToInstances.add(new Pair&lt;String, String&gt;(</span>
+                new HLCSegmentName(groupId, partitionId, String.valueOf(System.currentTimeMillis())).getSegmentName(),
+                instanceId));
+<span class="nc" id="L217">          }</span>
+        }
+<span class="nc" id="L219">      } catch (Exception e) {</span>
+<span class="nc" id="L220">        LOGGER.warn(&quot;Caught exception while processing resource {}, skipping.&quot;, realtimeTableName, e);</span>
+<span class="nc" id="L221">        _controllerMetrics.addMeteredGlobalValue(ControllerMeter.CONTROLLER_REALTIME_TABLE_SEGMENT_ASSIGNMENT_ERROR, 1L);</span>
+<span class="fc" id="L222">      }</span>
+<span class="fc" id="L223">    }</span>
+
+<span class="fc" id="L225">    LOGGER.info(&quot;Computed list of new segments to add : &quot; + Arrays.toString(listOfSegmentsToAddToInstances.toArray()));</span>
+
+    // Add the new segments to the server instances
+<span class="fc bfc" id="L228" title="All 2 branches covered.">    for (final Pair&lt;String, String&gt; segmentIdAndInstanceId : listOfSegmentsToAddToInstances) {</span>
+<span class="fc" id="L229">      final String segmentId = segmentIdAndInstanceId.getFirst();</span>
+<span class="fc" id="L230">      final String instanceName = segmentIdAndInstanceId.getSecond();</span>
+
+      try {
+<span class="fc" id="L233">        final HLCSegmentName segName = new HLCSegmentName(segmentId);</span>
+<span class="fc" id="L234">        String resourceName = segName.getTableName();</span>
+
+        // Does the ideal state already contain this segment?
+<span class="pc bpc" id="L237" title="1 of 2 branches missed.">        if (!idealStateMap.get(resourceName).getPartitionSet().contains(segmentId)) {</span>
+          // No, add it
+          // Create the realtime segment metadata
+<span class="fc" id="L240">          RealtimeSegmentZKMetadata realtimeSegmentMetadataToAdd = new RealtimeSegmentZKMetadata();</span>
+<span class="fc" id="L241">          realtimeSegmentMetadataToAdd.setTableName(TableNameBuilder.extractRawTableName(resourceName));</span>
+<span class="fc" id="L242">          realtimeSegmentMetadataToAdd.setSegmentType(SegmentType.REALTIME);</span>
+<span class="fc" id="L243">          realtimeSegmentMetadataToAdd.setStatus(Status.IN_PROGRESS);</span>
+<span class="fc" id="L244">          realtimeSegmentMetadataToAdd.setSegmentName(segmentId);</span>
+
+          // Add the new metadata to the property store
+<span class="fc" id="L247">          ZKMetadataProvider.setRealtimeSegmentZKMetadata(_pinotHelixResourceManager.getPropertyStore(),</span>
+              realtimeSegmentMetadataToAdd);
+
+          // Update the ideal state to add the new realtime segment
+<span class="fc" id="L251">          HelixHelper.updateIdealState(_pinotHelixResourceManager.getHelixZkManager(), resourceName, new Function&lt;IdealState, IdealState&gt;() {</span>
+            @Override
+            public IdealState apply(IdealState idealState) {
+<span class="fc" id="L254">              return PinotTableIdealStateBuilder.addNewRealtimeSegmentToIdealState(segmentId, idealState, instanceName);</span>
+            }
+          }, RetryPolicies.exponentialBackoffRetryPolicy(5, 500L, 2.0f));
+        }
+<span class="nc" id="L258">      } catch (Exception e) {</span>
+<span class="nc" id="L259">        LOGGER.warn(&quot;Caught exception while processing segment {} for instance {}, skipping.&quot;, segmentId, instanceName, e);</span>
+<span class="nc" id="L260">        _controllerMetrics.addMeteredGlobalValue(ControllerMeter.CONTROLLER_REALTIME_TABLE_SEGMENT_ASSIGNMENT_ERROR, 1L);</span>
+<span class="fc" id="L261">      }</span>
+<span class="fc" id="L262">    }</span>
+<span class="fc" id="L263">  }</span>
+
+  private boolean isLeader() {
+<span class="fc" id="L266">    return _pinotHelixResourceManager.isLeader();</span>
+  }
+
+  @Override
+  public synchronized void onDataChange(String path) {
+<span class="nc" id="L271">    LOGGER.info(&quot;PinotRealtimeSegmentManager.onDataChange: {}&quot;, path);</span>
+<span class="nc" id="L272">    processPropertyStoreChange(path);</span>
+<span class="nc" id="L273">  }</span>
+
+  @Override
+  public synchronized void onDataCreate(String path) {
+<span class="nc" id="L277">    LOGGER.info(&quot;PinotRealtimeSegmentManager.onDataCreate: {}&quot;, path);</span>
+<span class="nc" id="L278">    processPropertyStoreChange(path);</span>
+<span class="nc" id="L279">  }</span>
+
+  @Override
+  public synchronized void onDataDelete(String path) {
+<span class="nc" id="L283">    LOGGER.info(&quot;PinotRealtimeSegmentManager.onDataDelete: {}&quot;, path);</span>
+<span class="nc" id="L284">    processPropertyStoreChange(path);</span>
+<span class="nc" id="L285">  }</span>
+
+  private void processPropertyStoreChange(String path) {
+    try {
+<span class="fc" id="L289">      LOGGER.info(&quot;Processing change notification for path: {}&quot;, path);</span>
+<span class="fc" id="L290">      refreshWatchers(path);</span>
+
+<span class="pc bpc" id="L292" title="1 of 2 branches missed.">      if (isLeader()) {</span>
+<span class="fc bfc" id="L293" title="All 6 branches covered.">        if (path.matches(REALTIME_SEGMENT_PROPERTY_STORE_PATH_PATTERN) ||</span>
+            path.matches(REALTIME_TABLE_CONFIG_PROPERTY_STORE_PATH_PATTERN) ||
+            path.equals(CONTROLLER_LEADER_CHANGE)) {
+<span class="fc" id="L296">          assignRealtimeSegmentsToServerInstancesIfNecessary();</span>
+        }
+      } else {
+<span class="nc" id="L299">        LOGGER.info(&quot;Not the leader of this cluster, ignoring realtime segment property store change.&quot;);</span>
+      }
+<span class="nc" id="L301">    } catch (Exception e) {</span>
+<span class="nc" id="L302">      LOGGER.error(&quot;Caught exception while processing change for path {}&quot;, path, e);</span>
+<span class="nc" id="L303">      Utils.rethrowException(e);</span>
+<span class="fc" id="L304">    }</span>
+<span class="fc" id="L305">  }</span>
+
+  /**
+   * Helper method to perform idempotent operation to refresh all watches (related to real-time segments):
+   * - Data change listener for all existing real-time tables.
+   * - Child creation listener for all existing real-time tables.
+   * - Data change listener for all existing real-time segments
+   *
+   * @param path
+   */
+  private void refreshWatchers(String path) {
+<span class="fc" id="L316">    LOGGER.info(&quot;Received change notification for path: {}&quot;, path);</span>
+<span class="fc" id="L317">    List&lt;Stat&gt; stats = new ArrayList&lt;&gt;();</span>
+<span class="fc" id="L318">    List&lt;ZNRecord&gt; tableConfigs = _pinotHelixResourceManager.getPropertyStore().getChildren(TABLE_CONFIG, stats, 0);</span>
+
+<span class="pc bpc" id="L320" title="1 of 2 branches missed.">    if (tableConfigs == null) {</span>
+<span class="nc" id="L321">      return;</span>
+    }
+
+<span class="fc bfc" id="L324" title="All 2 branches covered.">    for (ZNRecord tableConfigZnRecord : tableConfigs) {</span>
+      try {
+<span class="fc" id="L326">        String znRecordId = tableConfigZnRecord.getId();</span>
+<span class="fc bfc" id="L327" title="All 2 branches covered.">        if (TableNameBuilder.getTableTypeFromTableName(znRecordId) == TableType.REALTIME) {</span>
+<span class="fc" id="L328">          TableConfig tableConfig = TableConfig.fromZnRecord(tableConfigZnRecord);</span>
+<span class="fc" id="L329">          KafkaStreamMetadata metadata = new KafkaStreamMetadata(tableConfig.getIndexingConfig().getStreamConfigs());</span>
+<span class="pc bpc" id="L330" title="1 of 2 branches missed.">          if (metadata.hasHighLevelKafkaConsumerType()) {</span>
+<span class="fc" id="L331">            String realtimeTable = tableConfig.getTableName();</span>
+<span class="fc" id="L332">            String realtimeSegmentsPathForTable = _propertyStorePath + SEGMENTS_PATH + &quot;/&quot; + realtimeTable;</span>
+
+<span class="fc" id="L334">            LOGGER.info(&quot;Setting data/child changes watch for real-time table '{}'&quot;, realtimeTable);</span>
+<span class="fc" id="L335">            _zkClient.subscribeDataChanges(realtimeSegmentsPathForTable, this);</span>
+<span class="fc" id="L336">            _zkClient.subscribeChildChanges(realtimeSegmentsPathForTable, this);</span>
+
+<span class="fc" id="L338">            List&lt;String&gt; childNames =</span>
+                _pinotHelixResourceManager.getPropertyStore().getChildNames(SEGMENTS_PATH + &quot;/&quot; + realtimeTable, 0);
+
+<span class="fc bfc" id="L341" title="All 4 branches covered.">            if (childNames != null &amp;&amp; !childNames.isEmpty()) {</span>
+<span class="fc bfc" id="L342" title="All 2 branches covered.">              for (String segmentName : childNames) {</span>
+<span class="pc bpc" id="L343" title="1 of 2 branches missed.">                if (!SegmentName.isHighLevelConsumerSegmentName(segmentName)) {</span>
+<span class="nc" id="L344">                  continue;</span>
+                }
+<span class="fc" id="L346">                String segmentPath = realtimeSegmentsPathForTable + &quot;/&quot; + segmentName;</span>
+<span class="fc" id="L347">                RealtimeSegmentZKMetadata realtimeSegmentZKMetadata =</span>
+                    ZKMetadataProvider.getRealtimeSegmentZKMetadata(_pinotHelixResourceManager.getPropertyStore(),
+                        tableConfig.getTableName(), segmentName);
+<span class="pc bpc" id="L350" title="1 of 2 branches missed.">                if (realtimeSegmentZKMetadata == null) {</span>
+                  // The segment got deleted by retention manager
+<span class="nc" id="L352">                  continue;</span>
+                }
+<span class="pc bpc" id="L354" title="1 of 2 branches missed.">                if (realtimeSegmentZKMetadata.getStatus() == Status.IN_PROGRESS) {</span>
+<span class="fc" id="L355">                  LOGGER.info(&quot;Setting data change watch for real-time segment currently being consumed: {}&quot;,</span>
+                      segmentPath);
+<span class="fc" id="L357">                  _zkClient.subscribeDataChanges(segmentPath, this);</span>
+                } else {
+<span class="nc" id="L359">                  _zkClient.unsubscribeDataChanges(segmentPath, this);</span>
+                }
+<span class="fc" id="L361">              }</span>
+            }
+          }
+        }
+<span class="nc" id="L365">      } catch (Exception e) {</span>
+        // we want to continue setting watches for other tables for any kind of exception here so that
+        // errors with one table don't impact others
+<span class="nc bnc" id="L368" title="All 2 branches missed.">        if (tableConfigZnRecord == null) {</span>
+          // Can happen if the table config zn record failed to parse.
+<span class="nc" id="L370">          LOGGER.error(&quot;Got null ZN record for table config&quot;, e);</span>
+        } else {
+<span class="nc" id="L372">          LOGGER.error(&quot;Caught exception while processing ZNRecord id: {}. Skipping node to continue setting watches&quot;,</span>
+              tableConfigZnRecord.getId(), e);
+        }
+<span class="fc" id="L375">      }</span>
+<span class="fc" id="L376">    }</span>
+<span class="fc" id="L377">  }</span>
+
+  @Override
+  public void handleChildChange(String parentPath, List&lt;String&gt; currentChildren)
+      throws Exception {
+<span class="fc" id="L382">    LOGGER.info(&quot;PinotRealtimeSegmentManager.handleChildChange: {}&quot;, parentPath);</span>
+<span class="fc" id="L383">    processPropertyStoreChange(parentPath);</span>
+
+    // If parent path get removed, currentChildren will be null
+<span class="pc bpc" id="L386" title="1 of 2 branches missed.">    if (currentChildren != null) {</span>
+<span class="fc bfc" id="L387" title="All 2 branches covered.">      for (String table : currentChildren) {</span>
+<span class="fc bfc" id="L388" title="All 2 branches covered.">        if (table.endsWith(&quot;_REALTIME&quot;)) {</span>
+<span class="fc" id="L389">          LOGGER.info(&quot;PinotRealtimeSegmentManager.handleChildChange with table: {}&quot;, parentPath + &quot;/&quot; + table);</span>
+<span class="fc" id="L390">          processPropertyStoreChange(parentPath + &quot;/&quot; + table);</span>
+        }
+<span class="fc" id="L392">      }</span>
+    }
+<span class="fc" id="L394">  }</span>
+
+  @Override
+  public void handleDataChange(String dataPath, Object data)
+      throws Exception {
+<span class="fc" id="L399">    LOGGER.info(&quot;PinotRealtimeSegmentManager.handleDataChange: {}&quot;, dataPath);</span>
+<span class="fc" id="L400">    processPropertyStoreChange(dataPath);</span>
+<span class="fc" id="L401">  }</span>
+
+  @Override
+  public void handleDataDeleted(String dataPath)
+      throws Exception {
+<span class="nc" id="L406">    LOGGER.info(&quot;PinotRealtimeSegmentManager.handleDataDeleted: {}&quot;, dataPath);</span>
+<span class="nc" id="L407">    processPropertyStoreChange(dataPath);</span>
+<span class="nc" id="L408">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

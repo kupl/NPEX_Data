@@ -1,0 +1,217 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>IndexLoadingConfig.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.segment.index.loader</a> &gt; <span class="el_source">IndexLoadingConfig.java</span></div><h1>IndexLoadingConfig.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.segment.index.loader;
+
+import com.google.common.annotations.VisibleForTesting;
+import com.linkedin.pinot.common.config.IndexingConfig;
+import com.linkedin.pinot.common.config.TableConfig;
+import com.linkedin.pinot.common.segment.ReadMode;
+import com.linkedin.pinot.core.data.manager.config.InstanceDataManagerConfig;
+import com.linkedin.pinot.core.indexsegment.generator.SegmentVersion;
+import com.linkedin.pinot.core.segment.index.loader.columnminmaxvalue.ColumnMinMaxValueGeneratorMode;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+
+
+/**
+ * Table level index loading config.
+ */
+public class IndexLoadingConfig {
+  private static final int DEFAULT_REALTIME_AVG_MULTI_VALUE_COUNT = 2;
+
+<span class="fc" id="L39">  private ReadMode _readMode = ReadMode.DEFAULT_MODE;</span>
+<span class="fc" id="L40">  private List&lt;String&gt; _sortedColumns = Collections.emptyList();</span>
+<span class="fc" id="L41">  private Set&lt;String&gt; _invertedIndexColumns = new HashSet&lt;&gt;();</span>
+<span class="fc" id="L42">  private Set&lt;String&gt; _noDictionaryColumns = new HashSet&lt;&gt;();</span>
+<span class="fc" id="L43">  private Set&lt;String&gt; _onHeapDictionaryColumns = new HashSet&lt;&gt;();</span>
+  private SegmentVersion _segmentVersion;
+  // This value will remain true only when the empty constructor is invoked.
+<span class="fc" id="L46">  private boolean _enableDefaultColumns = true;</span>
+<span class="fc" id="L47">  private ColumnMinMaxValueGeneratorMode _columnMinMaxValueGeneratorMode = ColumnMinMaxValueGeneratorMode.DEFAULT_MODE;</span>
+<span class="fc" id="L48">  private int _realtimeAvgMultiValueCount = DEFAULT_REALTIME_AVG_MULTI_VALUE_COUNT;</span>
+  private boolean _enableSplitCommit;
+  private boolean _isRealtimeOffheapAllocation;
+  private boolean _isDirectRealtimeOffheapAllocation;
+
+  public IndexLoadingConfig(@Nonnull InstanceDataManagerConfig instanceDataManagerConfig,
+<span class="fc" id="L54">      @Nonnull TableConfig tableConfig) {</span>
+<span class="fc" id="L55">    extractFromInstanceConfig(instanceDataManagerConfig);</span>
+<span class="fc" id="L56">    extractFromTableConfig(tableConfig);</span>
+<span class="fc" id="L57">  }</span>
+
+  private void extractFromTableConfig(@Nonnull TableConfig tableConfig) {
+<span class="fc" id="L60">    IndexingConfig indexingConfig = tableConfig.getIndexingConfig();</span>
+<span class="fc" id="L61">    String tableReadMode = indexingConfig.getLoadMode();</span>
+<span class="pc bpc" id="L62" title="1 of 2 branches missed.">    if (tableReadMode != null) {</span>
+<span class="fc" id="L63">      _readMode = ReadMode.getEnum(tableReadMode);</span>
+    }
+
+<span class="fc" id="L66">    List&lt;String&gt; sortedColumns = indexingConfig.getSortedColumn();</span>
+<span class="pc bpc" id="L67" title="1 of 2 branches missed.">    if (sortedColumns != null) {</span>
+<span class="fc" id="L68">      _sortedColumns = sortedColumns;</span>
+    }
+
+<span class="fc" id="L71">    List&lt;String&gt; invertedIndexColumns = indexingConfig.getInvertedIndexColumns();</span>
+<span class="pc bpc" id="L72" title="1 of 2 branches missed.">    if (invertedIndexColumns != null) {</span>
+<span class="fc" id="L73">      _invertedIndexColumns.addAll(invertedIndexColumns);</span>
+    }
+
+<span class="fc" id="L76">    List&lt;String&gt; noDictionaryColumns = indexingConfig.getNoDictionaryColumns();</span>
+<span class="pc bpc" id="L77" title="1 of 2 branches missed.">    if (noDictionaryColumns != null) {</span>
+<span class="nc" id="L78">      _noDictionaryColumns.addAll(noDictionaryColumns);</span>
+    }
+
+<span class="fc" id="L81">    List&lt;String&gt; onHeapDictionaryColumns = indexingConfig.getOnHeapDictionaryColumns();</span>
+<span class="pc bpc" id="L82" title="1 of 2 branches missed.">    if (onHeapDictionaryColumns != null) {</span>
+<span class="nc" id="L83">      _onHeapDictionaryColumns.addAll(onHeapDictionaryColumns);</span>
+    }
+
+<span class="fc" id="L86">    String tableSegmentVersion = indexingConfig.getSegmentFormatVersion();</span>
+<span class="pc bpc" id="L87" title="1 of 2 branches missed.">    if (tableSegmentVersion != null) {</span>
+<span class="nc" id="L88">      _segmentVersion = SegmentVersion.valueOf(tableSegmentVersion.toLowerCase());</span>
+    }
+
+<span class="fc" id="L91">    String columnMinMaxValueGeneratorMode = indexingConfig.getColumnMinMaxValueGeneratorMode();</span>
+<span class="pc bpc" id="L92" title="1 of 2 branches missed.">    if (columnMinMaxValueGeneratorMode != null) {</span>
+<span class="nc" id="L93">      _columnMinMaxValueGeneratorMode =</span>
+          ColumnMinMaxValueGeneratorMode.valueOf(columnMinMaxValueGeneratorMode.toUpperCase());
+    }
+<span class="fc" id="L96">  }</span>
+
+  private void extractFromInstanceConfig(@Nonnull InstanceDataManagerConfig instanceDataManagerConfig) {
+<span class="fc" id="L99">    ReadMode instanceReadMode = instanceDataManagerConfig.getReadMode();</span>
+<span class="pc bpc" id="L100" title="1 of 2 branches missed.">    if (instanceReadMode != null) {</span>
+<span class="nc" id="L101">      _readMode = instanceReadMode;</span>
+    }
+
+<span class="fc" id="L104">    String instanceSegmentVersion = instanceDataManagerConfig.getSegmentFormatVersion();</span>
+<span class="pc bpc" id="L105" title="1 of 2 branches missed.">    if (instanceSegmentVersion != null) {</span>
+<span class="nc" id="L106">      _segmentVersion = SegmentVersion.valueOf(instanceSegmentVersion.toLowerCase());</span>
+    }
+
+<span class="fc" id="L109">    _enableDefaultColumns = instanceDataManagerConfig.isEnableDefaultColumns();</span>
+
+<span class="fc" id="L111">    _enableSplitCommit = instanceDataManagerConfig.isEnableSplitCommit();</span>
+
+<span class="fc" id="L113">    _isRealtimeOffheapAllocation = instanceDataManagerConfig.isRealtimeOffHeapAllocation();</span>
+<span class="fc" id="L114">    _isDirectRealtimeOffheapAllocation = instanceDataManagerConfig.isDirectRealtimeOffheapAllocation();</span>
+
+<span class="fc" id="L116">    String avgMultiValueCount = instanceDataManagerConfig.getAvgMultiValueCount();</span>
+<span class="pc bpc" id="L117" title="1 of 2 branches missed.">    if (avgMultiValueCount != null) {</span>
+<span class="nc" id="L118">      _realtimeAvgMultiValueCount = Integer.valueOf(avgMultiValueCount);</span>
+    }
+<span class="fc" id="L120">  }</span>
+
+  /**
+   * For tests only.
+   */
+<span class="fc" id="L125">  public IndexLoadingConfig() {</span>
+<span class="fc" id="L126">  }</span>
+
+  @Nonnull
+  public ReadMode getReadMode() {
+<span class="fc" id="L130">    return _readMode;</span>
+  }
+
+  /**
+   * For tests only.
+   */
+  public void setReadMode(@Nonnull ReadMode readMode) {
+<span class="fc" id="L137">    _readMode = readMode;</span>
+<span class="fc" id="L138">  }</span>
+
+  @Nonnull
+  public List&lt;String&gt; getSortedColumns() {
+<span class="fc" id="L142">    return _sortedColumns;</span>
+  }
+
+  @Nonnull
+  public Set&lt;String&gt; getInvertedIndexColumns() {
+<span class="fc" id="L147">    return _invertedIndexColumns;</span>
+  }
+
+  /**
+   * For tests only.
+   */
+  @VisibleForTesting
+  public void setInvertedIndexColumns(@Nonnull Set&lt;String&gt; invertedIndexColumns) {
+<span class="fc" id="L155">    _invertedIndexColumns = invertedIndexColumns;</span>
+<span class="fc" id="L156">  }</span>
+
+  @VisibleForTesting
+  public void setOnHeapDictionaryColumns(@Nonnull Set&lt;String&gt; onHeapDictionaryColumns) {
+<span class="fc" id="L160">    _onHeapDictionaryColumns = onHeapDictionaryColumns;</span>
+<span class="fc" id="L161">  }</span>
+
+  @Nonnull
+  public Set&lt;String&gt; getNoDictionaryColumns() {
+<span class="fc" id="L165">    return _noDictionaryColumns;</span>
+  }
+
+  @Nonnull
+  public Set&lt;String&gt; getOnHeapDictionaryColumns() {
+<span class="fc" id="L170">    return _onHeapDictionaryColumns;</span>
+  }
+
+  @Nullable
+  public SegmentVersion getSegmentVersion() {
+<span class="fc" id="L175">    return _segmentVersion;</span>
+  }
+
+  /**
+   * For tests only.
+   */
+  public void setSegmentVersion(@Nonnull SegmentVersion segmentVersion) {
+<span class="fc" id="L182">    _segmentVersion = segmentVersion;</span>
+<span class="fc" id="L183">  }</span>
+
+  public boolean isEnableDefaultColumns() {
+<span class="fc" id="L186">    return _enableDefaultColumns;</span>
+  }
+
+  public boolean isEnableSplitCommit() {
+<span class="nc" id="L190">    return _enableSplitCommit;</span>
+  }
+
+  public boolean isRealtimeOffheapAllocation() {
+<span class="fc" id="L194">    return _isRealtimeOffheapAllocation;</span>
+  }
+
+  public boolean isDirectRealtimeOffheapAllocation() {
+<span class="fc" id="L198">    return _isDirectRealtimeOffheapAllocation;</span>
+  }
+
+  @Nonnull
+  public ColumnMinMaxValueGeneratorMode getColumnMinMaxValueGeneratorMode() {
+<span class="fc" id="L203">    return _columnMinMaxValueGeneratorMode;</span>
+  }
+
+  /**
+   * For tests only.
+   */
+  public void setColumnMinMaxValueGeneratorMode(ColumnMinMaxValueGeneratorMode columnMinMaxValueGeneratorMode) {
+<span class="fc" id="L210">    _columnMinMaxValueGeneratorMode = columnMinMaxValueGeneratorMode;</span>
+<span class="fc" id="L211">  }</span>
+
+  public int getRealtimeAvgMultiValueCount() {
+<span class="fc" id="L214">    return _realtimeAvgMultiValueCount;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

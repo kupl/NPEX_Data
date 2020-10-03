@@ -1,0 +1,358 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>LinkedDequeue.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-broker</a> &gt; <a href="../index.html" class="el_bundle">pinot-transport</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.transport.common</a> &gt; <span class="el_source">LinkedDequeue.java</span></div><h1>LinkedDequeue.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.transport.common;
+
+import java.util.AbstractQueue;
+import java.util.Collection;
+import java.util.Deque;
+import java.util.Iterator;
+import java.util.NoSuchElementException;
+
+
+/**
+ * Taken from R2's LinkedDeque implementation to be used in Pool implementation. The class is copied as the corresponding R2 jar pulls in a lot of unnecessary jars.
+ *
+ * This class provides the ability to remove an arbitrary interior element (neither head nor tail)
+ * from the queue in O(1) time, by invoking #removeNode(com.linkedin.r2.util.LinkedDeque.Node).
+ * No class in the Java Collections framework provides this ability.
+ *
+ * Adding to and removing from head or tail also run in O(1) time, as expected.
+ *
+ * External synchronization is required!
+ *
+ * @param &lt;T&gt; Resource to be managed by queue
+ */
+public class LinkedDequeue&lt;T&gt; extends AbstractQueue&lt;T&gt; implements Deque&lt;T&gt; {
+  public static class Node&lt;T&gt; {
+    private final T _value;
+    private Node&lt;T&gt; _next;
+    private Node&lt;T&gt; _prev;
+
+<span class="fc" id="L44">    private Node(T value) {</span>
+<span class="fc" id="L45">      _value = value;</span>
+<span class="fc" id="L46">    }</span>
+  }
+
+  private Node&lt;T&gt; _head;
+  private Node&lt;T&gt; _tail;
+  private int _size;
+
+  /**
+   * Construct a new instance.
+   */
+  public LinkedDequeue() {
+<span class="fc" id="L57">    super();</span>
+<span class="fc" id="L58">  }</span>
+
+  /**
+   * Construct a new instance, adding all objects in the specified collection.
+   *
+   * @param collection a {@link Collection} of objects to be added.
+   */
+  public LinkedDequeue(Collection&lt;? extends T&gt; collection) {
+<span class="nc" id="L66">    super();</span>
+<span class="nc" id="L67">    addAll(collection);</span>
+<span class="nc" id="L68">  }</span>
+
+  /**
+   * Add a new item at the head of the queue.
+   *
+   * @param item the item to be added.
+   * @return the {@link Node} of the newly added item.
+   */
+  public Node&lt;T&gt; addFirstNode(T item) {
+<span class="nc" id="L77">    return addBeforeNode(_head, item);</span>
+  }
+
+  /**
+   * Add a new item at the tail of the queue.
+   *
+   * @param item the item to be added.
+   * @return the {@link Node} of the newly added item.
+   */
+  public Node&lt;T&gt; addLastNode(T item) {
+<span class="fc" id="L87">    return addBeforeNode(null, item);</span>
+  }
+
+  /**
+   * Add a new item before the specified Node.
+   *
+   * @param before the {@link Node} before which the item should be added.
+   * @param item the item to be added.
+   * @return the {@link Node} of the newly added item.
+   */
+  public Node&lt;T&gt; addBeforeNode(Node&lt;T&gt; before, T item) {
+<span class="pc bpc" id="L98" title="1 of 2 branches missed.">    if (item == null) {</span>
+<span class="nc" id="L99">      throw new NullPointerException();</span>
+    }
+<span class="pc bpc" id="L101" title="7 of 8 branches missed.">    if (before != null &amp;&amp; before != _head &amp;&amp; before._next == null &amp;&amp; before._prev == null) {</span>
+<span class="nc" id="L102">      throw new IllegalStateException(&quot;node was already removed&quot;);</span>
+    }
+<span class="fc" id="L104">    Node&lt;T&gt; node = new Node&lt;T&gt;(item);</span>
+<span class="pc bpc" id="L105" title="1 of 2 branches missed.">    if (before == null) {</span>
+      // Adding to tail
+<span class="fc" id="L107">      node._next = null;</span>
+<span class="fc" id="L108">      node._prev = _tail;</span>
+<span class="pc bpc" id="L109" title="1 of 2 branches missed.">      if (_tail != null) {</span>
+<span class="nc" id="L110">        _tail._next = node;</span>
+      }
+<span class="fc" id="L112">      _tail = node;</span>
+<span class="pc bpc" id="L113" title="1 of 2 branches missed.">      if (_head == null) {</span>
+<span class="fc" id="L114">        _head = node;</span>
+      }
+    } else {
+<span class="nc" id="L117">      node._next = before;</span>
+<span class="nc" id="L118">      node._prev = before._prev;</span>
+<span class="nc" id="L119">      before._prev = node;</span>
+<span class="nc bnc" id="L120" title="All 2 branches missed.">      if (before == _head) {</span>
+<span class="nc" id="L121">        _head = node;</span>
+      }
+    }
+<span class="fc" id="L124">    _size++;</span>
+<span class="fc" id="L125">    return node;</span>
+  }
+
+  /**
+   * Remove the specified Node from the queue.
+   *
+   * @param node the Node to be removed.
+   * @return the item contained in the Node which was removed.
+   */
+  public T removeNode(Node&lt;T&gt; node) {
+    // TODO what if the node is from the wrong list??
+<span class="pc bpc" id="L136" title="5 of 6 branches missed.">    if (node != _head &amp;&amp; node._next == null &amp;&amp; node._prev == null) {</span>
+      // the node has already been removed
+<span class="nc" id="L138">      return null;</span>
+    }
+<span class="pc bpc" id="L140" title="1 of 2 branches missed.">    if (node == _head) {</span>
+<span class="fc" id="L141">      _head = node._next;</span>
+    }
+<span class="pc bpc" id="L143" title="1 of 2 branches missed.">    if (node._prev != null) {</span>
+<span class="nc" id="L144">      node._prev._next = node._next;</span>
+    }
+<span class="pc bpc" id="L146" title="1 of 2 branches missed.">    if (node == _tail) {</span>
+<span class="fc" id="L147">      _tail = node._prev;</span>
+    }
+<span class="pc bpc" id="L149" title="1 of 2 branches missed.">    if (node._next != null) {</span>
+<span class="nc" id="L150">      node._next._prev = node._prev;</span>
+    }
+<span class="fc" id="L152">    node._next = null;</span>
+<span class="fc" id="L153">    node._prev = null;</span>
+<span class="fc" id="L154">    _size--;</span>
+<span class="fc" id="L155">    return node._value;</span>
+  }
+
+  // Remaining methods implement Deque&lt;T&gt;
+
+  @Override
+  public boolean offerFirst(T t) {
+<span class="nc" id="L162">    addFirstNode(t);</span>
+<span class="nc" id="L163">    return true;</span>
+  }
+
+  @Override
+  public boolean offerLast(T t) {
+<span class="nc" id="L168">    addLastNode(t);</span>
+<span class="nc" id="L169">    return true;</span>
+  }
+
+  @Override
+  public T peekFirst() {
+<span class="nc bnc" id="L174" title="All 2 branches missed.">    if (_head == null) {</span>
+<span class="nc" id="L175">      return null;</span>
+    }
+<span class="nc" id="L177">    return _head._value;</span>
+  }
+
+  @Override
+  public T peekLast() {
+<span class="nc bnc" id="L182" title="All 2 branches missed.">    if (_tail == null) {</span>
+<span class="nc" id="L183">      return null;</span>
+    }
+<span class="nc" id="L185">    return _tail._value;</span>
+  }
+
+  @Override
+  public T pollFirst() {
+<span class="fc bfc" id="L190" title="All 2 branches covered.">    if (_head == null) {</span>
+<span class="fc" id="L191">      return null;</span>
+    }
+<span class="fc" id="L193">    return removeNode(_head);</span>
+  }
+
+  @Override
+  public T pollLast() {
+<span class="nc bnc" id="L198" title="All 2 branches missed.">    if (_tail == null) {</span>
+<span class="nc" id="L199">      return null;</span>
+    }
+<span class="nc" id="L201">    return removeNode(_tail);</span>
+  }
+
+  @Override
+  public int size() {
+<span class="fc" id="L206">    return _size;</span>
+  }
+
+  @Override
+  public Iterator&lt;T&gt; iterator() {
+<span class="nc" id="L211">    return new LinkedQueueIterator(Direction.ASCENDING);</span>
+  }
+
+  @Override
+  public Iterator&lt;T&gt; descendingIterator() {
+<span class="nc" id="L216">    return new LinkedQueueIterator(Direction.DESCENDING);</span>
+  }
+
+<span class="nc" id="L219">  private enum Direction {</span>
+<span class="nc" id="L220">    ASCENDING,</span>
+<span class="nc" id="L221">    DESCENDING</span>
+  }
+
+  private class LinkedQueueIterator implements Iterator&lt;T&gt; {
+    private final Direction _dir;
+    private Node&lt;T&gt; _index;
+    private Node&lt;T&gt; _last;
+
+<span class="nc" id="L229">    private LinkedQueueIterator(Direction dir) {</span>
+<span class="nc" id="L230">      _dir = dir;</span>
+<span class="nc bnc" id="L231" title="All 2 branches missed.">      _index = _dir == Direction.ASCENDING ? _head : _tail;</span>
+<span class="nc" id="L232">    }</span>
+
+    @Override
+    public boolean hasNext() {
+<span class="nc bnc" id="L236" title="All 2 branches missed.">      return _index != null;</span>
+    }
+
+    @Override
+    public T next() {
+<span class="nc bnc" id="L241" title="All 2 branches missed.">      if (_index == null) {</span>
+<span class="nc" id="L242">        throw new NoSuchElementException();</span>
+      }
+<span class="nc" id="L244">      _last = _index;</span>
+<span class="nc" id="L245">      T value = _index._value;</span>
+<span class="nc bnc" id="L246" title="All 2 branches missed.">      _index = _dir == Direction.ASCENDING ? _index._next : _index._prev;</span>
+<span class="nc" id="L247">      return value;</span>
+    }
+
+    @Override
+    public void remove() {
+<span class="nc bnc" id="L252" title="All 2 branches missed.">      if (_last == null) {</span>
+<span class="nc" id="L253">        throw new IllegalStateException();</span>
+      }
+<span class="nc" id="L255">      removeNode(_last);</span>
+<span class="nc" id="L256">      _last = null;</span>
+<span class="nc" id="L257">    }</span>
+  }
+
+  @Override
+  public void addFirst(T e) {
+<span class="nc bnc" id="L262" title="All 2 branches missed.">    if (!offerFirst(e)) {</span>
+<span class="nc" id="L263">      throw new IllegalStateException(&quot;Queue full&quot;);</span>
+    }
+<span class="nc" id="L265">  }</span>
+
+  @Override
+  public void addLast(T e) {
+<span class="nc bnc" id="L269" title="All 2 branches missed.">    if (!offerLast(e)) {</span>
+<span class="nc" id="L270">      throw new IllegalStateException(&quot;Queue full&quot;);</span>
+    }
+<span class="nc" id="L272">  }</span>
+
+  @Override
+  public T removeFirst() {
+<span class="nc" id="L276">    T e = pollFirst();</span>
+<span class="nc bnc" id="L277" title="All 2 branches missed.">    if (e == null) {</span>
+<span class="nc" id="L278">      throw new NoSuchElementException();</span>
+    }
+<span class="nc" id="L280">    return e;</span>
+  }
+
+  @Override
+  public T removeLast() {
+<span class="nc" id="L285">    T e = pollLast();</span>
+<span class="nc bnc" id="L286" title="All 2 branches missed.">    if (e == null) {</span>
+<span class="nc" id="L287">      throw new NoSuchElementException();</span>
+    }
+<span class="nc" id="L289">    return e;</span>
+  }
+
+  @Override
+  public T getFirst() {
+<span class="nc" id="L294">    T e = peekFirst();</span>
+<span class="nc bnc" id="L295" title="All 2 branches missed.">    if (e == null) {</span>
+<span class="nc" id="L296">      throw new NoSuchElementException();</span>
+    }
+<span class="nc" id="L298">    return e;</span>
+  }
+
+  @Override
+  public T getLast() {
+<span class="nc" id="L303">    T e = peekLast();</span>
+<span class="nc bnc" id="L304" title="All 2 branches missed.">    if (e == null) {</span>
+<span class="nc" id="L305">      throw new NoSuchElementException();</span>
+    }
+<span class="nc" id="L307">    return e;</span>
+  }
+
+  @Override
+  public boolean removeFirstOccurrence(Object o) {
+<span class="nc bnc" id="L312" title="All 2 branches missed.">    for (Iterator&lt;T&gt; i = iterator(); i.hasNext();) {</span>
+<span class="nc bnc" id="L313" title="All 2 branches missed.">      if (i.next().equals(o)) {</span>
+<span class="nc" id="L314">        i.remove();</span>
+<span class="nc" id="L315">        return true;</span>
+      }
+    }
+<span class="nc" id="L318">    return false;</span>
+  }
+
+  @Override
+  public boolean removeLastOccurrence(Object o) {
+<span class="nc bnc" id="L323" title="All 2 branches missed.">    for (Iterator&lt;T&gt; i = descendingIterator(); i.hasNext();) {</span>
+<span class="nc bnc" id="L324" title="All 2 branches missed.">      if (i.next().equals(o)) {</span>
+<span class="nc" id="L325">        i.remove();</span>
+<span class="nc" id="L326">        return true;</span>
+      }
+    }
+<span class="nc" id="L329">    return false;</span>
+  }
+
+  @Override
+  public void push(T e) {
+<span class="nc" id="L334">    addFirst(e);</span>
+<span class="nc" id="L335">  }</span>
+
+  @Override
+  public T pop() {
+<span class="nc" id="L339">    return removeFirst();</span>
+  }
+
+  // java.util.Queue methods
+  @Override
+  public boolean offer(T e) {
+<span class="nc" id="L345">    return offerLast(e);</span>
+  }
+
+  @Override
+  public T poll() {
+<span class="fc" id="L350">    return pollFirst();</span>
+  }
+
+  @Override
+  public T peek() {
+<span class="nc" id="L355">    return peekFirst();</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

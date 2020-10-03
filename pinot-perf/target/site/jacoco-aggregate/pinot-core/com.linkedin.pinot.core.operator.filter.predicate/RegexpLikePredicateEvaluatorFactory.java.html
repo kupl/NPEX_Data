@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>RegexpLikePredicateEvaluatorFactory.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-perf</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.operator.filter.predicate</a> &gt; <span class="el_source">RegexpLikePredicateEvaluatorFactory.java</span></div><h1>RegexpLikePredicateEvaluatorFactory.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.operator.filter.predicate;
+
+import com.google.common.base.Preconditions;
+import com.linkedin.pinot.common.data.FieldSpec;
+import com.linkedin.pinot.core.common.Predicate;
+import com.linkedin.pinot.core.common.predicate.RegexpLikePredicate;
+import com.linkedin.pinot.core.segment.index.readers.Dictionary;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.ints.IntList;
+import java.util.regex.Pattern;
+
+
+/**
+ * Factory for REGEXP_LIKE predicate evaluators.
+ */
+public class RegexpLikePredicateEvaluatorFactory {
+<span class="nc" id="L32">  private RegexpLikePredicateEvaluatorFactory() {</span>
+<span class="nc" id="L33">  }</span>
+
+  /**
+   * Create a new instance of dictionary based REGEXP_LIKE predicate evaluator.
+   *
+   * @param regexpLikePredicate REGEXP_LIKE predicate to evaluate
+   * @param dictionary Dictionary for the column
+   * @return Dictionary based REGEXP_LIKE predicate evaluator
+   */
+  public static BaseDictionaryBasedPredicateEvaluator newDictionaryBasedEvaluator(
+      RegexpLikePredicate regexpLikePredicate, Dictionary dictionary) {
+<span class="fc" id="L44">    return new DictionaryBasedRegexpLikePredicateEvaluator(regexpLikePredicate, dictionary);</span>
+  }
+
+  /**
+   * Create a new instance of raw value based REGEXP_LIKE predicate evaluator.
+   *
+   * @param regexpLikePredicate REGEXP_LIKE predicate to evaluate
+   * @param dataType Data type for the column
+   * @return Raw value based REGEXP_LIKE predicate evaluator
+   */
+  public static BaseRawValueBasedPredicateEvaluator newRawValueBasedEvaluator(RegexpLikePredicate regexpLikePredicate,
+      FieldSpec.DataType dataType) {
+<span class="nc bnc" id="L56" title="All 2 branches missed.">    Preconditions.checkArgument(dataType == FieldSpec.DataType.STRING, &quot;Unsupported data type: &quot; + dataType);</span>
+<span class="nc" id="L57">    return new RawValueBasedRegexpLikePredicateEvaluator(regexpLikePredicate);</span>
+  }
+
+  private static final int PATTERN_FLAG = Pattern.UNICODE_CASE | Pattern.CASE_INSENSITIVE;
+
+  private static final class DictionaryBasedRegexpLikePredicateEvaluator extends BaseDictionaryBasedPredicateEvaluator {
+    final Pattern _pattern;
+    final Dictionary _dictionary;
+    int[] _matchingDictIds;
+
+<span class="fc" id="L67">    public DictionaryBasedRegexpLikePredicateEvaluator(RegexpLikePredicate regexpLikePredicate, Dictionary dictionary) {</span>
+<span class="fc" id="L68">      _pattern = Pattern.compile(regexpLikePredicate.getRegex(), PATTERN_FLAG);</span>
+<span class="fc" id="L69">      _dictionary = dictionary;</span>
+<span class="fc" id="L70">    }</span>
+
+    @Override
+    public Predicate.Type getPredicateType() {
+<span class="fc" id="L74">      return Predicate.Type.REGEXP_LIKE;</span>
+    }
+
+    @Override
+    public boolean isAlwaysFalse() {
+<span class="fc" id="L79">      return false;</span>
+    }
+
+    @Override
+    public boolean applySV(int dictId) {
+<span class="fc" id="L84">      return _pattern.matcher(_dictionary.getStringValue(dictId)).find();</span>
+    }
+
+    @Override
+    public int[] getMatchingDictIds() {
+<span class="nc bnc" id="L89" title="All 2 branches missed.">      if (_matchingDictIds == null) {</span>
+<span class="nc" id="L90">        IntList matchingDictIds = new IntArrayList();</span>
+<span class="nc" id="L91">        int dictionarySize = _dictionary.length();</span>
+<span class="nc bnc" id="L92" title="All 2 branches missed.">        for (int dictId = 0; dictId &lt; dictionarySize; dictId++) {</span>
+<span class="nc bnc" id="L93" title="All 2 branches missed.">          if (applySV(dictId)) {</span>
+<span class="nc" id="L94">            matchingDictIds.add(dictId);</span>
+          }
+        }
+<span class="nc" id="L97">        _matchingDictIds = matchingDictIds.toIntArray();</span>
+      }
+<span class="nc" id="L99">      return _matchingDictIds;</span>
+    }
+  }
+
+  private static final class RawValueBasedRegexpLikePredicateEvaluator extends BaseRawValueBasedPredicateEvaluator {
+    final Pattern _pattern;
+
+<span class="nc" id="L106">    public RawValueBasedRegexpLikePredicateEvaluator(RegexpLikePredicate regexpLikePredicate) {</span>
+<span class="nc" id="L107">      _pattern = Pattern.compile(regexpLikePredicate.getRegex(), PATTERN_FLAG);</span>
+<span class="nc" id="L108">    }</span>
+
+    @Override
+    public Predicate.Type getPredicateType() {
+<span class="nc" id="L112">      return Predicate.Type.REGEXP_LIKE;</span>
+    }
+
+    @Override
+    public boolean applySV(String value) {
+<span class="nc" id="L117">      return _pattern.matcher(value).find();</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

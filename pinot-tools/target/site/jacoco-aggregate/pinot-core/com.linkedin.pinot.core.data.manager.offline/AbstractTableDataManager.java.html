@@ -1,0 +1,269 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>AbstractTableDataManager.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-tools</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.data.manager.offline</a> &gt; <span class="el_source">AbstractTableDataManager.java</span></div><h1>AbstractTableDataManager.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.data.manager.offline;
+
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
+import com.linkedin.pinot.common.config.TableConfig;
+import com.linkedin.pinot.common.metrics.ServerGauge;
+import com.linkedin.pinot.common.metrics.ServerMeter;
+import com.linkedin.pinot.common.metrics.ServerMetrics;
+import com.linkedin.pinot.core.data.manager.config.TableDataManagerConfig;
+import com.linkedin.pinot.core.indexsegment.IndexSegment;
+import com.linkedin.pinot.core.segment.index.loader.IndexLoadingConfig;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+import javax.annotation.Nonnull;
+import org.apache.helix.ZNRecord;
+import org.apache.helix.store.zk.ZkHelixPropertyStore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+<span class="fc" id="L42">public abstract class AbstractTableDataManager implements TableDataManager {</span>
+  // This read-write lock protects the _segmentsMap and SegmentDataManager.refCnt
+<span class="fc" id="L44">  protected final ReadWriteLock _rwLock = new ReentrantReadWriteLock();</span>
+<span class="fc" id="L45">  @VisibleForTesting</span>
+  protected final Map&lt;String, SegmentDataManager&gt; _segmentsMap = new HashMap&lt;&gt;();
+
+  protected TableDataManagerConfig _tableDataManagerConfig;
+  protected String _instanceId;
+  protected ZkHelixPropertyStore&lt;ZNRecord&gt; _propertyStore;
+  protected ServerMetrics _serverMetrics;
+  protected String _tableName;
+  protected String _tableDataDir;
+  protected File _indexDir;
+
+  protected Logger _logger;
+
+<span class="fc" id="L58">  private boolean _started = false;</span>
+
+  @Override
+  public void init(@Nonnull TableDataManagerConfig tableDataManagerConfig, @Nonnull String instanceId,
+      @Nonnull ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore, @Nonnull ServerMetrics serverMetrics) {
+<span class="fc" id="L63">    _tableDataManagerConfig = tableDataManagerConfig;</span>
+<span class="fc" id="L64">    _instanceId = instanceId;</span>
+<span class="fc" id="L65">    _propertyStore = propertyStore;</span>
+<span class="fc" id="L66">    _serverMetrics = serverMetrics;</span>
+
+<span class="fc" id="L68">    _tableName = tableDataManagerConfig.getTableName();</span>
+<span class="fc" id="L69">    _tableDataDir = tableDataManagerConfig.getDataDir();</span>
+<span class="fc" id="L70">    _indexDir = new File(_tableDataDir);</span>
+<span class="pc bpc" id="L71" title="1 of 2 branches missed.">    if (!_indexDir.exists()) {</span>
+<span class="nc" id="L72">      Preconditions.checkState(_indexDir.mkdirs());</span>
+    }
+<span class="fc" id="L74">    _logger = LoggerFactory.getLogger(_tableName + &quot;-&quot; + getClass().getSimpleName());</span>
+
+<span class="fc" id="L76">    doInit();</span>
+
+<span class="fc" id="L78">    _logger.info(&quot;Initialized table: {} with data directory: {}&quot;, _tableName, _tableDataDir);</span>
+<span class="fc" id="L79">  }</span>
+
+  protected abstract void doInit();
+
+  @Override
+  public void start() {
+<span class="fc" id="L85">    _logger.info(&quot;Starting table data manager for table: {}&quot;, _tableName);</span>
+<span class="pc bpc" id="L86" title="1 of 2 branches missed.">    if (_started) {</span>
+<span class="nc" id="L87">      _logger.info(&quot;Table data manager for table: {} is already started&quot;, _tableName);</span>
+<span class="nc" id="L88">      return;</span>
+    }
+
+    // Nothing to be done
+
+<span class="fc" id="L93">    _started = true;</span>
+<span class="fc" id="L94">    _logger.info(&quot;Finish starting table data manager for table: {}&quot;, _tableName);</span>
+<span class="fc" id="L95">  }</span>
+
+  @Override
+  public void shutDown() {
+<span class="fc" id="L99">    _logger.info(&quot;Shutting down table data manager for table: {}&quot;, _tableName);</span>
+<span class="pc bpc" id="L100" title="1 of 2 branches missed.">    if (!_started) {</span>
+<span class="nc" id="L101">      _logger.info(&quot;Table data manager for table: {} is not running&quot;, _tableName);</span>
+<span class="nc" id="L102">      return;</span>
+    }
+
+<span class="fc" id="L105">    doShutdown();</span>
+
+<span class="fc" id="L107">    _started = false;</span>
+<span class="fc" id="L108">    _logger.info(&quot;Finish shutting down table data manager for table: {}&quot;, _tableName);</span>
+<span class="fc" id="L109">  }</span>
+
+  protected abstract void doShutdown();
+
+  /**
+   * Add a segment (or replace it, if one exists with the same name).
+   * &lt;p&gt;
+   * Ensures that reference count of the old segment (if replaced) is reduced by 1, so that the
+   * last user of the old segment (or the calling thread, if there are none) remove the segment.
+   * The new segment is added with a refcnt of 1, so that is never removed until a drop command
+   * comes through.
+   *
+   * @param indexSegmentToAdd new segment to add/replace.
+   */
+  public void addSegment(@Nonnull IndexSegment indexSegmentToAdd) {
+<span class="fc" id="L124">    final String segmentName = indexSegmentToAdd.getSegmentName();</span>
+<span class="fc" id="L125">    _logger.info(&quot;Trying to add a new segment {} of table {} with OfflineSegmentDataManager&quot;, segmentName, _tableName);</span>
+<span class="fc" id="L126">    OfflineSegmentDataManager newSegmentManager = new OfflineSegmentDataManager(indexSegmentToAdd);</span>
+<span class="fc" id="L127">    final int newNumDocs = indexSegmentToAdd.getSegmentMetadata().getTotalRawDocs();</span>
+    SegmentDataManager oldSegmentManager;
+<span class="fc" id="L129">    int refCnt = -1;</span>
+    try {
+<span class="fc" id="L131">      _rwLock.writeLock().lock();</span>
+<span class="fc" id="L132">      oldSegmentManager = _segmentsMap.put(segmentName, newSegmentManager);</span>
+<span class="fc bfc" id="L133" title="All 2 branches covered.">      if (oldSegmentManager != null) {</span>
+<span class="fc" id="L134">        refCnt = oldSegmentManager.decrementRefCnt();</span>
+      }
+    } finally {
+<span class="pc" id="L137">      _rwLock.writeLock().unlock();</span>
+<span class="fc" id="L138">    }</span>
+<span class="fc bfc" id="L139" title="All 2 branches covered.">    if (oldSegmentManager == null) {</span>
+<span class="fc" id="L140">      _logger.info(&quot;Added new segment {} for table {}&quot;, segmentName, _tableName);</span>
+    } else {
+<span class="fc" id="L142">      _logger.info(&quot;Replaced segment {}(refCnt {}) with new segment for table {}&quot;, segmentName, refCnt, _tableName);</span>
+    }
+<span class="fc bfc" id="L144" title="All 2 branches covered.">    if (refCnt == 0) {  // oldSegmentManager must be non-null.</span>
+<span class="fc" id="L145">      closeSegment(oldSegmentManager);</span>
+    }
+<span class="fc" id="L147">    _serverMetrics.addValueToTableGauge(_tableName, ServerGauge.DOCUMENT_COUNT, newNumDocs);</span>
+<span class="fc" id="L148">    _serverMetrics.addValueToTableGauge(_tableName, ServerGauge.SEGMENT_COUNT, 1L);</span>
+<span class="fc" id="L149">  }</span>
+
+  @Override
+  public void addSegment(@Nonnull File indexDir, @Nonnull IndexLoadingConfig indexLoadingConfig) throws Exception {
+<span class="nc" id="L153">    throw new UnsupportedOperationException();</span>
+  }
+
+  @Override
+  public void addSegment(@Nonnull String segmentName, @Nonnull TableConfig tableConfig,
+      @Nonnull IndexLoadingConfig indexLoadingConfig) throws Exception {
+<span class="nc" id="L159">    throw new UnsupportedOperationException();</span>
+  }
+
+  /**
+   * Called when we get a helix transition to go to offline or dropped state.
+   * We need to remove it safely, keeping in mind that there may be queries that are
+   * using the segment,
+   * @param segmentName name of the segment to remove.
+   */
+  @Override
+  public void removeSegment(String segmentName) {
+    SegmentDataManager segmentDataManager;
+<span class="fc" id="L171">    int refCnt = -1;</span>
+    try {
+<span class="fc" id="L173">      _rwLock.writeLock().lock();</span>
+<span class="fc" id="L174">      segmentDataManager = _segmentsMap.remove(segmentName);</span>
+<span class="fc bfc" id="L175" title="All 2 branches covered.">      if (segmentDataManager != null) {</span>
+<span class="fc" id="L176">        refCnt = segmentDataManager.decrementRefCnt();</span>
+      }
+    } finally {
+<span class="pc" id="L179">      _rwLock.writeLock().unlock();</span>
+<span class="fc" id="L180">    }</span>
+<span class="fc bfc" id="L181" title="All 2 branches covered.">    if (refCnt == 0) {  // segmentDataManager must be non-null.</span>
+<span class="fc" id="L182">      closeSegment(segmentDataManager);</span>
+    }
+<span class="fc" id="L184">  }</span>
+
+  protected void closeSegment(SegmentDataManager segmentDataManager) {
+<span class="fc" id="L187">    final String segmentName = segmentDataManager.getSegmentName();</span>
+<span class="fc" id="L188">    _logger.info(&quot;Closing segment {} for table {}&quot;, segmentName, _tableName);</span>
+<span class="fc" id="L189">    _serverMetrics.addValueToTableGauge(_tableName, ServerGauge.SEGMENT_COUNT, -1L);</span>
+<span class="fc" id="L190">    _serverMetrics.addMeteredTableValue(_tableName, ServerMeter.DELETED_SEGMENT_COUNT, 1L);</span>
+<span class="fc" id="L191">    _serverMetrics.addValueToTableGauge(_tableName, ServerGauge.DOCUMENT_COUNT,</span>
+        -segmentDataManager.getSegment().getSegmentMetadata().getTotalRawDocs());
+<span class="fc" id="L193">    segmentDataManager.destroy();</span>
+<span class="fc" id="L194">    _logger.info(&quot;Segment {} for table {} has been closed&quot;, segmentName, _tableName);</span>
+<span class="fc" id="L195">  }</span>
+
+  @Nonnull
+  @Override
+  public ImmutableList&lt;SegmentDataManager&gt; acquireAllSegments() {
+<span class="fc" id="L200">    ImmutableList.Builder&lt;SegmentDataManager&gt; segmentListBuilder = ImmutableList.builder();</span>
+    try {
+<span class="fc" id="L202">      _rwLock.readLock().lock();</span>
+<span class="fc bfc" id="L203" title="All 2 branches covered.">      for (Map.Entry&lt;String, SegmentDataManager&gt; segmentEntry : _segmentsMap.entrySet()) {</span>
+<span class="fc" id="L204">        SegmentDataManager segmentDataManager = segmentEntry.getValue();</span>
+<span class="fc" id="L205">        segmentDataManager.incrementRefCnt();</span>
+<span class="fc" id="L206">        segmentListBuilder.add(segmentDataManager);</span>
+<span class="fc" id="L207">      }</span>
+    } finally {
+<span class="pc" id="L209">      _rwLock.readLock().unlock();</span>
+<span class="fc" id="L210">    }</span>
+<span class="fc" id="L211">    return segmentListBuilder.build();</span>
+  }
+
+  @Override
+  public List&lt;SegmentDataManager&gt; acquireSegments(List&lt;String&gt; segmentList) {
+<span class="fc" id="L216">    List&lt;SegmentDataManager&gt; ret = new ArrayList&lt;&gt;();</span>
+    try {
+<span class="fc" id="L218">      _rwLock.readLock().lock();</span>
+<span class="fc bfc" id="L219" title="All 2 branches covered.">      for (String segName : segmentList) {</span>
+        SegmentDataManager segmentDataManager;
+<span class="fc" id="L221">        segmentDataManager = _segmentsMap.get(segName);</span>
+<span class="pc bpc" id="L222" title="1 of 2 branches missed.">        if (segmentDataManager != null) {</span>
+<span class="fc" id="L223">          segmentDataManager.incrementRefCnt();</span>
+<span class="fc" id="L224">          ret.add(segmentDataManager);</span>
+        }
+<span class="fc" id="L226">      }</span>
+    } finally {
+<span class="pc" id="L228">      _rwLock.readLock().unlock();</span>
+<span class="fc" id="L229">    }</span>
+<span class="fc" id="L230">    return ret;</span>
+  }
+
+  @Override
+  public SegmentDataManager acquireSegment(String segmentName) {
+    try {
+<span class="fc" id="L236">      _rwLock.readLock().lock();</span>
+<span class="fc" id="L237">      SegmentDataManager segmentDataManager = _segmentsMap.get(segmentName);</span>
+<span class="fc bfc" id="L238" title="All 2 branches covered.">      if (segmentDataManager != null) {</span>
+<span class="fc" id="L239">        segmentDataManager.incrementRefCnt();</span>
+      }
+<span class="fc" id="L241">      return segmentDataManager;</span>
+    } finally {
+<span class="pc" id="L243">      _rwLock.readLock().unlock();</span>
+    }
+  }
+
+  @Override
+  public void releaseSegment(SegmentDataManager segmentDataManager) {
+<span class="fc bfc" id="L249" title="All 2 branches covered.">    if (segmentDataManager == null) {</span>
+<span class="fc" id="L250">      return;</span>
+    }
+<span class="fc" id="L252">    int refCnt = segmentDataManager.decrementRefCnt();</span>
+    // Exactly one thread should find this to be zero, so we can safely drop it.
+    // We never remove it from the map here, so no need to synchronize.
+<span class="fc bfc" id="L255" title="All 2 branches covered.">    if (refCnt == 0) {</span>
+<span class="fc" id="L256">      closeSegment(segmentDataManager);</span>
+    }
+<span class="fc" id="L258">  }</span>
+
+  public ServerMetrics getServerMetrics() {
+<span class="nc" id="L261">    return _serverMetrics;</span>
+  }
+
+  @Override
+  public String getTableName() {
+<span class="fc" id="L266">    return _tableName;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>BrokerRequestPreProcessor.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-hadoop</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.plan.maker</a> &gt; <span class="el_source">BrokerRequestPreProcessor.java</span></div><h1>BrokerRequestPreProcessor.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.plan.maker;
+
+import com.linkedin.pinot.common.data.MetricFieldSpec;
+import com.linkedin.pinot.common.request.AggregationInfo;
+import com.linkedin.pinot.common.request.BrokerRequest;
+import com.linkedin.pinot.common.segment.SegmentMetadata;
+import com.linkedin.pinot.core.indexsegment.IndexSegment;
+import java.util.List;
+import java.util.Objects;
+
+
+/**
+ * The &lt;code&gt;BrokerRequestPreProcessor&lt;/code&gt; class provides the utility to pre-process the {@link BrokerRequest}.
+ * &lt;p&gt;After the pre-process, the {@link BrokerRequest} should not be further changed.
+ */
+public class BrokerRequestPreProcessor {
+<span class="nc" id="L32">  private BrokerRequestPreProcessor() {</span>
+<span class="nc" id="L33">  }</span>
+
+  /**
+   * Pre-process the {@link BrokerRequest}.
+   * &lt;p&gt;Will apply the changes directly to the passed in object.
+   * &lt;p&gt;The following steps are performed:
+   * &lt;ul&gt;
+   *   &lt;li&gt;Rewrite 'fasthll' column name.&lt;/li&gt;
+   * &lt;/ul&gt;
+   *
+   * @param indexSegments list of index segments.
+   * @param brokerRequest broker request.
+   */
+  public static void preProcess(List&lt;IndexSegment&gt; indexSegments, BrokerRequest brokerRequest) {
+<span class="pc bpc" id="L47" title="1 of 2 branches missed.">    if (brokerRequest.isSetAggregationsInfo()) {</span>
+<span class="fc" id="L48">      List&lt;AggregationInfo&gt; aggregationsInfo = brokerRequest.getAggregationsInfo();</span>
+<span class="fc" id="L49">      rewriteFastHllColumnName(indexSegments, aggregationsInfo);</span>
+    }
+<span class="fc" id="L51">  }</span>
+
+  /**
+   * Rewrite 'fasthll' column name.
+   *
+   * @param indexSegments list of index segments.
+   * @param aggregationsInfo list of aggregation info.
+   */
+  private static void rewriteFastHllColumnName(List&lt;IndexSegment&gt; indexSegments,
+      List&lt;AggregationInfo&gt; aggregationsInfo) {
+    // Consistent check.
+<span class="fc bfc" id="L62" title="All 2 branches covered.">    for (AggregationInfo aggregationInfo : aggregationsInfo) {</span>
+<span class="fc bfc" id="L63" title="All 2 branches covered.">      if (aggregationInfo.getAggregationType().equalsIgnoreCase(&quot;fasthll&quot;)) {</span>
+<span class="fc" id="L64">        String column = aggregationInfo.getAggregationParams().get(&quot;column&quot;).trim();</span>
+<span class="fc" id="L65">        boolean isFirstSegment = true;</span>
+<span class="fc" id="L66">        String firstSegmentName = null;</span>
+<span class="fc" id="L67">        String hllDerivedColumn = null;</span>
+<span class="fc bfc" id="L68" title="All 2 branches covered.">        for (IndexSegment indexSegment : indexSegments) {</span>
+<span class="fc" id="L69">          SegmentMetadata segmentMetadata = indexSegment.getSegmentMetadata();</span>
+<span class="fc bfc" id="L70" title="All 2 branches covered.">          if (isFirstSegment) {</span>
+            // Use metadata from first index segment to perform rewrite.
+<span class="fc" id="L72">            isFirstSegment = false;</span>
+<span class="fc" id="L73">            firstSegmentName = segmentMetadata.getName();</span>
+<span class="fc" id="L74">            hllDerivedColumn = segmentMetadata.getDerivedColumn(column, MetricFieldSpec.DerivedMetricType.HLL);</span>
+<span class="pc bpc" id="L75" title="1 of 2 branches missed.">            if (hllDerivedColumn != null) {</span>
+<span class="nc" id="L76">              aggregationInfo.getAggregationParams().put(&quot;column&quot;, hllDerivedColumn);</span>
+            }
+          } else {
+            // Perform consistency check on other index segments.
+<span class="fc" id="L80">            String hllDerivedColumnToCheck =</span>
+                segmentMetadata.getDerivedColumn(column, MetricFieldSpec.DerivedMetricType.HLL);
+<span class="pc bpc" id="L82" title="1 of 2 branches missed.">            if (!Objects.equals(hllDerivedColumn, hllDerivedColumnToCheck)) {</span>
+<span class="nc" id="L83">              throw new RuntimeException(</span>
+                  &quot;Found inconsistency HLL derived column name. In segment &quot; + firstSegmentName + &quot;: &quot;
+                      + hllDerivedColumn + &quot;; In segment &quot; + segmentMetadata.getName() + &quot;: &quot;
+                      + hllDerivedColumnToCheck);
+            }
+          }
+<span class="fc" id="L89">        }</span>
+      }
+<span class="fc" id="L91">    }</span>
+<span class="fc" id="L92">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

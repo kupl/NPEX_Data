@@ -1,0 +1,1081 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>LLRealtimeSegmentDataManager.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.data.manager.realtime</a> &gt; <span class="el_source">LLRealtimeSegmentDataManager.java</span></div><h1>LLRealtimeSegmentDataManager.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.linkedin.pinot.core.data.manager.realtime;
+
+import com.google.common.base.Preconditions;
+import com.google.common.util.concurrent.Uninterruptibles;
+import com.linkedin.pinot.common.config.IndexingConfig;
+import com.linkedin.pinot.common.config.SegmentPartitionConfig;
+import com.linkedin.pinot.common.config.TableConfig;
+import com.linkedin.pinot.common.data.Schema;
+import com.linkedin.pinot.common.data.StarTreeIndexSpec;
+import com.linkedin.pinot.common.metadata.instance.InstanceZKMetadata;
+import com.linkedin.pinot.common.metadata.segment.LLCRealtimeSegmentZKMetadata;
+import com.linkedin.pinot.common.metadata.segment.RealtimeSegmentZKMetadata;
+import com.linkedin.pinot.common.metadata.stream.KafkaStreamMetadata;
+import com.linkedin.pinot.common.metrics.ServerGauge;
+import com.linkedin.pinot.common.metrics.ServerMeter;
+import com.linkedin.pinot.common.metrics.ServerMetrics;
+import com.linkedin.pinot.common.protocols.SegmentCompletionProtocol;
+import com.linkedin.pinot.common.utils.CommonConstants;
+import com.linkedin.pinot.common.utils.LLCSegmentName;
+import com.linkedin.pinot.common.utils.NetUtil;
+import com.linkedin.pinot.common.utils.TarGzCompressionUtils;
+import com.linkedin.pinot.core.data.GenericRow;
+import com.linkedin.pinot.core.data.extractors.FieldExtractorFactory;
+import com.linkedin.pinot.core.data.extractors.PlainFieldExtractor;
+import com.linkedin.pinot.core.indexsegment.IndexSegment;
+import com.linkedin.pinot.core.indexsegment.generator.SegmentVersion;
+import com.linkedin.pinot.core.io.readerwriter.PinotDataBufferMemoryManager;
+import com.linkedin.pinot.core.realtime.converter.RealtimeSegmentConverter;
+import com.linkedin.pinot.core.realtime.impl.RealtimeSegmentConfig;
+import com.linkedin.pinot.core.realtime.impl.RealtimeSegmentImpl;
+import com.linkedin.pinot.core.realtime.impl.kafka.KafkaLowLevelStreamProviderConfig;
+import com.linkedin.pinot.core.realtime.impl.kafka.KafkaMessageDecoder;
+import com.linkedin.pinot.core.realtime.impl.kafka.MessageBatch;
+import com.linkedin.pinot.core.realtime.impl.kafka.PinotKafkaConsumer;
+import com.linkedin.pinot.core.realtime.impl.kafka.PinotKafkaConsumerFactory;
+import com.linkedin.pinot.core.realtime.impl.kafka.SimpleConsumerWrapper;
+import com.linkedin.pinot.core.segment.index.loader.IndexLoadingConfig;
+import com.linkedin.pinot.server.realtime.ServerSegmentCompletionProtocolHandler;
+import com.yammer.metrics.core.Meter;
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicLong;
+import org.apache.commons.io.FileUtils;
+import org.joda.time.DateTime;
+import org.joda.time.DateTimeZone;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * Segment data manager for low level consumer realtime segments, which manages consumption and segment completion.
+ */
+public class LLRealtimeSegmentDataManager extends RealtimeSegmentDataManager {
+<span class="pc" id="L77">  protected enum State {</span>
+    // The state machine starts off with this state. While in this state we consume kafka events
+    // and index them in memory. We continue to be in this state until the end criteria is satisfied
+    // (time or number of rows)
+<span class="fc" id="L81">    INITIAL_CONSUMING,</span>
+
+    // In this state, we consume from kafka until we reach the _finalOffset (exclusive)
+<span class="fc" id="L84">    CATCHING_UP,</span>
+
+    // In this state, we sleep for MAX_HOLDING_TIME_MS, and the make a segmentConsumed() call to the
+    // controller.
+<span class="fc" id="L88">    HOLDING,</span>
+
+    // We have been asked to go Online from Consuming state, and are trying a last attempt to catch up to the
+    // target offset. In this state, we have a time constraint as well as a final offset constraint to look into
+    // before we stop consuming.
+<span class="fc" id="L93">    CONSUMING_TO_ONLINE,</span>
+
+    // We have been asked by the controller to retain the segment we have in memory at the current offset.
+    // We should build the segment, and replace it with the in-memory segment.
+<span class="fc" id="L97">    RETAINING,</span>
+
+    // We have been asked by the controller to commit the segment at the current offset. Build the segment
+    // and make a segmentCommit() call to the controller.
+<span class="fc" id="L101">    COMMITTING,</span>
+
+    // We have been asked to discard the in-memory segment we have. We will be serving queries, but not consuming
+    // anymore rows from kafka. We wait for a helix transition to go ONLINE, at which point, we can download the
+    // segment from the controller and replace it with the in-memory segment.
+<span class="fc" id="L106">    DISCARDED,</span>
+
+    // We have replaced our in-memory segment with the segment that has been built locally.
+<span class="fc" id="L109">    RETAINED,</span>
+
+    // We have committed our segment to the controller, and also replaced it locally with the constructed segment.
+<span class="fc" id="L112">    COMMITTED,</span>
+
+    // Something went wrong, we need to download the segment when we get the ONLINE transition.
+<span class="fc" id="L115">    ERROR;</span>
+
+    public boolean shouldConsume() {
+<span class="fc bfc" id="L118" title="All 6 branches covered.">      return this.equals(INITIAL_CONSUMING) || this.equals(CATCHING_UP) || this.equals(CONSUMING_TO_ONLINE);</span>
+    }
+
+    public boolean isFinal() {
+<span class="fc bfc" id="L122" title="All 8 branches covered.">      return this.equals(ERROR) || this.equals(COMMITTED) || this.equals(RETAINED) || this.equals(DISCARDED);</span>
+    }
+  }
+
+  private class SegmentFileAndOffset {
+    final String _segmentFile;
+    final long _offset;
+<span class="fc" id="L129">    SegmentFileAndOffset(String segmentFile, long offset) {</span>
+<span class="fc" id="L130">      _segmentFile = segmentFile;</span>
+<span class="fc" id="L131">      _offset = offset;</span>
+<span class="fc" id="L132">    }</span>
+    public long getOffset() {
+<span class="fc" id="L134">      return _offset;</span>
+    }
+
+    public String getSegmentFile() {
+<span class="fc" id="L138">      return _segmentFile;</span>
+    }
+
+public void deleteSegmentFile() {
+    /* NPEX_PATCH_BEGINS */
+<span class="fc bfc" id="L143" title="All 2 branches covered.">    if (_segmentFile != null) {</span>
+<span class="fc" id="L144">        FileUtils.deleteQuietly(new File(_segmentFile));</span>
+    }
+<span class="fc" id="L146">}</span>
+  }
+
+<span class="fc" id="L149">  private static final Logger LOGGER = LoggerFactory.getLogger(LLRealtimeSegmentDataManager.class);</span>
+  private static final long TIME_THRESHOLD_FOR_LOG_MINUTES = 1;
+  private static final long TIME_EXTENSION_ON_EMPTY_SEGMENT_HOURS = 1;
+  private static final int MSG_COUNT_THRESHOLD_FOR_LOG = 100000;
+  private static final int BUILD_TIME_LEASE_SECONDS = 30;
+  private static final int MAX_CONSECUTIVE_ERROR_COUNT = 5;
+
+  private final LLCRealtimeSegmentZKMetadata _segmentZKMetadata;
+  private final TableConfig _tableConfig;
+  private final RealtimeTableDataManager _realtimeTableDataManager;
+  private final KafkaMessageDecoder _messageDecoder;
+  private final int _segmentMaxRowCount;
+  private final String _resourceDataDir;
+  private final IndexLoadingConfig _indexLoadingConfig;
+  private final Schema _schema;
+  private final String _metricKeyName;
+  private final ServerMetrics _serverMetrics;
+  private final RealtimeSegmentImpl _realtimeSegment;
+  private volatile long _currentOffset;
+  private volatile State _state;
+<span class="fc" id="L169">  private volatile int _numRowsConsumed = 0;</span>
+<span class="fc" id="L170">  private volatile int consecutiveErrorCount = 0;</span>
+<span class="fc" id="L171">  private long _startTimeMs = 0;</span>
+  private final String _segmentNameStr;
+  private final SegmentVersion _segmentVersion;
+  private final SegmentBuildTimeLeaseExtender _leaseExtender;
+  private SegmentFileAndOffset _segmentFileAndOffset;
+  private PinotKafkaConsumerFactory _pinotKafkaConsumerFactory;
+
+  // Segment end criteria
+<span class="fc" id="L179">  private volatile long _consumeEndTime = 0;</span>
+<span class="fc" id="L180">  private volatile long _finalOffset = -1;</span>
+<span class="fc" id="L181">  private volatile boolean _shouldStop = false;</span>
+
+  // It takes 30s to locate controller leader, and more if there are multiple controller failures.
+  // For now, we let 31s pass for this state transition.
+  private static final int MAX_TIME_FOR_CONSUMING_TO_ONLINE_IN_SECONDS = 31;
+
+  private Thread _consumerThread;
+  private final String _kafkaTopic;
+  private final int _kafkaPartitionId;
+  final String _clientId;
+  private final LLCSegmentName _segmentName;
+  private final PlainFieldExtractor _fieldExtractor;
+<span class="fc" id="L193">  private PinotKafkaConsumer _consumerWrapper = null;</span>
+  private final File _resourceTmpDir;
+  private final String _tableName;
+  private final List&lt;String&gt; _invertedIndexColumns;
+  private final List&lt;String&gt; _noDictionaryColumns;
+  private final StarTreeIndexSpec _starTreeIndexSpec;
+  private final String _sortedColumn;
+<span class="fc" id="L200">  private Logger segmentLogger = LOGGER;</span>
+  private final String _tableStreamName;
+  private final PinotDataBufferMemoryManager _memoryManager;
+<span class="fc" id="L203">  private AtomicLong _lastUpdatedRawDocuments = new AtomicLong(0);</span>
+  private final String _instanceId;
+  private final ServerSegmentCompletionProtocolHandler _protocolHandler;
+  private final long _consumeStartTime;
+  private final long _startOffset;
+  private final KafkaStreamMetadata _kafkaStreamMetadata;
+  private final String _kafkaBootstrapNodes;
+
+<span class="fc" id="L211">  private long _lastLogTime = 0;</span>
+<span class="fc" id="L212">  private int _lastConsumedCount = 0;</span>
+<span class="fc" id="L213">  private String _stopReason = null;</span>
+  private final Semaphore _segBuildSemaphore;
+
+
+  // TODO each time this method is called, we print reason for stop. Good to print only once.
+  private boolean endCriteriaReached() {
+<span class="fc" id="L219">    Preconditions.checkState(_state.shouldConsume(), &quot;Incorrect state %s&quot;, _state);</span>
+<span class="fc" id="L220">    long now = now();</span>
+<span class="pc bpc" id="L221" title="1 of 4 branches missed.">    switch(_state) {</span>
+      case INITIAL_CONSUMING:
+        // The segment has been created, and we have not posted a segmentConsumed() message on the controller yet.
+        // We need to consume as much data as available, until we have either reached the max number of rows or
+        // the max time we are allowed to consume.
+<span class="fc bfc" id="L226" title="All 2 branches covered.">        if (now &gt;= _consumeEndTime) {</span>
+<span class="fc bfc" id="L227" title="All 2 branches covered.">          if (_realtimeSegment.getNumDocsIndexed() == 0) {</span>
+<span class="fc" id="L228">            segmentLogger.info(&quot;No events came in, extending time by {} hours&quot;, TIME_EXTENSION_ON_EMPTY_SEGMENT_HOURS);</span>
+<span class="fc" id="L229">            _consumeEndTime += TimeUnit.HOURS.toMillis(TIME_EXTENSION_ON_EMPTY_SEGMENT_HOURS);</span>
+<span class="fc" id="L230">            return false;</span>
+          }
+<span class="fc" id="L232">          segmentLogger.info(&quot;Stopping consumption due to time limit start={} now={} numRows={}&quot;, _startTimeMs, now, _numRowsConsumed);</span>
+<span class="fc" id="L233">          _stopReason = SegmentCompletionProtocol.REASON_TIME_LIMIT;</span>
+<span class="fc" id="L234">          return true;</span>
+<span class="fc bfc" id="L235" title="All 2 branches covered.">        } else if (_numRowsConsumed &gt;= _segmentMaxRowCount) {</span>
+<span class="fc" id="L236">          segmentLogger.info(&quot;Stopping consumption due to row limit nRows={} maxNRows={}&quot;, _numRowsConsumed,</span>
+              _segmentMaxRowCount);
+<span class="fc" id="L238">          _stopReason = SegmentCompletionProtocol.REASON_ROW_LIMIT;</span>
+<span class="fc" id="L239">          return true;</span>
+        }
+<span class="fc" id="L241">        return false;</span>
+
+      case CATCHING_UP:
+<span class="fc" id="L244">        _stopReason = null;</span>
+        // We have posted segmentConsumed() at least once, and the controller is asking us to catch up to a certain offset.
+        // There is no time limit here, so just check to see that we are still within the offset we need to reach.
+        // Going past the offset is an exception.
+<span class="fc bfc" id="L248" title="All 2 branches covered.">        if (_currentOffset == _finalOffset) {</span>
+<span class="fc" id="L249">          segmentLogger.info(&quot;Caught up to offset={}, state={}&quot;, _finalOffset, _state.toString());</span>
+<span class="fc" id="L250">          return true;</span>
+        }
+<span class="pc bpc" id="L252" title="1 of 2 branches missed.">        if (_currentOffset &gt; _finalOffset) {</span>
+<span class="nc" id="L253">          segmentLogger.error(&quot;Offset higher in state={}, current={}, final={}&quot;, _state.toString(), _currentOffset, _finalOffset);</span>
+<span class="nc" id="L254">          throw new RuntimeException(&quot;Past max offset&quot;);</span>
+        }
+<span class="fc" id="L256">        return false;</span>
+
+      case CONSUMING_TO_ONLINE:
+        // We are attempting to go from CONSUMING to ONLINE state. We are making a last attempt to catch up to the
+        // target offset. We have a time constraint, and need to stop consuming if we cannot get to the target offset
+        // within that time.
+<span class="fc bfc" id="L262" title="All 2 branches covered.">        if (_currentOffset == _finalOffset) {</span>
+<span class="fc" id="L263">          segmentLogger.info(&quot;Caught up to offset={}, state={}&quot;, _finalOffset, _state.toString());</span>
+<span class="fc" id="L264">          return true;</span>
+<span class="fc bfc" id="L265" title="All 2 branches covered.">        } else if (now &gt;= _consumeEndTime) {</span>
+<span class="fc" id="L266">          segmentLogger.info(&quot;Past max time budget: offset={}, state={}&quot;, _currentOffset, _state.toString());</span>
+<span class="fc" id="L267">          return true;</span>
+        }
+<span class="pc bpc" id="L269" title="1 of 2 branches missed.">        if (_currentOffset &gt; _finalOffset) {</span>
+<span class="nc" id="L270">          segmentLogger.error(&quot;Offset higher in state={}, current={}, final={}&quot;, _state.toString(), _currentOffset, _finalOffset);</span>
+<span class="nc" id="L271">          throw new RuntimeException(&quot;Past max offset&quot;);</span>
+        }
+<span class="fc" id="L273">        return false;</span>
+      default:
+<span class="nc" id="L275">        segmentLogger.error(&quot;Illegal state {}&quot; + _state.toString());</span>
+<span class="nc" id="L276">        throw new RuntimeException(&quot;Illegal state to consume&quot;);</span>
+    }
+  }
+
+  private void handleTransientKafkaErrors(Exception e) throws  Exception {
+<span class="nc" id="L281">    consecutiveErrorCount++;</span>
+<span class="nc bnc" id="L282" title="All 2 branches missed.">    if (consecutiveErrorCount &gt; MAX_CONSECUTIVE_ERROR_COUNT) {</span>
+<span class="nc" id="L283">      segmentLogger.warn(&quot;Kafka transient exception when fetching messages, stopping consumption after {} attempts&quot;, consecutiveErrorCount, e);</span>
+<span class="nc" id="L284">      throw e;</span>
+    } else {
+<span class="nc" id="L286">      segmentLogger.warn(&quot;Kafka transient exception when fetching messages, retrying (count={})&quot;, consecutiveErrorCount, e);</span>
+<span class="nc" id="L287">      Uninterruptibles.sleepUninterruptibly(1, TimeUnit.SECONDS);</span>
+<span class="nc" id="L288">      makeConsumerWrapper(&quot;Too many transient errors&quot;);</span>
+    }
+<span class="nc" id="L290">  }</span>
+
+  protected boolean consumeLoop() throws Exception {
+<span class="nc" id="L293">    _fieldExtractor.resetCounters();</span>
+<span class="nc" id="L294">    final long idlePipeSleepTimeMillis = 100;</span>
+<span class="nc" id="L295">    final long maxIdleCountBeforeStatUpdate = (3 * 60 * 1000)/(idlePipeSleepTimeMillis + _kafkaStreamMetadata.getKafkaFetchTimeoutMillis());  // 3 minute count</span>
+<span class="nc" id="L296">    long lastUpdatedOffset = _currentOffset;  // so that we always update the metric when we enter this method.</span>
+<span class="nc" id="L297">    long idleCount = 0;</span>
+    // At this point, we know that we can potentially move the offset, so the old saved segment file is not valid
+    // anymore. Remove the file if it exists.
+<span class="nc" id="L300">    removeSegmentFile();</span>
+
+<span class="nc" id="L302">    final long _endOffset = Long.MAX_VALUE; // No upper limit on Kafka offset</span>
+<span class="nc" id="L303">    segmentLogger.info(&quot;Starting consumption loop start offset {}, finalOffset {}&quot;, _currentOffset, _finalOffset);</span>
+<span class="nc bnc" id="L304" title="All 4 branches missed.">    while(!_shouldStop &amp;&amp; !endCriteriaReached()) {</span>
+      // Consume for the next _kafkaReadTime ms, or we get to final offset, whichever happens earlier,
+      // Update _currentOffset upon return from this method
+<span class="nc" id="L307">      MessageBatch messageBatch = null;</span>
+      try {
+<span class="nc" id="L309">        messageBatch = _consumerWrapper.fetchMessages(_currentOffset, _endOffset,</span>
+            _kafkaStreamMetadata.getKafkaFetchTimeoutMillis());
+<span class="nc" id="L311">        consecutiveErrorCount = 0;</span>
+<span class="nc" id="L312">      } catch (TimeoutException e) {</span>
+<span class="nc" id="L313">        handleTransientKafkaErrors(e);</span>
+<span class="nc" id="L314">        continue;</span>
+<span class="nc" id="L315">      } catch (SimpleConsumerWrapper.TransientConsumerException e) {</span>
+<span class="nc" id="L316">        handleTransientKafkaErrors(e);</span>
+<span class="nc" id="L317">        continue;</span>
+<span class="nc" id="L318">      } catch (SimpleConsumerWrapper.PermanentConsumerException e) {</span>
+<span class="nc" id="L319">        segmentLogger.warn(&quot;Kafka permanent exception when fetching messages, stopping consumption&quot;, e);</span>
+<span class="nc" id="L320">        throw e;</span>
+<span class="nc" id="L321">      } catch (Exception e) {</span>
+        // Unknown exception from Kafka. Treat as a transient exception.
+        // One such exception seen so far is java.net.SocketTimeoutException
+<span class="nc" id="L324">        handleTransientKafkaErrors(e);</span>
+<span class="nc" id="L325">        continue;</span>
+<span class="nc" id="L326">      }</span>
+
+<span class="nc" id="L328">      processKafkaEvents(messageBatch, idlePipeSleepTimeMillis);</span>
+
+<span class="nc bnc" id="L330" title="All 2 branches missed.">      if (_currentOffset != lastUpdatedOffset) {</span>
+        // We consumed something. Update the highest kafka offset as well as partition-consuming metric.
+<span class="nc" id="L332">        _serverMetrics.setValueOfTableGauge(_metricKeyName, ServerGauge.HIGHEST_KAFKA_OFFSET_CONSUMED, _currentOffset);</span>
+<span class="nc" id="L333">        _serverMetrics.setValueOfTableGauge(_metricKeyName, ServerGauge.LLC_PARTITION_CONSUMING, 1);</span>
+<span class="nc" id="L334">        lastUpdatedOffset = _currentOffset;</span>
+      } else {
+        // We did not consume any rows. Update the partition-consuming metric only if we have been idling for a long time.
+        // Create a new kafka consumer wrapper, in case we are stuck on something.
+<span class="nc bnc" id="L338" title="All 2 branches missed.">        if (++idleCount &gt; maxIdleCountBeforeStatUpdate) {</span>
+<span class="nc" id="L339">          _serverMetrics.setValueOfTableGauge(_metricKeyName, ServerGauge.LLC_PARTITION_CONSUMING, 1);</span>
+<span class="nc" id="L340">          idleCount = 0;</span>
+<span class="nc" id="L341">          makeConsumerWrapper(&quot;Idle for too long&quot;);</span>
+        }
+      }
+<span class="nc" id="L344">    }</span>
+
+<span class="nc" id="L346">    _serverMetrics.addMeteredTableValue(_metricKeyName, ServerMeter.ROWS_WITH_ERRORS,</span>
+        (long) _fieldExtractor.getTotalErrors());
+<span class="nc" id="L348">    _serverMetrics.addMeteredTableValue(_metricKeyName, ServerMeter.ROWS_NEEDING_CONVERSIONS,</span>
+        (long) _fieldExtractor.getTotalConversions());
+<span class="nc" id="L350">    _serverMetrics.addMeteredTableValue(_metricKeyName, ServerMeter.ROWS_WITH_NULL_VALUES,</span>
+        (long) _fieldExtractor.getTotalNulls());
+<span class="nc" id="L352">    _serverMetrics.addMeteredTableValue(_metricKeyName, ServerMeter.COLUMNS_WITH_NULL_VALUES,</span>
+        (long) _fieldExtractor.getTotalNullCols());
+<span class="nc" id="L354">    return true;</span>
+  }
+
+  private void processKafkaEvents(MessageBatch messagesAndOffsets, long idlePipeSleepTimeMillis) {
+<span class="nc" id="L358">    Meter realtimeRowsConsumedMeter = null;</span>
+<span class="nc" id="L359">    Meter realtimeRowsDroppedMeter = null;</span>
+
+<span class="nc" id="L361">    int indexedMessageCount = 0;</span>
+<span class="nc" id="L362">    int kafkaMessageCount = 0;</span>
+<span class="nc" id="L363">    boolean canTakeMore = true;</span>
+<span class="nc" id="L364">    GenericRow decodedRow = null;</span>
+<span class="nc" id="L365">    GenericRow transformedRow = null;</span>
+<span class="nc bnc" id="L366" title="All 2 branches missed.">    for (int index = 0; index &lt; messagesAndOffsets.getMessageCount(); index ++) {</span>
+<span class="nc bnc" id="L367" title="All 4 branches missed.">      if (_shouldStop || endCriteriaReached()) {</span>
+<span class="nc" id="L368">        break;</span>
+      }
+<span class="nc bnc" id="L370" title="All 2 branches missed.">      if (!canTakeMore) {</span>
+        // The RealtimeSegmentImpl that we are pushing rows into has indicated that it cannot accept any more
+        // rows. This can happen in one of two conditions:
+        // 1. We are in INITIAL_CONSUMING state, and we somehow exceeded the max number of rows we are allowed to consume
+        //    for this row. Something is seriously wrong, because endCriteriaReached() should have returned true when
+        //    we hit the row limit.
+        //    Throw an exception.
+        //
+        // 2. We are in CATCHING_UP state, and we legally hit this error due to Kafka unclean leader election where
+        //    offsets get changed with higher generation numbers for some pinot servers but not others. So, if another
+        //    server (who got a larger kafka offset) asked us to catch up to that offset, but we are connected to a
+        //    broker who has smaller offsets, then we may try to push more rows into the buffer than maximum. This
+        //    is a rare case, and we really don't know how to handle this at this time.
+        //    Throw an exception.
+        //
+<span class="nc" id="L385">        segmentLogger.error(&quot;Buffer full with {} rows consumed (row limit {})&quot;, _numRowsConsumed, _segmentMaxRowCount);</span>
+<span class="nc" id="L386">        throw new RuntimeException(&quot;Realtime segment full&quot;);</span>
+      }
+
+      // Index each message
+<span class="nc" id="L390">      decodedRow = GenericRow.createOrReuseRow(decodedRow);</span>
+
+<span class="nc" id="L392">      decodedRow = _messageDecoder</span>
+          .decode(messagesAndOffsets.getMessageAtIndex(index), messagesAndOffsets.getMessageOffsetAtIndex(index),
+              messagesAndOffsets.getMessageLengthAtIndex(index), decodedRow);
+
+<span class="nc bnc" id="L396" title="All 2 branches missed.">      if (decodedRow != null) {</span>
+<span class="nc" id="L397">        transformedRow = GenericRow.createOrReuseRow(transformedRow);</span>
+<span class="nc" id="L398">        transformedRow = _fieldExtractor.transform(decodedRow, transformedRow);</span>
+
+<span class="nc bnc" id="L400" title="All 2 branches missed.">        if (transformedRow != null) {</span>
+<span class="nc" id="L401">          realtimeRowsConsumedMeter = _serverMetrics</span>
+              .addMeteredTableValue(_metricKeyName, ServerMeter.REALTIME_ROWS_CONSUMED, 1, realtimeRowsConsumedMeter);
+<span class="nc" id="L403">          indexedMessageCount++;</span>
+        } else {
+<span class="nc" id="L405">          realtimeRowsDroppedMeter = _serverMetrics</span>
+              .addMeteredTableValue(_metricKeyName, ServerMeter.INVALID_REALTIME_ROWS_DROPPED, 1,
+                  realtimeRowsDroppedMeter);
+        }
+
+<span class="nc" id="L410">        canTakeMore = _realtimeSegment.index(transformedRow);</span>
+      } else {
+<span class="nc" id="L412">        realtimeRowsDroppedMeter = _serverMetrics</span>
+            .addMeteredTableValue(_metricKeyName, ServerMeter.INVALID_REALTIME_ROWS_DROPPED, 1,
+                realtimeRowsDroppedMeter);
+      }
+
+<span class="nc" id="L417">      _currentOffset = messagesAndOffsets.getNextKafkaMessageOffsetAtIndex(index);</span>
+<span class="nc" id="L418">      _numRowsConsumed++;</span>
+<span class="nc" id="L419">      kafkaMessageCount++;</span>
+    }
+<span class="nc" id="L421">    updateCurrentDocumentCountMetrics();</span>
+<span class="nc bnc" id="L422" title="All 2 branches missed.">    if (kafkaMessageCount != 0) {</span>
+<span class="nc" id="L423">      segmentLogger.debug(&quot;Indexed {} messages ({} messages read from Kafka) current offset {}&quot;, indexedMessageCount,</span>
+          kafkaMessageCount, _currentOffset);
+    } else {
+      // If there were no messages to be fetched from Kafka, wait for a little bit as to avoid hammering the
+      // Kafka broker
+<span class="nc" id="L428">      Uninterruptibles.sleepUninterruptibly(idlePipeSleepTimeMillis, TimeUnit.MILLISECONDS);</span>
+    }
+<span class="nc" id="L430">  }</span>
+
+<span class="fc" id="L432">  public class PartitionConsumer implements Runnable {</span>
+    public void run() {
+<span class="fc" id="L434">      long initialConsumptionEnd = 0L;</span>
+<span class="fc" id="L435">      long lastCatchUpStart = 0L;</span>
+<span class="fc" id="L436">      long catchUpTimeMillis = 0L;</span>
+<span class="fc" id="L437">      _startTimeMs = now();</span>
+      try {
+<span class="fc bfc" id="L439" title="All 2 branches covered.">        while (!_state.isFinal()) {</span>
+<span class="fc bfc" id="L440" title="All 2 branches covered.">          if (_state.shouldConsume()) {</span>
+<span class="fc" id="L441">            consumeLoop();  // Consume until we reached the end criteria, or we are stopped.</span>
+          }
+<span class="fc bfc" id="L443" title="All 2 branches covered.">          if (_shouldStop) {</span>
+<span class="fc" id="L444">            break;</span>
+          }
+
+<span class="fc bfc" id="L447" title="All 2 branches covered.">          if (_state == State.INITIAL_CONSUMING) {</span>
+<span class="fc" id="L448">            initialConsumptionEnd = now();</span>
+<span class="fc" id="L449">            _serverMetrics.setValueOfTableGauge(_metricKeyName,</span>
+                ServerGauge.LAST_REALTIME_SEGMENT_INITIAL_CONSUMPTION_DURATION_SECONDS,
+                TimeUnit.MILLISECONDS.toSeconds(initialConsumptionEnd - _startTimeMs));
+<span class="fc bfc" id="L452" title="All 2 branches covered.">          } else if (_state == State.CATCHING_UP) {</span>
+<span class="fc" id="L453">            catchUpTimeMillis += now() - lastCatchUpStart;</span>
+<span class="fc" id="L454">            _serverMetrics.setValueOfTableGauge(_metricKeyName,</span>
+                ServerGauge.LAST_REALTIME_SEGMENT_CATCHUP_DURATION_SECONDS,
+                TimeUnit.MILLISECONDS.toSeconds(catchUpTimeMillis));
+          }
+
+          // If we are sending segmentConsumed() to the controller, we are in HOLDING state.
+<span class="fc" id="L460">          _state = State.HOLDING;</span>
+<span class="fc" id="L461">          SegmentCompletionProtocol.Response response = postSegmentConsumedMsg();</span>
+<span class="fc" id="L462">          SegmentCompletionProtocol.ControllerResponseStatus status = response.getStatus();</span>
+<span class="fc" id="L463">          long rspOffset = response.getOffset();</span>
+          boolean success;
+<span class="pc bpc" id="L465" title="1 of 7 branches missed.">          switch (status) {</span>
+            case NOT_LEADER:
+<span class="fc" id="L467">              _serverMetrics.addMeteredTableValue(_metricKeyName, ServerMeter.LLC_CONTROLLER_RESPONSE_NOT_LEADER, 1);</span>
+              // Retain the same state
+<span class="fc" id="L469">              segmentLogger.warn(&quot;Got not leader response&quot;);</span>
+<span class="fc" id="L470">              hold();</span>
+<span class="fc" id="L471">              break;</span>
+            case CATCH_UP:
+<span class="fc" id="L473">              _serverMetrics.addMeteredTableValue(_metricKeyName, ServerMeter.LLC_CONTROLLER_RESPONSE_CATCH_UP, 1);</span>
+<span class="pc bpc" id="L474" title="1 of 2 branches missed.">              if (rspOffset &lt;= _currentOffset) {</span>
+                // Something wrong with the controller. Back off and try again.
+<span class="nc" id="L476">                segmentLogger.error(&quot;Invalid catchup offset {} in controller response, current offset {}&quot;, rspOffset,</span>
+                    _currentOffset);
+<span class="nc" id="L478">                hold();</span>
+              } else {
+<span class="fc" id="L480">                _state = State.CATCHING_UP;</span>
+<span class="fc" id="L481">                _finalOffset = rspOffset;</span>
+<span class="fc" id="L482">                lastCatchUpStart = now();</span>
+                // We will restart consumption when we loop back above.
+              }
+<span class="fc" id="L485">              break;</span>
+            case HOLD:
+<span class="fc" id="L487">              _serverMetrics.addMeteredTableValue(_metricKeyName, ServerMeter.LLC_CONTROLLER_RESPONSE_HOLD, 1);</span>
+<span class="fc" id="L488">              hold();</span>
+<span class="fc" id="L489">              break;</span>
+            case DISCARD:
+<span class="fc" id="L491">              _serverMetrics.addMeteredTableValue(_metricKeyName, ServerMeter.LLC_CONTROLLER_RESPONSE_DISCARD, 1);</span>
+              // Keep this in memory, but wait for the online transition, and download when it comes in.
+<span class="fc" id="L493">              _state = State.DISCARDED;</span>
+<span class="fc" id="L494">              break;</span>
+            case KEEP:
+<span class="fc" id="L496">              _serverMetrics.addMeteredTableValue(_metricKeyName, ServerMeter.LLC_CONTROLLER_RESPONSE_KEEP, 1);</span>
+<span class="fc" id="L497">              _state = State.RETAINING;</span>
+<span class="fc" id="L498">              success = buildSegmentAndReplace();</span>
+<span class="pc bpc" id="L499" title="1 of 2 branches missed.">              if (success) {</span>
+<span class="fc" id="L500">                _state = State.RETAINED;</span>
+              } else {
+                // Could not build segment for some reason. We can only download it.
+<span class="nc" id="L503">                _state = State.ERROR;</span>
+              }
+<span class="nc" id="L505">              break;</span>
+            case COMMIT:
+<span class="fc" id="L507">              _serverMetrics.addMeteredTableValue(_metricKeyName, ServerMeter.LLC_CONTROLLER_RESPONSE_COMMIT, 1);</span>
+<span class="fc" id="L508">              _state = State.COMMITTING;</span>
+<span class="fc" id="L509">              long buildTimeSeconds = response.getBuildTimeSeconds();</span>
+<span class="fc" id="L510">              final String segmentTarFile = buildSegmentForCommit(buildTimeSeconds * 1000L);</span>
+<span class="fc bfc" id="L511" title="All 2 branches covered.">              if (segmentTarFile == null) {</span>
+                // We could not build the segment. Go into error state.
+<span class="fc" id="L513">                _state = State.ERROR;</span>
+              } else {
+<span class="fc" id="L515">                success = commitSegment(segmentTarFile, response);</span>
+<span class="pc bpc" id="L516" title="1 of 2 branches missed.">                if (success) {</span>
+<span class="fc" id="L517">                  _state = State.COMMITTED;</span>
+                } else {
+                  // If for any reason commit failed, we don't want to be in COMMITTING state when we hold.
+                  // Change the state to HOLDING before looping around.
+<span class="nc" id="L521">                  _state = State.HOLDING;</span>
+<span class="nc" id="L522">                  segmentLogger.info(&quot;Could not commit segment. Retrying after hold&quot;);</span>
+<span class="nc" id="L523">                  hold();</span>
+                }
+              }
+<span class="nc" id="L526">              break;</span>
+            default:
+<span class="nc" id="L528">              segmentLogger.error(&quot;Holding after response from Controller: {}&quot;, response.toJsonString());</span>
+<span class="nc" id="L529">              hold();</span>
+              break;
+          }
+<span class="fc" id="L532">        }</span>
+<span class="fc" id="L533">      } catch (Exception e) {</span>
+<span class="fc" id="L534">        segmentLogger.error(&quot;Exception while in work&quot;, e);</span>
+<span class="fc" id="L535">        postStopConsumedMsg(e.getClass().getName());</span>
+<span class="fc" id="L536">        _state = State.ERROR;</span>
+<span class="fc" id="L537">        _serverMetrics.setValueOfTableGauge(_metricKeyName, ServerGauge.LLC_PARTITION_CONSUMING, 0);</span>
+<span class="fc" id="L538">        return;</span>
+<span class="fc" id="L539">      }</span>
+
+<span class="fc" id="L541">      removeSegmentFile();</span>
+
+<span class="pc bpc" id="L543" title="1 of 2 branches missed.">      if (initialConsumptionEnd != 0L) {</span>
+<span class="fc" id="L544">        _serverMetrics.setValueOfTableGauge(_metricKeyName,</span>
+            ServerGauge.LAST_REALTIME_SEGMENT_COMPLETION_DURATION_SECONDS,
+            TimeUnit.MILLISECONDS.toSeconds(now() - initialConsumptionEnd));
+      }
+<span class="fc" id="L548">      _serverMetrics.setValueOfTableGauge(_metricKeyName, ServerGauge.LLC_PARTITION_CONSUMING, 0);</span>
+<span class="fc" id="L549">    }</span>
+  }
+
+  private File makeSegmentDirPath() {
+<span class="nc" id="L553">    return new File(_resourceDataDir, _segmentZKMetadata.getSegmentName());</span>
+  }
+
+  protected String buildSegmentForCommit(long buildTimeLeaseMs) {
+    try {
+<span class="fc bfc" id="L558" title="All 2 branches covered.">      if (_segmentFileAndOffset != null) {</span>
+<span class="pc bpc" id="L559" title="1 of 2 branches missed.">        if (_segmentFileAndOffset.getOffset() == _currentOffset) {</span>
+          // Double-check that we have the file, just in case.
+<span class="fc" id="L561">          String segTarFile = _segmentFileAndOffset.getSegmentFile();</span>
+<span class="pc bpc" id="L562" title="1 of 2 branches missed.">          if (new File(segTarFile).exists()) {</span>
+<span class="fc" id="L563">            return _segmentFileAndOffset.getSegmentFile();</span>
+          } else {
+<span class="nc" id="L565">            _segmentFileAndOffset = null;</span>
+          }
+        }
+<span class="nc" id="L568">        removeSegmentFile();</span>
+      }
+<span class="fc bfc" id="L570" title="All 2 branches covered.">      if (buildTimeLeaseMs &lt;= 0) {</span>
+<span class="pc bpc" id="L571" title="1 of 2 branches missed.">        if (_segBuildSemaphore == null) {</span>
+<span class="fc" id="L572">          buildTimeLeaseMs = SegmentCompletionProtocol.getDefaultMaxSegmentCommitTimeSeconds() * 1000L;</span>
+        } else {
+          // We know we are going to use a semaphore to limit number of segment builds, and could be
+          // blocked for a long time. The controller has not provided a lease time, so set one to
+          // some reasonable guess here.
+<span class="nc" id="L577">          buildTimeLeaseMs = BUILD_TIME_LEASE_SECONDS * 1000;</span>
+        }
+      }
+<span class="fc" id="L580">      _leaseExtender.addSegment(_segmentNameStr, buildTimeLeaseMs, _currentOffset);</span>
+<span class="fc" id="L581">      String segTarFile =  buildSegmentInternal(true);</span>
+<span class="fc" id="L582">      _segmentFileAndOffset = new SegmentFileAndOffset(segTarFile, _currentOffset);</span>
+<span class="fc" id="L583">      return segTarFile;</span>
+    } finally {
+<span class="pc" id="L585">      _leaseExtender.removeSegment(_segmentNameStr);</span>
+    }
+  }
+
+  protected String buildSegmentInternal(boolean forCommit) {
+    try {
+<span class="nc bnc" id="L591" title="All 2 branches missed.">      if (_segBuildSemaphore != null) {</span>
+<span class="nc" id="L592">        segmentLogger.info(&quot;Waiting to acquire semaphore for building segment&quot;);</span>
+<span class="nc" id="L593">        _segBuildSemaphore.acquire();</span>
+      }
+<span class="nc" id="L595">      long startTimeMillis = System.currentTimeMillis();</span>
+      // Build a segment from in-memory rows.If buildTgz is true, then build the tar.gz file as well
+      // TODO Use an auto-closeable object to delete temp resources.
+<span class="nc" id="L598">      File tempSegmentFolder = new File(_resourceTmpDir, &quot;tmp-&quot; + _segmentNameStr + &quot;-&quot; + String.valueOf(now()));</span>
+      // lets convert the segment now
+<span class="nc" id="L600">      RealtimeSegmentConverter converter =</span>
+          new RealtimeSegmentConverter(_realtimeSegment, tempSegmentFolder.getAbsolutePath(), _schema,
+              _segmentZKMetadata.getTableName(), _segmentZKMetadata.getSegmentName(), _sortedColumn,
+              _invertedIndexColumns, _noDictionaryColumns, _starTreeIndexSpec);
+<span class="nc" id="L604">      logStatistics();</span>
+<span class="nc" id="L605">      segmentLogger.info(&quot;Trying to build segment&quot;);</span>
+<span class="nc" id="L606">      final long buildStartTime = now();</span>
+      try {
+<span class="nc" id="L608">        converter.build(_segmentVersion, _serverMetrics);</span>
+<span class="nc" id="L609">      } catch (Exception e) {</span>
+<span class="nc" id="L610">        segmentLogger.error(&quot;Could not build segment&quot;, e);</span>
+<span class="nc" id="L611">        FileUtils.deleteQuietly(tempSegmentFolder);</span>
+<span class="nc" id="L612">        return null;</span>
+<span class="nc" id="L613">      }</span>
+<span class="nc" id="L614">      final long buildEndTime = now();</span>
+<span class="nc" id="L615">      segmentLogger.info(&quot;Successfully built segment in {} ms&quot;, (buildEndTime - buildStartTime));</span>
+<span class="nc" id="L616">      File destDir = makeSegmentDirPath();</span>
+<span class="nc" id="L617">      FileUtils.deleteQuietly(destDir);</span>
+      try {
+<span class="nc" id="L619">        FileUtils.moveDirectory(tempSegmentFolder.listFiles()[0], destDir);</span>
+<span class="nc bnc" id="L620" title="All 2 branches missed.">        if (forCommit) {</span>
+<span class="nc" id="L621">          TarGzCompressionUtils.createTarGzOfDirectory(destDir.getAbsolutePath());</span>
+        }
+<span class="nc" id="L623">      } catch (IOException e) {</span>
+<span class="nc" id="L624">        segmentLogger.error(&quot;Exception during move/tar segment&quot;, e);</span>
+<span class="nc" id="L625">        FileUtils.deleteQuietly(tempSegmentFolder);</span>
+<span class="nc" id="L626">        return null;</span>
+<span class="nc" id="L627">      }</span>
+<span class="nc" id="L628">      FileUtils.deleteQuietly(tempSegmentFolder);</span>
+<span class="nc" id="L629">      long endTimeMillis = System.currentTimeMillis();</span>
+
+<span class="nc" id="L631">      _serverMetrics.setValueOfTableGauge(_metricKeyName, ServerGauge.LAST_REALTIME_SEGMENT_CREATION_DURATION_SECONDS,</span>
+          TimeUnit.MILLISECONDS.toSeconds(endTimeMillis - startTimeMillis));
+
+<span class="nc bnc" id="L634" title="All 2 branches missed.">      if (forCommit) {</span>
+<span class="nc" id="L635">        return destDir.getAbsolutePath() + TarGzCompressionUtils.TAR_GZ_FILE_EXTENTION;</span>
+      }
+<span class="nc" id="L637">      return destDir.getAbsolutePath();</span>
+<span class="nc" id="L638">    } catch (InterruptedException e) {</span>
+<span class="nc" id="L639">      segmentLogger.error(&quot;Interrupted while waiting for semaphore&quot;);</span>
+<span class="nc" id="L640">      return null;</span>
+    } finally {
+<span class="nc bnc" id="L642" title="All 12 branches missed.">      if (_segBuildSemaphore != null) {</span>
+<span class="nc" id="L643">        _segBuildSemaphore.release();</span>
+      }
+    }
+  }
+
+  protected SegmentCompletionProtocol.Response doSplitCommit(File segmentTarFile, SegmentCompletionProtocol.Response prevResponse) {
+<span class="nc" id="L649">    SegmentCompletionProtocol.Response segmentCommitStartResponse = _protocolHandler.segmentCommitStart(_currentOffset, _segmentNameStr);</span>
+<span class="nc bnc" id="L650" title="All 2 branches missed.">    if (!segmentCommitStartResponse.getStatus().equals(SegmentCompletionProtocol.ControllerResponseStatus.COMMIT_CONTINUE)) {</span>
+<span class="nc" id="L651">      segmentLogger.warn(&quot;CommitStart failed  with response {}&quot;, segmentCommitStartResponse.toJsonString());</span>
+<span class="nc" id="L652">      return SegmentCompletionProtocol.RESP_FAILED;</span>
+    }
+
+<span class="nc" id="L655">    SegmentCompletionProtocol.Response segmentCommitUploadResponse = _protocolHandler.segmentCommitUpload(</span>
+        _currentOffset, _segmentNameStr, segmentTarFile, prevResponse.getControllerVipUrl());
+<span class="nc bnc" id="L657" title="All 2 branches missed.">    if (!segmentCommitUploadResponse.getStatus().equals(SegmentCompletionProtocol.ControllerResponseStatus.UPLOAD_SUCCESS)) {</span>
+<span class="nc" id="L658">      segmentLogger.warn(&quot;Segment upload failed  with response {}&quot;, segmentCommitUploadResponse.toJsonString());</span>
+<span class="nc" id="L659">      return SegmentCompletionProtocol.RESP_FAILED;</span>
+    }
+
+<span class="nc" id="L662">    SegmentCompletionProtocol.Response commitEndResponse =  _protocolHandler.segmentCommitEnd(_currentOffset,</span>
+        _segmentNameStr, segmentCommitUploadResponse.getSegmentLocation(), _memoryManager.getTotalAllocatedBytes());
+<span class="nc bnc" id="L664" title="All 2 branches missed.">    if (!commitEndResponse.getStatus().equals(SegmentCompletionProtocol.ControllerResponseStatus.COMMIT_SUCCESS))  {</span>
+<span class="nc" id="L665">      segmentLogger.warn(&quot;CommitEnd failed  with response {}&quot;, commitEndResponse.toJsonString());</span>
+<span class="nc" id="L666">      return SegmentCompletionProtocol.RESP_FAILED;</span>
+    }
+<span class="nc" id="L668">    return commitEndResponse;</span>
+  }
+
+  protected boolean commitSegment(final String segTarFileName, SegmentCompletionProtocol.Response response) {
+<span class="fc" id="L672">    File segTarFile = new File(segTarFileName);</span>
+<span class="pc bpc" id="L673" title="1 of 2 branches missed.">    if (!segTarFile.exists()) {</span>
+<span class="nc" id="L674">      throw new RuntimeException(&quot;Segment file does not exist:&quot; + segTarFileName);</span>
+    }
+    SegmentCompletionProtocol.Response returnedResponse;
+<span class="pc bpc" id="L677" title="3 of 4 branches missed.">    if (response.getIsSplitCommit() &amp;&amp; _indexLoadingConfig.isEnableSplitCommit()) {</span>
+      // Send segmentStart, segmentUpload, &amp; segmentCommitEnd to the controller
+      // if that succeeds, swap in-memory segment with the one built.
+<span class="nc" id="L680">      returnedResponse = doSplitCommit(segTarFile, response);</span>
+    } else {
+      // Send segmentCommit() to the controller
+      // if that succeeds, swap in-memory segment with the one built.
+<span class="fc" id="L684">      returnedResponse = postSegmentCommitMsg(segTarFile);</span>
+    }
+<span class="fc bfc" id="L686" title="All 2 branches covered.">    if (!returnedResponse.getStatus().equals(SegmentCompletionProtocol.ControllerResponseStatus.COMMIT_SUCCESS)) {</span>
+<span class="fc" id="L687">      return false;</span>
+    }
+<span class="fc" id="L689">    _realtimeTableDataManager.replaceLLSegment(_segmentNameStr, _indexLoadingConfig);</span>
+<span class="fc" id="L690">    removeSegmentFile();</span>
+<span class="fc" id="L691">    return true;</span>
+  }
+
+  protected SegmentCompletionProtocol.Response postSegmentCommitMsg(File segmentTarFile) {
+<span class="nc" id="L695">    SegmentCompletionProtocol.Response response = _protocolHandler.segmentCommit(_currentOffset, _segmentNameStr,</span>
+        _memoryManager.getTotalAllocatedBytes(), segmentTarFile);
+<span class="nc bnc" id="L697" title="All 2 branches missed.">    if (!response.getStatus().equals(SegmentCompletionProtocol.ControllerResponseStatus.COMMIT_SUCCESS)) {</span>
+<span class="nc" id="L698">      segmentLogger.warn(&quot;Commit failed  with response {}&quot;, response.toJsonString());</span>
+    }
+<span class="nc" id="L700">    return response;</span>
+  }
+
+  protected boolean buildSegmentAndReplace() {
+<span class="nc" id="L704">    String segmentDirName = buildSegmentInternal(false);</span>
+<span class="nc bnc" id="L705" title="All 2 branches missed.">    if (segmentDirName == null) {</span>
+<span class="nc" id="L706">      return false;</span>
+    }
+<span class="nc" id="L708">    _realtimeTableDataManager.replaceLLSegment(_segmentNameStr, _indexLoadingConfig);</span>
+<span class="nc" id="L709">    return true;</span>
+  }
+
+  protected void hold() {
+    try {
+<span class="nc" id="L714">      Thread.sleep(SegmentCompletionProtocol.MAX_HOLD_TIME_MS);</span>
+<span class="nc" id="L715">    } catch (InterruptedException e) {</span>
+<span class="nc" id="L716">      segmentLogger.warn(&quot;Interrupted while holding&quot;);</span>
+<span class="nc" id="L717">    }</span>
+<span class="nc" id="L718">  }</span>
+
+  // Inform the controller that the server had to stop consuming due to an error.
+  protected void postStopConsumedMsg(String reason) {
+    do {
+<span class="nc" id="L723">      SegmentCompletionProtocol.Request.Params params = new SegmentCompletionProtocol.Request.Params();</span>
+<span class="nc" id="L724">      params.withOffset(_currentOffset).withReason(reason).withSegmentName(_segmentNameStr);</span>
+
+<span class="nc" id="L726">      SegmentCompletionProtocol.Response response = _protocolHandler.segmentStoppedConsuming(params);</span>
+<span class="nc bnc" id="L727" title="All 2 branches missed.">      if (response.getStatus() == SegmentCompletionProtocol.ControllerResponseStatus.PROCESSED) {</span>
+<span class="nc" id="L728">        LOGGER.info(&quot;Got response {}&quot;, response.toJsonString());</span>
+<span class="nc" id="L729">        break;</span>
+      }
+<span class="nc" id="L731">      Uninterruptibles.sleepUninterruptibly(10, TimeUnit.SECONDS);</span>
+<span class="nc" id="L732">      LOGGER.info(&quot;Retrying after response {}&quot;, response.toJsonString());</span>
+<span class="nc bnc" id="L733" title="All 2 branches missed.">    } while (!_shouldStop);</span>
+<span class="nc" id="L734">  }</span>
+
+  protected SegmentCompletionProtocol.Response postSegmentConsumedMsg() {
+    // Post segmentConsumed to current leader.
+    // Retry maybe once if leader is not found.
+<span class="nc" id="L739">    SegmentCompletionProtocol.Request.Params params = new SegmentCompletionProtocol.Request.Params();</span>
+<span class="nc" id="L740">    params.withOffset(_currentOffset).withSegmentName(_segmentNameStr).withReason(_stopReason);</span>
+<span class="nc" id="L741">    return _protocolHandler.segmentConsumed(params);</span>
+  }
+
+  private void removeSegmentFile() {
+<span class="fc bfc" id="L745" title="All 2 branches covered.">    if (_segmentFileAndOffset != null) {</span>
+<span class="fc" id="L746">      _segmentFileAndOffset.deleteSegmentFile();</span>
+<span class="fc" id="L747">      _segmentFileAndOffset = null;</span>
+    }
+<span class="fc" id="L749">  }</span>
+
+  public void goOnlineFromConsuming(RealtimeSegmentZKMetadata metadata) throws InterruptedException {
+<span class="fc" id="L752">    LLCRealtimeSegmentZKMetadata llcMetadata = (LLCRealtimeSegmentZKMetadata)metadata;</span>
+    // Remove the segment file before we do anything else.
+<span class="fc" id="L754">    removeSegmentFile();</span>
+<span class="fc" id="L755">    _leaseExtender.removeSegment(_segmentNameStr);</span>
+<span class="fc" id="L756">    final long endOffset = llcMetadata.getEndOffset();</span>
+<span class="fc" id="L757">    segmentLogger.info(&quot;State: {}, transitioning from CONSUMING to ONLINE (startOffset: {}, endOffset: {})&quot;,</span>
+        _state.toString(), _startOffset, endOffset);
+<span class="fc" id="L759">    stop();</span>
+<span class="fc" id="L760">    segmentLogger.info(&quot;Consumer thread stopped in state {}&quot;, _state.toString());</span>
+
+<span class="pc bpc" id="L762" title="1 of 4 branches missed.">    switch (_state) {</span>
+      case COMMITTED:
+      case RETAINED:
+        // Nothing to do. we already built local segment and swapped it with in-memory data.
+<span class="fc" id="L766">        segmentLogger.info(&quot;State {}. Nothing to do&quot;, _state.toString());</span>
+<span class="fc" id="L767">        break;</span>
+      case DISCARDED:
+      case ERROR:
+<span class="fc" id="L770">        segmentLogger.info(&quot;State {}. Downloading to replace&quot;, _state.toString());</span>
+<span class="fc" id="L771">        downloadSegmentAndReplace(llcMetadata);</span>
+<span class="fc" id="L772">        break;</span>
+      case CATCHING_UP:
+      case HOLDING:
+      case INITIAL_CONSUMING:
+        // Allow to catch up upto final offset, and then replace.
+<span class="fc bfc" id="L777" title="All 2 branches covered.">        if (_currentOffset &gt; endOffset) {</span>
+          // We moved ahead of the offset that is committed in ZK.
+<span class="fc" id="L779">          segmentLogger.warn(&quot;Current offset {} ahead of the offset in zk {}. Downloading to replace&quot;, _currentOffset,</span>
+              endOffset);
+<span class="fc" id="L781">          downloadSegmentAndReplace(llcMetadata);</span>
+<span class="fc bfc" id="L782" title="All 2 branches covered.">        } else if (_currentOffset == endOffset) {</span>
+<span class="fc" id="L783">          segmentLogger.info(&quot;Current offset {} matches offset in zk {}. Replacing segment&quot;, _currentOffset, endOffset);</span>
+<span class="fc" id="L784">          buildSegmentAndReplace();</span>
+        } else {
+<span class="fc" id="L786">          segmentLogger.info(&quot;Attempting to catch up from offset {} to {} &quot;, _currentOffset, endOffset);</span>
+<span class="fc" id="L787">          boolean success = catchupToFinalOffset(endOffset,</span>
+              TimeUnit.MILLISECONDS.convert(MAX_TIME_FOR_CONSUMING_TO_ONLINE_IN_SECONDS, TimeUnit.SECONDS));
+<span class="fc bfc" id="L789" title="All 2 branches covered.">          if (success) {</span>
+<span class="fc" id="L790">            segmentLogger.info(&quot;Caught up to offset {}&quot;, _currentOffset);</span>
+<span class="fc" id="L791">            buildSegmentAndReplace();</span>
+          } else {
+<span class="fc" id="L793">            segmentLogger.info(&quot;Could not catch up to offset (current = {}). Downloading to replace&quot;, _currentOffset);</span>
+<span class="fc" id="L794">            downloadSegmentAndReplace(llcMetadata);</span>
+          }
+        }
+<span class="fc" id="L797">        break;</span>
+      default:
+<span class="nc" id="L799">        segmentLogger.info(&quot;Downloading to replace segment while in state {}&quot;, _state.toString());</span>
+<span class="nc" id="L800">        downloadSegmentAndReplace(llcMetadata);</span>
+        break;
+    }
+<span class="fc" id="L803">  }</span>
+
+  protected void downloadSegmentAndReplace(LLCRealtimeSegmentZKMetadata metadata) {
+<span class="nc" id="L806">    _realtimeTableDataManager.downloadAndReplaceSegment(_segmentNameStr, metadata, _indexLoadingConfig);</span>
+<span class="nc" id="L807">  }</span>
+
+  protected long now() {
+<span class="nc" id="L810">    return System.currentTimeMillis();</span>
+  }
+
+  private boolean catchupToFinalOffset(long endOffset, long timeoutMs) {
+<span class="fc" id="L814">    _finalOffset = endOffset;</span>
+<span class="fc" id="L815">    _consumeEndTime = now() + timeoutMs;</span>
+<span class="fc" id="L816">    _state = State.CONSUMING_TO_ONLINE;</span>
+<span class="fc" id="L817">    _shouldStop = false;</span>
+    try {
+<span class="fc" id="L819">      consumeLoop();</span>
+<span class="nc" id="L820">    } catch (Exception e) {</span>
+      // We will end up downloading the segment, so this is not a serious problem
+<span class="nc" id="L822">      segmentLogger.warn(&quot;Exception when catching up to final offset&quot;, e);</span>
+<span class="nc" id="L823">      return false;</span>
+<span class="fc" id="L824">    }</span>
+<span class="fc bfc" id="L825" title="All 2 branches covered.">    if (_currentOffset != endOffset) {</span>
+      // Timeout?
+<span class="fc" id="L827">      segmentLogger.error(&quot;Could not consume up to {} (current offset {})&quot;, endOffset, _currentOffset);</span>
+<span class="fc" id="L828">      return false;</span>
+    }
+
+<span class="fc" id="L831">    return true;</span>
+  }
+
+  public void destroy() {
+    try {
+<span class="nc" id="L836">      stop();</span>
+<span class="nc" id="L837">    } catch (InterruptedException e) {</span>
+<span class="nc" id="L838">      segmentLogger.error(&quot;Could not stop consumer thread&quot;);</span>
+<span class="nc" id="L839">    }</span>
+<span class="nc" id="L840">    _realtimeSegment.destroy();</span>
+    try {
+<span class="nc" id="L842">      _consumerWrapper.close();</span>
+<span class="nc" id="L843">    } catch (Exception e) {</span>
+<span class="nc" id="L844">      segmentLogger.warn(&quot;Could not close consumer wrapper&quot;, e);</span>
+<span class="nc" id="L845">    }</span>
+<span class="nc" id="L846">  }</span>
+
+  protected void start() {
+<span class="nc" id="L849">    _consumerThread = new Thread(new PartitionConsumer(), _segmentNameStr);</span>
+<span class="nc" id="L850">    segmentLogger.info(&quot;Created new consumer thread {} for {}&quot;, _consumerThread, this.toString());</span>
+<span class="nc" id="L851">    _consumerThread.start();</span>
+<span class="nc" id="L852">  }</span>
+
+  /**
+   * Stop the consuming thread.
+   */
+  public void stop() throws InterruptedException {
+<span class="nc" id="L858">    _shouldStop = true;</span>
+    // This method could be called either when we get an ONLINE transition or
+    // when we commit a segment and replace the realtime segment with a committed
+    // one. In the latter case, we don't want to call join.
+<span class="nc bnc" id="L862" title="All 2 branches missed.">    if (Thread.currentThread() != _consumerThread) {</span>
+<span class="nc" id="L863">      Uninterruptibles.joinUninterruptibly(_consumerThread, 10, TimeUnit.MINUTES);</span>
+
+<span class="nc bnc" id="L865" title="All 2 branches missed.">      if (_consumerThread.isAlive()) {</span>
+<span class="nc" id="L866">        segmentLogger.warn(&quot;Failed to stop consumer thread within 10 minutes&quot;);</span>
+      }
+    }
+<span class="nc" id="L869">  }</span>
+
+  // TODO Make this a factory class.
+  protected KafkaLowLevelStreamProviderConfig createStreamProviderConfig() {
+<span class="nc" id="L873">    return new KafkaLowLevelStreamProviderConfig();</span>
+  }
+
+  // Assume that this is called only on OFFLINE to CONSUMING transition.
+  // If the transition is OFFLINE to ONLINE, the caller should have downloaded the segment and we don't reach here.
+  public LLRealtimeSegmentDataManager(RealtimeSegmentZKMetadata segmentZKMetadata, TableConfig tableConfig,
+      InstanceZKMetadata instanceZKMetadata, RealtimeTableDataManager realtimeTableDataManager, String resourceDataDir,
+      IndexLoadingConfig indexLoadingConfig, Schema schema, ServerMetrics serverMetrics)
+<span class="fc" id="L881">      throws Exception {</span>
+<span class="fc" id="L882">    _segBuildSemaphore = realtimeTableDataManager.getSegmentBuildSemaphore();</span>
+<span class="fc" id="L883">    _segmentZKMetadata = (LLCRealtimeSegmentZKMetadata) segmentZKMetadata;</span>
+<span class="fc" id="L884">    _tableConfig = tableConfig;</span>
+<span class="fc" id="L885">    _realtimeTableDataManager = realtimeTableDataManager;</span>
+<span class="fc" id="L886">    _resourceDataDir = resourceDataDir;</span>
+<span class="fc" id="L887">    _indexLoadingConfig = indexLoadingConfig;</span>
+<span class="fc" id="L888">    _schema = schema;</span>
+<span class="fc" id="L889">    _serverMetrics = serverMetrics;</span>
+<span class="fc" id="L890">    _segmentVersion = indexLoadingConfig.getSegmentVersion();</span>
+<span class="fc" id="L891">    _instanceId = _realtimeTableDataManager.getServerInstance();</span>
+<span class="fc" id="L892">    _leaseExtender = SegmentBuildTimeLeaseExtender.getLeaseExtender(_instanceId);</span>
+<span class="fc" id="L893">    _protocolHandler = new ServerSegmentCompletionProtocolHandler(_instanceId);</span>
+
+    // TODO Validate configs
+<span class="fc" id="L896">    IndexingConfig indexingConfig = _tableConfig.getIndexingConfig();</span>
+<span class="fc" id="L897">    _kafkaStreamMetadata = new KafkaStreamMetadata(indexingConfig.getStreamConfigs());</span>
+<span class="fc" id="L898">    _pinotKafkaConsumerFactory = PinotKafkaConsumerFactory.create(_kafkaStreamMetadata);</span>
+<span class="fc" id="L899">    KafkaLowLevelStreamProviderConfig kafkaStreamProviderConfig = createStreamProviderConfig();</span>
+<span class="fc" id="L900">    kafkaStreamProviderConfig.init(tableConfig, instanceZKMetadata, schema);</span>
+<span class="fc" id="L901">    _kafkaBootstrapNodes = indexingConfig.getStreamConfigs()</span>
+        .get(CommonConstants.Helix.DataSource.STREAM_PREFIX + &quot;.&quot;
+            + CommonConstants.Helix.DataSource.Realtime.Kafka.KAFKA_BROKER_LIST);
+<span class="fc" id="L904">    _kafkaTopic = kafkaStreamProviderConfig.getTopicName();</span>
+<span class="fc" id="L905">    _segmentNameStr = _segmentZKMetadata.getSegmentName();</span>
+<span class="fc" id="L906">    _segmentName = new LLCSegmentName(_segmentNameStr);</span>
+<span class="fc" id="L907">    _kafkaPartitionId = _segmentName.getPartitionId();</span>
+<span class="fc" id="L908">    _tableName = _tableConfig.getTableName();</span>
+<span class="fc" id="L909">    _metricKeyName = _tableName + &quot;-&quot; + _kafkaTopic + &quot;-&quot; + _kafkaPartitionId;</span>
+<span class="fc" id="L910">    segmentLogger = LoggerFactory.getLogger(LLRealtimeSegmentDataManager.class.getName() +</span>
+        &quot;_&quot; + _segmentNameStr);
+<span class="fc" id="L912">    _tableStreamName = _tableName + &quot;_&quot; + kafkaStreamProviderConfig.getStreamName();</span>
+<span class="fc" id="L913">    _memoryManager = getMemoryManager(realtimeTableDataManager.getConsumerDir(), _segmentNameStr,</span>
+        indexLoadingConfig.isRealtimeOffheapAllocation(), indexLoadingConfig.isDirectRealtimeOffheapAllocation(),
+        realtimeTableDataManager.getServerMetrics());
+
+<span class="fc" id="L917">    List&lt;String&gt; sortedColumns = indexLoadingConfig.getSortedColumns();</span>
+<span class="pc bpc" id="L918" title="1 of 2 branches missed.">    if (sortedColumns.isEmpty()) {</span>
+<span class="fc" id="L919">      segmentLogger.info(&quot;RealtimeDataResourceZKMetadata contains no information about sorted column for segment {}&quot;,</span>
+          _segmentName);
+<span class="fc" id="L921">      _sortedColumn = null;</span>
+    } else {
+<span class="nc" id="L923">      String firstSortedColumn = sortedColumns.get(0);</span>
+<span class="nc bnc" id="L924" title="All 2 branches missed.">      if (_schema.hasColumn(firstSortedColumn)) {</span>
+<span class="nc" id="L925">        segmentLogger.info(&quot;Setting sorted column name: {} from RealtimeDataResourceZKMetadata for segment {}&quot;,</span>
+            firstSortedColumn, _segmentName);
+<span class="nc" id="L927">        _sortedColumn = firstSortedColumn;</span>
+      } else {
+<span class="nc" id="L929">        segmentLogger.warn(</span>
+            &quot;Sorted column name: {} from RealtimeDataResourceZKMetadata is not existed in schema for segment {}.&quot;,
+            firstSortedColumn, _segmentName);
+<span class="nc" id="L932">        _sortedColumn = null;</span>
+      }
+    }
+
+    // Inverted index columns
+<span class="fc" id="L937">    Set&lt;String&gt; invertedIndexColumns = indexLoadingConfig.getInvertedIndexColumns();</span>
+    // We need to add sorted column into inverted index columns because when we convert realtime in memory segment into
+    // offline segment, we use sorted column's inverted index to maintain the order of the records so that the records
+    // are sorted on the sorted column.
+<span class="pc bpc" id="L941" title="1 of 2 branches missed.">    if (_sortedColumn != null) {</span>
+<span class="nc" id="L942">      invertedIndexColumns.add(_sortedColumn);</span>
+    }
+<span class="fc" id="L944">    _invertedIndexColumns = new ArrayList&lt;&gt;(invertedIndexColumns);</span>
+
+    // No dictionary Columns
+<span class="fc" id="L947">    _noDictionaryColumns = new ArrayList&lt;&gt;(indexLoadingConfig.getNoDictionaryColumns());</span>
+
+    // Read the star tree config
+<span class="fc" id="L950">    _starTreeIndexSpec = indexingConfig.getStarTreeIndexSpec();</span>
+
+    // Read the max number of rows
+<span class="fc" id="L953">    int segmentMaxRowCount = kafkaStreamProviderConfig.getSizeThresholdToFlushSegment();</span>
+
+<span class="pc bpc" id="L955" title="1 of 2 branches missed.">    if (0 &lt; segmentZKMetadata.getSizeThresholdToFlushSegment()) {</span>
+<span class="nc" id="L956">      segmentMaxRowCount = segmentZKMetadata.getSizeThresholdToFlushSegment();</span>
+    }
+
+<span class="fc" id="L959">    _segmentMaxRowCount = segmentMaxRowCount;</span>
+
+    // Start new realtime segment
+<span class="fc" id="L962">    RealtimeSegmentConfig.Builder realtimeSegmentConfigBuilder =</span>
+        new RealtimeSegmentConfig.Builder().setSegmentName(_segmentNameStr)
+            .setStreamName(_kafkaTopic)
+            .setSchema(schema)
+            .setCapacity(_segmentMaxRowCount)
+            .setAvgNumMultiValues(indexLoadingConfig.getRealtimeAvgMultiValueCount())
+            .setNoDictionaryColumns(indexLoadingConfig.getNoDictionaryColumns())
+            .setInvertedIndexColumns(invertedIndexColumns)
+            .setRealtimeSegmentZKMetadata(segmentZKMetadata)
+            .setOffHeap(indexLoadingConfig.isRealtimeOffheapAllocation())
+            .setMemoryManager(_memoryManager)
+            .setStatsHistory(realtimeTableDataManager.getStatsHistory());
+
+    // Create message decoder
+<span class="fc" id="L976">    _messageDecoder = _pinotKafkaConsumerFactory.getDecoder(kafkaStreamProviderConfig);</span>
+<span class="fc" id="L977">    _clientId = _kafkaPartitionId + &quot;-&quot; + NetUtil.getHostnameOrAddress();</span>
+
+    // Create field extractor
+<span class="fc" id="L980">    _fieldExtractor = FieldExtractorFactory.getPlainFieldExtractor(schema);</span>
+<span class="fc" id="L981">    makeConsumerWrapper(&quot;Starting&quot;);</span>
+
+<span class="fc" id="L983">    SegmentPartitionConfig segmentPartitionConfig = indexingConfig.getSegmentPartitionConfig();</span>
+<span class="pc bpc" id="L984" title="1 of 2 branches missed.">    if (segmentPartitionConfig != null) {</span>
+      try {
+<span class="nc" id="L986">        int nPartitions = _consumerWrapper.getPartitionCount(_kafkaTopic, /*maxWaitTimeMs=*/5000L);</span>
+<span class="nc" id="L987">        segmentPartitionConfig.setNumPartitions(nPartitions);</span>
+<span class="nc" id="L988">        realtimeSegmentConfigBuilder.setSegmentPartitionConfig(segmentPartitionConfig);</span>
+<span class="nc" id="L989">      } catch (Exception e) {</span>
+<span class="nc" id="L990">        segmentLogger.warn(&quot;Couldn't get number of partitions in 5s, not using partition config {}&quot;, e.getMessage());</span>
+<span class="nc" id="L991">        makeConsumerWrapper(&quot;Timeout getting number of partitions&quot;);</span>
+<span class="nc" id="L992">      }</span>
+    }
+
+<span class="fc" id="L995">    _realtimeSegment = new RealtimeSegmentImpl(realtimeSegmentConfigBuilder.build());</span>
+<span class="fc" id="L996">    _startOffset = _segmentZKMetadata.getStartOffset();</span>
+<span class="fc" id="L997">    _currentOffset = _startOffset;</span>
+<span class="fc" id="L998">    _resourceTmpDir = new File(resourceDataDir, &quot;_tmp&quot;);</span>
+<span class="fc bfc" id="L999" title="All 2 branches covered.">    if (!_resourceTmpDir.exists()) {</span>
+<span class="fc" id="L1000">      _resourceTmpDir.mkdirs();</span>
+    }
+<span class="fc" id="L1002">    _state = State.INITIAL_CONSUMING;</span>
+<span class="fc" id="L1003">    long now = now();</span>
+<span class="fc" id="L1004">    _consumeStartTime = now;</span>
+<span class="fc" id="L1005">    _consumeEndTime = now + kafkaStreamProviderConfig.getTimeThresholdToFlushSegment();</span>
+<span class="fc" id="L1006">    LOGGER.info(&quot;Starting consumption on realtime consuming segment {} maxRowCount {} maxEndTime {}&quot;,</span>
+        _segmentName, _segmentMaxRowCount, new DateTime(_consumeEndTime, DateTimeZone.UTC).toString());
+<span class="fc" id="L1008">    start();</span>
+<span class="fc" id="L1009">  }</span>
+
+  private void logStatistics() {
+    int numErrors, numConversions, numNulls, numNullCols;
+<span class="nc bnc" id="L1013" title="All 2 branches missed.">    if ((numErrors = _fieldExtractor.getTotalErrors()) &gt; 0) {</span>
+<span class="nc" id="L1014">      _serverMetrics.addMeteredTableValue(_tableStreamName,</span>
+          ServerMeter.ROWS_WITH_ERRORS, (long) numErrors);
+    }
+<span class="nc" id="L1017">    Map&lt;String, Integer&gt; errorCount = _fieldExtractor.getErrorCount();</span>
+<span class="nc bnc" id="L1018" title="All 2 branches missed.">    for (String column : errorCount.keySet()) {</span>
+<span class="nc bnc" id="L1019" title="All 2 branches missed.">      if ((numErrors = errorCount.get(column)) &gt; 0) {</span>
+<span class="nc" id="L1020">        segmentLogger.warn(&quot;Column {} had {} rows with errors&quot;, column, numErrors);</span>
+      }
+<span class="nc" id="L1022">    }</span>
+<span class="nc bnc" id="L1023" title="All 2 branches missed.">    if ((numConversions = _fieldExtractor.getTotalConversions()) &gt; 0) {</span>
+<span class="nc" id="L1024">      _serverMetrics.addMeteredTableValue(_tableStreamName,</span>
+          ServerMeter.ROWS_NEEDING_CONVERSIONS, (long) numConversions);
+<span class="nc" id="L1026">      segmentLogger.info(&quot;{} rows needed conversions &quot;, numConversions);</span>
+    }
+<span class="nc bnc" id="L1028" title="All 2 branches missed.">    if ((numNulls = _fieldExtractor.getTotalNulls()) &gt; 0) {</span>
+<span class="nc" id="L1029">      _serverMetrics.addMeteredTableValue(_tableStreamName,</span>
+          ServerMeter.ROWS_WITH_NULL_VALUES, (long) numNulls);
+<span class="nc" id="L1031">      segmentLogger.info(&quot;{} rows had null columns&quot;, numNulls);</span>
+    }
+<span class="nc bnc" id="L1033" title="All 2 branches missed.">    if ((numNullCols = _fieldExtractor.getTotalNullCols()) &gt; 0) {</span>
+<span class="nc" id="L1034">      _serverMetrics.addMeteredTableValue(_tableStreamName,</span>
+          ServerMeter.COLUMNS_WITH_NULL_VALUES, (long) numNullCols);
+<span class="nc" id="L1036">      segmentLogger.info(&quot;{} columns had null values&quot;, numNullCols);</span>
+    }
+<span class="nc" id="L1038">  }</span>
+
+  private void makeConsumerWrapper(String reason) {
+<span class="pc bpc" id="L1041" title="1 of 2 branches missed.">    if (_consumerWrapper != null) {</span>
+      try {
+<span class="nc" id="L1043">        _consumerWrapper.close();</span>
+<span class="nc" id="L1044">      } catch (Exception e) {</span>
+<span class="nc" id="L1045">        segmentLogger.warn(&quot;Could not close Kafka consumer wrapper&quot;);</span>
+<span class="nc" id="L1046">      }</span>
+    }
+<span class="fc" id="L1048">    segmentLogger.info(&quot;Creating new Kafka consumer wrapper, reason: {}&quot;, reason);</span>
+<span class="fc" id="L1049">    _consumerWrapper = _pinotKafkaConsumerFactory.buildConsumer(_clientId, _kafkaPartitionId, _kafkaStreamMetadata);</span>
+<span class="fc" id="L1050">  }</span>
+
+  // This should be done during commit? We may not always commit when we build a segment....
+  // TODO Call this method when we are loading the segment, which we do from table datamanager afaik
+  private void updateCurrentDocumentCountMetrics() {
+<span class="nc" id="L1055">    int currentRawDocs = _realtimeSegment.getNumDocsIndexed();</span>
+<span class="nc" id="L1056">    _serverMetrics.addValueToTableGauge(_tableName, ServerGauge.DOCUMENT_COUNT, (currentRawDocs - _lastUpdatedRawDocuments</span>
+        .get()));
+<span class="nc" id="L1058">    _lastUpdatedRawDocuments.set(currentRawDocs);</span>
+<span class="nc" id="L1059">    final long now = now();</span>
+<span class="nc" id="L1060">    final int rowsConsumed = _numRowsConsumed - _lastConsumedCount;</span>
+<span class="nc bnc" id="L1061" title="All 2 branches missed.">    final long prevTime = _lastConsumedCount == 0 ? _consumeStartTime : _lastLogTime;</span>
+    // Log every minute or 100k events
+<span class="nc bnc" id="L1063" title="All 4 branches missed.">    if (now - prevTime &gt; TimeUnit.MINUTES.toMillis(TIME_THRESHOLD_FOR_LOG_MINUTES) || rowsConsumed &gt;= MSG_COUNT_THRESHOLD_FOR_LOG) {</span>
+<span class="nc" id="L1064">      segmentLogger.info(&quot;Consumed {} events from (rate:{}/s), currentOffset={}, numRowsSoFar={}&quot;, rowsConsumed,</span>
+            (float) (rowsConsumed) * 1000 / (now - prevTime), _currentOffset, _numRowsConsumed);
+<span class="nc" id="L1066">      _lastConsumedCount = _numRowsConsumed;</span>
+<span class="nc" id="L1067">      _lastLogTime = now;</span>
+    }
+<span class="nc" id="L1069">  }</span>
+
+  @Override
+  public IndexSegment getSegment() {
+<span class="nc" id="L1073">    return _realtimeSegment;</span>
+  }
+
+  @Override
+  public String getSegmentName() {
+<span class="nc" id="L1078">    return _segmentNameStr;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

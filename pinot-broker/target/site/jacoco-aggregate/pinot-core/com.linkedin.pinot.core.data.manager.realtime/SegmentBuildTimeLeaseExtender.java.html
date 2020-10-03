@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>SegmentBuildTimeLeaseExtender.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-broker</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.data.manager.realtime</a> &gt; <span class="el_source">SegmentBuildTimeLeaseExtender.java</span></div><h1>SegmentBuildTimeLeaseExtender.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.linkedin.pinot.core.data.manager.realtime;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import com.google.common.util.concurrent.Uninterruptibles;
+import com.linkedin.pinot.common.protocols.SegmentCompletionProtocol;
+import com.linkedin.pinot.server.realtime.ServerSegmentCompletionProtocolHandler;
+
+
+/**
+ * Extend the lease for build time. Keep a map of segments for which lease needs to be extended.
+ * Repeat lease extension periodically as often as necessary until the segment name is removed
+ * from the map.
+ */
+public class SegmentBuildTimeLeaseExtender {
+  private static final int MAX_NUM_ATTEMPTS = 3;
+  // Always request 120s of extra build time
+  private static final int EXTRA_TIME_SECONDS = 120;
+  // Retransmit lease request 10% before lease expires.
+  private static final int REPEAT_REQUEST_PERIOD_SEC = (EXTRA_TIME_SECONDS * 9 /10);
+<span class="fc" id="L44">  private static Logger LOGGER = LoggerFactory.getLogger(SegmentBuildTimeLeaseExtender.class);</span>
+<span class="fc" id="L45">  private static final Map&lt;String, SegmentBuildTimeLeaseExtender&gt; INSTANCE_TO_LEASE_EXTENDER  = new HashMap&lt;&gt;(1);</span>
+
+  private ScheduledExecutorService _executor;
+<span class="fc" id="L48">  private final Map&lt;String, Future&gt; _segmentToFutureMap = new ConcurrentHashMap&lt;&gt;();</span>
+  private final String _instanceId;
+  private final ServerSegmentCompletionProtocolHandler _protocolHandler;
+
+  public static SegmentBuildTimeLeaseExtender getLeaseExtender(final String instanceId) {
+<span class="fc" id="L53">    return INSTANCE_TO_LEASE_EXTENDER.get(instanceId);</span>
+  }
+
+  public static synchronized  SegmentBuildTimeLeaseExtender create(final String instanceId) {
+<span class="fc" id="L57">    SegmentBuildTimeLeaseExtender leaseExtender = INSTANCE_TO_LEASE_EXTENDER.get(instanceId);</span>
+<span class="fc bfc" id="L58" title="All 2 branches covered.">    if (leaseExtender != null) {</span>
+<span class="fc" id="L59">      LOGGER.warn(&quot;Instance already exists&quot;);</span>
+    } else {
+<span class="fc" id="L61">      leaseExtender = new SegmentBuildTimeLeaseExtender(instanceId);</span>
+<span class="fc" id="L62">      INSTANCE_TO_LEASE_EXTENDER.put(instanceId, leaseExtender);</span>
+    }
+<span class="fc" id="L64">    return leaseExtender;</span>
+  }
+
+<span class="fc" id="L67">  private SegmentBuildTimeLeaseExtender(String instanceId) {</span>
+<span class="fc" id="L68">    _instanceId = instanceId;</span>
+<span class="fc" id="L69">    _protocolHandler = new ServerSegmentCompletionProtocolHandler(_instanceId);</span>
+<span class="fc" id="L70">    _executor = new ScheduledThreadPoolExecutor(1);</span>
+<span class="fc" id="L71">  }</span>
+
+  public void shutDown() {
+<span class="nc bnc" id="L74" title="All 2 branches missed.">    if (_executor != null) {</span>
+<span class="nc" id="L75">      _executor.shutdownNow();</span>
+<span class="nc" id="L76">      _executor = null;</span>
+    }
+<span class="nc" id="L78">    _segmentToFutureMap.clear();</span>
+<span class="nc" id="L79">  }</span>
+
+  /**
+   * Adds a segment for periodic lease request.
+   * The first lease request is sent before {@param initialBuildTimeMs} exipres. Subsequent lease requests are sent
+   * within two minutes.
+   * @param segmentId is the name of he segment that is being built
+   * @param initialBuildTimeMs is the initial time budget that SegmentCompletionManager has allocated.
+   * @param offset The offset at which this segment is being built.
+   */
+  public void addSegment(String segmentId, long initialBuildTimeMs, long offset) {
+<span class="fc" id="L90">    final long initialDelayMs = initialBuildTimeMs * 9 / 10;</span>
+<span class="fc" id="L91">    final SegmentCompletionProtocol.Request.Params reqParams = new SegmentCompletionProtocol.Request.Params();</span>
+<span class="fc" id="L92">    reqParams.withOffset(offset).withSegmentName(segmentId).withExtraTimeSec(EXTRA_TIME_SECONDS);</span>
+<span class="fc" id="L93">    Future future = _executor.scheduleWithFixedDelay(new LeaseExtender(reqParams), initialDelayMs,</span>
+        REPEAT_REQUEST_PERIOD_SEC * 1000L, TimeUnit.MILLISECONDS);
+<span class="fc" id="L95">    _segmentToFutureMap.put(segmentId, future);</span>
+<span class="fc" id="L96">  }</span>
+
+  public void removeSegment(final String segmentId) {
+<span class="fc" id="L99">    Future future = _segmentToFutureMap.get(segmentId);</span>
+<span class="fc bfc" id="L100" title="All 2 branches covered.">    if (future != null) {</span>
+<span class="fc" id="L101">      boolean cancelled = future.cancel(true);</span>
+<span class="pc bpc" id="L102" title="1 of 2 branches missed.">      if (!cancelled) {</span>
+<span class="nc" id="L103">        LOGGER.warn(&quot;Task could not be cancelled for {}&quot; + segmentId);</span>
+      }
+    }
+<span class="fc" id="L106">    _segmentToFutureMap.remove(segmentId);</span>
+<span class="fc" id="L107">  }</span>
+
+  private class LeaseExtender implements Runnable {
+
+    private final SegmentCompletionProtocol.Request.Params _params;
+
+<span class="fc" id="L113">    private LeaseExtender(final SegmentCompletionProtocol.Request.Params params) {</span>
+<span class="fc" id="L114">      _params = params;</span>
+<span class="fc" id="L115">    }</span>
+
+    @Override
+    public void run() {
+<span class="nc" id="L119">      int nAttempts = 0;</span>
+<span class="nc" id="L120">      SegmentCompletionProtocol.ControllerResponseStatus status = SegmentCompletionProtocol.ControllerResponseStatus.NOT_SENT;</span>
+<span class="nc" id="L121">      final String segmentId = _params.getSegmentName();</span>
+
+      // Attempt to send a lease renewal message for MAX_NUM_ATTEMPTS number of times. If unsuccessful,
+      // log a warning and let things take their course. At worst, the segment that is built will be rejected
+      // in favor of another server.
+<span class="nc bnc" id="L126" title="All 4 branches missed.">      while (status != SegmentCompletionProtocol.ControllerResponseStatus.PROCESSED &amp;&amp; nAttempts &lt; MAX_NUM_ATTEMPTS) {</span>
+        try {
+<span class="nc" id="L128">          SegmentCompletionProtocol.Response response = _protocolHandler.extendBuildTime(_params);</span>
+<span class="nc" id="L129">          status = response.getStatus();</span>
+<span class="nc" id="L130">        } catch (Exception e) {</span>
+<span class="nc" id="L131">          LOGGER.warn(&quot;Exception trying to send lease renewal for {}&quot;, segmentId);</span>
+<span class="nc" id="L132">        }</span>
+<span class="nc bnc" id="L133" title="All 2 branches missed.">        if (status != SegmentCompletionProtocol.ControllerResponseStatus.PROCESSED) {</span>
+<span class="nc" id="L134">          Uninterruptibles.sleepUninterruptibly(2, TimeUnit.SECONDS);</span>
+<span class="nc" id="L135">          LOGGER.warn(&quot;Retrying lease extension for {} because controller status {}&quot;, segmentId, status.toString());</span>
+<span class="nc" id="L136">          nAttempts++;</span>
+        }
+      }
+<span class="nc bnc" id="L139" title="All 2 branches missed.">      if (nAttempts &gt;= MAX_NUM_ATTEMPTS) {</span>
+<span class="nc" id="L140">        LOGGER.error(&quot;Failed to send lease extension for {}&quot;, segmentId);</span>
+      }
+<span class="nc" id="L142">    }</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

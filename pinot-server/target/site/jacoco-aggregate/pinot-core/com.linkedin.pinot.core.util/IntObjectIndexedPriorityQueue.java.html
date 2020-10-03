@@ -1,0 +1,281 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>IntObjectIndexedPriorityQueue.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-server</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.util</a> &gt; <span class="el_source">IntObjectIndexedPriorityQueue.java</span></div><h1>IntObjectIndexedPriorityQueue.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.util;
+
+import com.linkedin.pinot.common.utils.Pairs.IntObjectPair;
+import it.unimi.dsi.fastutil.objects.ObjectArrayList;
+import java.util.Collections;
+import javax.annotation.concurrent.NotThreadSafe;
+
+
+/**
+ * Heap based Indexed priority queue with primitive 'int' key and 'T' value.
+ *
+ * Allows for the following:
+ * &lt;ul&gt;
+ *   &lt;li&gt; O(1) access to values inserted using their corresponding keys. &lt;/li&gt;
+ *   &lt;li&gt; Dynamic update of values (heap order is maintained after updates). &lt;/li&gt;
+ *   &lt;li&gt; Min or max ordering, can be specified in the constructor. &lt;/li&gt;
+ * &lt;/ul&gt;
+ */
+@NotThreadSafe
+@SuppressWarnings(&quot;Duplicates&quot;)
+public class IntObjectIndexedPriorityQueue&lt;T extends Comparable&gt; extends BaseIndexedPriorityQueue {
+  ObjectArrayList&lt;T&gt; _values;
+  IntObjectPair&lt;T&gt; _reusablePair;
+
+  /**
+   * Constructor for the class.
+   *
+   * @param initialCapacity Initial capacity for the priority queue
+   * @param minHeap Min order, ie smallest element on top.
+   */
+  public IntObjectIndexedPriorityQueue(int initialCapacity, boolean minHeap) {
+<span class="fc" id="L47">    super(initialCapacity, minHeap);</span>
+<span class="fc" id="L48">    _values = new ObjectArrayList&lt;&gt;(initialCapacity);</span>
+<span class="fc" id="L49">    _reusablePair = new IntObjectPair&lt;&gt;(0, null);</span>
+<span class="fc" id="L50">  }</span>
+
+  /**
+   * Puts the element into the priority queue.
+   * &lt;ul&gt;
+   *   &lt;li&gt; If key does not exist, it is added to the priority queue. &lt;/li&gt;
+   *   &lt;li&gt; If key exists, then the value is updated, and the priority queue ordering is maintained. &lt;/li&gt;
+   *   &lt;li&gt; Runtime complexity of {@code O(log(n)}). &lt;/li&gt;
+   * &lt;/ul&gt;
+   * @param key Integer key for the value
+   * @param value Value of the key
+   */
+  @SuppressWarnings(&quot;unchecked&quot;)
+  public void put(int key, T value) {
+<span class="fc bfc" id="L64" title="All 2 branches covered.">    if (!_keyToIndexMap.containsKey(key)) {</span>
+<span class="fc" id="L65">      _values.add(value);</span>
+
+<span class="fc" id="L67">      int last = _values.size() - 1;</span>
+<span class="fc" id="L68">      updateKeyIndexMap(key, last);</span>
+<span class="fc" id="L69">      siftUp(last);</span>
+<span class="fc" id="L70">    } else {</span>
+<span class="fc" id="L71">      int index = _keyToIndexMap.get(key);</span>
+<span class="fc" id="L72">      _values.set(index, value);</span>
+
+      // Sift the value up or down, as the case may be.
+<span class="fc bfc" id="L75" title="All 2 branches covered.">      if (!siftDown(index)) {</span>
+<span class="fc" id="L76">        siftUp(index);</span>
+      }
+    }
+<span class="fc" id="L79">  }</span>
+
+  /**
+   * Returns the value for the specified key.
+   * &lt;ul&gt;
+   *   &lt;li&gt; Returns null if the specified key does not exist. &lt;/li&gt;
+   *   &lt;li&gt; Runtime complexity of O(1). &lt;/li&gt;
+   * &lt;/ul&gt;
+   *
+   * @param key Key for which to return the value
+   * @return Value for the key
+   */
+  public IntObjectPair get(int key) {
+<span class="nc bnc" id="L92" title="All 2 branches missed.">    if (!_keyToIndexMap.containsKey(key)) {</span>
+<span class="nc" id="L93">      return null;</span>
+    }
+
+<span class="nc" id="L96">    int index = _keyToIndexMap.get(key);</span>
+<span class="nc" id="L97">    T value = _values.get(index);</span>
+<span class="nc" id="L98">    _reusablePair.setIntValue(index);</span>
+<span class="nc" id="L99">    _reusablePair.setObjectValue(value);</span>
+
+<span class="nc" id="L101">    return _reusablePair;</span>
+  }
+
+  /**
+   * Returns the key+value pair with the max priority (min for minHeap mode)
+   * &lt;ul&gt;
+   *   &lt;li&gt; key+value pair is removed from the priority queue. &lt;/li&gt;
+   *   &lt;li&gt; Throws runtime exception if the priority queue is empty. &lt;/li&gt;
+   *   &lt;li&gt; Runtime complexity of O(1). &lt;/li&gt;
+   * &lt;/ul&gt;
+   *
+   * @return Key+Value pair
+   */
+  public IntObjectPair&lt;T&gt; poll() {
+<span class="pc bpc" id="L115" title="1 of 2 branches missed.">    if (isEmpty()) {</span>
+<span class="nc" id="L116">      throw new RuntimeException(&quot;Empty collection, nothing to remove&quot;);</span>
+    } else {
+<span class="fc" id="L118">      IntObjectPair&lt;T&gt; poll = peek();</span>
+<span class="fc" id="L119">      int lastIndex = _values.size() - 1;</span>
+<span class="fc" id="L120">      swapValues(0, lastIndex);</span>
+<span class="fc" id="L121">      _values.remove(lastIndex);</span>
+
+<span class="fc" id="L123">      _keyToIndexMap.remove(_indexToKeyMap.get(lastIndex));</span>
+<span class="fc" id="L124">      _indexToKeyMap.remove(lastIndex);</span>
+
+<span class="fc bfc" id="L126" title="All 2 branches covered.">      if (!_values.isEmpty()) {</span>
+<span class="fc" id="L127">        siftDown(0);</span>
+      }
+
+<span class="fc" id="L130">      return poll;</span>
+    }
+  }
+
+  /**
+   * Returns the key+value pair with the max priority (min for minHeap mode)
+   * &lt;ul&gt;
+   *   &lt;li&gt; key+value pair is not removed from the priority queue. &lt;/li&gt;
+   *   &lt;li&gt; Returns null if the priority queue is empty. &lt;/li&gt;
+   *   &lt;li&gt; Runtime complexity of O(1). &lt;/li&gt;
+   * &lt;/ul&gt;
+   *
+   * @return Key+Value pair
+   */
+  public IntObjectPair&lt;T&gt; peek() {
+<span class="pc bpc" id="L145" title="1 of 2 branches missed.">    if (_values.isEmpty()) {</span>
+<span class="nc" id="L146">      return null;</span>
+    }
+<span class="fc" id="L148">    _reusablePair.setIntValue(_indexToKeyMap.get(0));</span>
+<span class="fc" id="L149">    _reusablePair.setObjectValue(_values.get(0));</span>
+<span class="fc" id="L150">    return _reusablePair;</span>
+  }
+
+  /**
+   * Returns true if the priority queue is empty, false otherwise.
+   *
+   * @return True if empty, false otherwise
+   */
+  public boolean isEmpty() {
+<span class="fc" id="L159">    return _values.isEmpty();</span>
+  }
+
+  /**
+   * Helper method that moves the element at the specified index up
+   * until the heap ordering is established.
+   *
+   * @param index Index of element to sift up.
+   */
+  private void siftUp(int index) {
+    // Return if already at root node.
+<span class="fc bfc" id="L170" title="All 2 branches covered.">    if (index == 0) {</span>
+<span class="fc" id="L171">      return;</span>
+    }
+
+<span class="fc bfc" id="L174" title="All 2 branches covered.">    while (index != 0) {</span>
+<span class="fc" id="L175">      int parentIndex = getParentIndex(index);</span>
+<span class="fc" id="L176">      T value = _values.get(index);</span>
+<span class="fc" id="L177">      T parentValue = _values.get(parentIndex);</span>
+
+<span class="fc bfc" id="L179" title="All 2 branches covered.">      if (compare(parentValue, value) == 1) {</span>
+<span class="fc" id="L180">        swapValues(index, parentIndex);</span>
+<span class="fc" id="L181">        index = parentIndex;</span>
+      } else {
+        // No more sifting up required, break
+        break;
+      }
+<span class="fc" id="L186">    }</span>
+<span class="fc" id="L187">  }</span>
+
+  /**
+   * Helper method that moves the element at the specified index down
+   * until the heap ordering is established.
+   *
+   * @param index Index of element to sift down.
+   * @return True if sifted, false otherwise.
+   */
+  private boolean siftDown(int index) {
+<span class="fc" id="L197">    boolean hasChildren = hasChildren(index);</span>
+<span class="fc bfc" id="L198" title="All 2 branches covered.">    if (!hasChildren) {</span>
+<span class="fc" id="L199">      return false;</span>
+    }
+
+<span class="fc" id="L202">    boolean sifted = false;</span>
+    while (true) {
+<span class="fc" id="L204">      int leftChildIndex = getLeftChildIndex(index);</span>
+<span class="fc" id="L205">      int rightChildIndex = getRightChildIndex(index);</span>
+
+      int minIndex;
+<span class="fc" id="L208">      int size = _values.size();</span>
+<span class="pc bpc" id="L209" title="1 of 4 branches missed.">      if (leftChildIndex &gt;= size &amp;&amp; rightChildIndex &gt;= size) { // This is leaf node, all done.</span>
+<span class="fc" id="L210">        break;</span>
+<span class="fc bfc" id="L211" title="All 2 branches covered.">      } else if (rightChildIndex &gt;= size) { // Node only has left child which will be the minimum.</span>
+<span class="fc" id="L212">        minIndex = leftChildIndex;</span>
+      } else { // Node has both left and right children, find the minimum of the two.
+<span class="fc" id="L214">        T leftChildValue = _values.get(leftChildIndex);</span>
+<span class="fc" id="L215">        T rightChildValue = _values.get(rightChildIndex);</span>
+
+<span class="fc bfc" id="L217" title="All 2 branches covered.">        if (compare(leftChildValue, rightChildValue) &lt;= 0) {</span>
+<span class="fc" id="L218">          minIndex = leftChildIndex;</span>
+        } else {
+<span class="fc" id="L220">          minIndex = rightChildIndex;</span>
+        }
+      }
+
+      // One of the children is out of order, need to sift
+<span class="fc bfc" id="L225" title="All 2 branches covered.">      if (compare(_values.get(index), _values.get(minIndex)) == 1) {</span>
+<span class="fc" id="L226">        swapValues(index, minIndex);</span>
+<span class="fc" id="L227">        index = minIndex;</span>
+<span class="fc" id="L228">        sifted = true;</span>
+      } else {
+        break;
+      }
+<span class="fc" id="L232">    }</span>
+<span class="fc" id="L233">    return sifted;</span>
+  }
+
+  /**
+   * Compares the two specified values, and returns:
+   * &lt;ul&gt;
+   *   &lt;li&gt; if v1 &lt; v2, -1 for max, +1 for min mode. &lt;/li&gt;
+   *   &lt;li&gt; if v1 &gt; v2, -1 for max, -1 for min mode. &lt;/li&gt;
+   *   &lt;li&gt; if v1 = v2,  0 for max, 0 for min mode. &lt;/li&gt;
+   * &lt;/ul&gt;
+   * @param o1 Value to compare
+   * @param o2 Value to compare
+   * @return Result of comparison (as described above).
+   */
+  @SuppressWarnings(&quot;unchecked&quot;)
+  private int compare(T o1, T o2) {
+<span class="fc" id="L249">    int ret = o1.compareTo(o2);</span>
+<span class="fc bfc" id="L250" title="All 2 branches covered.">    return (_minHeap) ? ret : -ret;</span>
+  }
+
+  /**
+   * Helper method that performs all operations required to swap two values.
+   * &lt;ul&gt;
+   *   &lt;li&gt; Swaps the values in the array that backs the heap. &lt;/li&gt;
+   *   &lt;li&gt; Updates the indexToKey and keyToIndex maps due to the swap. &lt;/li&gt;
+   * &lt;/ul&gt;
+   * @param index1 Index to swap
+   * @param index2 Index to swap
+   */
+  private void swapValues(int index1, int index2) {
+<span class="fc bfc" id="L263" title="All 2 branches covered.">    if (index1 == index2) {</span>
+<span class="fc" id="L264">      return;</span>
+    }
+<span class="fc" id="L266">    Collections.swap(_values, index1, index2);</span>
+<span class="fc" id="L267">    swapKeys(index1, index2);</span>
+<span class="fc" id="L268">  }</span>
+
+  /**
+   * Returns true if the node at specified index has children, false otherwise.
+   * Just checking for existence of left child is sufficient (array backed heap).
+   *
+   * @param index Index to check
+   * @return True if node has children, false otherwise.
+   */
+  private boolean hasChildren(int index) {
+<span class="fc bfc" id="L278" title="All 2 branches covered.">    return (getLeftChildIndex(index) &lt; _values.size());</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

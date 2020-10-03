@@ -1,0 +1,346 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>MetricsHelper.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-broker</a> &gt; <a href="../index.html" class="el_bundle">pinot-common</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.common.metrics</a> &gt; <span class="el_source">MetricsHelper.java</span></div><h1>MetricsHelper.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.common.metrics;
+
+import com.yammer.metrics.core.Timer;
+import java.lang.reflect.Constructor;
+import java.util.Map;
+import java.util.Set;
+import java.util.WeakHashMap;
+import java.util.concurrent.TimeUnit;
+
+import com.yammer.metrics.Metrics;
+import com.yammer.metrics.core.Counter;
+import com.yammer.metrics.core.Gauge;
+import com.yammer.metrics.core.Histogram;
+import com.yammer.metrics.core.Meter;
+import com.yammer.metrics.core.Metered;
+import com.yammer.metrics.core.MetricName;
+import com.yammer.metrics.core.MetricsRegistry;
+import com.yammer.metrics.core.Sampling;
+import com.yammer.metrics.core.Stoppable;
+import org.apache.commons.configuration.Configuration;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+<span class="nc" id="L40">public class MetricsHelper {</span>
+<span class="fc" id="L41">  private static final Logger LOGGER = LoggerFactory.getLogger(MetricsHelper.class);</span>
+
+<span class="fc" id="L43">  private static Map&lt;MetricsRegistry, Object&gt; metricsRegistryMap = new WeakHashMap&lt;MetricsRegistry, Object&gt;();</span>
+
+<span class="fc" id="L45">  private static Map&lt;MetricsRegistryRegistrationListener, Object&gt; metricsRegistryRegistrationListenersMap =</span>
+      new WeakHashMap&lt;MetricsRegistryRegistrationListener, Object&gt;();
+
+  /**
+   * Initializes the metrics system by initializing the registry registration listeners present in the configuration.
+   *
+   * @param configuration The subset of the configuration containing the metrics-related keys
+   */
+  public static void initializeMetrics(Configuration configuration) {
+<span class="fc" id="L54">    synchronized (MetricsHelper.class) {</span>
+<span class="fc" id="L55">      String[] listenerClassNames = configuration.getStringArray(&quot;metricsRegistryRegistrationListeners&quot;);</span>
+
+<span class="fc bfc" id="L57" title="All 2 branches covered.">      if (listenerClassNames.length &lt; 1) {</span>
+<span class="fc" id="L58">        listenerClassNames = new String[] { JmxReporterMetricsRegistryRegistrationListener.class.getName() };</span>
+      }
+
+      // Build each listener using their default constructor and add them
+<span class="fc bfc" id="L62" title="All 2 branches covered.">      for (String listenerClassName : listenerClassNames) {</span>
+        try {
+<span class="fc" id="L64">          Class&lt;? extends MetricsRegistryRegistrationListener&gt; clazz =</span>
+              (Class&lt;? extends MetricsRegistryRegistrationListener&gt;) Class.forName(listenerClassName);
+<span class="fc" id="L66">          Constructor&lt;? extends MetricsRegistryRegistrationListener&gt; defaultConstructor =</span>
+              clazz.getDeclaredConstructor();
+<span class="fc" id="L68">          MetricsRegistryRegistrationListener listener = defaultConstructor.newInstance();</span>
+
+<span class="fc" id="L70">          addMetricsRegistryRegistrationListener(listener);</span>
+<span class="nc" id="L71">        } catch (Exception e) {</span>
+<span class="nc" id="L72">          LOGGER.warn(&quot;Caught exception while initializing MetricsRegistryRegistrationListener &quot; + listenerClassName, e);</span>
+<span class="fc" id="L73">        }</span>
+      }
+<span class="pc" id="L75">    }</span>
+<span class="fc" id="L76">  }</span>
+
+  /**
+   * Adds a metrics registry registration listener. When adding a metrics registry registration listener, events are
+   * fired to add all previously registered metrics registries to the newly added metrics registry registration
+   * listener.
+   *
+   * @param listener The listener to add
+   */
+  public static void addMetricsRegistryRegistrationListener(MetricsRegistryRegistrationListener listener) {
+<span class="fc" id="L86">    synchronized (MetricsHelper.class) {</span>
+<span class="fc" id="L87">      metricsRegistryRegistrationListenersMap.put(listener, null);</span>
+
+      // Fire events to register all previously registered metrics registries
+<span class="fc" id="L90">      Set&lt;MetricsRegistry&gt; metricsRegistries = metricsRegistryMap.keySet();</span>
+<span class="pc bpc" id="L91" title="1 of 2 branches missed.">      for (MetricsRegistry metricsRegistry : metricsRegistries) {</span>
+<span class="nc" id="L92">        listener.onMetricsRegistryRegistered(metricsRegistry);</span>
+<span class="nc" id="L93">      }</span>
+<span class="pc" id="L94">    }</span>
+<span class="fc" id="L95">  }</span>
+
+  /**
+   * Registers the metrics registry with the metrics helper.
+   *
+   * @param registry The registry to register
+   */
+  public static void registerMetricsRegistry(MetricsRegistry registry) {
+<span class="fc" id="L103">    synchronized (MetricsHelper.class) {</span>
+<span class="fc" id="L104">      metricsRegistryMap.put(registry, null);</span>
+
+      // Fire event to all registered listeners
+<span class="fc" id="L107">      Set&lt;MetricsRegistryRegistrationListener&gt; metricsRegistryRegistrationListeners =</span>
+          metricsRegistryRegistrationListenersMap.keySet();
+<span class="fc bfc" id="L109" title="All 2 branches covered.">      for (MetricsRegistryRegistrationListener metricsRegistryRegistrationListener : metricsRegistryRegistrationListeners) {</span>
+<span class="fc" id="L110">        metricsRegistryRegistrationListener.onMetricsRegistryRegistered(registry);</span>
+<span class="fc" id="L111">      }</span>
+<span class="pc" id="L112">    }</span>
+<span class="fc" id="L113">  }</span>
+
+  /**
+   *
+   * Return an existing meter if
+   *  (a) A meter already exist with the same metric name.
+   * Otherwise, creates a new meter and registers
+   *
+   * @param registry MetricsRegistry
+   * @param name metric name
+   * @param eventType Event Type
+   * @param unit TimeUnit for rate determination
+   * @return Meter
+   */
+  public static Meter newMeter(MetricsRegistry registry, MetricName name, String eventType, TimeUnit unit) {
+<span class="pc bpc" id="L128" title="1 of 2 branches missed.">    if (registry != null) {</span>
+<span class="fc" id="L129">      return registry.newMeter(name, eventType, unit);</span>
+    } else {
+<span class="nc" id="L131">      return Metrics.newMeter(name, eventType, unit);</span>
+    }
+  }
+
+  /**
+   *
+   * Return an existing aggregated meter if registry is not null and a aggregated meter already exist
+   * with the same metric name. Otherwise, creates a new aggregated meter and registers (if registry not null)
+   *
+   * @param registry MetricsRegistry
+   * @param name metric name
+   * @return AggregatedMeter
+   */
+  public static &lt;T extends Metered &amp; Stoppable&gt; AggregatedMeter&lt;T&gt; newAggregatedMeter(
+      AggregatedMetricsRegistry registry, MetricName name) {
+<span class="nc bnc" id="L146" title="All 2 branches missed.">    if (registry != null) {</span>
+<span class="nc" id="L147">      return registry.newAggregatedMeter(name);</span>
+    } else {
+<span class="nc" id="L149">      return new AggregatedMeter&lt;T&gt;(); //not registered</span>
+    }
+  }
+
+  /**
+   *
+   * Return an existing counter if
+   *  (a) A counter already exist with the same metric name.
+   * Otherwise, creates a new meter and registers
+   *
+   * @param registry MetricsRegistry
+   * @param name metric name
+   * @return Counter
+   */
+  public static Counter newCounter(MetricsRegistry registry, MetricName name) {
+<span class="fc bfc" id="L164" title="All 2 branches covered.">    if (registry != null) {</span>
+<span class="fc" id="L165">      return registry.newCounter(name);</span>
+    } else {
+<span class="fc" id="L167">      return Metrics.newCounter(name);</span>
+    }
+  }
+
+  /**
+   *
+   * Return an existing aggregated counter if registry is not null and a aggregated counter already exist
+   * with the same metric name. Otherwise, creates a new aggregated counter and registers (if registry not null)
+   *
+   * @param registry MetricsRegistry
+   * @param name metric name
+   * @return AggregatedCounter
+   */
+  public static AggregatedCounter newAggregatedCounter(AggregatedMetricsRegistry registry, MetricName name) {
+<span class="pc bpc" id="L181" title="1 of 2 branches missed.">    if (registry != null) {</span>
+<span class="nc" id="L182">      return registry.newAggregatedCounter(name);</span>
+    } else {
+<span class="fc" id="L184">      return new AggregatedCounter();</span>
+    }
+  }
+
+  /**
+   *
+   * Return an existing histogram if
+   *  (a) A histogram already exist with the same metric name.
+   * Otherwise, creates a new meter and registers
+   *
+   * @param registry MetricsRegistry
+   * @param name metric name
+   * @param biased (true if uniform distribution, otherwise exponential weighted)
+   * @return histogram
+   */
+  public static Histogram newHistogram(MetricsRegistry registry, MetricName name, boolean biased) {
+<span class="fc bfc" id="L200" title="All 2 branches covered.">    if (registry != null) {</span>
+<span class="fc" id="L201">      return registry.newHistogram(name, biased);</span>
+    } else {
+<span class="fc" id="L203">      return Metrics.newHistogram(name, biased);</span>
+    }
+  }
+
+  /**
+   *
+   * Return an existing aggregated histogram if registry is not null and a aggregated histogram already exist
+   * with the same metric name. Otherwise, creates a new aggregated histogram and registers (if registry not null)
+   *
+   * @param registry MetricsRegistry
+   * @param name metric name
+   * @return AggregatedHistogram
+   */
+  public static &lt;T extends Sampling&gt; AggregatedHistogram&lt;T&gt; newAggregatedHistogram(AggregatedMetricsRegistry registry,
+      MetricName name) {
+<span class="pc bpc" id="L218" title="1 of 2 branches missed.">    if (registry != null) {</span>
+<span class="nc" id="L219">      return registry.newAggregatedHistogram(name);</span>
+    } else {
+<span class="fc" id="L221">      return new AggregatedHistogram&lt;T&gt;();</span>
+    }
+  }
+
+  /**
+   *
+   * Return an existing gauge if
+   *  (a) A gauge already exist with the same metric name.
+   * Otherwise, creates a new meter and registers
+   *
+   * @param registry MetricsRegistry
+   * @param name metric name
+   * @param gauge Underlying gauge to be tracked
+   * @return gauge
+   */
+  public static &lt;T&gt; Gauge&lt;T&gt; newGauge(MetricsRegistry registry, MetricName name, Gauge&lt;T&gt; gauge) {
+<span class="fc bfc" id="L237" title="All 2 branches covered.">    if (registry != null) {</span>
+<span class="fc" id="L238">      return registry.newGauge(name, gauge);</span>
+    } else {
+<span class="fc" id="L240">      return Metrics.newGauge(name, gauge);</span>
+    }
+  }
+
+  /**
+   * Removes an existing metric
+   */
+  public static void removeMetric(MetricsRegistry registry, MetricName name) {
+<span class="nc bnc" id="L248" title="All 2 branches missed.">    if (registry != null) {</span>
+<span class="nc" id="L249">      registry.removeMetric(name);</span>
+    } else {
+<span class="nc" id="L251">      Metrics.defaultRegistry().removeMetric(name);</span>
+    }
+<span class="nc" id="L253">  }</span>
+
+  /**
+   *
+   * Return an existing aggregated long gauge if registry is not null and a aggregated long gauge already exist
+   * with the same metric name. Otherwise, creates a new aggregated long gauge and registers (if registry not null)
+   *
+   * @param registry MetricsRegistry
+   * @param name metric name
+   * @return AggregatedLongGauge
+   */
+  public static &lt;T extends Number, V extends Gauge&lt;T&gt;&gt; AggregatedLongGauge&lt;T, V&gt; newAggregatedLongGauge(
+      AggregatedMetricsRegistry registry, MetricName name) {
+<span class="nc bnc" id="L266" title="All 2 branches missed.">    if (registry != null) {</span>
+<span class="nc" id="L267">      return registry.newAggregatedLongGauge(name);</span>
+    } else {
+<span class="nc" id="L269">      return new AggregatedLongGauge&lt;T, V&gt;();</span>
+    }
+  }
+
+  /**
+   *
+   * Return an existing timer if
+   *  (a) A timer already exist with the same metric name.
+   * Otherwise, creates a new timer and registers
+   *
+   * @param registry MetricsRegistry
+   * @param name metric name
+   * @param durationUnit TimeUnit for duration
+   * @param rateUnit TimeUnit for rate determination
+   * @return Timer
+   */
+  public static Timer newTimer(MetricsRegistry registry, MetricName name, TimeUnit durationUnit, TimeUnit rateUnit) {
+<span class="pc bpc" id="L286" title="1 of 2 branches missed.">    if (registry != null) {</span>
+<span class="fc" id="L287">      return registry.newTimer(name, durationUnit, rateUnit);</span>
+    } else {
+<span class="nc" id="L289">      return Metrics.newTimer(name, durationUnit, rateUnit);</span>
+    }
+  }
+
+  /**
+   * Useful for measuring elapsed times.
+   *
+   * Usage :
+   * &lt;pre&gt;
+   * {@code
+   *   TimerContext tc = MtericsHelper.startTimer();
+   *   ....
+   *   Your code to be measured
+   *   ....
+   *   tc.stop();
+   *   long elapsedTimeMs = tc.getLatencyMs();
+   *
+   * }
+   * &lt;/pre&gt;
+   * @return
+   */
+  public static TimerContext startTimer() {
+<span class="fc" id="L311">    return new TimerContext();</span>
+  }
+
+  /**
+   *
+   * TimerContext to measure elapsed time
+   *
+   */
+<span class="nc" id="L319">  public static class TimerContext {</span>
+    private final long _startTimeNanos;
+    private long _stopTimeNanos;
+    private boolean _isDone;
+
+<span class="fc" id="L324">    public TimerContext() {</span>
+<span class="fc" id="L325">      _startTimeNanos = System.nanoTime();</span>
+<span class="fc" id="L326">      _isDone = false;</span>
+<span class="fc" id="L327">    }</span>
+
+    public void stop() {
+<span class="fc" id="L330">      _isDone = true;</span>
+<span class="fc" id="L331">      _stopTimeNanos = System.nanoTime();</span>
+<span class="fc" id="L332">    }</span>
+
+    /**
+     *
+     * @return
+     */
+    public long getLatencyMs() {
+<span class="pc bpc" id="L339" title="1 of 2 branches missed.">      if (!_isDone) {</span>
+<span class="nc" id="L340">        stop();</span>
+      }
+<span class="fc" id="L342">      return (_stopTimeNanos - _startTimeNanos) / 1000000L;</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

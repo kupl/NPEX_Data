@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>OptimizationFlags.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-broker</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.broker.requesthandler</a> &gt; <span class="el_source">OptimizationFlags.java</span></div><h1>OptimizationFlags.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.broker.requesthandler;
+
+import com.google.common.base.Preconditions;
+import com.google.common.base.Splitter;
+import com.linkedin.pinot.common.request.BrokerRequest;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import javax.annotation.Nullable;
+
+
+/**
+ * Holder for optimization flags.
+ */
+public class OptimizationFlags {
+  private final Set&lt;String&gt; _enabledOptimizations;
+  private final Set&lt;String&gt; _disabledOptimizations;
+
+<span class="fc" id="L34">  private OptimizationFlags(Set&lt;String&gt; enabledOptimizations, Set&lt;String&gt; disabledOptimizations) {</span>
+<span class="fc bfc" id="L35" title="All 4 branches covered.">    Preconditions.checkArgument(enabledOptimizations.isEmpty() || disabledOptimizations.isEmpty(),</span>
+        &quot;Cannot exclude and include optimizations at the same time&quot;);
+<span class="fc" id="L37">    _enabledOptimizations = enabledOptimizations;</span>
+<span class="fc" id="L38">    _disabledOptimizations = disabledOptimizations;</span>
+<span class="fc" id="L39">  }</span>
+
+  public boolean isOptimizationEnabled(String optimizationName) {
+<span class="fc bfc" id="L42" title="All 2 branches covered.">    if (_enabledOptimizations.isEmpty()) {</span>
+<span class="fc bfc" id="L43" title="All 2 branches covered.">      return !_disabledOptimizations.contains(optimizationName);</span>
+    } else {
+<span class="fc" id="L45">      return _enabledOptimizations.contains(optimizationName);</span>
+    }
+  }
+
+  /**
+   * Returns the optimization flags contained in the debug options of a broker request, or null if there are no
+   * optimization flags to apply.
+   *
+   * Optimization flags are specified as a broker request debug option called &quot;optimizationFlags&quot; which contains a list
+   * of optimizations to enable or skip. Optimizations that are prefixed with a plus sign are marked as enabled, while
+   * ones that are prefixed with a minus sign are disabled. If at least one optimization is marked as enabled, this is
+   * equivalent to disabling all non-explicitly enabled optimizations.
+   *
+   * For example, &quot;+filterQueryTree,+flattenNestedPredicates&quot; enables only the &quot;FilterQueryTree&quot; and
+   * &quot;FlattenNestedPredicates&quot; optimizations, with all other optimizations being disabled. &quot;-flattenNestedPredicates&quot;
+   * disables only the &quot;FlattenNestedPredicates&quot; optimization but keeps all other optimizations.
+   *
+   * @param brokerRequest The broker request from which to extract the optimization flags
+   * @return The optimization flags for this request, or null.
+   */
+  public static @Nullable OptimizationFlags getOptimizationFlags(BrokerRequest brokerRequest) {
+<span class="pc bpc" id="L66" title="1 of 4 branches missed.">    if (brokerRequest == null || brokerRequest.getDebugOptions() == null) {</span>
+<span class="fc" id="L67">      return null;</span>
+    }
+
+<span class="fc" id="L70">    String optimizationFlagString = brokerRequest.getDebugOptions().get(&quot;optimizationFlags&quot;);</span>
+
+<span class="pc bpc" id="L72" title="2 of 4 branches missed.">    if (optimizationFlagString == null || optimizationFlagString.isEmpty()) {</span>
+<span class="nc" id="L73">      return null;</span>
+    }
+
+<span class="fc" id="L76">    Set&lt;String&gt; enabledOptimizations = new HashSet&lt;&gt;();</span>
+<span class="fc" id="L77">    Set&lt;String&gt; disabledOptimizations = new HashSet&lt;&gt;();</span>
+
+<span class="fc" id="L79">    List&lt;String&gt; optimizations = Splitter.on(',').omitEmptyStrings().trimResults().splitToList(optimizationFlagString);</span>
+<span class="fc bfc" id="L80" title="All 2 branches covered.">    for (String optimization : optimizations) {</span>
+<span class="fc bfc" id="L81" title="All 2 branches covered.">      if (optimization.charAt(0) == '+') {</span>
+<span class="fc" id="L82">        enabledOptimizations.add(optimization.substring(1));</span>
+<span class="pc bpc" id="L83" title="1 of 2 branches missed.">      } else if (optimization.charAt(0) == '-') {</span>
+<span class="fc" id="L84">        disabledOptimizations.add(optimization.substring(1));</span>
+      } else {
+<span class="nc" id="L86">        throw new RuntimeException(&quot;Optimization flag list contains an invalid value &quot; + optimization</span>
+            + &quot;, should be prefixed either with + or -&quot;);
+      }
+<span class="fc" id="L89">    }</span>
+
+<span class="fc" id="L91">    return new OptimizationFlags(enabledOptimizations, disabledOptimizations);</span>
+  }
+
+  /**
+   * Returns a friendly name for an optimization by stripping the irrelevant parts of the class name and lowering the
+   * case of its first letter.
+   *
+   * @param clazz The class for which to get the friendly optimization name
+   * @return A friendly optimization name
+   */
+  public static String optimizationName(Class&lt;?&gt; clazz) {
+<span class="fc" id="L102">    String className = clazz.getSimpleName();</span>
+    String shortenedClassName;
+
+<span class="fc" id="L105">    shortenedClassName = className.replaceAll(&quot;FilterQueryTreeOptimizer&quot;, &quot;&quot;);</span>
+
+<span class="fc" id="L107">    return Character.toLowerCase(shortenedClassName.charAt(0)) + shortenedClassName.substring(1);</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

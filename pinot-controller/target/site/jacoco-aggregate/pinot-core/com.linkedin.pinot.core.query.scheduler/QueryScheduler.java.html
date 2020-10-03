@@ -1,0 +1,223 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>QueryScheduler.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-controller</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.query.scheduler</a> &gt; <span class="el_source">QueryScheduler.java</span></div><h1>QueryScheduler.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.linkedin.pinot.core.query.scheduler;
+
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.ListenableFutureTask;
+import com.linkedin.pinot.common.exception.QueryException;
+import com.linkedin.pinot.common.metrics.ServerGauge;
+import com.linkedin.pinot.common.metrics.ServerMeter;
+import com.linkedin.pinot.common.metrics.ServerMetrics;
+import com.linkedin.pinot.common.metrics.ServerQueryPhase;
+import com.linkedin.pinot.common.query.QueryExecutor;
+import com.linkedin.pinot.common.query.ServerQueryRequest;
+import com.linkedin.pinot.common.query.context.TimerContext;
+import com.linkedin.pinot.common.request.InstanceRequest;
+import com.linkedin.pinot.common.response.ProcessingException;
+import com.linkedin.pinot.common.utils.DataTable;
+import com.linkedin.pinot.core.common.datatable.DataTableImplV2;
+import com.linkedin.pinot.core.query.scheduler.resources.QueryExecutorService;
+import com.linkedin.pinot.core.query.scheduler.resources.ResourceManager;
+import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * Abstract class providing common scheduler functionality
+ * including query runner and query worker pool
+ */
+public abstract class QueryScheduler {
+
+<span class="fc" id="L53">  private static final Logger LOGGER = LoggerFactory.getLogger(QueryScheduler.class);</span>
+
+  protected final ServerMetrics serverMetrics;
+  protected final QueryExecutor queryExecutor;
+  protected final ResourceManager resourceManager;
+<span class="fc" id="L58">  protected volatile boolean isRunning = false;</span>
+
+  /**
+   * Constructor to initialize QueryScheduler
+   * @param queryExecutor QueryExecutor engine to use
+   * @param resourceManager for managing server thread resources
+   * @param serverMetrics server metrics collector
+   */
+  public QueryScheduler(@Nonnull QueryExecutor queryExecutor, @Nonnull ResourceManager resourceManager,
+<span class="fc" id="L67">      @Nonnull ServerMetrics serverMetrics) {</span>
+<span class="fc" id="L68">    Preconditions.checkNotNull(queryExecutor);</span>
+<span class="fc" id="L69">    Preconditions.checkNotNull(resourceManager);</span>
+<span class="fc" id="L70">    Preconditions.checkNotNull(serverMetrics);</span>
+
+<span class="fc" id="L72">    this.serverMetrics = serverMetrics;</span>
+<span class="fc" id="L73">    this.resourceManager = resourceManager;</span>
+<span class="fc" id="L74">    this.queryExecutor = queryExecutor;</span>
+<span class="fc" id="L75">  }</span>
+
+  /**
+   * Submit a query for execution. The query will be scheduled for execution as per the scheduling algorithm
+   * @param queryRequest query to schedule for execution
+   * @return Listenable future for query result representing serialized response. It is possible that the
+   *    future may return immediately or be scheduled for execution at a later time.
+   */
+  public abstract @Nonnull ListenableFuture&lt;byte[]&gt; submit(@Nullable ServerQueryRequest queryRequest);
+
+  /**
+   * Query scheduler name for logging
+   */
+  public abstract String name();
+
+  /**
+   * Start query scheduler thread
+   */
+  public void start() {
+<span class="fc" id="L94">    isRunning = true;</span>
+<span class="fc" id="L95">  }</span>
+
+  /**
+   * stop the scheduler and shutdown services
+   */
+  public void stop() {
+    // don't stop resourcemanager yet...we need to wait for all running queries to finish
+<span class="fc" id="L102">    isRunning = false;</span>
+<span class="fc" id="L103">  }</span>
+
+
+  @VisibleForTesting
+  public ExecutorService getQueryWorkers() {
+<span class="nc" id="L108">    return resourceManager.getQueryWorkers();</span>
+  }
+
+  /**
+   * Create a future task for the query
+   * @param request incoming query request
+   * @param e executor service to use for parallelizing query. This is passed to the QueryExecutor
+   * @return Future task that can be scheduled for execution on an ExecutorService. Ideally, this future
+   * should be executed on a different executor service than {@code e} to avoid deadlock.
+   */
+  protected ListenableFutureTask&lt;byte[]&gt; createQueryFutureTask(@Nonnull final ServerQueryRequest request,
+      @Nonnull final QueryExecutorService e) {
+<span class="fc" id="L120">    return ListenableFutureTask.create(new Callable&lt;byte[]&gt;() {</span>
+      @Override
+      public byte[] call()
+          throws Exception {
+<span class="fc" id="L124">        return processQueryAndSerialize(request, e);</span>
+      }
+    });
+  }
+
+  /**
+   * Process query and serialize response
+   * @param request incoming query request
+   * @param executorService Executor service to use for parallelizing query processing
+   * @return serialized query response
+   */
+  @Nullable
+  protected byte[] processQueryAndSerialize(@Nonnull final ServerQueryRequest request,
+      @Nonnull final ExecutorService executorService) {
+    DataTable dataTable;
+    try {
+<span class="fc" id="L140">      dataTable = queryExecutor.processQuery(request, executorService);</span>
+<span class="nc" id="L141">    } catch (Exception e) {</span>
+      // For not handled exceptions
+<span class="nc" id="L143">      serverMetrics.addMeteredGlobalValue(ServerMeter.UNCAUGHT_EXCEPTIONS, 1);</span>
+<span class="nc" id="L144">      dataTable = new DataTableImplV2();</span>
+<span class="nc" id="L145">      dataTable.addException(QueryException.getException(QueryException.INTERNAL_ERROR, e));</span>
+<span class="fc" id="L146">    }</span>
+<span class="fc" id="L147">    InstanceRequest instanceRequest = request.getInstanceRequest();</span>
+<span class="fc" id="L148">    long requestId = instanceRequest.getRequestId();</span>
+<span class="fc" id="L149">    Map&lt;String, String&gt; dataTableMetadata = dataTable.getMetadata();</span>
+<span class="fc" id="L150">    dataTableMetadata.put(DataTable.REQUEST_ID_METADATA_KEY, Long.toString(requestId));</span>
+
+<span class="fc" id="L152">    byte[] responseData = serializeDataTable(request, dataTable);</span>
+
+    // Log the statistics
+<span class="fc" id="L155">    TimerContext timerContext = request.getTimerContext();</span>
+<span class="fc" id="L156">    LOGGER.info(</span>
+        &quot;Processed requestId={},table={},reqSegments={},prunedToSegmentCount={},totalExecMs={},totalTimeMs={},broker={},numDocsScanned={},scanInFilter={},scanPostFilter={},sched={}&quot;,
+        requestId,
+        request.getTableName(),
+        instanceRequest.getSearchSegments().size(),
+        request.getSegmentCountAfterPruning(),
+        timerContext.getPhaseDurationMs(ServerQueryPhase.QUERY_PROCESSING),
+        timerContext.getPhaseDurationMs(ServerQueryPhase.TOTAL_QUERY_TIME),
+        instanceRequest.getBrokerId(),
+        getMetadataValue(dataTableMetadata, DataTable.NUM_DOCS_SCANNED_METADATA_KEY),
+        getMetadataValue(dataTableMetadata, DataTable.NUM_ENTRIES_SCANNED_IN_FILTER_METADATA_KEY),
+        getMetadataValue(dataTableMetadata, DataTable.NUM_ENTRIES_SCANNED_POST_FILTER_METADATA_KEY),
+        name());
+<span class="fc" id="L169">    serverMetrics.setValueOfTableGauge(request.getTableName(), ServerGauge.NUM_SEGMENTS_SEARCHED, request.getSegmentCountAfterPruning());</span>
+
+<span class="fc" id="L171">    return responseData;</span>
+  }
+
+  protected String getMetadataValue(Map&lt;String, String&gt; metadata, String key) {
+<span class="fc" id="L175">    String val = metadata.get(key);</span>
+<span class="pc bpc" id="L176" title="1 of 2 branches missed.">    return (val == null) ? &quot;&quot; : val;</span>
+  }
+
+  /**
+   * Serialize the DataTable response for query request
+   * @param queryRequest Server query request for which response is serialized
+   * @param instanceResponse DataTable to serialize
+   * @return serialized response bytes
+   */
+  @Nullable
+  public static byte[] serializeDataTable(@Nonnull ServerQueryRequest queryRequest,
+      @Nonnull DataTable instanceResponse) {
+<span class="fc" id="L188">    TimerContext timerContext = queryRequest.getTimerContext();</span>
+<span class="fc" id="L189">    TimerContext.Timer responseSerializationTimer =</span>
+        timerContext.startNewPhaseTimer(ServerQueryPhase.RESPONSE_SERIALIZATION);
+
+    byte[] responseByte;
+<span class="fc" id="L193">    InstanceRequest instanceRequest = queryRequest.getInstanceRequest();</span>
+    try {
+<span class="fc" id="L195">      responseByte = instanceResponse.toBytes();</span>
+<span class="nc" id="L196">    } catch (Exception e) {</span>
+<span class="nc" id="L197">      queryRequest.getServerMetrics().addMeteredGlobalValue(ServerMeter.RESPONSE_SERIALIZATION_EXCEPTIONS, 1);</span>
+<span class="nc" id="L198">      LOGGER.error(&quot;Caught exception while serializing response for requestId: {}, brokerId: {}&quot;,</span>
+          instanceRequest.getRequestId(), instanceRequest.getBrokerId(), e);
+<span class="nc" id="L200">      responseByte = null;</span>
+<span class="fc" id="L201">    }</span>
+
+<span class="fc" id="L203">    responseSerializationTimer.stopAndRecord();</span>
+<span class="fc" id="L204">    timerContext.startNewPhaseTimerAtNs(ServerQueryPhase.TOTAL_QUERY_TIME, timerContext.getQueryArrivalTimeNs())</span>
+        .stopAndRecord();
+
+<span class="fc" id="L207">    return responseByte;</span>
+  }
+
+  /**
+   * Error response future in case of internal error where query response is not available. This can happen
+   * if the query can not be executed or
+   * @param queryRequest
+   * @param error error code to send
+   * @return
+   */
+  protected ListenableFuture&lt;byte[]&gt; immediateErrorResponse(ServerQueryRequest queryRequest, ProcessingException error) {
+<span class="fc" id="L218">    DataTable result = new DataTableImplV2();</span>
+<span class="fc" id="L219">    result.addException(error);</span>
+<span class="fc" id="L220">    return Futures.immediateFuture(QueryScheduler.serializeDataTable(queryRequest, result));</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

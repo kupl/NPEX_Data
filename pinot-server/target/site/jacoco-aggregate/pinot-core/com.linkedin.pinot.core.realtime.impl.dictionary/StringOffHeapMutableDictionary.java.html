@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>StringOffHeapMutableDictionary.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-server</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.realtime.impl.dictionary</a> &gt; <span class="el_source">StringOffHeapMutableDictionary.java</span></div><h1>StringOffHeapMutableDictionary.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.linkedin.pinot.core.realtime.impl.dictionary;
+
+import com.linkedin.pinot.core.io.readerwriter.PinotDataBufferMemoryManager;
+import com.linkedin.pinot.core.io.writer.impl.MutableOffHeapByteArrayStore;
+import java.io.IOException;
+import java.nio.charset.Charset;
+import java.util.Arrays;
+import javax.annotation.Nonnull;
+
+
+public class StringOffHeapMutableDictionary extends BaseOffHeapMutableDictionary {
+
+<span class="fc" id="L29">  private static final Charset UTF_8 = Charset.forName(&quot;UTF-8&quot;);</span>
+  private final MutableOffHeapByteArrayStore _byteStore;
+<span class="fc" id="L31">  private String _min = null;</span>
+<span class="fc" id="L32">  private String _max = null;</span>
+
+  public StringOffHeapMutableDictionary(int estimatedCardinality, int maxOverflowHashSize,
+      PinotDataBufferMemoryManager memoryManager, String allocationContext, int avgStringLen) {
+<span class="fc" id="L36">    super(estimatedCardinality, maxOverflowHashSize, memoryManager, allocationContext);</span>
+<span class="fc" id="L37">    _byteStore = new MutableOffHeapByteArrayStore(memoryManager, allocationContext, estimatedCardinality, avgStringLen);</span>
+<span class="fc" id="L38">  }</span>
+
+  @Override
+  public void doClose() throws IOException {
+<span class="fc" id="L42">    _byteStore.close();</span>
+<span class="fc" id="L43">  }</span>
+
+  @Override
+  protected void setRawValueAt(int dictId, Object rawValue, byte[] serializedValue) {
+<span class="fc" id="L47">    _byteStore.add(serializedValue);</span>
+<span class="fc" id="L48">  }</span>
+
+  @Override
+  public Object get(int dictionaryId) {
+<span class="fc" id="L52">    return new String(_byteStore.get(dictionaryId));</span>
+  }
+
+  @Override
+  public void index(@Nonnull Object rawValue) {
+<span class="pc bpc" id="L57" title="1 of 2 branches missed.">    if (rawValue instanceof String) {</span>
+      // Single value
+<span class="fc" id="L59">      byte[] serializedValue =  ((String) rawValue).getBytes(UTF_8);</span>
+<span class="fc" id="L60">      indexValue(rawValue, serializedValue);</span>
+<span class="fc" id="L61">      updateMinMax((String) rawValue);</span>
+<span class="fc" id="L62">    } else {</span>
+      // Multi value
+<span class="nc" id="L64">      Object[] values = (Object[]) rawValue;</span>
+<span class="nc bnc" id="L65" title="All 2 branches missed.">      for (Object value : values) {</span>
+<span class="nc" id="L66">        byte[] serializedValue =  ((String) value).getBytes(UTF_8);</span>
+<span class="nc" id="L67">        indexValue(value, serializedValue);</span>
+<span class="nc" id="L68">        updateMinMax((String) value);</span>
+      }
+    }
+<span class="fc" id="L71">  }</span>
+
+  private String getInternal(int dictId) {
+<span class="nc" id="L74">    return new String(_byteStore.get(dictId));</span>
+  }
+
+  @Override
+  public boolean inRange(@Nonnull String lower, @Nonnull String upper, int dictIdToCompare, boolean includeLower,
+      boolean includeUpper) {
+<span class="nc" id="L80">    String valueToCompare = getInternal(dictIdToCompare);</span>
+
+<span class="nc bnc" id="L82" title="All 2 branches missed.">    if (includeLower) {</span>
+<span class="nc bnc" id="L83" title="All 2 branches missed.">      if (valueToCompare.compareTo(lower) &lt; 0) {</span>
+<span class="nc" id="L84">        return false;</span>
+      }
+    } else {
+<span class="nc bnc" id="L87" title="All 2 branches missed.">      if (valueToCompare.compareTo(lower) &lt;= 0) {</span>
+<span class="nc" id="L88">        return false;</span>
+      }
+    }
+
+<span class="nc bnc" id="L92" title="All 2 branches missed.">    if (includeUpper) {</span>
+<span class="nc bnc" id="L93" title="All 2 branches missed.">      if (valueToCompare.compareTo(upper) &gt; 0) {</span>
+<span class="nc" id="L94">        return false;</span>
+      }
+    } else {
+<span class="nc bnc" id="L97" title="All 2 branches missed.">      if (valueToCompare.compareTo(upper) &gt;= 0) {</span>
+<span class="nc" id="L98">        return false;</span>
+      }
+    }
+
+<span class="nc" id="L102">    return true;</span>
+  }
+
+  @Override
+  public int indexOf(Object rawValue) {
+<span class="fc" id="L107">    byte[] serializedValue = ((String) rawValue).getBytes(UTF_8);</span>
+<span class="fc" id="L108">    return getDictId(rawValue, serializedValue);</span>
+  }
+
+  @Nonnull
+  @Override
+  public Object getMinVal() {
+<span class="nc" id="L114">    return _min;</span>
+  }
+
+  @Nonnull
+  @Override
+  public Object getMaxVal() {
+<span class="nc" id="L120">    return _max;</span>
+  }
+
+  @Nonnull
+  @Override
+  public Object getSortedValues() {
+<span class="nc" id="L126">    int numValues = length();</span>
+<span class="nc" id="L127">    String[] sortedValues = new String[numValues];</span>
+
+<span class="nc bnc" id="L129" title="All 2 branches missed.">    for (int i = 0; i &lt; numValues; i++) {</span>
+<span class="nc" id="L130">      sortedValues[i] = new String(getInternal(i));</span>
+    }
+
+<span class="nc" id="L133">    Arrays.sort(sortedValues);</span>
+<span class="nc" id="L134">    return sortedValues;</span>
+  }
+
+  protected boolean equalsValueAt(int dictId, Object value, byte[] serializedValue) {
+<span class="fc" id="L138">    return _byteStore.equalsValueAt(serializedValue, dictId);</span>
+  }
+
+  private void updateMinMax(String value) {
+<span class="fc bfc" id="L142" title="All 2 branches covered.">    if (_min == null) {</span>
+<span class="fc" id="L143">      _min = value;</span>
+<span class="fc" id="L144">      _max = value;</span>
+    } else {
+<span class="fc bfc" id="L146" title="All 2 branches covered.">      if (value.compareTo(_min) &lt; 0) {</span>
+<span class="fc" id="L147">        _min = value;</span>
+      }
+<span class="fc bfc" id="L149" title="All 2 branches covered.">      if (value.compareTo(_max) &gt; 0) {</span>
+<span class="fc" id="L150">        _max = value;</span>
+      }
+    }
+<span class="fc" id="L153">  }</span>
+
+  @Override
+  public long getTotalOffHeapMemUsed() {
+<span class="nc" id="L157">    return super.getTotalOffHeapMemUsed() + _byteStore.getTotalOffHeapMemUsed();</span>
+  }
+
+  @Override
+  public int getAvgValueSize() {
+<span class="nc" id="L162">    return (int) _byteStore.getAvgValueSize();</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

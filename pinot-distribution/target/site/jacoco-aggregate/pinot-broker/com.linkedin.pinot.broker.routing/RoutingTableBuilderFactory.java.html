@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>RoutingTableBuilderFactory.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-broker</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.broker.routing</a> &gt; <span class="el_source">RoutingTableBuilderFactory.java</span></div><h1>RoutingTableBuilderFactory.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.broker.routing;
+
+import com.linkedin.pinot.broker.routing.builder.PartitionAwareOfflineRoutingTableBuilder;
+import com.linkedin.pinot.broker.routing.builder.PartitionAwareRealtimeRoutingTableBuilder;
+import com.linkedin.pinot.common.config.SegmentsValidationAndRetentionConfig;
+import com.linkedin.pinot.common.metadata.stream.KafkaStreamMetadata;
+import com.linkedin.pinot.common.utils.CommonConstants;
+import org.apache.commons.configuration.Configuration;
+import org.apache.helix.ZNRecord;
+import org.apache.helix.store.zk.ZkHelixPropertyStore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.linkedin.pinot.broker.routing.builder.BalancedRandomRoutingTableBuilder;
+import com.linkedin.pinot.broker.routing.builder.DefaultOfflineRoutingTableBuilder;
+import com.linkedin.pinot.broker.routing.builder.DefaultRealtimeRoutingTableBuilder;
+import com.linkedin.pinot.broker.routing.builder.KafkaHighLevelConsumerBasedRoutingTableBuilder;
+import com.linkedin.pinot.broker.routing.builder.KafkaLowLevelConsumerRoutingTableBuilder;
+import com.linkedin.pinot.broker.routing.builder.RoutingTableBuilder;
+import com.linkedin.pinot.common.config.TableConfig;
+import com.linkedin.pinot.common.utils.CommonConstants.Helix.TableType;
+
+
+public class RoutingTableBuilderFactory {
+<span class="fc" id="L40">  private static final Logger LOGGER = LoggerFactory.getLogger(RoutingTableBuilderFactory.class);</span>
+
+  private Configuration _configuration;
+
+  private ZkHelixPropertyStore&lt;ZNRecord&gt; _propertyStore;
+
+<span class="pc" id="L46">  enum RoutingTableBuilderName {</span>
+<span class="fc" id="L47">    DefaultOffline,</span>
+<span class="fc" id="L48">    DefaultRealtime,</span>
+<span class="fc" id="L49">    BalancedRandom,</span>
+<span class="fc" id="L50">    KafkaLowLevel,</span>
+<span class="fc" id="L51">    KafkaHighLevel,</span>
+<span class="fc" id="L52">    PartitionAwareOffline,</span>
+<span class="fc" id="L53">    PartitionAwareRealtime</span>
+  }
+
+<span class="fc" id="L56">  public RoutingTableBuilderFactory(Configuration configuration, ZkHelixPropertyStore&lt;ZNRecord&gt; propertyStore) {</span>
+<span class="fc" id="L57">    _configuration = configuration;</span>
+<span class="fc" id="L58">    _propertyStore = propertyStore;</span>
+<span class="fc" id="L59">  }</span>
+
+  public RoutingTableBuilder createRoutingTableBuilder(TableConfig tableConfig) {
+<span class="fc" id="L62">    String builderName = null;</span>
+<span class="pc bpc" id="L63" title="1 of 2 branches missed.">    if (tableConfig.getRoutingConfig() != null) {</span>
+<span class="fc" id="L64">      builderName = tableConfig.getRoutingConfig().getRoutingTableBuilderName();</span>
+    }
+<span class="fc" id="L66">    RoutingTableBuilderName buildNameEnum = null;</span>
+
+<span class="pc bpc" id="L68" title="1 of 2 branches missed.">    if (builderName != null) {</span>
+      try {
+<span class="nc" id="L70">        buildNameEnum = RoutingTableBuilderName.valueOf(builderName);</span>
+<span class="nc" id="L71">      } catch (Exception e) {</span>
+<span class="nc" id="L72">        LOGGER.error(&quot;Unable to create routing table builder with name:{} for table:{}&quot;, builderName,</span>
+            tableConfig.getTableName());
+<span class="nc" id="L74">        buildNameEnum = null;</span>
+<span class="nc" id="L75">      }</span>
+    }
+    // use appropriate default if builderName is not specified or we fail to recognize the builderName
+<span class="pc bpc" id="L78" title="1 of 2 branches missed.">    if (buildNameEnum == null) {</span>
+<span class="fc bfc" id="L79" title="All 2 branches covered.">      if (tableConfig.getTableType() == TableType.OFFLINE) {</span>
+<span class="fc" id="L80">        buildNameEnum = RoutingTableBuilderName.DefaultOffline;</span>
+<span class="pc bpc" id="L81" title="1 of 2 branches missed.">      } else if (tableConfig.getTableType() == TableType.REALTIME) {</span>
+<span class="fc" id="L82">        buildNameEnum = RoutingTableBuilderName.DefaultRealtime;</span>
+      } else {
+<span class="nc" id="L84">        buildNameEnum = RoutingTableBuilderName.BalancedRandom;</span>
+      }
+    }
+<span class="fc" id="L87">    RoutingTableBuilder builder = null;</span>
+<span class="pc bpc" id="L88" title="6 of 8 branches missed.">    switch (buildNameEnum) {</span>
+      case BalancedRandom:
+<span class="nc" id="L90">        builder = new BalancedRandomRoutingTableBuilder();</span>
+<span class="nc" id="L91">        break;</span>
+      case DefaultOffline:
+<span class="fc" id="L93">        builder = new DefaultOfflineRoutingTableBuilder();</span>
+<span class="fc" id="L94">        break;</span>
+      case DefaultRealtime:
+<span class="fc" id="L96">        builder = new DefaultRealtimeRoutingTableBuilder();</span>
+<span class="fc" id="L97">        break;</span>
+      case KafkaHighLevel:
+<span class="nc" id="L99">        builder = new KafkaHighLevelConsumerBasedRoutingTableBuilder();</span>
+<span class="nc" id="L100">        break;</span>
+      case KafkaLowLevel:
+<span class="nc" id="L102">        builder = new KafkaLowLevelConsumerRoutingTableBuilder();</span>
+<span class="nc" id="L103">        break;</span>
+      case PartitionAwareOffline:
+<span class="nc" id="L105">        SegmentsValidationAndRetentionConfig validationConfig = tableConfig.getValidationConfig();</span>
+<span class="nc" id="L106">        String segmentAssignmentStrategy = validationConfig.getSegmentAssignmentStrategy();</span>
+
+        // Check that the replica group aware segment assignment strategy is used.
+<span class="nc bnc" id="L109" title="All 2 branches missed.">        boolean isSegmentAssignmentStrategyCorrect =</span>
+            (CommonConstants.Helix.DataSource.SegmentAssignmentStrategyType.valueOf(segmentAssignmentStrategy)
+                == CommonConstants.Helix.DataSource.SegmentAssignmentStrategyType.ReplicaGroupSegmentAssignmentStrategy);
+
+        // Check that replica group strategy config is correctly set
+<span class="nc bnc" id="L114" title="All 2 branches missed.">        boolean hasReplicaGroupStrategyConfig = (validationConfig != null);</span>
+
+        // Check that the table push type is not 'refresh'.
+<span class="nc bnc" id="L117" title="All 4 branches missed.">        boolean isNotRefreshPush = (validationConfig.getSegmentPushType() != null) &amp;&amp;</span>
+            !validationConfig.getSegmentPushType().equalsIgnoreCase(&quot;REFRESH&quot;);
+
+<span class="nc bnc" id="L120" title="All 6 branches missed.">        if (isSegmentAssignmentStrategyCorrect &amp;&amp; hasReplicaGroupStrategyConfig &amp;&amp; isNotRefreshPush) {</span>
+<span class="nc" id="L121">          builder = new PartitionAwareOfflineRoutingTableBuilder();</span>
+        } else {
+<span class="nc" id="L123">          builder = new DefaultOfflineRoutingTableBuilder();</span>
+        }
+<span class="nc" id="L125">        break;</span>
+      case PartitionAwareRealtime:
+        // Check that the table uses LLC kafka consumer.
+<span class="nc" id="L128">        KafkaStreamMetadata streamMetadata = new KafkaStreamMetadata(tableConfig.getIndexingConfig().getStreamConfigs());</span>
+
+<span class="nc bnc" id="L130" title="All 4 branches missed.">        if (streamMetadata.getConsumerTypes().size() == 1 &amp;&amp; streamMetadata.getConsumerTypes().get(0)</span>
+            == CommonConstants.Helix.DataSource.Realtime.Kafka.ConsumerType.simple) {
+<span class="nc" id="L132">          builder = new PartitionAwareRealtimeRoutingTableBuilder();</span>
+        } else {
+<span class="nc" id="L134">          builder = new DefaultRealtimeRoutingTableBuilder();</span>
+        }
+        break;
+    }
+<span class="fc" id="L138">    builder.init(_configuration, tableConfig, _propertyStore);</span>
+<span class="fc" id="L139">    return builder;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

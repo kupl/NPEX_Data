@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>StreamAvroIntoKafkaCommand.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-tools</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.tools.admin.command</a> &gt; <span class="el_source">StreamAvroIntoKafkaCommand.java</span></div><h1>StreamAvroIntoKafkaCommand.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.tools.admin.command;
+
+import com.google.common.primitives.Longs;
+import com.google.common.util.concurrent.Uninterruptibles;
+import com.linkedin.pinot.common.utils.HashUtil;
+import com.linkedin.pinot.common.utils.KafkaStarterUtils;
+import com.linkedin.pinot.core.util.AvroUtils;
+import com.linkedin.pinot.tools.Command;
+import java.io.File;
+import java.io.IOException;
+import java.util.Properties;
+import java.util.concurrent.TimeUnit;
+import kafka.javaapi.producer.Producer;
+import kafka.producer.KeyedMessage;
+import kafka.producer.ProducerConfig;
+import org.apache.avro.file.DataFileStream;
+import org.apache.avro.generic.GenericRecord;
+import org.kohsuke.args4j.Option;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * Class for command to stream Avro data into Kafka.
+ */
+<span class="nc" id="L41">public class StreamAvroIntoKafkaCommand extends AbstractBaseAdminCommand implements Command {</span>
+<span class="nc" id="L42">  private static final Logger LOGGER = LoggerFactory.getLogger(StreamAvroIntoKafkaCommand.class);</span>
+
+<span class="nc" id="L44">  @Option(name=&quot;-avroFile&quot;, required=true, metaVar=&quot;&lt;String&gt;&quot;, usage=&quot;Avro file to stream.&quot;)</span>
+  private String _avroFile = null;
+
+<span class="nc" id="L47">  @Option(name=&quot;-help&quot;, required=false, help=true, aliases={&quot;-h&quot;, &quot;--h&quot;, &quot;--help&quot;}, usage=&quot;Print this message.&quot;)</span>
+  private boolean _help = false;
+
+<span class="nc" id="L50">  @Option(name=&quot;-kafkaBrokerList&quot;, required=false, metaVar=&quot;&lt;String&gt;&quot;, usage=&quot;Kafka broker list.&quot;)</span>
+  private String _kafkaBrokerList = KafkaStarterUtils.DEFAULT_KAFKA_BROKER;
+
+<span class="nc" id="L53">  @Option(name=&quot;-kafkaTopic&quot;, required=true, metaVar=&quot;&lt;String&gt;&quot;, usage=&quot;Kafka topic to stream into.&quot;)</span>
+  private String _kafkaTopic = null;
+
+<span class="nc" id="L56">  @Option(name=&quot;-zkAddress&quot;, required=false, metaVar=&quot;&lt;string&gt;&quot;, usage=&quot;Address of Zookeeper.&quot;)</span>
+  private String _zkAddress = &quot;localhost:2181&quot;;
+
+<span class="nc" id="L59">  @Option(name=&quot;-millisBetweenMessages&quot;, required=false, metaVar=&quot;&lt;int&gt;&quot;, usage=&quot;Delay in milliseconds between messages (default 1000 ms)&quot;)</span>
+  private String _millisBetweenMessages = &quot;1000&quot;;
+
+  @Override
+  public boolean getHelp() {
+<span class="nc" id="L64">    return _help;</span>
+  }
+
+  @Override
+  public String getName() {
+<span class="nc" id="L69">    return &quot;StreamAvroToKafka&quot;;</span>
+  }
+
+  @Override
+  public String toString() {
+<span class="nc" id="L74">    return &quot;StreamAvroInfoKafka -avroFile &quot; + _avroFile + &quot; -kafkaBrokerList &quot; + _kafkaBrokerList + &quot; -kafkaTopic &quot; +</span>
+        _kafkaTopic + &quot; -millisBetweenMessages &quot; + _millisBetweenMessages;
+  }
+
+  @Override
+  public String description() {
+<span class="nc" id="L80">    return &quot;Stream the specified Avro file into a Kafka topic, which can be read by Pinot\n&quot; +</span>
+        &quot;by using com.linkedin.pinot.core.realtime.impl.kafka.KafkaJSONMessageDecoder as the\n&quot; +
+        &quot;message decoder class name (stream.kafka.decoder.class.name).&quot;;
+  }
+
+  @Override
+  public boolean execute() throws IOException {
+<span class="nc" id="L87">    int messageDelayMillis = Integer.parseInt(_millisBetweenMessages);</span>
+<span class="nc bnc" id="L88" title="All 2 branches missed.">    final boolean sleepRequired = 0 &lt; messageDelayMillis;</span>
+
+<span class="nc bnc" id="L90" title="All 2 branches missed.">    if (sleepRequired) {</span>
+<span class="nc" id="L91">      LOGGER.info(&quot;Streaming Avro file into Kafka topic {} with {} ms between messages&quot;, _kafkaTopic,</span>
+          _millisBetweenMessages);
+    } else {
+<span class="nc" id="L94">      LOGGER.info(&quot;Streaming Avro file into Kafka topic {} with no delay between messages&quot;, _kafkaTopic);</span>
+    }
+
+    // Create Kafka producer
+<span class="nc" id="L98">    Properties properties = new Properties();</span>
+<span class="nc" id="L99">    properties.put(&quot;metadata.broker.list&quot;, _kafkaBrokerList);</span>
+<span class="nc" id="L100">    properties.put(&quot;serializer.class&quot;, &quot;kafka.serializer.DefaultEncoder&quot;);</span>
+<span class="nc" id="L101">    properties.put(&quot;request.required.acks&quot;, &quot;1&quot;);</span>
+
+<span class="nc" id="L103">    ProducerConfig producerConfig = new ProducerConfig(properties);</span>
+<span class="nc" id="L104">    Producer&lt;byte[], byte[]&gt; producer = new Producer&lt;byte[], byte[]&gt;(producerConfig);</span>
+    try {
+      // Open the Avro file
+<span class="nc" id="L107">      DataFileStream&lt;GenericRecord&gt; reader = AvroUtils.getAvroReader(new File(_avroFile));</span>
+
+      // Iterate over every record
+<span class="nc bnc" id="L110" title="All 2 branches missed.">      for (GenericRecord genericRecord : reader) {</span>
+        // Write the message to Kafka
+<span class="nc" id="L112">        String recordJson = genericRecord.toString();</span>
+<span class="nc" id="L113">        byte[] bytes = recordJson.getBytes(&quot;utf-8&quot;);</span>
+<span class="nc" id="L114">        KeyedMessage&lt;byte[], byte[]&gt; data = new KeyedMessage&lt;byte[], byte[]&gt;(_kafkaTopic,</span>
+            Longs.toByteArray(HashUtil.hash64(bytes, bytes.length)), bytes);
+
+<span class="nc" id="L117">        producer.send(data);</span>
+
+        // Sleep between messages
+<span class="nc bnc" id="L120" title="All 2 branches missed.">        if (sleepRequired) {</span>
+<span class="nc" id="L121">          Uninterruptibles.sleepUninterruptibly(messageDelayMillis, TimeUnit.MILLISECONDS);</span>
+        }
+<span class="nc" id="L123">      }</span>
+
+<span class="nc" id="L125">      reader.close();</span>
+<span class="nc" id="L126">    } catch (Exception e) {</span>
+<span class="nc" id="L127">      e.printStackTrace();</span>
+<span class="nc" id="L128">      throw new RuntimeException(e);</span>
+<span class="nc" id="L129">    }</span>
+
+<span class="nc" id="L131">    savePID(System.getProperty(&quot;java.io.tmpdir&quot;) + File.separator + &quot;.streamAvro.pid&quot;);</span>
+<span class="nc" id="L132">    return true;</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>OffHeapStarTreeNode.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-perf</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.startree</a> &gt; <span class="el_source">OffHeapStarTreeNode.java</span></div><h1>OffHeapStarTreeNode.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.startree;
+
+import com.linkedin.pinot.core.segment.creator.impl.V1Constants;
+import java.util.Iterator;
+import xerial.larray.buffer.LBufferAPI;
+
+
+public class OffHeapStarTreeNode implements StarTreeNode {
+  public static final int INVALID_INDEX = -1;
+
+  // Number of fields and serializable size of the node
+  public static final int NUM_SERIALIZABLE_FIELDS = 7;
+  public static final int SERIALIZABLE_SIZE_IN_BYTES = V1Constants.Numbers.INTEGER_SIZE * NUM_SERIALIZABLE_FIELDS;
+
+  private final LBufferAPI _dataBuffer;
+  private final int _dimensionId;
+  private final int _dimensionValue;
+  private final int _startDocId;
+  private final int _endDocId;
+  private final int _aggregatedDocId;
+  private final int _childrenStartIndex;
+  // Inclusive
+  private final int _childrenEndIndex;
+
+<span class="fc" id="L40">  public OffHeapStarTreeNode(LBufferAPI dataBuffer, int nodeId) {</span>
+<span class="fc" id="L41">    _dataBuffer = dataBuffer;</span>
+<span class="fc" id="L42">    long offset = nodeId * SERIALIZABLE_SIZE_IN_BYTES;</span>
+
+<span class="fc" id="L44">    _dimensionId = dataBuffer.getInt(offset);</span>
+<span class="fc" id="L45">    offset += V1Constants.Numbers.INTEGER_SIZE;</span>
+
+<span class="fc" id="L47">    _dimensionValue = dataBuffer.getInt(offset);</span>
+<span class="fc" id="L48">    offset += V1Constants.Numbers.INTEGER_SIZE;</span>
+
+<span class="fc" id="L50">    _startDocId = dataBuffer.getInt(offset);</span>
+<span class="fc" id="L51">    offset += V1Constants.Numbers.INTEGER_SIZE;</span>
+
+<span class="fc" id="L53">    _endDocId = dataBuffer.getInt(offset);</span>
+<span class="fc" id="L54">    offset += V1Constants.Numbers.INTEGER_SIZE;</span>
+
+<span class="fc" id="L56">    _aggregatedDocId = dataBuffer.getInt(offset);</span>
+<span class="fc" id="L57">    offset += V1Constants.Numbers.INTEGER_SIZE;</span>
+
+<span class="fc" id="L59">    _childrenStartIndex = dataBuffer.getInt(offset);</span>
+<span class="fc" id="L60">    offset += V1Constants.Numbers.INTEGER_SIZE;</span>
+
+<span class="fc" id="L62">    _childrenEndIndex = dataBuffer.getInt(offset);</span>
+<span class="fc" id="L63">  }</span>
+
+  @Override
+  public int getDimensionId() {
+<span class="nc" id="L67">    return _dimensionId;</span>
+  }
+
+  @Override
+  public int getDimensionValue() {
+<span class="fc" id="L72">    return _dimensionValue;</span>
+  }
+
+  @Override
+  public int getChildDimensionId() {
+<span class="pc bpc" id="L77" title="1 of 2 branches missed.">    if (_childrenStartIndex == INVALID_INDEX) {</span>
+<span class="nc" id="L78">      return INVALID_INDEX;</span>
+    } else {
+<span class="fc" id="L80">      return _dataBuffer.getInt(_childrenStartIndex * SERIALIZABLE_SIZE_IN_BYTES);</span>
+    }
+  }
+
+  @Override
+  public int getStartDocId() {
+<span class="fc" id="L86">    return _startDocId;</span>
+  }
+
+  @Override
+  public int getEndDocId() {
+<span class="fc" id="L91">    return _endDocId;</span>
+  }
+
+  @Override
+  public int getAggregatedDocId() {
+<span class="fc" id="L96">    return _aggregatedDocId;</span>
+  }
+
+  @Override
+  public int getNumChildren() {
+<span class="pc bpc" id="L101" title="1 of 2 branches missed.">    if (_childrenStartIndex == INVALID_INDEX) {</span>
+<span class="nc" id="L102">      return 0;</span>
+    } else {
+<span class="fc" id="L104">      return _childrenEndIndex - _childrenStartIndex + 1;</span>
+    }
+  }
+
+  @Override
+  public boolean isLeaf() {
+<span class="fc bfc" id="L110" title="All 2 branches covered.">    return _childrenStartIndex == INVALID_INDEX;</span>
+  }
+
+  @Override
+  public StarTreeNode getChildForDimensionValue(int dimensionValue) {
+<span class="pc bpc" id="L115" title="1 of 2 branches missed.">    if (isLeaf()) {</span>
+<span class="nc" id="L116">      return null;</span>
+    }
+
+    // Specialize star node for performance
+<span class="fc bfc" id="L120" title="All 2 branches covered.">    if (dimensionValue == ALL) {</span>
+<span class="fc" id="L121">      OffHeapStarTreeNode firstNode = new OffHeapStarTreeNode(_dataBuffer, _childrenStartIndex);</span>
+<span class="fc bfc" id="L122" title="All 2 branches covered.">      if (firstNode.getDimensionValue() == ALL) {</span>
+<span class="fc" id="L123">        return firstNode;</span>
+      } else {
+<span class="fc" id="L125">        return null;</span>
+      }
+    }
+
+    // Binary search
+<span class="fc" id="L130">    int low = _childrenStartIndex;</span>
+<span class="fc" id="L131">    int high = _childrenEndIndex;</span>
+
+<span class="fc bfc" id="L133" title="All 2 branches covered.">    while (low &lt;= high) {</span>
+<span class="fc" id="L134">      int mid = (low + high) / 2;</span>
+<span class="fc" id="L135">      OffHeapStarTreeNode midNode = new OffHeapStarTreeNode(_dataBuffer, mid);</span>
+<span class="fc" id="L136">      int midValue = midNode.getDimensionValue();</span>
+
+<span class="fc bfc" id="L138" title="All 2 branches covered.">      if (midValue == dimensionValue) {</span>
+<span class="fc" id="L139">        return midNode;</span>
+<span class="fc bfc" id="L140" title="All 2 branches covered.">      } else if (midValue &lt; dimensionValue) {</span>
+<span class="fc" id="L141">        low = mid + 1;</span>
+      } else {
+<span class="fc" id="L143">        high = mid - 1;</span>
+      }
+<span class="fc" id="L145">    }</span>
+<span class="fc" id="L146">    return null;</span>
+  }
+
+  @Override
+  public Iterator&lt;OffHeapStarTreeNode&gt; getChildrenIterator() {
+<span class="fc" id="L151">    return new Iterator&lt;OffHeapStarTreeNode&gt;() {</span>
+      // Inclusive
+<span class="fc" id="L153">      private final int _endChildId = _childrenEndIndex;</span>
+<span class="fc" id="L154">      private int _currentChildId = _childrenStartIndex;</span>
+
+      @Override
+      public boolean hasNext() {
+<span class="fc bfc" id="L158" title="All 2 branches covered.">        return _currentChildId &lt;= _endChildId;</span>
+      }
+
+      @Override
+      public OffHeapStarTreeNode next() {
+<span class="fc" id="L163">        return new OffHeapStarTreeNode(_dataBuffer, _currentChildId++);</span>
+      }
+
+      @Override
+      public void remove() {
+<span class="nc" id="L168">        throw new UnsupportedOperationException();</span>
+      }
+    };
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

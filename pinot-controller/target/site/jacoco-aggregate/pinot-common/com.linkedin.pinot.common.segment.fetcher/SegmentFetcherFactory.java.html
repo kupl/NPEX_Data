@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>SegmentFetcherFactory.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-controller</a> &gt; <a href="../index.html" class="el_bundle">pinot-common</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.common.segment.fetcher</a> &gt; <span class="el_source">SegmentFetcherFactory.java</span></div><h1>SegmentFetcherFactory.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.common.segment.fetcher;
+
+import com.google.common.base.Preconditions;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import org.apache.commons.configuration.Configuration;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+public class SegmentFetcherFactory {
+<span class="fc" id="L34">  private static final Logger LOGGER = LoggerFactory.getLogger(SegmentFetcherFactory.class);</span>
+<span class="fc" id="L35">  private static final SegmentFetcherFactory INSTANCE = new SegmentFetcherFactory();</span>
+
+<span class="fc" id="L37">  private SegmentFetcherFactory() {</span>
+<span class="fc" id="L38">  }</span>
+
+  public static SegmentFetcherFactory getInstance() {
+<span class="fc" id="L41">    return INSTANCE;</span>
+  }
+
+  public static final String PROTOCOLS_KEY = &quot;protocols&quot;;
+<span class="fc" id="L45">  public static final List&lt;String&gt; DEFAULT_PROTOCOLS = Collections.unmodifiableList(Arrays.asList(&quot;file&quot;, &quot;http&quot;));</span>
+<span class="fc" id="L46">  public static final Map&lt;String, String&gt; DEFAULT_FETCHER_CLASS_MAP =</span>
+<span class="fc" id="L47">      Collections.unmodifiableMap(new HashMap&lt;String, String&gt;(4) {{</span>
+<span class="fc" id="L48">        put(&quot;file&quot;, LocalFileSegmentFetcher.class.getName());</span>
+<span class="fc" id="L49">        put(&quot;http&quot;, HttpSegmentFetcher.class.getName());</span>
+<span class="fc" id="L50">        put(&quot;https&quot;, HttpsSegmentFetcher.class.getName());</span>
+<span class="fc" id="L51">        put(&quot;hdfs&quot;, HdfsSegmentFetcher.class.getName());</span>
+<span class="fc" id="L52">      }});</span>
+  public static final String FETCHER_CLASS_KEY_SUFFIX = &quot;.class&quot;;
+
+<span class="fc" id="L55">  private final Map&lt;String, SegmentFetcher&gt; _segmentFetcherMap = new HashMap&lt;&gt;();</span>
+
+  /**
+   * Initiate the segment fetcher factory. This method should only be called once.
+   *
+   * @param config Segment fetcher factory config
+   */
+  public void init(Configuration config) throws ClassNotFoundException, IllegalAccessException, InstantiationException {
+    @SuppressWarnings(&quot;unchecked&quot;)
+<span class="fc" id="L64">    List&lt;String&gt; protocols = config.getList(PROTOCOLS_KEY, DEFAULT_PROTOCOLS);</span>
+<span class="fc bfc" id="L65" title="All 2 branches covered.">    for (String protocol : protocols) {</span>
+<span class="fc" id="L66">      String fetcherClass =</span>
+          config.getString(protocol + FETCHER_CLASS_KEY_SUFFIX, DEFAULT_FETCHER_CLASS_MAP.get(protocol));
+<span class="fc" id="L68">      Preconditions.checkNotNull(fetcherClass, &quot;No fetcher class defined for protocol: &quot; + protocol);</span>
+<span class="fc" id="L69">      LOGGER.info(&quot;Creating a new segment fetcher for protocol: {} with class: {}&quot;, protocol, fetcherClass);</span>
+<span class="fc" id="L70">      SegmentFetcher segmentFetcher = (SegmentFetcher) Class.forName(fetcherClass).newInstance();</span>
+<span class="fc" id="L71">      LOGGER.info(&quot;Initializing segment fetcher for protocol: {}&quot;, protocol);</span>
+<span class="fc" id="L72">      Configuration segmentFetcherConfig = config.subset(protocol);</span>
+<span class="fc" id="L73">      logFetcherInitConfig(segmentFetcher, protocol, segmentFetcherConfig);</span>
+<span class="fc" id="L74">      segmentFetcher.init(segmentFetcherConfig);</span>
+<span class="fc" id="L75">      _segmentFetcherMap.put(protocol, segmentFetcher);</span>
+<span class="fc" id="L76">    }</span>
+<span class="fc" id="L77">  }</span>
+
+  public boolean containsProtocol(String protocol) {
+<span class="fc" id="L80">    return _segmentFetcherMap.containsKey(protocol);</span>
+  }
+
+  public SegmentFetcher getSegmentFetcherBasedOnURI(String uri) throws URISyntaxException {
+<span class="fc" id="L84">    String protocol = new URI(uri).getScheme();</span>
+<span class="fc" id="L85">    return _segmentFetcherMap.get(protocol);</span>
+  }
+
+  private static void logFetcherInitConfig(SegmentFetcher fetcher, String protocol, Configuration conf) {
+<span class="fc" id="L89">    LOGGER.info(&quot;Initializing protocol [{}] with the following configs:&quot;, protocol);</span>
+<span class="fc" id="L90">    Iterator iter = conf.getKeys();</span>
+<span class="fc" id="L91">    Set&lt;String&gt; secretKeys = fetcher.getProtectedConfigKeys();</span>
+<span class="fc bfc" id="L92" title="All 2 branches covered.">    while (iter.hasNext()) {</span>
+<span class="fc" id="L93">      String key = (String) iter.next();</span>
+<span class="pc bpc" id="L94" title="1 of 2 branches missed.">      if (secretKeys.contains(key)) {</span>
+<span class="nc" id="L95">        LOGGER.info(&quot;{}: {}&quot;, key, &quot;********&quot;);</span>
+      } else {
+<span class="fc" id="L97">        LOGGER.info(&quot;{}: {}&quot;, key, conf.getString(key));</span>
+      }
+<span class="fc" id="L99">    }</span>
+<span class="fc" id="L100">    LOGGER.info(&quot;&quot;);</span>
+<span class="fc" id="L101">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

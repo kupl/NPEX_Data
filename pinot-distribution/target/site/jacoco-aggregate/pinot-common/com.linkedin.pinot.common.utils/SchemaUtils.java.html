@@ -1,0 +1,199 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>SchemaUtils.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-common</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.common.utils</a> &gt; <span class="el_source">SchemaUtils.java</span></div><h1>SchemaUtils.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.common.utils;
+
+import com.google.common.base.Preconditions;
+import com.linkedin.pinot.common.data.FieldSpec;
+import com.linkedin.pinot.common.data.Schema;
+import java.io.IOException;
+import java.net.URL;
+import java.util.concurrent.TimeUnit;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+import org.apache.commons.httpclient.HttpClient;
+import org.apache.commons.httpclient.methods.DeleteMethod;
+import org.apache.commons.httpclient.methods.GetMethod;
+import org.apache.commons.httpclient.methods.PostMethod;
+import org.apache.commons.httpclient.methods.multipart.MultipartRequestEntity;
+import org.apache.commons.httpclient.methods.multipart.Part;
+import org.apache.commons.httpclient.methods.multipart.StringPart;
+import org.apache.commons.httpclient.params.HttpMethodParams;
+import org.apache.helix.ZNRecord;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * Utility class which contains {@link Schema} related operations.
+ */
+public class SchemaUtils {
+<span class="fc" id="L43">  private static final Logger LOGGER = LoggerFactory.getLogger(SchemaUtils.class);</span>
+
+<span class="fc" id="L45">  private static final HttpClient HTTP_CLIENT = new HttpClient();</span>
+
+<span class="nc" id="L47">  private SchemaUtils() {</span>
+<span class="nc" id="L48">  }</span>
+
+  /**
+   * Fetch {@link Schema} from a {@link ZNRecord}.
+   */
+  public static Schema fromZNRecord(@Nonnull ZNRecord record)
+      throws IOException {
+<span class="fc" id="L55">    String schemaJSON = record.getSimpleField(&quot;schemaJSON&quot;);</span>
+<span class="fc" id="L56">    return Schema.fromString(schemaJSON);</span>
+  }
+
+  /**
+   * Wrap {@link Schema} into a {@link ZNRecord}.
+   */
+  public static ZNRecord toZNRecord(@Nonnull Schema schema)
+      throws IllegalArgumentException, IllegalAccessException {
+<span class="fc" id="L64">    ZNRecord record = new ZNRecord(schema.getSchemaName());</span>
+<span class="fc" id="L65">    record.setSimpleField(&quot;schemaJSON&quot;, schema.getJSONSchema());</span>
+<span class="fc" id="L66">    return record;</span>
+  }
+
+  /**
+   * Given host, port and schema name, send a http GET request to download the {@link Schema}.
+   *
+   * @return schema on success.
+   * &lt;P&gt;&lt;code&gt;null&lt;/code&gt; on failure.
+   */
+  public static @Nullable Schema getSchema(@Nonnull String host, int port, @Nonnull String schemaName) {
+<span class="nc" id="L76">    Preconditions.checkNotNull(host);</span>
+<span class="nc" id="L77">    Preconditions.checkNotNull(schemaName);</span>
+
+    try {
+<span class="nc" id="L80">      URL url = new URL(&quot;http&quot;, host, port, &quot;/schemas/&quot; + schemaName);</span>
+<span class="nc" id="L81">      GetMethod httpGet = new GetMethod(url.toString());</span>
+      try {
+<span class="nc" id="L83">        int responseCode = HTTP_CLIENT.executeMethod(httpGet);</span>
+<span class="nc" id="L84">        String response = httpGet.getResponseBodyAsString();</span>
+<span class="nc bnc" id="L85" title="All 2 branches missed.">        if (responseCode &gt;= 400) {</span>
+          // File not find error code.
+<span class="nc bnc" id="L87" title="All 2 branches missed.">          if (responseCode == 404) {</span>
+<span class="nc" id="L88">            LOGGER.info(&quot;Cannot find schema: {} from host: {}, port: {}&quot;, schemaName, host, port);</span>
+          } else {
+<span class="nc" id="L90">            LOGGER.warn(&quot;Got error response code: {}, response: {}&quot;, responseCode, response);</span>
+          }
+<span class="nc" id="L92">          return null;</span>
+        }
+<span class="nc" id="L94">        return Schema.fromString(response);</span>
+      } finally {
+<span class="nc" id="L96">        httpGet.releaseConnection();</span>
+      }
+<span class="nc" id="L98">    } catch (Exception e) {</span>
+<span class="nc" id="L99">      LOGGER.error(&quot;Caught exception while getting the schema: {} from host: {}, port: {}&quot;, schemaName, host, port, e);</span>
+<span class="nc" id="L100">      return null;</span>
+    }
+  }
+
+  /**
+   * Given host, port and schema, send a http POST request to upload the {@link Schema}.
+   *
+   * @return &lt;code&gt;true&lt;/code&gt; on success.
+   * &lt;P&gt;&lt;code&gt;false&lt;/code&gt; on failure.
+   */
+  public static boolean postSchema(@Nonnull String host, int port, @Nonnull Schema schema) {
+<span class="nc" id="L111">    Preconditions.checkNotNull(host);</span>
+<span class="nc" id="L112">    Preconditions.checkNotNull(schema);</span>
+
+    try {
+<span class="nc" id="L115">      URL url = new URL(&quot;http&quot;, host, port, &quot;/schemas&quot;);</span>
+<span class="nc" id="L116">      PostMethod httpPost = new PostMethod(url.toString());</span>
+      try {
+<span class="nc" id="L118">        Part[] parts = {new StringPart(schema.getSchemaName(), schema.toString())};</span>
+<span class="nc" id="L119">        MultipartRequestEntity requestEntity = new MultipartRequestEntity(parts, new HttpMethodParams());</span>
+<span class="nc" id="L120">        httpPost.setRequestEntity(requestEntity);</span>
+<span class="nc" id="L121">        int responseCode = HTTP_CLIENT.executeMethod(httpPost);</span>
+<span class="nc bnc" id="L122" title="All 2 branches missed.">        if (responseCode &gt;= 400) {</span>
+<span class="nc" id="L123">          String response = httpPost.getResponseBodyAsString();</span>
+<span class="nc" id="L124">          LOGGER.warn(&quot;Got error response code: {}, response: {}&quot;, responseCode, response);</span>
+<span class="nc" id="L125">          return false;</span>
+        }
+<span class="nc" id="L127">        return true;</span>
+      } finally {
+<span class="nc" id="L129">        httpPost.releaseConnection();</span>
+      }
+<span class="nc" id="L131">    } catch (Exception e) {</span>
+<span class="nc" id="L132">      LOGGER.error(&quot;Caught exception while posting the schema: {} to host: {}, port: {}&quot;, schema.getSchemaName(), host,</span>
+          port, e);
+<span class="nc" id="L134">      return false;</span>
+    }
+  }
+
+  /**
+   * Given host, port and schema name, send a http DELETE request to delete the {@link Schema}.
+   *
+   * @return &lt;code&gt;true&lt;/code&gt; on success.
+   * &lt;P&gt;&lt;code&gt;false&lt;/code&gt; on failure.
+   */
+  public static boolean deleteSchema(@Nonnull String host, int port, @Nonnull String schemaName) {
+<span class="nc" id="L145">    Preconditions.checkNotNull(host);</span>
+<span class="nc" id="L146">    Preconditions.checkNotNull(schemaName);</span>
+
+    try {
+<span class="nc" id="L149">      URL url = new URL(&quot;http&quot;, host, port, &quot;/schemas/&quot; + schemaName);</span>
+<span class="nc" id="L150">      DeleteMethod httpDelete = new DeleteMethod(url.toString());</span>
+      try {
+<span class="nc" id="L152">        int responseCode = HTTP_CLIENT.executeMethod(httpDelete);</span>
+<span class="nc bnc" id="L153" title="All 2 branches missed.">        if (responseCode &gt;= 400) {</span>
+<span class="nc" id="L154">          String response = httpDelete.getResponseBodyAsString();</span>
+<span class="nc" id="L155">          LOGGER.warn(&quot;Got error response code: {}, response: {}&quot;, responseCode, response);</span>
+<span class="nc" id="L156">          return false;</span>
+        }
+<span class="nc" id="L158">        return true;</span>
+      } finally {
+<span class="nc" id="L160">        httpDelete.releaseConnection();</span>
+      }
+<span class="nc" id="L162">    } catch (Exception e) {</span>
+<span class="nc" id="L163">      LOGGER.error(&quot;Caught exception while getting the schema: {} from host: {}, port: {}&quot;, schemaName, host, port, e);</span>
+<span class="nc" id="L164">      return false;</span>
+    }
+  }
+
+  /**
+   * Compare two schemas ignoring their version number.
+   *
+   * @return &lt;code&gt;true&lt;/code&gt; if two schemas equal to each other.
+   * &lt;p&gt;&lt;code&gt;false&lt;/code&gt;if two schemas do not equal to each other.
+   */
+  public static boolean equalsIgnoreVersion(@Nonnull Schema schema1, @Nonnull Schema schema2) {
+<span class="nc" id="L175">    Preconditions.checkNotNull(schema1);</span>
+<span class="nc" id="L176">    Preconditions.checkNotNull(schema2);</span>
+
+<span class="nc bnc" id="L178" title="All 4 branches missed.">    return schema1.getSchemaName().equals(schema2.getSchemaName())</span>
+        &amp;&amp; schema1.getFieldSpecMap().equals(schema2.getFieldSpecMap());
+  }
+
+  /**
+   * An example on how to use this utility class.
+   */
+  public static void main(String[] args) {
+<span class="nc" id="L186">    Schema schema = new Schema.SchemaBuilder().setSchemaName(&quot;testSchema&quot;)</span>
+        .addSingleValueDimension(&quot;dimension&quot;, FieldSpec.DataType.DOUBLE)
+        .addMetric(&quot;metric&quot;, FieldSpec.DataType.INT)
+        .addTime(&quot;time&quot;, TimeUnit.DAYS, FieldSpec.DataType.INT)
+        .build();
+<span class="nc" id="L191">    System.out.println(postSchema(&quot;localhost&quot;, 8100, schema));</span>
+<span class="nc" id="L192">    Schema fetchedSchema = getSchema(&quot;localhost&quot;, 8100, &quot;testSchema&quot;);</span>
+<span class="nc" id="L193">    Preconditions.checkNotNull(fetchedSchema);</span>
+<span class="nc" id="L194">    System.out.println(fetchedSchema);</span>
+<span class="nc" id="L195">    System.out.println(equalsIgnoreVersion(schema, fetchedSchema));</span>
+<span class="nc" id="L196">    System.out.println(deleteSchema(&quot;localhost&quot;, 8100, &quot;testSchema&quot;));</span>
+<span class="nc" id="L197">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

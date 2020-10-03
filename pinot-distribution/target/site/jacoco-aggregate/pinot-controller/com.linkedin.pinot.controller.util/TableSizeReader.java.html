@@ -1,0 +1,246 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>TableSizeReader.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-controller</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.controller.util</a> &gt; <span class="el_source">TableSizeReader.java</span></div><h1>TableSizeReader.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.controller.util;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.Executor;
+import org.apache.commons.httpclient.HttpConnectionManager;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.google.common.base.Preconditions;
+import com.google.common.collect.BiMap;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Sets;
+import com.linkedin.pinot.common.config.TableNameBuilder;
+import com.linkedin.pinot.common.restlet.resources.SegmentSizeInfo;
+import com.linkedin.pinot.common.utils.CommonConstants;
+import com.linkedin.pinot.controller.api.resources.ServerTableSizeReader;
+import com.linkedin.pinot.controller.helix.core.PinotHelixResourceManager;
+import javax.annotation.Nonnegative;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+
+
+/**
+ * Reads table sizes from servers
+ */
+public class TableSizeReader {
+<span class="fc" id="L45">  private static final Logger LOGGER = LoggerFactory.getLogger(TableSizeReader.class);</span>
+  private Executor _executor;
+  private HttpConnectionManager _connectionManager;
+  private PinotHelixResourceManager _helixResourceManager;
+
+  public TableSizeReader(Executor executor, HttpConnectionManager connectionManager,
+<span class="fc" id="L51">      PinotHelixResourceManager helixResourceManager) {</span>
+<span class="fc" id="L52">    _executor = executor;</span>
+<span class="fc" id="L53">    _connectionManager = connectionManager;</span>
+<span class="fc" id="L54">    _helixResourceManager = helixResourceManager;</span>
+<span class="fc" id="L55">  }</span>
+
+  /**
+   * Get the table size.
+   * This one polls all servers in parallel for segment sizes. In the response,
+   * reported size indicates actual sizes collected from servers. For errors,
+   * we use the size of largest segment as an estimate.
+   * Returns null if the table is not found.
+   * @param tableName table name without type
+   * @param timeoutMsec timeout in milliseconds for reading table sizes from server
+   * @return
+   */
+  public @Nullable TableSizeDetails getTableSizeDetails(@Nonnull String tableName,
+      @Nonnegative int timeoutMsec) {
+<span class="fc" id="L69">    Preconditions.checkNotNull(tableName, &quot;Table name should not be null&quot;);</span>
+<span class="pc bpc" id="L70" title="1 of 2 branches missed.">    Preconditions.checkArgument(timeoutMsec &gt; 0, &quot;Timeout value must be greater than 0&quot;);</span>
+
+<span class="fc" id="L72">    boolean hasRealtimeTable = false;</span>
+<span class="fc" id="L73">    boolean hasOfflineTable = false;</span>
+<span class="fc" id="L74">    CommonConstants.Helix.TableType tableType = TableNameBuilder.getTableTypeFromTableName(tableName);</span>
+
+<span class="fc bfc" id="L76" title="All 2 branches covered.">    if (tableType != null) {</span>
+<span class="fc bfc" id="L77" title="All 2 branches covered.">      hasRealtimeTable = tableType == CommonConstants.Helix.TableType.REALTIME;</span>
+<span class="fc bfc" id="L78" title="All 2 branches covered.">      hasOfflineTable = tableType == CommonConstants.Helix.TableType.OFFLINE;</span>
+    } else {
+<span class="fc" id="L80">      hasRealtimeTable = _helixResourceManager.hasRealtimeTable(tableName);</span>
+<span class="fc" id="L81">      hasOfflineTable = _helixResourceManager.hasOfflineTable(tableName);</span>
+    }
+
+<span class="fc bfc" id="L84" title="All 4 branches covered.">    if (!hasOfflineTable &amp;&amp; !hasRealtimeTable) {</span>
+<span class="fc" id="L85">      return null;</span>
+    }
+
+<span class="fc" id="L88">    TableSizeDetails tableSizeDetails = new TableSizeDetails(tableName);</span>
+
+<span class="fc bfc" id="L90" title="All 2 branches covered.">    if (hasRealtimeTable) {</span>
+<span class="fc" id="L91">      String realtimeTableName = TableNameBuilder.REALTIME.tableNameWithType(tableName);</span>
+<span class="fc" id="L92">      tableSizeDetails.realtimeSegments = getTableSubtypeSize(realtimeTableName, timeoutMsec);</span>
+<span class="fc" id="L93">      tableSizeDetails.reportedSizeInBytes += tableSizeDetails.realtimeSegments.reportedSizeInBytes;</span>
+<span class="fc" id="L94">      tableSizeDetails.estimatedSizeInBytes += tableSizeDetails.realtimeSegments.estimatedSizeInBytes;</span>
+    }
+<span class="fc bfc" id="L96" title="All 2 branches covered.">    if (hasOfflineTable) {</span>
+<span class="fc" id="L97">      String offlineTableName = TableNameBuilder.OFFLINE.tableNameWithType(tableName);</span>
+<span class="fc" id="L98">      tableSizeDetails.offlineSegments = getTableSubtypeSize(offlineTableName, timeoutMsec);</span>
+<span class="fc" id="L99">      tableSizeDetails.reportedSizeInBytes += tableSizeDetails.offlineSegments.reportedSizeInBytes;</span>
+<span class="fc" id="L100">      tableSizeDetails.estimatedSizeInBytes += tableSizeDetails.offlineSegments.estimatedSizeInBytes;</span>
+    }
+<span class="fc" id="L102">    return tableSizeDetails;</span>
+  }
+
+  //
+  // Reported size below indicates the sizes actually reported by servers on successful responses.
+  // Estimated sizes indicates the size estimated size with approximated calculations for errored servers
+  //
+  @JsonIgnoreProperties(ignoreUnknown = true)
+  static public class TableSizeDetails {
+    public String tableName;
+<span class="fc" id="L112">    public long reportedSizeInBytes = 0;</span>
+    // estimated size if servers are down
+<span class="fc" id="L114">    public long estimatedSizeInBytes = 0;</span>
+    public @Nullable TableSubTypeSizeDetails offlineSegments;
+    public @Nullable TableSubTypeSizeDetails realtimeSegments;
+
+<span class="fc" id="L118">    public TableSizeDetails(String tableName) {</span>
+<span class="fc" id="L119">      this.tableName = tableName;</span>
+<span class="fc" id="L120">    }</span>
+  }
+
+  @JsonIgnoreProperties(ignoreUnknown = true)
+<span class="fc" id="L124">  static public class TableSubTypeSizeDetails {</span>
+<span class="fc" id="L125">    public long reportedSizeInBytes = 0;</span>
+<span class="fc" id="L126">    public long estimatedSizeInBytes = 0;</span>
+<span class="fc" id="L127">    public Map&lt;String, SegmentSizeDetails&gt; segments = new HashMap&lt;&gt;();</span>
+  }
+
+  @JsonIgnoreProperties(ignoreUnknown = true)
+<span class="fc" id="L131">  static public class SegmentSizeDetails {</span>
+<span class="fc" id="L132">    public long reportedSizeInBytes = 0;</span>
+<span class="fc" id="L133">    public long estimatedSizeInBytes = 0;</span>
+<span class="fc" id="L134">    public Map&lt;String, SegmentSizeInfo&gt; serverInfo = new HashMap&lt;&gt;();</span>
+  }
+
+  public TableSubTypeSizeDetails getTableSubtypeSize(String tableNameWithType, int timeoutMsec) {
+    // for convenient usage within this function
+<span class="fc" id="L139">    final String table = tableNameWithType;</span>
+
+    // get list of servers
+<span class="fc" id="L142">    Map&lt;String, List&lt;String&gt;&gt; serverSegmentsMap =</span>
+        _helixResourceManager.getInstanceToSegmentsInATableMap(table);
+<span class="fc" id="L144">    ServerTableSizeReader serverTableSizeReader = new ServerTableSizeReader(_executor, _connectionManager);</span>
+<span class="fc" id="L145">    BiMap&lt;String, String&gt; endpoints = _helixResourceManager.getDataInstanceAdminEndpoints(serverSegmentsMap.keySet());</span>
+<span class="fc" id="L146">    Map&lt;String, List&lt;SegmentSizeInfo&gt;&gt; serverSizeInfo =</span>
+        serverTableSizeReader.getSizeDetailsFromServers(endpoints, table, timeoutMsec);
+
+<span class="fc" id="L149">    populateErroredServerSizes(serverSizeInfo, serverSegmentsMap);</span>
+
+<span class="fc" id="L151">    TableSubTypeSizeDetails subTypeSizeDetails = new TableSubTypeSizeDetails();</span>
+
+<span class="fc" id="L153">    Map&lt;String, SegmentSizeDetails&gt; segmentMap = subTypeSizeDetails.segments;</span>
+    // convert from server -&gt;SegmentSizes to segment -&gt; (SegmentSizeDetails: server -&gt; segmentSizes)
+<span class="fc bfc" id="L155" title="All 2 branches covered.">    for (Map.Entry&lt;String, List&lt;SegmentSizeInfo&gt;&gt; serverSegments : serverSizeInfo.entrySet()) {</span>
+<span class="fc" id="L156">      String server = serverSegments.getKey();</span>
+<span class="fc" id="L157">      List&lt;SegmentSizeInfo&gt; segments = serverSegments.getValue();</span>
+<span class="fc bfc" id="L158" title="All 2 branches covered.">      for (SegmentSizeInfo segment : segments) {</span>
+<span class="fc" id="L159">        SegmentSizeDetails sizeDetails = segmentMap.get(segment.segmentName);</span>
+<span class="fc bfc" id="L160" title="All 2 branches covered.">        if (sizeDetails == null) {</span>
+<span class="fc" id="L161">          sizeDetails = new SegmentSizeDetails();</span>
+<span class="fc" id="L162">          segmentMap.put(segment.segmentName, sizeDetails);</span>
+        }
+<span class="fc" id="L164">        sizeDetails.serverInfo.put(server, segment);</span>
+<span class="fc" id="L165">      }</span>
+<span class="fc" id="L166">    }</span>
+
+    // iterate through the map of segments and calculate the reported and estimated sizes
+    // for each segment. For servers that reported error, we use the max size of the same segment
+    // reported by another server. If no server reported size for a segment, we use the size
+    // of the largest segment reported by any server for the table.
+    // At all times, reportedSize indicates actual size that is reported by servers. For errored
+    // segments are not reflected in that count. Estimated size is what we estimate in case of
+    // errors, as described above.
+    // estimatedSize &gt;= reportedSize. If no server reported error, estimatedSize == reportedSize
+<span class="fc" id="L176">    long tableLevelMax = -1;</span>
+<span class="fc bfc" id="L177" title="All 2 branches covered.">    for (Map.Entry&lt;String, SegmentSizeDetails&gt; segmentEntry : segmentMap.entrySet()) {</span>
+<span class="fc" id="L178">      SegmentSizeDetails segmentSizes = segmentEntry.getValue();</span>
+      // track segment level max size
+<span class="fc" id="L180">      long segmentLevelMax = -1;</span>
+<span class="fc" id="L181">      int errors = 0;</span>
+      // iterate over all servers that reported size for this segment
+<span class="fc bfc" id="L183" title="All 2 branches covered.">      for (Map.Entry&lt;String, SegmentSizeInfo&gt; serverInfo : segmentSizes.serverInfo.entrySet()) {</span>
+<span class="fc" id="L184">        SegmentSizeInfo ss = serverInfo.getValue();</span>
+<span class="fc bfc" id="L185" title="All 2 branches covered.">        if (ss.diskSizeInBytes != -1) {</span>
+<span class="fc" id="L186">          segmentSizes.reportedSizeInBytes += ss.diskSizeInBytes;</span>
+<span class="fc" id="L187">          segmentLevelMax = Math.max(segmentLevelMax, ss.diskSizeInBytes);</span>
+        } else {
+<span class="fc" id="L189">          ++errors;</span>
+        }
+<span class="fc" id="L191">      }</span>
+      // after iterating over all servers update summary reported and estimated size of the segment
+<span class="fc bfc" id="L193" title="All 2 branches covered.">      if (errors != segmentSizes.serverInfo.size()) {</span>
+        // atleast one server reported size for this segment
+<span class="fc" id="L195">        segmentSizes.estimatedSizeInBytes = segmentSizes.reportedSizeInBytes + errors * segmentLevelMax;</span>
+<span class="fc" id="L196">        tableLevelMax = Math.max(tableLevelMax, segmentLevelMax);</span>
+<span class="fc" id="L197">        subTypeSizeDetails.reportedSizeInBytes += segmentSizes.reportedSizeInBytes;</span>
+<span class="fc" id="L198">        subTypeSizeDetails.estimatedSizeInBytes += segmentSizes.estimatedSizeInBytes;</span>
+      } else {
+<span class="fc" id="L200">        segmentSizes.reportedSizeInBytes = -1;</span>
+<span class="fc" id="L201">        segmentSizes.estimatedSizeInBytes = -1;</span>
+      }
+<span class="fc" id="L203">    }</span>
+<span class="pc bpc" id="L204" title="1 of 2 branches missed.">    if (tableLevelMax == -1) {</span>
+      // no server reported size
+<span class="nc" id="L206">      subTypeSizeDetails.reportedSizeInBytes = -1;</span>
+<span class="nc" id="L207">      subTypeSizeDetails.estimatedSizeInBytes = -1;</span>
+    } else {
+      // For segments with no reported sizes, use max table-level segment size as an estimate
+<span class="fc bfc" id="L210" title="All 2 branches covered.">      for (Map.Entry&lt;String, SegmentSizeDetails&gt; segmentSizeDetailsEntry : segmentMap.entrySet()) {</span>
+<span class="fc" id="L211">        SegmentSizeDetails sizeDetails = segmentSizeDetailsEntry.getValue();</span>
+<span class="fc bfc" id="L212" title="All 2 branches covered.">        if (sizeDetails.reportedSizeInBytes != -1) {</span>
+<span class="fc" id="L213">          continue;</span>
+        }
+<span class="fc" id="L215">        sizeDetails.estimatedSizeInBytes += sizeDetails.serverInfo.size() * tableLevelMax;</span>
+<span class="fc" id="L216">        subTypeSizeDetails.estimatedSizeInBytes += sizeDetails.estimatedSizeInBytes;</span>
+<span class="fc" id="L217">      }</span>
+    }
+
+<span class="fc" id="L220">    return subTypeSizeDetails;</span>
+  }
+
+  // for servers that reported error, populate segment size with -1
+  private void populateErroredServerSizes(Map&lt;String, List&lt;SegmentSizeInfo&gt;&gt; serverSizeInfo,
+      Map&lt;String, List&lt;String&gt;&gt; serverSegmentsMap) {
+<span class="fc" id="L226">    ImmutableSet&lt;String&gt; erroredServers = null;</span>
+    try {
+<span class="fc" id="L228">      erroredServers = Sets.difference(</span>
+          serverSegmentsMap.keySet(),
+          serverSizeInfo.keySet()).immutableCopy();
+<span class="nc" id="L231">    } catch (Exception e) {</span>
+<span class="nc" id="L232">      LOGGER.error(&quot;Failed to get set difference: &quot;, e);</span>
+<span class="fc" id="L233">    }</span>
+<span class="fc bfc" id="L234" title="All 2 branches covered.">    for (String server : erroredServers) {</span>
+<span class="fc" id="L235">      List&lt;String&gt; serverSegments = serverSegmentsMap.get(server);</span>
+<span class="fc" id="L236">      Preconditions.checkNotNull(serverSegments);</span>
+<span class="fc" id="L237">      List&lt;SegmentSizeInfo&gt; serverSegmentSizes = new ArrayList&lt;&gt;(serverSegments.size());</span>
+<span class="fc" id="L238">      serverSizeInfo.put(server, serverSegmentSizes);</span>
+<span class="fc bfc" id="L239" title="All 2 branches covered.">      for (String segment : serverSegments) {</span>
+        // this populates segment size info with size -1
+<span class="fc" id="L241">        serverSegmentSizes.add(new SegmentSizeInfo(segment, -1));</span>
+<span class="fc" id="L242">      }</span>
+<span class="fc" id="L243">    }</span>
+<span class="fc" id="L244">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

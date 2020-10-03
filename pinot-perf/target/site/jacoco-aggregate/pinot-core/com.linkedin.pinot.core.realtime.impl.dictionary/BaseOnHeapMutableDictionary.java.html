@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>BaseOnHeapMutableDictionary.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-perf</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.realtime.impl.dictionary</a> &gt; <span class="el_source">BaseOnHeapMutableDictionary.java</span></div><h1>BaseOnHeapMutableDictionary.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.realtime.impl.dictionary;
+
+import java.io.IOException;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import javax.annotation.Nonnull;
+
+
+/**
+ * The class &lt;code&gt;BaseOnHeapMutableDictionary&lt;/code&gt; is the implementation of the mutable dictionary required by
+ * REALTIME consuming segments.
+ * &lt;p&gt;The implementation needs to be thread safe for single writer multiple readers scenario.
+ * &lt;p&gt;We can assume the readers always first get the dictionary id for a value, then use the dictionary id to fetch the
+ * value later, but not reversely. So whenever we return a valid dictionary id for a value, we need to ensure the value
+ * can be fetched by the dictionary id returned.
+ */
+<span class="fc" id="L32">public abstract class BaseOnHeapMutableDictionary extends MutableDictionary {</span>
+  private static final int SHIFT_OFFSET = 13;  // INITIAL_DICTIONARY_SIZE = 8192
+  private static final int INITIAL_DICTIONARY_SIZE = 1 &lt;&lt; SHIFT_OFFSET;
+  private static final int MASK = 0xFFFFFFFF &gt;&gt;&gt; (Integer.SIZE - SHIFT_OFFSET);
+
+<span class="fc" id="L37">  private final Map&lt;Object, Integer&gt; _valueToDictId = new ConcurrentHashMap&lt;&gt;(INITIAL_DICTIONARY_SIZE);</span>
+<span class="fc" id="L38">  private final Object[][] _dictIdToValue = new Object[INITIAL_DICTIONARY_SIZE][];</span>
+<span class="fc" id="L39">  private int _entriesIndexed = 0;</span>
+
+  /**
+   * For performance, we don't validate the dictId passed in. It should be returned by index() or indexOf().
+   */
+  @Nonnull
+  @Override
+  public Object get(int dictId) {
+<span class="fc" id="L47">    return _dictIdToValue[dictId &gt;&gt;&gt; SHIFT_OFFSET][dictId &amp; MASK];</span>
+  }
+
+  @Override
+  public int length() {
+<span class="fc" id="L52">    return _entriesIndexed;</span>
+  }
+
+  @Override
+  public int getAvgValueSize() {
+<span class="nc" id="L57">    throw new UnsupportedOperationException(&quot;Not implemented&quot;);</span>
+  }
+
+  public boolean isEmpty() {
+<span class="nc bnc" id="L61" title="All 2 branches missed.">    return _entriesIndexed == 0;</span>
+  }
+
+  public void close() throws IOException {
+<span class="fc" id="L65">  }</span>
+
+  /**
+   * Index a single value.
+   * &lt;p&gt;This method will only be called by a single writer thread.
+   *
+   * @param value single value already converted to correct type.
+   */
+  protected void indexValue(@Nonnull Object value) {
+<span class="fc bfc" id="L74" title="All 2 branches covered.">    if (!_valueToDictId.containsKey(value)) {</span>
+<span class="fc" id="L75">      int arrayIndex = _entriesIndexed &gt;&gt;&gt; SHIFT_OFFSET;</span>
+<span class="fc" id="L76">      int arrayOffset = _entriesIndexed &amp; MASK;</span>
+
+      // Create a new array if necessary
+<span class="fc bfc" id="L79" title="All 2 branches covered.">      if (arrayOffset == 0) {</span>
+<span class="fc" id="L80">        _dictIdToValue[arrayIndex] = new Object[INITIAL_DICTIONARY_SIZE];</span>
+      }
+
+      // First update dictId to value map then value to dictId map
+      // Ensure we can always fetch value by dictId returned by index() or indexOf()
+<span class="fc" id="L85">      _dictIdToValue[arrayIndex][arrayOffset] = value;</span>
+<span class="fc" id="L86">      _valueToDictId.put(value, _entriesIndexed);</span>
+<span class="fc" id="L87">      _entriesIndexed++;</span>
+    }
+<span class="fc" id="L89">  }</span>
+
+  /**
+   * Get the dictId of a single value.
+   * &lt;p&gt;This method will only be called by a single writer thread.
+   *
+   * @param value single value already converted to correct type.
+   * @return dictId of the value.
+   */
+  protected int getDictId(@Nonnull Object value) {
+<span class="fc" id="L99">    Integer dictId = _valueToDictId.get(value);</span>
+<span class="fc bfc" id="L100" title="All 2 branches covered.">    if (dictId == null) {</span>
+<span class="fc" id="L101">      return NULL_VALUE_INDEX;</span>
+    } else {
+<span class="fc" id="L103">      return dictId;</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

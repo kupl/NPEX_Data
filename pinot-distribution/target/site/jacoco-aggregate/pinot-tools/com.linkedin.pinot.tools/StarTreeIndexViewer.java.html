@@ -1,0 +1,227 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>StarTreeIndexViewer.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-tools</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.tools</a> &gt; <span class="el_source">StarTreeIndexViewer.java</span></div><h1>StarTreeIndexViewer.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.tools;
+
+import com.google.common.collect.MinMaxPriorityQueue;
+import com.linkedin.pinot.common.segment.ReadMode;
+import com.linkedin.pinot.core.common.Block;
+import com.linkedin.pinot.core.common.BlockSingleValIterator;
+import com.linkedin.pinot.core.common.BlockValSet;
+import com.linkedin.pinot.core.common.DataSource;
+import com.linkedin.pinot.core.indexsegment.IndexSegment;
+import com.linkedin.pinot.core.segment.index.SegmentMetadataImpl;
+import com.linkedin.pinot.core.segment.index.loader.Loaders;
+import com.linkedin.pinot.core.segment.index.readers.Dictionary;
+import com.linkedin.pinot.core.segment.store.SegmentDirectoryPaths;
+import com.linkedin.pinot.core.startree.OffHeapStarTree;
+import com.linkedin.pinot.core.startree.StarTree;
+import com.linkedin.pinot.core.startree.StarTreeNode;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.InputStream;
+import java.net.URI;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import javax.ws.rs.GET;
+import javax.ws.rs.Path;
+import javax.ws.rs.Produces;
+import javax.ws.rs.core.MediaType;
+import org.apache.commons.lang3.tuple.ImmutablePair;
+import org.apache.commons.lang3.tuple.Pair;
+import org.codehaus.jackson.map.ObjectMapper;
+import org.codehaus.jackson.map.annotate.JsonSerialize.Inclusion;
+import org.glassfish.grizzly.http.server.HttpServer;
+import org.glassfish.jersey.grizzly2.httpserver.GrizzlyHttpServerFactory;
+import org.glassfish.jersey.server.ResourceConfig;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+public class StarTreeIndexViewer {
+  private static class StarTreeJsonNode {
+    String _name;
+    List&lt;StarTreeJsonNode&gt; _children;
+
+<span class="nc" id="L64">    StarTreeJsonNode(String name) {</span>
+<span class="nc" id="L65">      _name = name;</span>
+<span class="nc" id="L66">    }</span>
+
+    public void addChild(StarTreeJsonNode child) {
+<span class="nc bnc" id="L69" title="All 2 branches missed.">      if (_children == null) {</span>
+<span class="nc" id="L70">        _children = new ArrayList&lt;&gt;();</span>
+      }
+<span class="nc" id="L72">      _children.add(child);</span>
+<span class="nc" id="L73">    }</span>
+
+    public String getName() {
+<span class="nc" id="L76">      return _name;</span>
+    }
+
+    public List&lt;StarTreeJsonNode&gt; getChildren() {
+<span class="nc" id="L80">      return _children;</span>
+    }
+  }
+
+<span class="nc" id="L84">  private static final Logger LOGGER = LoggerFactory.getLogger(StarTreeIndexViewer.class);</span>
+
+  /*
+   * MAX num children to show in the UI
+   */
+<span class="nc" id="L89">  static int MAX_CHILDREN = 100;</span>
+  private List&lt;String&gt; _dimensionNames;
+  private Map&lt;String, Dictionary&gt; dictionaries;
+  private Map&lt;String, BlockSingleValIterator&gt; valueIterators;
+
+<span class="nc" id="L94">  public StarTreeIndexViewer(File segmentDir) throws Exception {</span>
+<span class="nc" id="L95">    IndexSegment indexSegment = Loaders.IndexSegment.load(segmentDir, ReadMode.heap);</span>
+
+<span class="nc" id="L97">    dictionaries = new HashMap&lt;String, Dictionary&gt;();</span>
+<span class="nc" id="L98">    valueIterators = new HashMap&lt;String, BlockSingleValIterator&gt;();</span>
+<span class="nc" id="L99">    SegmentMetadataImpl metadata = new SegmentMetadataImpl(segmentDir);</span>
+
+<span class="nc bnc" id="L101" title="All 2 branches missed.">    for (String columnName : metadata.getAllColumns()) {</span>
+<span class="nc" id="L102">      DataSource dataSource = indexSegment.getDataSource(columnName);</span>
+<span class="nc" id="L103">      Block block = dataSource.nextBlock();</span>
+<span class="nc" id="L104">      BlockValSet blockValSet = block.getBlockValueSet();</span>
+<span class="nc" id="L105">      BlockSingleValIterator itr = (BlockSingleValIterator) blockValSet.iterator();</span>
+<span class="nc" id="L106">      valueIterators.put(columnName, itr);</span>
+<span class="nc" id="L107">      dictionaries.put(columnName, dataSource.getDictionary());</span>
+<span class="nc" id="L108">    }</span>
+<span class="nc" id="L109">    File starTreeFile = SegmentDirectoryPaths.findStarTreeFile(segmentDir);</span>
+<span class="nc" id="L110">    StarTree tree = new OffHeapStarTree(starTreeFile, ReadMode.mmap);</span>
+<span class="nc" id="L111">    _dimensionNames = tree.getDimensionNames();</span>
+<span class="nc" id="L112">    StarTreeJsonNode jsonRoot = new StarTreeJsonNode(&quot;ROOT&quot;);</span>
+<span class="nc" id="L113">    build(tree.getRoot(), jsonRoot);</span>
+<span class="nc" id="L114">    ObjectMapper objectMapper = new ObjectMapper();</span>
+<span class="nc" id="L115">    objectMapper.getSerializationConfig().withSerializationInclusion(Inclusion.NON_NULL);</span>
+<span class="nc" id="L116">    String writeValueAsString = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(jsonRoot);</span>
+<span class="nc" id="L117">    LOGGER.info(writeValueAsString);</span>
+<span class="nc" id="L118">    startServer(segmentDir, writeValueAsString);</span>
+<span class="nc" id="L119">  }</span>
+
+  private int build(StarTreeNode indexNode, StarTreeJsonNode json) {
+<span class="nc" id="L122">    Iterator&lt;? extends StarTreeNode&gt; childrenIterator = indexNode.getChildrenIterator();</span>
+<span class="nc bnc" id="L123" title="All 2 branches missed.">    if (!childrenIterator.hasNext()) {</span>
+<span class="nc" id="L124">      return 0;</span>
+    }
+<span class="nc" id="L126">    int childDimensionId = indexNode.getChildDimensionId();</span>
+<span class="nc" id="L127">    String childDimensionName = _dimensionNames.get(childDimensionId);</span>
+<span class="nc" id="L128">    Dictionary dictionary = dictionaries.get(childDimensionName);</span>
+<span class="nc" id="L129">    int totalChildNodes = indexNode.getNumChildren();</span>
+
+<span class="nc" id="L131">    Comparator&lt;Pair&lt;String, Integer&gt;&gt; comparator = new Comparator&lt;Pair&lt;String, Integer&gt;&gt;() {</span>
+
+      @Override
+      public int compare(Pair&lt;String, Integer&gt; o1, Pair&lt;String, Integer&gt; o2) {
+<span class="nc" id="L135">        return -1 * Integer.compare(o1.getRight(), o2.getRight());</span>
+      }
+    };
+<span class="nc" id="L138">    MinMaxPriorityQueue&lt;Pair&lt;String, Integer&gt;&gt; queue =</span>
+        MinMaxPriorityQueue.orderedBy(comparator).maximumSize(MAX_CHILDREN).create();
+<span class="nc" id="L140">    StarTreeJsonNode allNode = null;</span>
+
+<span class="nc bnc" id="L142" title="All 2 branches missed.">    while (childrenIterator.hasNext()) {</span>
+<span class="nc" id="L143">      StarTreeNode childIndexNode = childrenIterator.next();</span>
+<span class="nc" id="L144">      int childDimensionValueId = childIndexNode.getDimensionValue();</span>
+<span class="nc" id="L145">      String childDimensionValue = &quot;ALL&quot;;</span>
+<span class="nc bnc" id="L146" title="All 2 branches missed.">      if (childDimensionValueId != StarTreeNode.ALL) {</span>
+<span class="nc" id="L147">        childDimensionValue = dictionary.get(childDimensionValueId).toString();</span>
+      }
+<span class="nc" id="L149">      StarTreeJsonNode childJson = new StarTreeJsonNode(childDimensionValue);</span>
+<span class="nc" id="L150">      totalChildNodes += build(childIndexNode, childJson);</span>
+<span class="nc bnc" id="L151" title="All 2 branches missed.">      if (childDimensionValueId != StarTreeNode.ALL) {</span>
+<span class="nc" id="L152">        json.addChild(childJson);</span>
+<span class="nc" id="L153">        queue.add(ImmutablePair.of(childDimensionValue, totalChildNodes));</span>
+      } else {
+<span class="nc" id="L155">        allNode = childJson;</span>
+      }
+<span class="nc" id="L157">    }</span>
+    //put ALL node at the end
+<span class="nc bnc" id="L159" title="All 2 branches missed.">    if (allNode != null) {</span>
+<span class="nc" id="L160">      json.addChild(allNode);</span>
+    }
+<span class="nc bnc" id="L162" title="All 2 branches missed.">    if (totalChildNodes &gt; MAX_CHILDREN) {</span>
+<span class="nc" id="L163">      Iterator&lt;Pair&lt;String, Integer&gt;&gt; qIterator = queue.iterator();</span>
+<span class="nc" id="L164">      Set&lt;String&gt; topKDimensions = new HashSet&lt;&gt;();</span>
+<span class="nc" id="L165">      topKDimensions.add(&quot;ALL&quot;);</span>
+<span class="nc bnc" id="L166" title="All 2 branches missed.">      while (qIterator.hasNext()) {</span>
+<span class="nc" id="L167">        topKDimensions.add(qIterator.next().getKey());</span>
+      }
+<span class="nc" id="L169">      Iterator&lt;StarTreeJsonNode&gt; iterator = json.getChildren().iterator();</span>
+<span class="nc bnc" id="L170" title="All 2 branches missed.">      while (iterator.hasNext()) {</span>
+<span class="nc" id="L171">        StarTreeJsonNode next = iterator.next();</span>
+<span class="nc bnc" id="L172" title="All 2 branches missed.">        if (!topKDimensions.contains(next.getName())) {</span>
+<span class="nc" id="L173">          iterator.remove();</span>
+        }
+<span class="nc" id="L175">      }</span>
+    }
+<span class="nc" id="L177">    return totalChildNodes;</span>
+  }
+
+  public static void main(String[] args) throws Exception {
+<span class="nc bnc" id="L181" title="All 2 branches missed.">    if (args.length != 1) {</span>
+<span class="nc" id="L182">      LOGGER.error(&quot;USAGE: StarIndexViewer &lt;segmentDirectory&gt;&quot;);</span>
+<span class="nc" id="L183">      System.exit(1);</span>
+    }
+<span class="nc" id="L185">    String segmentDir = args[0];</span>
+<span class="nc bnc" id="L186" title="All 2 branches missed.">    if (!new File(segmentDir).exists()) {</span>
+<span class="nc" id="L187">      throw new FileNotFoundException(&quot;Missing directory:&quot; + segmentDir);</span>
+    }
+<span class="nc" id="L189">    new StarTreeIndexViewer(new File(segmentDir));</span>
+<span class="nc" id="L190">  }</span>
+
+  private static class StarTreeResource extends ResourceConfig {
+<span class="nc" id="L193">    StarTreeResource(String json) {</span>
+<span class="nc" id="L194">      StarTreeViewRestResource resource = new StarTreeViewRestResource();</span>
+<span class="nc" id="L195">      StarTreeViewRestResource.json = json;</span>
+<span class="nc" id="L196">      register(resource.getClass());</span>
+<span class="nc" id="L197">    }</span>
+  }
+
+  private void startServer(final File segmentDirectory, final String json) throws Exception {
+<span class="nc" id="L201">    int httpPort = 8090;</span>
+<span class="nc" id="L202">    URI baseUri = URI.create(&quot;http://0.0.0.0:&quot; + Integer.toString(httpPort) + &quot;/&quot;);</span>
+<span class="nc" id="L203">    HttpServer httpServer = GrizzlyHttpServerFactory.createHttpServer(baseUri, new StarTreeResource(json));</span>
+
+<span class="nc" id="L205">    LOGGER.info(&quot;Go to http://{}:{}/  to view the star tree&quot;, &quot;localhost&quot;, httpPort);</span>
+<span class="nc" id="L206">  }</span>
+
+  @Path(&quot;/&quot;)
+<span class="nc" id="L209">  public static final class StarTreeViewRestResource {</span>
+    public static String json;
+
+    @GET
+    @Path(&quot;/data&quot;)
+    @Produces(MediaType.TEXT_PLAIN)
+    public String getStarTree() {
+<span class="nc" id="L216">      return json;</span>
+    }
+
+    @GET
+    @Path(&quot;/&quot;)
+    @Produces(MediaType.TEXT_HTML)
+    public InputStream getStarTreeHtml() {
+<span class="nc" id="L223">      return getClass().getClassLoader().getResourceAsStream(&quot;star-tree.html&quot;);</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

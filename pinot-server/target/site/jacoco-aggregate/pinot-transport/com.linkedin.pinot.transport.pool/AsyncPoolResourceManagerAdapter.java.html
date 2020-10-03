@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>AsyncPoolResourceManagerAdapter.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-server</a> &gt; <a href="../index.html" class="el_bundle">pinot-transport</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.transport.pool</a> &gt; <span class="el_source">AsyncPoolResourceManagerAdapter.java</span></div><h1>AsyncPoolResourceManagerAdapter.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.transport.pool;
+
+import java.util.concurrent.ExecutorService;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.linkedin.pinot.common.metrics.LatencyMetric;
+import com.linkedin.pinot.common.metrics.MetricsHelper;
+import com.linkedin.pinot.common.response.ServerInstance;
+import com.linkedin.pinot.transport.common.Callback;
+import com.linkedin.pinot.transport.metrics.PoolStats.LifecycleStats;
+import com.linkedin.pinot.transport.pool.AsyncPool.Lifecycle;
+import com.yammer.metrics.core.Histogram;
+import com.yammer.metrics.core.MetricName;
+import com.yammer.metrics.core.MetricsRegistry;
+
+
+// The create() and destoy() methods in this class are ONLY called from
+// AsyncPoolImpl when a connection needs to be created or destroyed.
+public class AsyncPoolResourceManagerAdapter&lt;T&gt; implements Lifecycle&lt;T&gt; {
+<span class="fc" id="L37">  private static final Logger LOGGER = LoggerFactory.getLogger(AsyncPoolResourceManagerAdapter.class);</span>
+
+  private final PooledResourceManager&lt;T&gt; _resourceManager;
+  private final ExecutorService _executor;
+  private final ServerInstance _key;
+  private final Histogram _histogram;
+<span class="fc" id="L43">  private boolean _isShuttingDown = false;</span>
+
+  public AsyncPoolResourceManagerAdapter(ServerInstance key, PooledResourceManager&lt;T&gt; resourceManager,
+<span class="fc" id="L46">      ExecutorService executorService, MetricsRegistry registry) {</span>
+<span class="fc" id="L47">    _resourceManager = resourceManager;</span>
+<span class="fc" id="L48">    _executor = executorService;</span>
+<span class="fc" id="L49">    _key = key;</span>
+<span class="fc" id="L50">    _histogram =</span>
+        MetricsHelper.newHistogram(registry, new MetricName(AsyncPoolResourceManagerAdapter.class, key.toString()),
+            false);
+<span class="fc" id="L53">  }</span>
+
+  @Override
+  public void shutdown() {
+<span class="fc" id="L57">    _isShuttingDown = true;</span>
+<span class="fc" id="L58">  }</span>
+
+  @Override
+  public void create(final Callback&lt;T&gt; callback) {
+<span class="fc" id="L62">    final long startTime = System.currentTimeMillis();</span>
+<span class="fc" id="L63">    _executor.submit(new Runnable() {</span>
+
+      @Override
+      public void run() {
+<span class="fc" id="L67">        T resource = _resourceManager.create(_key);</span>
+<span class="fc" id="L68">        _histogram.update(System.currentTimeMillis() - startTime);</span>
+<span class="fc bfc" id="L69" title="All 2 branches covered.">        if (null != resource) {</span>
+<span class="fc" id="L70">          callback.onSuccess(resource);</span>
+        } else {
+<span class="fc" id="L72">          callback.onError(new Exception(&quot;Unable to create resource for key &quot; + _key));</span>
+        }
+<span class="fc" id="L74">      }</span>
+    });
+<span class="fc" id="L76">  }</span>
+
+  @Override
+  public boolean validate(T obj) {
+<span class="fc" id="L80">    return _resourceManager.validate(_key, obj);</span>
+  }
+
+  @Override
+  public boolean validateGet(T obj) {
+<span class="fc" id="L85">    return _resourceManager.validate(_key, obj);</span>
+  }
+
+  @Override
+  public boolean validatePut(T obj) {
+<span class="fc" id="L90">    return _resourceManager.validate(_key, obj);</span>
+  }
+
+  @Override
+  public void destroy(final T obj, final boolean error, final Callback&lt;T&gt; callback) {
+    try {
+<span class="fc" id="L96">      _executor.submit(new Runnable() {</span>
+
+        @Override
+        public void run() {
+<span class="fc" id="L100">          LOGGER.info(&quot;Running teardown for the client connection &quot; + obj + &quot; Error is : &quot; + error);</span>
+<span class="fc" id="L101">          boolean success = _resourceManager.destroy(_key, error, obj);</span>
+<span class="fc bfc" id="L102" title="All 2 branches covered.">          if (success) {</span>
+<span class="fc" id="L103">            callback.onSuccess(obj);</span>
+          } else {
+<span class="fc" id="L105">            callback.onError(new Exception(&quot;Unable to destroy resource for key &quot; + _key));</span>
+          }
+<span class="fc" id="L107">        }</span>
+      });
+<span class="fc" id="L109">    } catch (Exception e) {</span>
+      // During a broker shutdown, it is possible that we get RejectedExecutionException since we are tyring to
+      // destroy all resources. Ignore it (only during shutdown).
+<span class="pc bpc" id="L112" title="1 of 2 branches missed.">      if (_isShuttingDown) {</span>
+<span class="fc" id="L113">        LOGGER.info(&quot;Could not destroy resource for key {}: {}&quot;, _key.toString(), e.getMessage());</span>
+      } else {
+<span class="nc" id="L115">        LOGGER.error(&quot;Could not destroy resource for key {}: {}&quot;, _key.toString(), e.getMessage());</span>
+<span class="nc" id="L116">        throw new RuntimeException(e);</span>
+      }
+<span class="fc" id="L118">    }</span>
+
+<span class="fc" id="L120">  }</span>
+
+  @Override
+  public LifecycleStats&lt;Histogram&gt; getStats() {
+<span class="fc" id="L124">    return new LifecycleStats&lt;Histogram&gt;(new LatencyMetric&lt;Histogram&gt;(_histogram));</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

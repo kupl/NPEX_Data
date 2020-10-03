@@ -1,0 +1,289 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>DistinctCountHLLAggregationFunction.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.query.aggregation.function</a> &gt; <span class="el_source">DistinctCountHLLAggregationFunction.java</span></div><h1>DistinctCountHLLAggregationFunction.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.query.aggregation.function;
+
+import com.clearspring.analytics.stream.cardinality.CardinalityMergeException;
+import com.clearspring.analytics.stream.cardinality.HyperLogLog;
+import com.linkedin.pinot.common.data.FieldSpec;
+import com.linkedin.pinot.core.common.BlockValSet;
+import com.linkedin.pinot.core.query.aggregation.AggregationResultHolder;
+import com.linkedin.pinot.core.query.aggregation.ObjectAggregationResultHolder;
+import com.linkedin.pinot.core.query.aggregation.groupby.GroupByResultHolder;
+import com.linkedin.pinot.core.query.aggregation.groupby.ObjectGroupByResultHolder;
+import com.linkedin.pinot.startree.hll.HllConstants;
+import javax.annotation.Nonnull;
+
+
+<span class="fc" id="L30">public class DistinctCountHLLAggregationFunction implements AggregationFunction&lt;HyperLogLog, Long&gt; {</span>
+<span class="fc" id="L31">  private static final String NAME = AggregationFunctionFactory.AggregationFunctionType.DISTINCTCOUNTHLL.getName();</span>
+
+  @Nonnull
+  @Override
+  public String getName() {
+<span class="fc" id="L36">    return NAME;</span>
+  }
+
+  @Nonnull
+  @Override
+  public String getColumnName(@Nonnull String[] columns) {
+<span class="fc" id="L42">    return NAME + &quot;_&quot; + columns[0];</span>
+  }
+
+  @Override
+  public void accept(@Nonnull AggregationFunctionVisitorBase visitor) {
+<span class="fc" id="L47">    visitor.visit(this);</span>
+<span class="fc" id="L48">  }</span>
+
+  @Nonnull
+  @Override
+  public AggregationResultHolder createAggregationResultHolder() {
+<span class="fc" id="L53">    return new ObjectAggregationResultHolder();</span>
+  }
+
+  @Nonnull
+  @Override
+  public GroupByResultHolder createGroupByResultHolder(int initialCapacity, int maxCapacity, int trimSize) {
+<span class="fc" id="L59">    return new ObjectGroupByResultHolder(initialCapacity, maxCapacity, trimSize);</span>
+  }
+
+  @Override
+  public void aggregate(int length, @Nonnull AggregationResultHolder aggregationResultHolder,
+      @Nonnull BlockValSet... blockValSets) {
+
+<span class="fc" id="L66">    HyperLogLog hyperLogLog = aggregationResultHolder.getResult();</span>
+<span class="fc bfc" id="L67" title="All 2 branches covered.">    if (hyperLogLog == null) {</span>
+<span class="fc" id="L68">      hyperLogLog = new HyperLogLog(HllConstants.DEFAULT_LOG2M);</span>
+<span class="fc" id="L69">      aggregationResultHolder.setValue(hyperLogLog);</span>
+    }
+
+<span class="fc" id="L72">    FieldSpec.DataType valueType = blockValSets[0].getValueType();</span>
+<span class="pc bpc" id="L73" title="5 of 6 branches missed.">    switch (valueType) {</span>
+      case INT:
+<span class="fc" id="L75">        int[] intValues = blockValSets[0].getIntValuesSV();</span>
+<span class="fc bfc" id="L76" title="All 2 branches covered.">        for (int i = 0; i &lt; length; i++) {</span>
+<span class="fc" id="L77">          hyperLogLog.offer(intValues[i]);</span>
+        }
+<span class="fc" id="L79">        break;</span>
+
+      case LONG:
+<span class="nc" id="L82">        long[] longValues = blockValSets[0].getLongValuesSV();</span>
+<span class="nc bnc" id="L83" title="All 2 branches missed.">        for (int i = 0; i &lt; length; i++) {</span>
+<span class="nc" id="L84">          hyperLogLog.offer(Long.valueOf(longValues[i]).hashCode());</span>
+        }
+<span class="nc" id="L86">        break;</span>
+
+      case FLOAT:
+<span class="nc" id="L89">        float[] floatValues = blockValSets[0].getFloatValuesSV();</span>
+<span class="nc bnc" id="L90" title="All 2 branches missed.">        for (int i = 0; i &lt; length; i++) {</span>
+<span class="nc" id="L91">          hyperLogLog.offer(Float.valueOf(floatValues[i]).hashCode());</span>
+        }
+<span class="nc" id="L93">        break;</span>
+
+      case DOUBLE:
+<span class="nc" id="L96">        double[] doubleValues = blockValSets[0].getDoubleValuesSV();</span>
+<span class="nc bnc" id="L97" title="All 2 branches missed.">        for (int i = 0; i &lt; length; i++) {</span>
+<span class="nc" id="L98">          hyperLogLog.offer(Double.valueOf(doubleValues[i]).hashCode());</span>
+        }
+<span class="nc" id="L100">        break;</span>
+
+      case STRING:
+<span class="nc" id="L103">        String[] stringValues = blockValSets[0].getStringValuesSV();</span>
+<span class="nc bnc" id="L104" title="All 2 branches missed.">        for (int i = 0; i &lt; length; i++) {</span>
+<span class="nc" id="L105">          hyperLogLog.offer(stringValues[i]);</span>
+        }
+<span class="nc" id="L107">        break;</span>
+
+      default:
+<span class="pc" id="L110">        throw new IllegalArgumentException(&quot;Illegal data type for distinct count aggregation function: &quot; + valueType);</span>
+    }
+<span class="fc" id="L112">  }</span>
+
+  @Override
+  public void aggregateGroupBySV(int length, @Nonnull int[] groupKeyArray,
+      @Nonnull GroupByResultHolder groupByResultHolder, @Nonnull BlockValSet... blockValSets) {
+
+<span class="fc" id="L118">    FieldSpec.DataType valueType = blockValSets[0].getValueType();</span>
+<span class="pc bpc" id="L119" title="5 of 6 branches missed.">    switch (valueType) {</span>
+      case INT:
+<span class="fc" id="L121">        int[] intValues = blockValSets[0].getIntValuesSV();</span>
+<span class="fc bfc" id="L122" title="All 2 branches covered.">        for (int i = 0; i &lt; length; i++) {</span>
+<span class="fc" id="L123">          setValueForGroupKey(groupByResultHolder, groupKeyArray[i], intValues[i]);</span>
+        }
+<span class="fc" id="L125">        break;</span>
+
+      case LONG:
+<span class="nc" id="L128">        long[] longValues = blockValSets[0].getLongValuesSV();</span>
+<span class="nc bnc" id="L129" title="All 2 branches missed.">        for (int i = 0; i &lt; length; i++) {</span>
+<span class="nc" id="L130">          setValueForGroupKey(groupByResultHolder, groupKeyArray[i], Long.valueOf(longValues[i]).hashCode());</span>
+        }
+<span class="nc" id="L132">        break;</span>
+
+      case FLOAT:
+<span class="nc" id="L135">        float[] floatValues = blockValSets[0].getFloatValuesSV();</span>
+<span class="nc bnc" id="L136" title="All 2 branches missed.">        for (int i = 0; i &lt; length; i++) {</span>
+<span class="nc" id="L137">          setValueForGroupKey(groupByResultHolder, groupKeyArray[i], Float.valueOf(floatValues[i]).hashCode());</span>
+        }
+<span class="nc" id="L139">        break;</span>
+
+      case DOUBLE:
+<span class="nc" id="L142">        double[] doubleValues = blockValSets[0].getDoubleValuesSV();</span>
+<span class="nc bnc" id="L143" title="All 2 branches missed.">        for (int i = 0; i &lt; length; i++) {</span>
+<span class="nc" id="L144">          int groupKey = groupKeyArray[i];</span>
+<span class="nc" id="L145">          setValueForGroupKey(groupByResultHolder, groupKey, Double.valueOf(doubleValues[i]).hashCode());</span>
+        }
+<span class="nc" id="L147">        break;</span>
+
+      case STRING:
+<span class="nc" id="L150">        String[] stringValues = blockValSets[0].getStringValuesSV();</span>
+<span class="nc bnc" id="L151" title="All 2 branches missed.">        for (int i = 0; i &lt; length; i++) {</span>
+<span class="nc" id="L152">          int groupKey = groupKeyArray[i];</span>
+<span class="nc" id="L153">          setValueForGroupKey(groupByResultHolder, groupKey, stringValues[i].hashCode());</span>
+        }
+<span class="nc" id="L155">        break;</span>
+
+      default:
+<span class="nc" id="L158">        throw new IllegalArgumentException(&quot;Illegal data type for distinct count aggregation function: &quot; + valueType);</span>
+    }
+<span class="fc" id="L160">  }</span>
+
+  @Override
+  public void aggregateGroupByMV(int length, @Nonnull int[][] groupKeysArray,
+      @Nonnull GroupByResultHolder groupByResultHolder, @Nonnull BlockValSet... blockValSets) {
+
+<span class="nc" id="L166">    FieldSpec.DataType valueType = blockValSets[0].getValueType();</span>
+<span class="nc bnc" id="L167" title="All 6 branches missed.">    switch (valueType) {</span>
+      case INT:
+<span class="nc" id="L169">        int[] intValues = blockValSets[0].getIntValuesSV();</span>
+<span class="nc bnc" id="L170" title="All 2 branches missed.">        for (int i = 0; i &lt; length; i++) {</span>
+<span class="nc" id="L171">          setValueForGroupKeys(groupByResultHolder, groupKeysArray[i], intValues[i]);</span>
+        }
+<span class="nc" id="L173">        break;</span>
+
+      case LONG:
+<span class="nc" id="L176">        long[] longValues = blockValSets[0].getLongValuesSV();</span>
+<span class="nc bnc" id="L177" title="All 2 branches missed.">        for (int i = 0; i &lt; length; i++) {</span>
+<span class="nc" id="L178">          setValueForGroupKeys(groupByResultHolder, groupKeysArray[i], Long.valueOf(longValues[i]).hashCode());</span>
+        }
+<span class="nc" id="L180">        break;</span>
+
+      case FLOAT:
+<span class="nc" id="L183">        float[] floatValues = blockValSets[0].getFloatValuesSV();</span>
+<span class="nc bnc" id="L184" title="All 2 branches missed.">        for (int i = 0; i &lt; length; i++) {</span>
+<span class="nc" id="L185">          setValueForGroupKeys(groupByResultHolder, groupKeysArray[i], Float.valueOf(floatValues[i]).hashCode());</span>
+        }
+<span class="nc" id="L187">        break;</span>
+
+      case DOUBLE:
+<span class="nc" id="L190">        double[] doubleValues = blockValSets[0].getDoubleValuesSV();</span>
+<span class="nc bnc" id="L191" title="All 2 branches missed.">        for (int i = 0; i &lt; length; i++) {</span>
+<span class="nc" id="L192">          setValueForGroupKeys(groupByResultHolder, groupKeysArray[i], Double.valueOf(doubleValues[i]).hashCode());</span>
+        }
+<span class="nc" id="L194">        break;</span>
+
+      case STRING:
+<span class="nc" id="L197">        String[] singleValues = blockValSets[0].getStringValuesSV();</span>
+<span class="nc bnc" id="L198" title="All 2 branches missed.">        for (int i = 0; i &lt; length; i++) {</span>
+<span class="nc" id="L199">          int hashCode = singleValues[i].hashCode();</span>
+<span class="nc bnc" id="L200" title="All 2 branches missed.">          for (int groupKey : groupKeysArray[i]) {</span>
+<span class="nc" id="L201">            setValueForGroupKey(groupByResultHolder, groupKey, hashCode);</span>
+          }
+        }
+<span class="nc" id="L204">        break;</span>
+
+      default:
+<span class="nc" id="L207">        throw new IllegalArgumentException(&quot;Illegal data type for distinct count aggregation function: &quot; + valueType);</span>
+    }
+<span class="nc" id="L209">  }</span>
+
+  @Nonnull
+  @Override
+  public HyperLogLog extractAggregationResult(@Nonnull AggregationResultHolder aggregationResultHolder) {
+<span class="fc" id="L214">    HyperLogLog hyperLogLog = aggregationResultHolder.getResult();</span>
+<span class="pc bpc" id="L215" title="1 of 2 branches missed.">    if (hyperLogLog == null) {</span>
+<span class="nc" id="L216">      return new HyperLogLog(HllConstants.DEFAULT_LOG2M);</span>
+    } else {
+<span class="fc" id="L218">      return hyperLogLog;</span>
+    }
+  }
+
+  @Nonnull
+  @Override
+  public HyperLogLog extractGroupByResult(@Nonnull GroupByResultHolder groupByResultHolder, int groupKey) {
+<span class="fc" id="L225">    HyperLogLog hyperLogLog = groupByResultHolder.getResult(groupKey);</span>
+<span class="pc bpc" id="L226" title="1 of 2 branches missed.">    if (hyperLogLog == null) {</span>
+<span class="nc" id="L227">      return new HyperLogLog(HllConstants.DEFAULT_LOG2M);</span>
+    } else {
+<span class="fc" id="L229">      return hyperLogLog;</span>
+    }
+  }
+
+  @Nonnull
+  @Override
+  public HyperLogLog merge(@Nonnull HyperLogLog intermediateResult1, @Nonnull HyperLogLog intermediateResult2) {
+    try {
+<span class="fc" id="L237">      intermediateResult1.addAll(intermediateResult2);</span>
+<span class="nc" id="L238">    } catch (CardinalityMergeException e) {</span>
+<span class="nc" id="L239">      throw new RuntimeException(&quot;Caught exception while merging HyperLogLog.&quot;, e);</span>
+<span class="fc" id="L240">    }</span>
+<span class="fc" id="L241">    return intermediateResult1;</span>
+  }
+
+  @Override
+  public boolean isIntermediateResultComparable() {
+<span class="nc" id="L246">    return false;</span>
+  }
+
+  @Nonnull
+  @Override
+  public FieldSpec.DataType getIntermediateResultDataType() {
+<span class="fc" id="L252">    return FieldSpec.DataType.OBJECT;</span>
+  }
+
+  @Nonnull
+  @Override
+  public Long extractFinalResult(@Nonnull HyperLogLog intermediateResult) {
+<span class="fc" id="L258">    return intermediateResult.cardinality();</span>
+  }
+
+  /**
+   * Helper method to set value for a groupKey into the result holder.
+   *
+   * @param groupByResultHolder Result holder
+   * @param groupKey Group-key for which to set the value
+   * @param value Value for the group key
+   */
+  private void setValueForGroupKey(@Nonnull GroupByResultHolder groupByResultHolder, int groupKey, int value) {
+<span class="fc" id="L269">    HyperLogLog hyperLogLog = groupByResultHolder.getResult(groupKey);</span>
+<span class="fc bfc" id="L270" title="All 2 branches covered.">    if (hyperLogLog == null) {</span>
+<span class="fc" id="L271">      hyperLogLog = new HyperLogLog(HllConstants.DEFAULT_LOG2M);</span>
+<span class="fc" id="L272">      groupByResultHolder.setValueForKey(groupKey, hyperLogLog);</span>
+    }
+<span class="fc" id="L274">    hyperLogLog.offer(value);</span>
+<span class="fc" id="L275">  }</span>
+
+  /**
+   * Helper method to set value for a given array of group keys.
+   * @param groupByResultHolder Result Holder
+   * @param groupKeys Group keys for which to set the value
+   * @param value Value to set
+   */
+  private void setValueForGroupKeys(@Nonnull GroupByResultHolder groupByResultHolder, int[] groupKeys, int value) {
+<span class="nc bnc" id="L284" title="All 2 branches missed.">    for (int groupKey : groupKeys) {</span>
+<span class="nc" id="L285">      setValueForGroupKey(groupByResultHolder, groupKey, value);</span>
+    }
+<span class="nc" id="L287">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

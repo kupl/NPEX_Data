@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>AggregatedCounter.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-broker</a> &gt; <a href="../index.html" class="el_bundle">pinot-common</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.common.metrics</a> &gt; <span class="el_source">AggregatedCounter.java</span></div><h1>AggregatedCounter.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.common.metrics;
+
+import java.util.Collection;
+import java.util.concurrent.CopyOnWriteArrayList;
+
+import com.yammer.metrics.core.Counter;
+import com.yammer.metrics.core.Metric;
+import com.yammer.metrics.core.MetricName;
+import com.yammer.metrics.core.MetricProcessor;
+
+
+/**
+ * Aggregated Histogram which aggregates counters.
+ *  This class supports multi-level aggregations of counters
+ *
+ *
+ */
+public class AggregatedCounter implements Metric {
+  // Container of inner meters
+<span class="pc" id="L35">  private final CopyOnWriteArrayList&lt;Metric&gt; _counters = new CopyOnWriteArrayList&lt;Metric&gt;();</span>
+
+  private static final long DEFAULT_REFRESH_MS = 60 * 1000L; // 1 minute
+
+  // Refresh Delay config
+  private final long _refreshMs;
+
+  // Last Refreshed timestamp
+  private long _lastRefreshedTime;
+
+  // Count of entries
+  private volatile long _count;
+
+  @Override
+  public &lt;T&gt; void processWith(MetricProcessor&lt;T&gt; processor, MetricName name, T context) throws Exception {
+<span class="nc bnc" id="L50" title="All 2 branches missed.">    for (Metric c : _counters)</span>
+<span class="nc" id="L51">      c.processWith(processor, name, context);</span>
+<span class="nc" id="L52">  }</span>
+
+<span class="fc" id="L54">  public AggregatedCounter() {</span>
+<span class="fc" id="L55">    _refreshMs = DEFAULT_REFRESH_MS;</span>
+<span class="fc" id="L56">  }</span>
+
+<span class="nc" id="L58">  public AggregatedCounter(long refreshMs) {</span>
+<span class="nc" id="L59">    _refreshMs = refreshMs;</span>
+<span class="nc" id="L60">  }</span>
+
+  /**
+   * Add Collection of metrics to be aggregated
+   * @param counters collection of metrics to be aggregated
+   * @return this instance
+   */
+  public AggregatedCounter addAll(Collection&lt;? extends Metric&gt; counters) {
+<span class="nc" id="L68">    _counters.addAll(counters);</span>
+<span class="nc" id="L69">    return this;</span>
+  }
+
+  /**
+   * Add a metric to be aggregated
+   * @param counter
+   * @return this instance
+   */
+  public AggregatedCounter add(Metric counter) {
+<span class="fc" id="L78">    _counters.add(counter);</span>
+<span class="fc" id="L79">    return this;</span>
+  }
+
+  /**
+   * Remove a metric which was already added
+   * @param counter metric to be removed
+   * @return true if the metric was present in the list
+   */
+  public boolean remove(Metric counter) {
+<span class="nc" id="L88">    return _counters.remove(counter);</span>
+  }
+
+  /**
+   * Returns the counter's current value.
+   *
+   * @return the counter's current value
+   */
+  public long count() {
+<span class="nc" id="L97">    refreshIfElapsed();</span>
+<span class="nc" id="L98">    return _count;</span>
+  }
+
+  /**
+   * Check elapsed time since last refresh and only refresh if time difference is
+   * greater than threshold.
+   */
+  private void refreshIfElapsed() {
+<span class="nc" id="L106">    long currentTime = System.currentTimeMillis();</span>
+<span class="nc bnc" id="L107" title="All 4 branches missed.">    if (currentTime - _lastRefreshedTime &gt; _refreshMs &amp;&amp; !_counters.isEmpty()) {</span>
+<span class="nc" id="L108">      refresh();</span>
+<span class="nc" id="L109">      _lastRefreshedTime = currentTime;</span>
+    }
+<span class="nc" id="L111">  }</span>
+
+  /**
+   * Update counter from underlying counters.
+   */
+  public void refresh() {
+<span class="nc" id="L117">    long count = 0;</span>
+<span class="nc bnc" id="L118" title="All 2 branches missed.">    for (Metric m : _counters) {</span>
+<span class="nc bnc" id="L119" title="All 2 branches missed.">      if (m instanceof Counter) {</span>
+<span class="nc" id="L120">        count += ((Counter) m).count();</span>
+<span class="nc bnc" id="L121" title="All 2 branches missed.">      } else if (m instanceof AggregatedCounter) {</span>
+<span class="nc" id="L122">        count += ((AggregatedCounter) m).count();</span>
+      }
+<span class="nc" id="L124">    }</span>
+<span class="nc" id="L125">    _count = count;</span>
+<span class="nc" id="L126">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>AbstractSchedulerGroup.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-minion</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.query.scheduler</a> &gt; <span class="el_source">AbstractSchedulerGroup.java</span></div><h1>AbstractSchedulerGroup.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.query.scheduler;
+
+import com.google.common.base.Preconditions;
+import java.util.Iterator;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicInteger;
+import javax.annotation.Nonnull;
+
+
+/**
+ * Abstract {@link SchedulerGroup} class that provides common facilities like
+ * managing pending queries as a Linked queue of requests and provides basic accounting
+ * by tracking running queries, reserved threads and in-use threads
+ */
+public abstract class AbstractSchedulerGroup implements SchedulerGroup {
+  // Queue of pending queries for this group
+<span class="fc" id="L32">  protected final ConcurrentLinkedQueue&lt;SchedulerQueryContext&gt; pendingQueries = new ConcurrentLinkedQueue&lt;&gt;();</span>
+  protected final String name;
+  // Tracks number of running queries for this group
+<span class="fc" id="L35">  protected AtomicInteger numRunning = new AtomicInteger(0);</span>
+  // Total threads in use for this group
+<span class="fc" id="L37">  protected AtomicInteger threadsInUse = new AtomicInteger(0);</span>
+  // Total reserved threads for currently running queries for this group
+<span class="fc" id="L39">  protected AtomicInteger reservedThreads = new AtomicInteger(0);</span>
+
+<span class="fc" id="L41">  public AbstractSchedulerGroup(@Nonnull String name) {</span>
+<span class="fc" id="L42">    Preconditions.checkNotNull(name);</span>
+<span class="fc" id="L43">    this.name = name;</span>
+<span class="fc" id="L44">  }</span>
+
+  @Override
+  public String name() {
+<span class="fc" id="L48">    return this.name;</span>
+  }
+
+  @Override
+  public void addLast(SchedulerQueryContext query) {
+<span class="fc" id="L53">    pendingQueries.add(query);</span>
+<span class="fc" id="L54">  }</span>
+
+  @Override
+  public SchedulerQueryContext peekFirst() {
+<span class="fc" id="L58">    return pendingQueries.peek();</span>
+  }
+
+  @Override
+  public SchedulerQueryContext removeFirst() {
+<span class="fc" id="L63">    return pendingQueries.poll();</span>
+  }
+
+  @Override
+  public void trimExpired(long deadlineMillis) {
+<span class="fc" id="L68">    Iterator&lt;SchedulerQueryContext&gt; iter = pendingQueries.iterator();</span>
+<span class="fc bfc" id="L69" title="All 2 branches covered.">    while (iter.hasNext()) {</span>
+<span class="fc" id="L70">      SchedulerQueryContext next = iter.next();</span>
+<span class="fc bfc" id="L71" title="All 2 branches covered.">      if (next.getArrivalTimeMs() &lt; deadlineMillis) {</span>
+<span class="fc" id="L72">        iter.remove();</span>
+      }
+<span class="fc" id="L74">    }</span>
+<span class="fc" id="L75">  }</span>
+
+  @Override
+  public boolean isEmpty() {
+<span class="fc" id="L79">    return pendingQueries.isEmpty();</span>
+  }
+
+  @Override
+  public int numPending() {
+<span class="fc" id="L84">    return pendingQueries.size();</span>
+  }
+
+  @Override
+  public int numRunning() {
+<span class="fc" id="L89">    return numRunning.get();</span>
+  }
+
+  @Override
+  public void incrementThreads() {
+<span class="fc" id="L94">    threadsInUse.incrementAndGet();</span>
+<span class="fc" id="L95">  }</span>
+
+  @Override
+  public void decrementThreads() {
+<span class="fc" id="L99">    threadsInUse.decrementAndGet();</span>
+<span class="fc" id="L100">  }</span>
+
+  @Override
+  public int getThreadsInUse() {
+<span class="fc" id="L104">    return threadsInUse.get();</span>
+  }
+
+  @Override
+  public void addReservedThreads(int threads) {
+<span class="fc" id="L109">    reservedThreads.addAndGet(threads);</span>
+<span class="fc" id="L110">  }</span>
+
+  @Override
+  public void releasedReservedThreads(int threads) {
+<span class="fc" id="L114">    reservedThreads.addAndGet(-1 * threads);</span>
+<span class="fc" id="L115">  }</span>
+
+  @Override
+  public int totalReservedThreads() {
+<span class="fc" id="L119">    return reservedThreads.get();</span>
+  }
+
+  @Override
+  public void startQuery() {
+<span class="fc" id="L124">    incrementThreads();</span>
+<span class="fc" id="L125">    numRunning.incrementAndGet();</span>
+<span class="fc" id="L126">  }</span>
+
+  @Override
+  public void endQuery() {
+<span class="fc" id="L130">    decrementThreads();</span>
+<span class="fc" id="L131">    numRunning.decrementAndGet();</span>
+<span class="fc" id="L132">  }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

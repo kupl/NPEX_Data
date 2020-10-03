@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>QuerySchedulerFactory.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-server</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.query.scheduler</a> &gt; <span class="el_source">QuerySchedulerFactory.java</span></div><h1>QuerySchedulerFactory.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.linkedin.pinot.core.query.scheduler;
+
+import com.google.common.base.Preconditions;
+import com.linkedin.pinot.common.metrics.ServerMetrics;
+import com.linkedin.pinot.common.query.QueryExecutor;
+import com.linkedin.pinot.core.query.scheduler.fcfs.BoundedFCFSScheduler;
+import com.linkedin.pinot.core.query.scheduler.fcfs.FCFSQueryScheduler;
+import com.linkedin.pinot.core.query.scheduler.tokenbucket.TokenPriorityScheduler;
+import java.lang.reflect.Constructor;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+import org.apache.commons.configuration.Configuration;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * Factory class to initialize query scheduler
+ */
+<span class="nc" id="L36">public class QuerySchedulerFactory {</span>
+  private static final String FCFS_ALGORITHM = &quot;fcfs&quot;;
+  private static final String DEFAULT_QUERY_SCHEDULER_ALGORITHM = FCFS_ALGORITHM;
+  public static final String TOKEN_BUCKET_ALGORITHM = &quot;tokenbucket&quot;;
+  public static final String BOUNDED_FCFS_ALGORITHM = &quot;bounded_fcfs&quot;;
+  public static final String ALGORITHM_NAME_CONFIG_KEY = &quot;name&quot;;
+<span class="nc" id="L42">  private static Logger LOGGER = LoggerFactory.getLogger(QuerySchedulerFactory.class);</span>
+
+  /**
+   * Static factory to instantiate query scheduler based on scheduler configuration.
+   * 'name' configuration in the scheduler will decide which scheduler instance to create
+   * Besides known instances, 'name' can be a classname
+   * @param schedulerConfig scheduler specific configuration
+   * @param queryExecutor QueryExecutor to use
+   * @return returns an instance of query scheduler
+   */
+  public static @Nonnull  QueryScheduler create(@Nonnull Configuration schedulerConfig,
+      @Nonnull QueryExecutor queryExecutor, ServerMetrics serverMetrics) {
+<span class="nc" id="L54">    Preconditions.checkNotNull(schedulerConfig);</span>
+<span class="nc" id="L55">    Preconditions.checkNotNull(queryExecutor);</span>
+
+<span class="nc" id="L57">    String schedulerName = schedulerConfig.getString(ALGORITHM_NAME_CONFIG_KEY,</span>
+        DEFAULT_QUERY_SCHEDULER_ALGORITHM).toLowerCase();
+<span class="nc bnc" id="L59" title="All 2 branches missed.">    if (schedulerName.equals(FCFS_ALGORITHM)) {</span>
+<span class="nc" id="L60">      LOGGER.info(&quot;Using FCFS query scheduler&quot;);</span>
+<span class="nc" id="L61">      return new FCFSQueryScheduler(schedulerConfig, queryExecutor, serverMetrics);</span>
+<span class="nc bnc" id="L62" title="All 2 branches missed.">    } else if (schedulerName.equals(TOKEN_BUCKET_ALGORITHM)) {</span>
+<span class="nc" id="L63">      LOGGER.info(&quot;Using Priority Token Bucket scheduler&quot;);</span>
+<span class="nc" id="L64">      return TokenPriorityScheduler.create(schedulerConfig, queryExecutor, serverMetrics);</span>
+<span class="nc bnc" id="L65" title="All 2 branches missed.">    } else if (schedulerConfig.equals(BOUNDED_FCFS_ALGORITHM)) {</span>
+<span class="nc" id="L66">      return BoundedFCFSScheduler.create(schedulerConfig, queryExecutor, serverMetrics);</span>
+    }
+
+    // didn't find by name so try by classname
+<span class="nc" id="L70">    QueryScheduler scheduler = getQuerySchedulerByClassName(schedulerName, schedulerConfig, queryExecutor);</span>
+<span class="nc bnc" id="L71" title="All 2 branches missed.">    if (scheduler != null) {</span>
+<span class="nc" id="L72">      return scheduler;</span>
+    }
+
+    // if we don't find the configured algorithm we warn and use the default one
+    // because it's better to execute with poor algorithm than completely fail.
+    // Failure on bad configuration will cause outage vs an inferior algorithm that
+    // will provide degraded service
+
+<span class="nc" id="L80">    LOGGER.warn(&quot;Scheduler {} not found. Using default FCFS query scheduler&quot;, schedulerName);</span>
+<span class="nc" id="L81">    return new FCFSQueryScheduler(schedulerConfig, queryExecutor, serverMetrics);</span>
+  }
+
+  private static @Nullable QueryScheduler getQuerySchedulerByClassName(String className, Configuration schedulerConfig,
+      QueryExecutor queryExecutor) {
+    try {
+<span class="nc" id="L87">      Constructor&lt;?&gt; constructor =</span>
+          Class.forName(className).getDeclaredConstructor(Configuration.class, QueryExecutor.class);
+<span class="nc" id="L89">      constructor.setAccessible(true);</span>
+<span class="nc" id="L90">      return (QueryScheduler) constructor.newInstance(schedulerConfig, queryExecutor);</span>
+<span class="nc" id="L91">    } catch (Exception e) {</span>
+<span class="nc" id="L92">      LOGGER.error(&quot;Failed to instantiate scheduler class by name: {}&quot;, className, e);</span>
+<span class="nc" id="L93">      return null;</span>
+    }
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>

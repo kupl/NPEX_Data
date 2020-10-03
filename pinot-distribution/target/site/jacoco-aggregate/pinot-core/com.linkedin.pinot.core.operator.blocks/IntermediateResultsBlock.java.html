@@ -1,0 +1,307 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../../jacoco-resources/report.gif" type="image/gif"/><title>IntermediateResultsBlock.java</title><link rel="stylesheet" href="../../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../../index.html" class="el_report">pinot-distribution</a> &gt; <a href="../index.html" class="el_bundle">pinot-core</a> &gt; <a href="index.source.html" class="el_package">com.linkedin.pinot.core.operator.blocks</a> &gt; <span class="el_source">IntermediateResultsBlock.java</span></div><h1>IntermediateResultsBlock.java</h1><pre class="source lang-java linenums">/**
+ * Copyright (C) 2014-2016 LinkedIn Corp. (pinot-core@linkedin.com)
+ *
+ * Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *         http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an &quot;AS IS&quot; BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.linkedin.pinot.core.operator.blocks;
+
+import com.linkedin.pinot.common.data.FieldSpec;
+import com.linkedin.pinot.common.exception.QueryException;
+import com.linkedin.pinot.common.response.ProcessingException;
+import com.linkedin.pinot.common.utils.DataSchema;
+import com.linkedin.pinot.common.utils.DataTable;
+import com.linkedin.pinot.core.common.Block;
+import com.linkedin.pinot.core.common.BlockDocIdSet;
+import com.linkedin.pinot.core.common.BlockDocIdValueSet;
+import com.linkedin.pinot.core.common.BlockMetadata;
+import com.linkedin.pinot.core.common.BlockValSet;
+import com.linkedin.pinot.core.common.datatable.DataTableBuilder;
+import com.linkedin.pinot.core.common.datatable.DataTableImplV2;
+import com.linkedin.pinot.core.query.aggregation.AggregationFunctionContext;
+import com.linkedin.pinot.core.query.aggregation.groupby.AggregationGroupByResult;
+import com.linkedin.pinot.core.query.selection.SelectionOperatorUtils;
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+
+
+/**
+ * The &lt;code&gt;IntermediateResultsBlock&lt;/code&gt; class is the holder of the server side inter-segment results.
+ */
+public class IntermediateResultsBlock implements Block {
+  private DataSchema _selectionDataSchema;
+  private Collection&lt;Serializable[]&gt; _selectionResult;
+  private AggregationFunctionContext[] _aggregationFunctionContexts;
+  private List&lt;Object&gt; _aggregationResult;
+  private AggregationGroupByResult _aggregationGroupByResult;
+  private List&lt;Map&lt;String, Object&gt;&gt; _combinedAggregationGroupByResult;
+  private List&lt;ProcessingException&gt; _processingExceptions;
+  private long _numDocsScanned;
+  private long _numEntriesScannedInFilter;
+  private long _numEntriesScannedPostFilter;
+  private long _numTotalRawDocs;
+
+  /**
+   * Constructor for selection result.
+   */
+  public IntermediateResultsBlock(@Nonnull DataSchema selectionDataSchema,
+<span class="fc" id="L62">      @Nonnull Collection&lt;Serializable[]&gt; selectionResult) {</span>
+<span class="fc" id="L63">    _selectionDataSchema = selectionDataSchema;</span>
+<span class="fc" id="L64">    _selectionResult = selectionResult;</span>
+<span class="fc" id="L65">  }</span>
+
+  /**
+   * Constructor for aggregation result.
+   * &lt;p&gt;For aggregation only, the result is a list of values.
+   * &lt;p&gt;For aggregation group-by, the result is a list of maps from group keys to aggregation values.
+   */
+  @SuppressWarnings(&quot;unchecked&quot;)
+  public IntermediateResultsBlock(@Nonnull AggregationFunctionContext[] aggregationFunctionContexts,
+<span class="fc" id="L74">      @Nonnull List aggregationResult, boolean isGroupBy) {</span>
+<span class="fc" id="L75">    _aggregationFunctionContexts = aggregationFunctionContexts;</span>
+<span class="fc bfc" id="L76" title="All 2 branches covered.">    if (isGroupBy) {</span>
+<span class="fc" id="L77">      _combinedAggregationGroupByResult = aggregationResult;</span>
+    } else {
+<span class="fc" id="L79">      _aggregationResult = aggregationResult;</span>
+    }
+<span class="fc" id="L81">  }</span>
+
+  /**
+   * Constructor for aggregation group-by result with {@link AggregationGroupByResult}.
+   */
+  public IntermediateResultsBlock(@Nonnull AggregationFunctionContext[] aggregationFunctionContexts,
+<span class="fc" id="L87">      @Nullable AggregationGroupByResult aggregationGroupByResults) {</span>
+<span class="fc" id="L88">    _aggregationFunctionContexts = aggregationFunctionContexts;</span>
+<span class="fc" id="L89">    _aggregationGroupByResult = aggregationGroupByResults;</span>
+<span class="fc" id="L90">  }</span>
+
+  /**
+   * Constructor for exception block.
+   */
+<span class="nc" id="L95">  public IntermediateResultsBlock(@Nonnull ProcessingException processingException, @Nonnull Exception e) {</span>
+<span class="nc" id="L96">    _processingExceptions = new ArrayList&lt;&gt;();</span>
+<span class="nc" id="L97">    _processingExceptions.add(QueryException.getException(processingException, e));</span>
+<span class="nc" id="L98">  }</span>
+
+  /**
+   * Constructor for exception block.
+   */
+  public IntermediateResultsBlock(@Nonnull Exception e) {
+<span class="nc" id="L104">    this(QueryException.QUERY_EXECUTION_ERROR, e);</span>
+<span class="nc" id="L105">  }</span>
+
+  @Nullable
+  public DataSchema getSelectionDataSchema() {
+<span class="fc" id="L109">    return _selectionDataSchema;</span>
+  }
+
+  public void setSelectionDataSchema(@Nullable DataSchema dataSchema) {
+<span class="nc" id="L113">    _selectionDataSchema = dataSchema;</span>
+<span class="nc" id="L114">  }</span>
+
+  @Nullable
+  public Collection&lt;Serializable[]&gt; getSelectionResult() {
+<span class="fc" id="L118">    return _selectionResult;</span>
+  }
+
+  public void setSelectionResult(@Nullable Collection&lt;Serializable[]&gt; rowEventsSet) {
+<span class="nc" id="L122">    _selectionResult = rowEventsSet;</span>
+<span class="nc" id="L123">  }</span>
+
+  @Nullable
+  public AggregationFunctionContext[] getAggregationFunctionContexts() {
+<span class="fc" id="L127">    return _aggregationFunctionContexts;</span>
+  }
+
+  public void setAggregationFunctionContexts(AggregationFunctionContext[] aggregationFunctionContexts) {
+<span class="nc" id="L131">    _aggregationFunctionContexts = aggregationFunctionContexts;</span>
+<span class="nc" id="L132">  }</span>
+
+  @Nullable
+  public List&lt;Object&gt; getAggregationResult() {
+<span class="fc" id="L136">    return _aggregationResult;</span>
+  }
+
+  public void setAggregationResults(@Nullable List&lt;Object&gt; aggregationResults) {
+<span class="nc" id="L140">    _aggregationResult = aggregationResults;</span>
+<span class="nc" id="L141">  }</span>
+
+  @Nullable
+  public AggregationGroupByResult getAggregationGroupByResult() {
+<span class="fc" id="L145">    return _aggregationGroupByResult;</span>
+  }
+
+  @Nullable
+  public List&lt;ProcessingException&gt; getProcessingExceptions() {
+<span class="fc" id="L150">    return _processingExceptions;</span>
+  }
+
+  public void setProcessingExceptions(@Nullable List&lt;ProcessingException&gt; processingExceptions) {
+<span class="fc" id="L154">    _processingExceptions = processingExceptions;</span>
+<span class="fc" id="L155">  }</span>
+
+  public void addToProcessingExceptions(@Nonnull ProcessingException processingException) {
+<span class="nc bnc" id="L158" title="All 2 branches missed.">    if (_processingExceptions == null) {</span>
+<span class="nc" id="L159">      _processingExceptions = new ArrayList&lt;&gt;();</span>
+    }
+<span class="nc" id="L161">    _processingExceptions.add(processingException);</span>
+<span class="nc" id="L162">  }</span>
+
+  public void setNumDocsScanned(long numDocsScanned) {
+<span class="fc" id="L165">    _numDocsScanned = numDocsScanned;</span>
+<span class="fc" id="L166">  }</span>
+
+  public void setNumEntriesScannedInFilter(long numEntriesScannedInFilter) {
+<span class="fc" id="L169">    _numEntriesScannedInFilter = numEntriesScannedInFilter;</span>
+<span class="fc" id="L170">  }</span>
+
+  public void setNumEntriesScannedPostFilter(long numEntriesScannedPostFilter) {
+<span class="fc" id="L173">    _numEntriesScannedPostFilter = numEntriesScannedPostFilter;</span>
+<span class="fc" id="L174">  }</span>
+
+  public void setNumTotalRawDocs(long numTotalRawDocs) {
+<span class="fc" id="L177">    _numTotalRawDocs = numTotalRawDocs;</span>
+<span class="fc" id="L178">  }</span>
+
+  @Nonnull
+  public DataTable getDataTable()
+      throws Exception {
+<span class="pc bpc" id="L183" title="1 of 2 branches missed.">    if (_selectionResult != null) {</span>
+<span class="nc" id="L184">      return getSelectionResultDataTable();</span>
+    }
+
+<span class="fc bfc" id="L187" title="All 2 branches covered.">    if (_aggregationResult != null) {</span>
+<span class="fc" id="L188">      return getAggregationResultDataTable();</span>
+    }
+
+<span class="pc bpc" id="L191" title="1 of 2 branches missed.">    if (_combinedAggregationGroupByResult != null) {</span>
+<span class="fc" id="L192">      return getAggregationGroupByResultDataTable();</span>
+    }
+
+<span class="nc bnc" id="L195" title="All 4 branches missed.">    if (_processingExceptions != null &amp;&amp; _processingExceptions.size() &gt; 0) {</span>
+<span class="nc" id="L196">      return getProcessingExceptionsDataTable();</span>
+    }
+
+<span class="nc" id="L199">    throw new UnsupportedOperationException(&quot;No data inside IntermediateResultsBlock.&quot;);</span>
+  }
+
+  @Nonnull
+  private DataTable getSelectionResultDataTable()
+      throws Exception {
+<span class="nc" id="L205">    return attachMetadataToDataTable(</span>
+        SelectionOperatorUtils.getDataTableFromRows(_selectionResult, _selectionDataSchema));
+  }
+
+  @Nonnull
+  private DataTable getAggregationResultDataTable()
+      throws Exception {
+    // Extract each aggregation column name and type from aggregation function context.
+<span class="fc" id="L213">    int numAggregationFunctions = _aggregationFunctionContexts.length;</span>
+<span class="fc" id="L214">    String[] columnNames = new String[numAggregationFunctions];</span>
+<span class="fc" id="L215">    FieldSpec.DataType[] columnTypes = new FieldSpec.DataType[numAggregationFunctions];</span>
+<span class="fc bfc" id="L216" title="All 2 branches covered.">    for (int i = 0; i &lt; numAggregationFunctions; i++) {</span>
+<span class="fc" id="L217">      AggregationFunctionContext aggregationFunctionContext = _aggregationFunctionContexts[i];</span>
+<span class="fc" id="L218">      columnNames[i] = aggregationFunctionContext.getAggregationColumnName();</span>
+<span class="fc" id="L219">      columnTypes[i] = aggregationFunctionContext.getAggregationFunction().getIntermediateResultDataType();</span>
+    }
+
+    // Build the data table.
+<span class="fc" id="L223">    DataTableBuilder dataTableBuilder = new DataTableBuilder(new DataSchema(columnNames, columnTypes));</span>
+<span class="fc" id="L224">    dataTableBuilder.startRow();</span>
+<span class="fc bfc" id="L225" title="All 2 branches covered.">    for (int i = 0; i &lt; numAggregationFunctions; i++) {</span>
+<span class="pc bpc" id="L226" title="1 of 4 branches missed.">      switch (columnTypes[i]) {</span>
+        case LONG:
+<span class="fc" id="L228">          dataTableBuilder.setColumn(i, ((Number) _aggregationResult.get(i)).longValue());</span>
+<span class="fc" id="L229">          break;</span>
+        case DOUBLE:
+<span class="fc" id="L231">          dataTableBuilder.setColumn(i, ((Double) _aggregationResult.get(i)).doubleValue());</span>
+<span class="fc" id="L232">          break;</span>
+        case OBJECT:
+<span class="fc" id="L234">          dataTableBuilder.setColumn(i, _aggregationResult.get(i));</span>
+<span class="fc" id="L235">          break;</span>
+        default:
+<span class="nc" id="L237">          throw new UnsupportedOperationException(</span>
+              &quot;Unsupported aggregation column data type: &quot; + columnTypes[i] + &quot; for column: &quot; + columnNames[i]);
+      }
+    }
+<span class="fc" id="L241">    dataTableBuilder.finishRow();</span>
+<span class="fc" id="L242">    DataTable dataTable = dataTableBuilder.build();</span>
+
+<span class="fc" id="L244">    return attachMetadataToDataTable(dataTable);</span>
+  }
+
+  @Nonnull
+  private DataTable getAggregationGroupByResultDataTable()
+      throws Exception {
+<span class="fc" id="L250">    String[] columnNames = new String[]{&quot;functionName&quot;, &quot;GroupByResultMap&quot;};</span>
+<span class="fc" id="L251">    FieldSpec.DataType[] columnTypes = new FieldSpec.DataType[]{FieldSpec.DataType.STRING, FieldSpec.DataType.OBJECT};</span>
+
+    // Build the data table.
+<span class="fc" id="L254">    DataTableBuilder dataTableBuilder = new DataTableBuilder(new DataSchema(columnNames, columnTypes));</span>
+<span class="fc" id="L255">    int numAggregationFunctions = _aggregationFunctionContexts.length;</span>
+<span class="fc bfc" id="L256" title="All 2 branches covered.">    for (int i = 0; i &lt; numAggregationFunctions; i++) {</span>
+<span class="fc" id="L257">      dataTableBuilder.startRow();</span>
+<span class="fc" id="L258">      AggregationFunctionContext aggregationFunctionContext = _aggregationFunctionContexts[i];</span>
+<span class="fc" id="L259">      dataTableBuilder.setColumn(0, aggregationFunctionContext.getAggregationColumnName());</span>
+<span class="fc" id="L260">      dataTableBuilder.setColumn(1, _combinedAggregationGroupByResult.get(i));</span>
+<span class="fc" id="L261">      dataTableBuilder.finishRow();</span>
+    }
+<span class="fc" id="L263">    DataTable dataTable = dataTableBuilder.build();</span>
+
+<span class="fc" id="L265">    return attachMetadataToDataTable(dataTable);</span>
+  }
+
+  private DataTable getProcessingExceptionsDataTable() {
+<span class="nc" id="L269">    return attachMetadataToDataTable(new DataTableImplV2());</span>
+  }
+
+  private DataTable attachMetadataToDataTable(DataTable dataTable) {
+<span class="fc" id="L273">    dataTable.getMetadata().put(DataTable.NUM_DOCS_SCANNED_METADATA_KEY, String.valueOf(_numDocsScanned));</span>
+<span class="fc" id="L274">    dataTable.getMetadata()</span>
+        .put(DataTable.NUM_ENTRIES_SCANNED_IN_FILTER_METADATA_KEY, String.valueOf(_numEntriesScannedInFilter));
+<span class="fc" id="L276">    dataTable.getMetadata()</span>
+        .put(DataTable.NUM_ENTRIES_SCANNED_POST_FILTER_METADATA_KEY, String.valueOf(_numEntriesScannedPostFilter));
+<span class="fc" id="L278">    dataTable.getMetadata().put(DataTable.TOTAL_DOCS_METADATA_KEY, String.valueOf(_numTotalRawDocs));</span>
+<span class="pc bpc" id="L279" title="3 of 4 branches missed.">    if (_processingExceptions != null &amp;&amp; _processingExceptions.size() &gt; 0) {</span>
+<span class="nc bnc" id="L280" title="All 2 branches missed.">      for (ProcessingException exception : _processingExceptions) {</span>
+<span class="nc" id="L281">        dataTable.addException(exception);</span>
+<span class="nc" id="L282">      }</span>
+    }
+<span class="fc" id="L284">    return dataTable;</span>
+  }
+
+  @Override
+  public BlockDocIdSet getBlockDocIdSet() {
+<span class="nc" id="L289">    throw new UnsupportedOperationException();</span>
+  }
+
+  @Override
+  public BlockValSet getBlockValueSet() {
+<span class="nc" id="L294">    throw new UnsupportedOperationException();</span>
+  }
+
+  @Override
+  public BlockDocIdValueSet getBlockDocIdValueSet() {
+<span class="nc" id="L299">    throw new UnsupportedOperationException();</span>
+  }
+
+  @Override
+  public BlockMetadata getMetadata() {
+<span class="nc" id="L304">    throw new UnsupportedOperationException();</span>
+  }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.eclemma.org/jacoco">JaCoCo</a> 0.7.7.201606060606</span></div></body></html>
