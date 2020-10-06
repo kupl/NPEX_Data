@@ -352,8 +352,7 @@ public final class PDAcroForm implements COSObjectable
      */
     public String getDefaultAppearance()
     {
-        COSString defaultAppearance = (COSString) dictionary.getItem(COSName.DA);
-        return defaultAppearance.getString();
+        return dictionary.getString(COSName.DA,"");
     }
 
     /**
