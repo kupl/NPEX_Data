@@ -248,38 +248,40 @@ public final class PDAcroForm implements COSObjectable
             String[] nameSubSection = fullyQualifiedName.split("\\.");
             COSArray fields = (COSArray) dictionary.getDictionaryObject(COSName.FIELDS);
 
-            for (int i = 0; i < fields.size() && retval == null; i++)
-            {
-                COSDictionary element = (COSDictionary) fields.getObject(i);
-                if (element != null)
-                {
-                    COSString fieldName =
-                            (COSString)element.getDictionaryObject(COSName.T);
-                    if (fieldName.getString().equals(fullyQualifiedName) ||
-                            fieldName.getString().equals(nameSubSection[0]))
-                    {
-                        PDField root = PDField.fromDictionary(this, element, null);
-                        if (root != null)
-                        {
-                            if (nameSubSection.length > 1)
-                            {
-                                PDField kid = root.findKid(nameSubSection, 1);
-                                if (kid != null)
-                                {
-                                    retval = kid;
-                                }
-                                else
-                                {
-                                    retval = root;
-                                }
-                            }
-                            else
-                            {
-                                retval = root;
-                            }
-                        }
-                    }
-                }
+            if (fields != null) {
+              for (int i = 0; i < fields.size() && retval == null; i++)
+              {
+                  COSDictionary element = (COSDictionary) fields.getObject(i);
+                  if (element != null)
+                  {
+                      COSString fieldName =
+                              (COSString)element.getDictionaryObject(COSName.T);
+                      if (fieldName.getString().equals(fullyQualifiedName) ||
+                              fieldName.getString().equals(nameSubSection[0]))
+                      {
+                          PDField root = PDField.fromDictionary(this, element, null);
+                          if (root != null)
+                          {
+                              if (nameSubSection.length > 1)
+                              {
+                                  PDField kid = root.findKid(nameSubSection, 1);
+                                  if (kid != null)
+                                  {
+                                      retval = kid;
+                                  }
+                                  else
+                                  {
+                                      retval = root;
+                                  }
+                              }
+                              else
+                              {
+                                  retval = root;
+                              }
+                          }
+                      }
+                  }
+              }
             }
         }
         return retval;
