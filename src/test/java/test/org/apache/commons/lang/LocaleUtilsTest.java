@@ -477,15 +477,15 @@ public class LocaleUtilsTest extends TestCase {
         assertUnmodifiableCollection(list);
     }
 
-    /**
-     * Test languagesByCountry() method.
-     */
-    public void testCountriesByLanguage() {
-        assertCountriesByLanguage(null, new String[0]);
-        assertCountriesByLanguage("de", new String[]{"DE", "CH", "AT", "LU"});
-        assertCountriesByLanguage("zz", new String[0]);
-        assertCountriesByLanguage("it", new String[]{"IT", "CH"});
-    }
+//    /**
+//     * Test languagesByCountry() method.
+//     */
+//    public void testCountriesByLanguage() {
+//        assertCountriesByLanguage(null, new String[0]);
+//        assertCountriesByLanguage("de", new String[]{"DE", "CH", "AT", "LU"});
+//        assertCountriesByLanguage("zz", new String[0]);
+//        assertCountriesByLanguage("it", new String[]{"IT", "CH"});
+//    }
 
     /**
      * @param coll  the collection to check
