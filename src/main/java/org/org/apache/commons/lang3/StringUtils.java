@@ -3290,13 +3290,12 @@ public class StringUtils {
         if (array == null) {
             return null;
         }
-        int bufSize = (endIndex - startIndex);
-        if (bufSize <= 0) {
+        int noOfItems = (endIndex - startIndex);
+        if (noOfItems <= 0) {
             return EMPTY;
         }
 
-        bufSize *= ((array[startIndex] == null ? 16 : array[startIndex].toString().length()) + 1);
-        StringBuilder buf = new StringBuilder(bufSize);
+        StringBuilder buf = new StringBuilder(noOfItems * 16);
 
         for (int i = startIndex; i < endIndex; i++) {
             if (i > startIndex) {
@@ -3377,15 +3376,12 @@ public class StringUtils {
 
         // endIndex - startIndex > 0:   Len = NofStrings *(len(firstString) + len(separator))
         //           (Assuming that all Strings are roughly equally long)
-        int bufSize = (endIndex - startIndex);
-        if (bufSize <= 0) {
+        int noOfItems = (endIndex - startIndex);
+        if (noOfItems <= 0) {
             return EMPTY;
         }
 
-        bufSize *= ((array[startIndex] == null ? 16 : array[startIndex].toString().length())
-                        + separator.length());
-
-        StringBuilder buf = new StringBuilder(bufSize);
+        StringBuilder buf = new StringBuilder(noOfItems * 16);
 
         for (int i = startIndex; i < endIndex; i++) {
             if (i > startIndex) {
