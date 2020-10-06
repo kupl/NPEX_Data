@@ -517,7 +517,9 @@ public class BundleRevisionImpl implements BundleRevision, Resource
         // each bundle class path entry...this isn't very
         // clean or meaningful, but the Spring guys want it.
         final List<Content> contentPath = getContentPath();
-
+        if (contentPath == null)
+            return Collections.emptyEnumeration();
+        
         if (name.equals("/"))
         {
             for (int i = 0; i < contentPath.size(); i++)
