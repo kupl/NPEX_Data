@@ -84,7 +84,8 @@ public class TestFilterListIterator extends TestCase {
         FilterListIterator<Object> var13 = new FilterListIterator<Object>(var9);
         Assert.assertFalse(var13.hasNext());
         FilterListIterator<Object> var14 = new FilterListIterator<Object>(var9);
-        Assert.assertFalse(var14.hasPrevious());
+        // NPEX: single error
+        // Assert.assertFalse(var14.hasPrevious());
     }
 
 }
