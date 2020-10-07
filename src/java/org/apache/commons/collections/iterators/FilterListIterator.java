@@ -227,6 +227,10 @@ public class FilterListIterator<E> implements ListIterator<E> {
             clearNextObject();
         }
 
+        if (iterator == null) {
+            return false;
+        }
+
         while (iterator.hasNext()) {
             E object = iterator.next();
             if (predicate.evaluate(object)) {
