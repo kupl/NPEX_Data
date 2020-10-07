@@ -5,6 +5,7 @@ import re
 import subprocess
 import signal
 from subprocess import Popen, PIPE, TimeoutExpired
+from multiprocessing import Pool
 from time import monotonic as timer
 
 from typing import List, Set, Dict, Tuple, Optional
@@ -40,7 +41,7 @@ def find_file(glob_pattern):
 
 def size_of(repo_dir):
     ret_cloc = execute("cloc . --match-f=.java --json", repo_dir)
-    if ret_cloc.stdout is "":
+    if ret_cloc.stdout == "":
         print(f"[WARNING]: {repo_dir} is not measured by cloc")
         return None
     data = json.loads(ret_cloc.stdout)
@@ -174,25 +175,9 @@ def execute(cmd, dir=None, env=None, timeout=1800, verbosity=0):
         stdout, stderr = process.communicate()
 
     ret = Ret(stdout, stderr, process.returncode, timer() - start)
-    '''
-    try:
-        ret = subprocess.run(cmd, shell=True, cwd=dir, env=env, timeout=timeout,
-            stdout=PIPE, stderr=PIPE)
-        ret.time = time.time() - start_time
-        ret.return_code = ret.returncode
-
-        ret.stdout= ret.stdout.decode()
-        ret.stderr= ret.stderr.decode()
-    except subprocess.TimeoutExpired as e:
-        ret = e
-        ret.time = timeout
-        ret.return_code = -1
-        ret.stdout= ret.stdout.decode()
-        ret.stderr= ret.stderr.decode()
-    '''
     err_msg = "=== Execute %s ===\n  * return_code : %d\n  * stdout : %s\n  * stderr : %s\n  * dir : %s\n" \
             % (cmd, ret.return_code, ret.stdout, ret.stderr, dir)
-    if ret.return_code is not 0:
+    if ret.return_code != 0:
         if verbosity >= 1:
             print(
                 f"{ERROR} - FAILED TO EXECUTE {cmd} AT {os.path.basename(dir)}"
@@ -232,3 +217,7 @@ def read_json_from_file(json_filename: str):
 def save_dict_to_jsonfile(json_filename: str, dict: Dict):
     json_file = open(json_filename, 'w')
     json_file.write(json.dumps(dict, indent=4))
+
+def multiprocess (fun, arg_list, n_cpus=4):
+    p = Pool(n_cpus)
+    p.map(fun, arg_list)
