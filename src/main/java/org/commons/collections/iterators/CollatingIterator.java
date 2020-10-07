@@ -349,6 +349,9 @@ public class CollatingIterator<E> implements Iterator<E> {
                     leastObject = values.get(i);
                 } else {
                     E curObject = values.get(i);
+									  if (comparator == null) {
+									  		throw new NullPointerException("You must invoke setComparator() to set a compator first.");
+									  }
                     if (comparator.compare(curObject, leastObject) < 0) {
                         leastObject = curObject;
                         leastIndex = i;
