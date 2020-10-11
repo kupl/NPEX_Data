@@ -291,6 +291,7 @@ class Bug:
 
         if os.path.isdir(bug_dir) is False:
             utils.execute(f"cp -r {SEED_DIR} {bug_dir}", dir=ROOT_DIR, verbosity=1)
+            utils.execute (f"git config credential.helper store --global", bug_dir, verbosty=1)
             execute(f"git checkout benchmarks/{target_branch}", dir=bug_dir)
 
         if os.path.isfile(f"{bug_dir}/bug.json"):

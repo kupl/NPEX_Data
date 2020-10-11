@@ -175,6 +175,22 @@ def execute(cmd, dir=None, env=None, timeout=1800, verbosity=0):
         stdout, stderr = process.communicate()
 
     ret = Ret(stdout, stderr, process.returncode, timer() - start)
+    '''
+    try:
+        ret = subprocess.run(cmd, shell=True, cwd=dir, env=env, timeout=timeout,
+            stdout=PIPE, stderr=PIPE)
+        ret.time = time.time() - start_time
+        ret.return_code = ret.returncode
+
+        ret.stdout= ret.stdout.decode()
+        ret.stderr= ret.stderr.decode()
+    except subprocess.TimeoutExpired as e:
+        ret = e
+        ret.time = timeout
+        ret.return_code = -1
+        ret.stdout= ret.stdout.decode()
+        ret.stderr= ret.stderr.decode()
+    '''
     err_msg = "=== Execute %s ===\n  * return_code : %d\n  * stdout : %s\n  * stderr : %s\n  * dir : %s\n" \
             % (cmd, ret.return_code, ret.stdout, ret.stderr, dir)
     if ret.return_code != 0:

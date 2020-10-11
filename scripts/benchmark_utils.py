@@ -26,13 +26,13 @@ ROOT_DIR = os.getcwd()
 
 @dataclass
 class Statistics:
+  ratio_of_compiled_patches: str
+  reliability: str 
+  fix_rate: str
   bugs: int = 0
   compiled: int = 0 
   has_validating_tc: int = 0
   fixed: int = 0 
-  ratio_of_compiled_patches: float = 0.0
-  reliability: float = 0.0
-  fix_rate: float = 0.0
   has_plasible_patches: List[str] = field(default_factory=list)
   no_validating_testcases: List[str] = field(default_factory=list)
   no_plausible_patches: List[str] = field(default_factory=list)
@@ -79,9 +79,10 @@ class Statistics:
         self.no_patch_bugs.append(bug.bug_id)
       else:
         self.not_compled_bugs.append(bug.bug_id)
-      
-    self.reliability = float(float(patch_passed)/float(patch_compiled))
-    self.fix_rate = float(float(self.fixed)/(float(self.has_validating_tc)))
+  
+    self.ratio_of_compiled_patches = f"{patch_compiled}/{patch_compiled + patch_not_compiled}"    
+    self.reliability = f"{patch_passed}/{patch_compiled}"
+    self.fix_rate = f"{self.fixed}/{self.has_validating_tc}"
 
   def to_json(self):
       utils.save_dict_to_jsonfile(f"{ROOT_DIR}/statistics.json", asdict(self))
@@ -121,6 +122,11 @@ target_branches = [
     os.path.basename(br)
     for br in glob.glob(".git/refs/remotes/origin/benchmarks/*-buggy")
 ]
+
+if os.path.isdir(f"{ROOT_DIR}/seed") is False:
+  utils.execute (f"git config credential.helper store --global", ROOT_DIR, verbosty=1)
+  utils.execute (f"mkdir seed", ROOT_DIR)
+  utils.execute (f"cp -r .git seed", ROOT_DIR)
 
 if args.all:
   # for target_branch in target_branches:
