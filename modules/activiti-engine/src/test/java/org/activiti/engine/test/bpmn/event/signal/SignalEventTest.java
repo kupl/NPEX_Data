@@ -28,7 +28,7 @@ import org.activiti.engine.test.Deployment;
  * @author Daniel Meyer
  */
 public class SignalEventTest extends PluggableActivitiTestCase {
-  
+  /*
   @Deployment(resources={
           "org/activiti/engine/test/bpmn/event/signal/SignalEventTests.catchAlertSignal.bpmn20.xml",
           "org/activiti/engine/test/bpmn/event/signal/SignalEventTests.throwAlertSignal.bpmn20.xml"})
@@ -132,7 +132,7 @@ public class SignalEventTest extends PluggableActivitiTestCase {
     assertEquals(0, createEventSubscriptionQuery().count());    
     assertEquals(0, runtimeService.createProcessInstanceQuery().count());
   }
-  
+  */ 
   /**
    * Verifies the solution of https://jira.codehaus.org/browse/ACT-1309
    */
@@ -142,7 +142,7 @@ public class SignalEventTest extends PluggableActivitiTestCase {
     runtimeService.signalEventReceived("stopSignal");    
     assertProcessEnded(pi.getProcessInstanceId());
   }
-
+  /*
   public void testDuplicateSignalNames() {    
     try {
       repositoryService.createDeployment()
@@ -198,5 +198,5 @@ public class SignalEventTest extends PluggableActivitiTestCase {
   private EventSubscriptionQueryImpl createEventSubscriptionQuery() {
     return new EventSubscriptionQueryImpl(processEngineConfiguration.getCommandExecutorTxRequired());
   }
-  
+  */  
 }
