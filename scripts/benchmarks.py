@@ -42,6 +42,33 @@ class Build:
     error_message: Optional[str] = None
     time:          Optional[float] = None
 
+@dataclass(frozen=True)
+class TraceEntry:
+    tag: str
+    filepath: str
+    line_number: int
+    description: str
+
+    @classmethod
+    def parse_from_line(cls, ln):
+        pattern = r'\[(?P<tag>.*)\] Filepath: (?P<filepath>.*), Line: (?P<lineno>\d+), Element: (?P<desc>.*)'
+        if (m := re.search(pattern, ln)):
+            return cls(m.group('tag'), m.group('filepath'), int(m.group('lineno')), m.group('desc'))
+        else:
+            return None
+
+    @classmethod
+    def generate_trace_json(cls, trace_lines, dir):
+        trace = [cls.parse_from_line(ln) for ln in trace_lines]
+        trace = [asdict(te) for te in trace if te]
+        if trace == []:
+            print (f"{WARNING}: no trace.json is generated at {dir}")
+            return False
+        print (f"{SUCCESS}: trace.json is generated at {dir}")
+        utils.save_dict_to_jsonfile(f"{dir}/trace.json", trace)
+        return True
+
+
 
 @dataclass(frozen=True)
 class TestCase:
@@ -180,21 +207,32 @@ class Bug:
 
     def execute_test_all(self, dir):
         java_version = self.build_info.java_version
-        test_cmd = utils.get_test_command(dir, java_version=java_version)
+        if self.repository_info: 
+            test_classes = [os.path.basename(file).split('.')[-2] for file in self.repository_info.test_files]
+        else:
+            test_classes = []
+        
+        test_cmd = utils.get_test_command(dir, java_version=java_version, test_classes=test_classes)
         return utils.execute(
             test_cmd,
             dir=dir,
             env=utils.set_java_version(java_version=java_version))
     
-    def execute_test(self, dir):
-        java_version = self.build_info.java_version
+    def execute_test(self, dir, verbosity=0, env=os.environ):
         test_cmd = f'mvn clean test -DfailIfNoTests=false {MVN_OPTION}' 
         for testcase in self.test_info.testcases:
             test_cmd = test_cmd + f" -Dtest={testcase.classname}#{testcase.method}" 
+           
+        if "_JAVA_OPTIONS" not in env:
+            env = utils.set_java_version(java_version=java_version)
+        
+        self.test_info.test_command = test_cmd
+        java_version = self.build_info.java_version
         return utils.execute(
             test_cmd,
             dir=dir,
-            env=utils.set_java_version(java_version=java_version))
+            env=env,
+            verbosity=verbosity)
     
     def test(self, dir):
         if self.build_info.compiled is False:
@@ -231,6 +269,7 @@ class Bug:
 
     def checkout(self, dir):
         execute(f"git checkout -f benchmarks/{self.bug_id}", dir)
+        execute(f"git clean -df --exclude=bug.json --exclude=patches --exclude=infer-out --exclude=trace.json --exclude=npe*.json", dir)
 
     def patch(self, dir):
         self.patch_results = []
@@ -284,6 +323,52 @@ class Bug:
         bug_dir = f"{ROOT_DIR}/{target_branch}"
         return cls.from_json(f"{bug_dir}/bug.json")
 
+
+    def generate_trace(self, dir):
+        self.checkout(dir)
+        # if os.path.isfile(f"{dir}/trace.json"):
+        #     print (f"{PROGRESS}: {self.bug_id} has already trace.json")
+        #     return True
+       
+        if self.test_info == None:
+            print (f"{WARNING}: {self.bug_id} has no test_info")
+            return False 
+            
+        if self.test_info.testcases == []:
+            print (f"{WARNING}: {self.bug_id} has no testcases")
+            return False 
+        
+        env = os.environ["_JAVA_OPTIONS"] = f"-javaagent:{TRACER}={dir}"
+        
+        ret_test = self.execute_test(dir, env=env)
+        f = open(f"{dir}/1", 'w')
+        f.write(ret_test.stdout)
+        f.close() 
+        return TraceEntry.generate_trace_json(ret_test.stdout.split('\n'), dir)
+
+    def localize(self, dir):
+        if os.path.isfile (f"{dir}/trace.json") is False:
+            print (f"{WARNING}: no trace.json for {self.bug_id}")
+            return False
+        self.checkout(dir)
+        env = utils.set_java_version(self.build_info.java_version)
+        ret_infer_compile = utils.execute (f"infer capture -- {self.build_info.build_command}", dir=dir, env=env)
+        if ret_infer_compile.return_code != 0:
+            print (f"{ERROR} cannot compile {self.bug_id}")
+            return False
+        
+        ret_npex = utils.execute (f"infer npex", dir=dir)
+        if ret_npex != 0:
+            print (f"{ERROR} occurs during executing npex for {self.bug_id}")
+            return False
+
+        new_npe_list = Npe.list_from_dir(dir)
+        if set(new_npe_list) != set(self.npe_info): #npe.json changed
+            self.npe_info = new_npe_list
+            self.patch_results = [] 
+            print (f"{SUCCESS} new npes are found for {self.bug_id}")
+        return True
+
     @staticmethod
     def configure(target_branch):
         print(f"{PROGRESS}: configuring {target_branch}...")
@@ -291,7 +376,6 @@ class Bug:
 
         if os.path.isdir(bug_dir) is False:
             utils.execute(f"cp -r {SEED_DIR} {bug_dir}", dir=ROOT_DIR, verbosity=1)
-            utils.execute (f"git config credential.helper store --global", bug_dir, verbosty=1)
             execute(f"git checkout benchmarks/{target_branch}", dir=bug_dir)
 
         if os.path.isfile(f"{bug_dir}/bug.json"):
@@ -311,9 +395,10 @@ class Bug:
         if set(npe_list) != set(bug.npe_info): #npe.json changed
             bug.npe_info = npe_list
             bug.patch_results = [] 
+
+        bug.generate_trace(bug_dir)
+        bug.localize(bug_dir)
             
-        bug.patch_results = [] # TODO: remove it
-             
         if bug.patch_results == []:
             bug.patch(bug_dir)
         
@@ -324,6 +409,9 @@ class Bug:
             print (f"{FAIL}: {bug.bug_id} has no plausible patches")
         
         bug.to_json(bug_dir)
+        utils.execute (f"git add bug.json", dir=bug_dir)
+        utils.execute (f"git commit -m \"update bug.json\"", dir=bug_dir)
+        utils.execute (f"git push", dir=bug_dir)
         print(f"{PROGRESS}: finished {target_branch}")
         
 

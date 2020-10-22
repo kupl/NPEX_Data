@@ -91,9 +91,10 @@ class Statistics:
 
 def get_repo_info (url):
   url = args.url
+  org = url.split('/')[-4]
   repo = url.split('/')[-3]
   commit_id = url.split('/')[-1]
-  link = 'https://api.github.com/repos/apache/%s/commits/%s' % (repo, commit_id)
+  link = 'https://api.github.com/repos/%s/%s/commits/%s' % (org, repo, commit_id)
   res = requests.get(link, auth=(username, token), headers=headers)
   content = json.loads(res.content.decode("utf-8"))
 
@@ -111,22 +112,29 @@ def get_repo_info (url):
   }
 
   utils.save_dict_to_jsonfile("repo.json", ret)
+  execute(f"git add repo.json", ROOT_DIR)
+  execute(f"git commit -m \"add repo.json\"", ROOT_DIR)
+  execute(f"git push", ROOT_DIR)
+
+def generate_trace(target_branch):
+  bug_dir = f"{ROOT_DIR}/{target_branch}"
+  bug = Bug.from_json(f"{bug_dir}/bug.json")
+  bug.generate_trace(bug_dir)
+  bug.to_json(bug_dir)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--url", help="url")
-parser.add_argument("--all", help="do all")
-parser.add_argument("--statistics", help="statictics")
+parser.add_argument("--all",        action='store_true', default=False, help="do all")
+parser.add_argument("--statistics", action='store_true', default=False, help="statictics")
+parser.add_argument("--do_all", help="do cmd for all branches" )
+parser.add_argument("--trace", action='store_true', default=False, help="trace")
+parser.add_argument("--get_repo", action='store_true', default=False, help="get repository info from commit url")
 args = parser.parse_args()
 
 target_branches = [
     os.path.basename(br)
     for br in glob.glob(".git/refs/remotes/origin/benchmarks/*-buggy")
 ]
-
-if os.path.isdir(f"{ROOT_DIR}/seed") is False:
-  utils.execute (f"git config credential.helper store --global", ROOT_DIR, verbosty=1)
-  utils.execute (f"mkdir seed", ROOT_DIR)
-  utils.execute (f"cp -r .git seed", ROOT_DIR)
 
 if args.all:
   # for target_branch in target_branches:
@@ -136,4 +144,16 @@ if args.all:
 if args.statistics:
   Statistics(target_branches).to_json()
 
+if args.trace:
+  utils.multiprocess (generate_trace, target_branches, n_cpus=4)
+  # for target_branch in target_branches:
+  #   generate_trace(target_branch
   
+if args.do_all:
+  def execute (dir):
+    cmd = args.do_all
+    utils.execute(cmd, dir=dir, verbosity=1)
+  utils.multiprocess (execute, target_branches, n_cpus=1)
+ 
+if args.url:
+  get_repo_info(args.url)

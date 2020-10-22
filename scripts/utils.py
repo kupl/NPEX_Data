@@ -154,7 +154,7 @@ class Ret:
         self.time = time
 
 
-def execute(cmd, dir=None, env=None, timeout=1800, verbosity=0):
+def execute(cmd, dir=None, env=None, timeout=1200, verbosity=0):
     if verbosity >= 1:
         print(f"EXECUTE {cmd} AT {os.path.basename(dir)}")
 
@@ -172,7 +172,7 @@ def execute(cmd, dir=None, env=None, timeout=1800, verbosity=0):
         os.killpg(process.pid,
                   signal.SIGINT)  # send signal to the process group
         print(f"{TIMEOUT} occurs during executing {cmd[:20]} at {dir}")
-        stdout, stderr = process.communicate()
+        stdout, stderr = process.communicate(timeout=timeout)
 
     ret = Ret(stdout, stderr, process.returncode, timer() - start)
     '''
@@ -205,16 +205,10 @@ def execute(cmd, dir=None, env=None, timeout=1800, verbosity=0):
 
 def get_test_command(dir, test_classes=[], project=None, java_version=8):
     if os.path.isfile(f'{dir}/pom.xml'):
-        if test_classes:
-            test_classes = ','.join(test_classes)
-            return f'{get_mvn_command(java_version)} clean test -Dtest={test_classes} -DfailIfNoTests=false {MVN_OPTION}'
-            # stable test command:
-            #return f'{get_mvn_command(java_version)} clean install -Dtest={testClass} -DfailIfNoTests=false {MVN_OPTION}'
-            # unstable test command:
-        else:
-            return f'{get_mvn_command(java_version)} clean test {MVN_OPTION}'
-    # elif os.path.isfile('maven.xml'):
-    #     return 'maven clean test -Dtest=%s -DfailIfNoTests=false' % testClass
+        project_str = f"-pl {project}" if project else ""
+        test_classes = ','.join(test_classes)
+        test_str = f"-Dtest={test_classes} -DfailIfNoTests=false"
+        return f'{get_mvn_command(java_version)} clean test -fn {project_str} {test_str} {MVN_OPTION}'
     elif os.path.isfile(f"{dir}/build.xml"):
         return "ant test -logfile \"results.txt\""
     elif os.path.isfile(f"{dir}/gradlew"):  # build.gradle
