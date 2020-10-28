@@ -6,6 +6,7 @@ import os, sys, glob
 from config import *
 from pprint import pprint
 from dacite import from_dict as _from_dict
+from copy import deepcopy
 
 ROOT_DIR = os.getcwd()
 SEED_DIR = os.path.abspath("seed")
@@ -50,16 +51,47 @@ class TraceEntry:
     description: str
 
     @classmethod
-    def parse_from_line(cls, ln):
-        pattern = r'\[(?P<tag>.*)\] Filepath: (?P<filepath>.*), Line: (?P<lineno>\d+), Element: (?P<desc>.*)'
+    def parse_from_line(cls, ln, dir):
+        pattern = r'\[(?P<tag>.*)\] Filepath: (?P<filepath>.*), Package: (?P<pkg>.*), Line: (?P<lineno>\d+), Element: (?P<desc>.*)'
         if (m := re.search(pattern, ln)):
-            return cls(m.group('tag'), m.group('filepath'), int(m.group('lineno')), m.group('desc'))
+            tag = m.group('tag')
+            filename = m.group('filepath')
+            filepath = None
+            package_path = m.group("pkg").replace(".", "/")
+            if os.path.isfile(f"{dir}/{filename}"):
+                filepath = filename
+            else:
+                os.chdir(dir) # to ensure rel-path
+                filepaths = glob.glob(f"**/{filename}", recursive=True)
+                for fp in filepaths:
+                    if package_path in fp:
+                        filepath = fp
+                        break
+                if filepath == None:
+                    return None
+                
+            file = m.group('filepath')
+            line_number = int(m.group ('lineno'))
+            description = m.group('desc')
+            return cls(tag, filepath, line_number, description)
+        else:
+            return None
+
+    @classmethod
+    def parse_from_line(cls, ln, dir):
+        pattern = r'\[(?P<tag>.*)\] Filepath: (?P<filepath>.*), Package: (?P<pkg>.*), Line: (?P<lineno>\d+), Element: (?P<desc>.*)'
+        if (m := re.search(pattern, ln)):
+            tag = m.group('tag')
+            filepath = m.group('filepath')
+            line_number = int(m.group ('lineno'))
+            description = m.group('desc')
+            return cls(tag, filepath, line_number, description)
         else:
             return None
 
     @classmethod
     def generate_trace_json(cls, trace_lines, dir):
-        trace = [cls.parse_from_line(ln) for ln in trace_lines]
+        trace = [cls.parse_from_line(ln, dir) for ln in trace_lines]
         trace = [asdict(te) for te in trace if te]
         if trace == []:
             print (f"{WARNING}: no trace.json is generated at {dir}")
@@ -219,15 +251,15 @@ class Bug:
             env=utils.set_java_version(java_version=java_version))
     
     def execute_test(self, dir, verbosity=0, env=os.environ):
-        test_cmd = f'mvn clean test -DfailIfNoTests=false {MVN_OPTION}' 
-        for testcase in self.test_info.testcases:
-            test_cmd = test_cmd + f" -Dtest={testcase.classname}#{testcase.method}" 
+        test_cmd = f'mvn clean test -DfailIfNoTests=false {MVN_OPTION}' + f" -Dtest={self.test_info.testcases[0].classname}#{self.test_info.testcases[0].method}"
+        # test_cmd = f'mvn clean test -DfailIfNoTests=false {MVN_OPTION}' 
+        # for testcase in self.test_info.testcases:
+        #     test_cmd = test_cmd + f" -Dtest={testcase.classname}#{testcase.method}" 
            
         if "_JAVA_OPTIONS" not in env:
-            env = utils.set_java_version(java_version=java_version)
+            env = utils.set_java_version(java_version=self.build_info.java_version)
         
         self.test_info.test_command = test_cmd
-        java_version = self.build_info.java_version
         return utils.execute(
             test_cmd,
             dir=dir,
@@ -280,7 +312,7 @@ class Bug:
         for npe in self.npe_info:
             utils.save_dict_to_jsonfile(f"{dir}/npe.json", asdict(npe))
             env = utils.set_java_version(self.build_info.java_version)
-            utils.execute( f"java -cp {SYNTHESIZER} npex.Main -patch {dir} {dir}/npe.json")
+            utils.execute( f"java -cp {SYNTHESIZER} npex.synthesizer.Main -patch {dir} {dir}/npe.json")
             patch_dirs = glob.glob(f"{dir}/patches/*")
             for patch_dir in patch_dirs:
                 patch_id = os.path.basename(patch_dir)
@@ -338,12 +370,22 @@ class Bug:
             print (f"{WARNING}: {self.bug_id} has no testcases")
             return False 
         
-        env = os.environ["_JAVA_OPTIONS"] = f"-javaagent:{TRACER}={dir}"
+        env = deepcopy(os.environ)
+        if self.build_info.java_version == 8 or self.build_info.java_version == 11:
+            env["_JAVA_OPTIONS"]= f"-javaagent:{TRACER8}={dir},{self.test_info.testcases[0].classname}#{self.test_info.testcases[0].method}"
+        elif self.build_info.java_version == 7:
+            print (f"{WARNING}: not supported java version for {self.bug_id}")
+            return False
+            # env["_JAVA_OPTIONS"]= f"-javaagent:{TRACER7}={dir}"
+        else:
+            print (f"{WARNING}: not supported java version for {self.bug_id}")
+            return False 
         
         ret_test = self.execute_test(dir, env=env)
         f = open(f"{dir}/1", 'w')
         f.write(ret_test.stdout)
         f.close() 
+        self.checkout(dir)
         return TraceEntry.generate_trace_json(ret_test.stdout.split('\n'), dir)
 
     def localize(self, dir):
@@ -396,7 +438,10 @@ class Bug:
             bug.npe_info = npe_list
             bug.patch_results = [] 
 
-        bug.generate_trace(bug_dir)
+        if bug.generate_trace(bug_dir):
+            utils.execute (f"git add trace.json", dir=bug_dir)
+            utils.execute (f"git commit -m \"update trace.json\"", dir=bug_dir)
+            utils.execute (f"git push", dir=bug_dir)
         bug.localize(bug_dir)
             
         if bug.patch_results == []:

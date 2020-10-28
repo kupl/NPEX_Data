@@ -7,6 +7,7 @@ import signal
 from subprocess import Popen, PIPE, TimeoutExpired
 from multiprocessing import Pool
 from time import monotonic as timer
+from copy import deepcopy
 
 from typing import List, Set, Dict, Tuple, Optional
 import xml.etree.ElementTree as ET
@@ -99,6 +100,7 @@ def set_detailed_npe(java_version, env=ENV):
     elif java_version == 11:
         detailed_npe = DETAILED_NPE11
 
+    env = deepcopy(env)
     env["_JAVA_OPTIONS"] = detailed_npe
     return env
 
@@ -116,6 +118,8 @@ def set_java_version(java_version, env=ENV):
             java_home = JDK_11
     except:
         java_home = JDK_8
+    
+    env = deepcopy(env)
     env["JAVA_HOME"] = java_home
     return env
 
@@ -159,38 +163,29 @@ def execute(cmd, dir=None, env=None, timeout=1200, verbosity=0):
         print(f"EXECUTE {cmd} AT {os.path.basename(dir)}")
 
     start = timer()
-    process = Popen(cmd,
+    try: 
+        process = Popen(cmd,
                     shell=True,
                     stdout=PIPE,
                     stderr=PIPE,
                     cwd=dir,
                     env=env,
                     preexec_fn=os.setsid)
-    try:
         stdout, stderr = process.communicate(timeout=timeout)
+        returncode = process.returncode
     except TimeoutExpired:
         os.killpg(process.pid,
                   signal.SIGINT)  # send signal to the process group
         print(f"{TIMEOUT} occurs during executing {cmd[:20]} at {dir}")
         stdout, stderr = process.communicate(timeout=timeout)
+        returncode = process.returncode
+    except OSError:
+        print (f"{ERROR}: failed to execute {cmd} at {dir} (maybe it is too long...)")
+        stdout, stderr = b"", b""
+        returncode = -1
 
-    ret = Ret(stdout, stderr, process.returncode, timer() - start)
-    '''
-    try:
-        ret = subprocess.run(cmd, shell=True, cwd=dir, env=env, timeout=timeout,
-            stdout=PIPE, stderr=PIPE)
-        ret.time = time.time() - start_time
-        ret.return_code = ret.returncode
+    ret = Ret(stdout, stderr, returncode, timer() - start)
 
-        ret.stdout= ret.stdout.decode()
-        ret.stderr= ret.stderr.decode()
-    except subprocess.TimeoutExpired as e:
-        ret = e
-        ret.time = timeout
-        ret.return_code = -1
-        ret.stdout= ret.stdout.decode()
-        ret.stderr= ret.stderr.decode()
-    '''
     err_msg = "=== Execute %s ===\n  * return_code : %d\n  * stdout : %s\n  * stderr : %s\n  * dir : %s\n" \
             % (cmd, ret.return_code, ret.stdout, ret.stderr, dir)
     if ret.return_code != 0:

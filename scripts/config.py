@@ -31,8 +31,10 @@ DETAILED_NPE7 = "-agentpath:/home/june/project/detailedNPE/detailedNPE_7.so"
 DETAILED_NPE8 = "-agentpath:/home/june/project/detailedNPE/detailedNPE_8.so"
 DETAILED_NPE11 = "-agentpath:/home/june/project/detailedNPE/detailedNPE_11.so"
 
-SYNTHESIZER = "/home/june/project/npex-synthesizer/target/npex-synthesizer-1.0-SNAPSHOT-jar-with-dependencies.jar"
-TRACER = "/home/junhee/projects/npex/errortracer/target/instrumentation-jar-with-dependencies.jar"
+SYNTHESIZER = "/home/junhee/projects/npex/synthesizer/target/synthesizer-1.0-SNAPSHOT-jar-with-dependencies.jar"
+TRACER = "/home/june/project/npex/errortracer/target/instrumentation-jar-with-dependencies.jar"
+TRACER7 = "/home/junhee/projects/npex/tracer7.jar"
+TRACER8 = "/home/junhee/projects/npex/tracer8.jar"
 
 MSG_TEST_FAIL = "test failures"
 MSG_ASSERT_FAIL = "Assertion"

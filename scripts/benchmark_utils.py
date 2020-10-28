@@ -118,9 +118,12 @@ def get_repo_info (url):
 
 def generate_trace(target_branch):
   bug_dir = f"{ROOT_DIR}/{target_branch}"
-  bug = Bug.from_json(f"{bug_dir}/bug.json")
-  bug.generate_trace(bug_dir)
-  bug.to_json(bug_dir)
+  try:
+    bug = Bug.from_json(f"{bug_dir}/bug.json")
+    bug.generate_trace(bug_dir)
+    bug.to_json(bug_dir)
+  except: 
+    pass
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--url", help="url")
@@ -129,12 +132,16 @@ parser.add_argument("--statistics", action='store_true', default=False, help="st
 parser.add_argument("--do_all", help="do cmd for all branches" )
 parser.add_argument("--trace", action='store_true', default=False, help="trace")
 parser.add_argument("--get_repo", action='store_true', default=False, help="get repository info from commit url")
+parser.add_argument("--bug_id", help="get repository info from commit url")
 args = parser.parse_args()
 
-target_branches = [
-    os.path.basename(br)
-    for br in glob.glob(".git/refs/remotes/origin/benchmarks/*-buggy")
-]
+if args.bug_id:
+  target_branches = [args.bug_id]
+else:
+  target_branches = [
+      os.path.basename(br)
+      for br in glob.glob(".git/refs/remotes/origin/benchmarks/*-buggy")
+  ]
 
 if args.all:
   # for target_branch in target_branches:
@@ -145,7 +152,7 @@ if args.statistics:
   Statistics(target_branches).to_json()
 
 if args.trace:
-  utils.multiprocess (generate_trace, target_branches, n_cpus=4)
+  utils.multiprocess (generate_trace, target_branches, n_cpus=20)
   # for target_branch in target_branches:
   #   generate_trace(target_branch
   
