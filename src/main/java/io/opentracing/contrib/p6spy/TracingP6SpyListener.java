@@ -123,7 +123,9 @@ class TracingP6SpyListener extends SimpleJdbcEventListener {
     Tags.COMPONENT.set(span, "java-p6spy");
     Tags.DB_STATEMENT.set(span, statementInformation.getSql());
     Tags.DB_TYPE.set(span, extractDbType(dbUrl));
-    Tags.DB_INSTANCE.set(span, dbInstance);
+    if (dbInstance != null && !dbInstance.isEmpty()) 
+      Tags.DB_INSTANCE.set(span, dbInstance);
+    
     span.setTag("peer.address", dbUrl);
     if (peerName != null && !peerName.isEmpty()) {
       Tags.PEER_SERVICE.set(span, peerName);
