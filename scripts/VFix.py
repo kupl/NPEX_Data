@@ -3,10 +3,12 @@
 import argparse
 import glob
 import os
+from os import name
 from benchmarks import Bug, ROOT_DIR
 from config import *
 import utils
 from pathlib import Path
+import xml.etree.ElementTree as ET
 
 # INPUT: BUG-ID, target-directory
 # OUTPUT: target-directory/setting된 bug-id project
@@ -40,7 +42,7 @@ def prepare(bug_id):
     utils.copyfile(bug_repo, f"{project_root_dir}/source", inner=True, verbosity=1)
 
     # Modify pom
-    modify_pom(project_source_dir)
+    modify_pom(f"{project_source_dir}/pom.xml")
 
     # Build
     build(bug, project_source_dir)
@@ -93,9 +95,49 @@ def build(bug, dir):
     )
 
 
-def modify_pom(source_dir):
-    # TODO
-    pass
+def modify_pom(pom_path):
+    tree = ET.parse(pom_path)
+
+    # Remove namespaces
+    nsl = len(ns := "{http://maven.apache.org/POM/4.0.0}")
+    for elem in tree.getroot().iter():
+        elem.tag = elem.tag[nsl:] if elem.tag.startswith(ns) else elem.tag
+
+    plugins = tree.find("build/plugins")
+    if (jar_plugin := tree.find(".//*[.='maven-jar-plugin']/..")) :
+        plugins.remove(jar_plugin)
+    if (asm_plugin := tree.find(".//*[.='maven-jar-plugin']/..")) :
+        plugins.remove(asm_plugin)
+
+    jar_plugin = ET.XML(
+        "<plugin>"
+        "<artifactId>maven-jar-plugin</artifactId>"
+        "<version>2.4</version>"
+        "<executions>"
+        "<execution>"
+        "<goals> <goal>test-jar</goal> </goals>"
+        "</execution>"
+        "</executions>"
+        "</plugin>"
+    )
+    asm_plugin = ET.XML(
+        "<plugin>"
+        "<artifactId>maven-assembly-plugin</artifactId>"
+        "<version>3.0.0</version>"
+        "<configuration>"
+        "<descriptorRefs>"
+        "<descriptorRef>jar-with-dependencies</descriptorRef>"
+        "</descriptorRefs>"
+        "</configuration>"
+        "<executions>"
+        "<execution><phase>package</phase><goals><goal>single</goal></goals></execution>"
+        "</executions>"
+        "</plugin>"
+    )
+    plugins.append(asm_plugin)
+    plugins.append(jar_plugin)
+
+    tree.write(pom_path, method="xml")
 
 
 def write_config(outpath, nullpointer, dep_jars, main="Main", test="TestMain"):
