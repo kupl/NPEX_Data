@@ -115,6 +115,10 @@ def modify_pom(pom_path):
     if (asm_plugin := tree.find(".//*[.='maven-jar-plugin']/..")) :
         plugins.remove(asm_plugin)
 
+    # Remove all <provided> tags
+    for node in tree.findall(".//dependency[scope='provided']"):
+        node.remove(node.find("scope"))
+
     jar_plugin = ET.XML(
         "<plugin>"
         "<artifactId>maven-jar-plugin</artifactId>"
