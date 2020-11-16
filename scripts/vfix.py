@@ -30,6 +30,7 @@ class Flag:
     BUILDABLE: str = "BUILDABLE"
     MAIN_COMPILED: str = "MAIN_COMPILED"
     NPE_TRIGGERABLE: str = "NPE_TRIGGERABLE"
+    GZOLTAR_SUCCEEDS: str = "GZOLTAR_SUCCEEDS"
 
 
 @dataclass
@@ -266,6 +267,12 @@ class Proj:
         with open(log := f"{self.config_dir}/log", "w") as f:
             return self.main.run_java(cwd=self.source_dir, fp=f) == True
 
+    @step(Flag.GZOLTAR_SUCCEEDS, "failed to run gzoltar")
+    def run_gzoltar(self):
+        vfix_bug_id = os.path.basename(self.root_dir).split("-")[0]
+        cmd = f"java -jar VFix.jar {vfix_bug_id} 1"
+        return utils.execute(cmd, dir=VFIX_DIRECTORY, verbosity=1).return_code == 0
+
 
 class Pom:
     pom_path: str
@@ -330,6 +337,7 @@ def run(bug_id):
         proj.build()
         proj.compile()
         proj.run_main()
+        proj.run_gzoltar()
     except Exception as e:
         print(f"{bug_id}: {e}")
 
