@@ -138,7 +138,8 @@ class Proj:
         branch = bug_id if bug_id.endswith("-buggy") else f"{bug_id}-buggy"
         benchmark_dir = f"{BENCHMARKS_DIRECTORY}/{branch}"
         bug = Bug.from_json(f"{benchmark_dir}/bug.json")
-        root_dir = f"{VFIX_DIRECTORY}/dataset/{bug_id}"
+        vfix_bug_id = bug_id.strip("-buggy").replace("-", "_") + "-1"
+        root_dir = f"{VFIX_DIRECTORY}/dataset/{vfix_bug_id}"
         config_dir, source_dir, target_dir = (
             dirs := [f"{root_dir}/{dir}" for dir in ["config", "source", "target"]]
         )
