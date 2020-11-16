@@ -36,15 +36,16 @@ class Flag:
 class VFixConfiguration:
     nullpointer: str
     deps: List[str]
-    main: str = "main"
-    test: str = "testMain"
+    main: str = "Main"
+    test: str = "TestMain"
 
     def write(self, outpath):
         with open(outpath, "w") as f:
             f.write(f"main={self.main}\n")
             f.write(f"test={self.test}\n")
             f.write(f"nullpointer={self.nullpointer}\n")
-            f.write(f"deps={self.deps}\n")
+            deps = ":".join([f"/../{jar}" for jar in self.deps])
+            f.write(f"deps={deps}\n")
 
 
 @dataclass
@@ -54,6 +55,8 @@ class JavaSource:
     root: str
     name: str
     contents: str
+    compile_cmd: Optional[str] = None
+    run_cmd: Optional[str] = None
 
     def get_source_path(self):
         return f"{self.root}/{self.name}.java"
@@ -67,14 +70,14 @@ class JavaSource:
         return True
 
     def compile(self):
-        cmd = f"javac -cp {self.CLASSPATH} {self.get_source_path()}"
-        if utils.execute(cmd, dir=self.root, verbosity=1).return_code != 0:
+        self.compile_cmd = f"javac -cp {self.CLASSPATH} {self.get_source_path()}"
+        if utils.execute(self.compile_cmd, dir=self.root, verbosity=1).return_code != 0:
             return False
         return True
 
     def run_java(self, cwd, fp):
-        cmd = f"java -cp {self.CLASSPATH} {self.name}"
-        ret = utils.execute(cmd, dir=cwd)
+        self.run_cmd = f"java -cp {self.CLASSPATH} {self.name}"
+        ret = utils.execute(self.run_cmd, dir=cwd)
         write = False
         for line in ret.stderr.splitlines():
             "java.lang.NullPointerException" in line and (write := True)
@@ -227,25 +230,33 @@ class Proj:
     @step(Flag.MAIN_COMPILED, "failed to compile main or test")
     def compile(self):
         # Write Main/TestMain.java
-        testClass = self.bug.test_info.testcases[0].classname
-        testMethod = self.bug.test_info.testcases[0].method
+        test_class_name = self.bug.test_info.testcases[0].classname
+        test_method = self.bug.test_info.testcases[0].method
 
-        main = MainSource.generate(self.source_dir, testClass, testMethod)
-        test = TestMainSource.generate(self.source_dir)
-        self.main, self.test = main, test
+        main = MainSource.generate(self.source_dir, test_class_name, test_method)
+        test_main = TestMainSource.generate(self.source_dir)
+        self.main, self.test = main, test_main
 
         main.write()
-        test.write()
+        test_main.write()
 
         # Compile Main/TestMain.java
-        if not main.compile() or not test.compile():
+        if not main.compile() or not test_main.compile():
             return False
+
         utils.copyfile(
-            main.get_class_path(), f"{self.target_dir}/classes/", verbosity=1
+            main.get_class_path(),
+            (classes_dir := f"{self.target_dir}/classes"),
+            verbosity=1,
         )
         utils.copyfile(
-            test.get_class_path(), f"{self.target_dir}/test-classes/", verbosity=1
+            test_main.get_class_path(), f"{self.target_dir}/test-classes", verbosity=1
         )
+        package_as_dir = ".".join(test_class_name.split(".")[:-1]).replace(".", "/")
+        test_class_file = (
+            f'{self.target_dir}/test-classes/{test_class_name.replace(".", "/")}.class'
+        )
+        utils.copyfile(test_class_file, f"{classes_dir}/{package_as_dir}", verbosity=1)
 
         return True
 
