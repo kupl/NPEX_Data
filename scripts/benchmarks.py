@@ -166,6 +166,7 @@ class Npe:
     npe_class: str
     npe_method: str
     sink_field: Optional[str] = None  # to parse automatically generated npe
+    nullpointer: Optional[str] = None
     jvmti_identify_succeed: Optional[
         bool
     ] = None  # to parse automatically generated npe
