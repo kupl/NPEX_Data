@@ -16,13 +16,15 @@ source = "https://github.com/apache?language=java&page="
 APACHE_SOURCE = "https://github.com/apache?language=java&page="
 APACHE_PROJECT_SOURCE = "https://github.com/apache/"
 
-username = 'SeongjoonHong'
-token = '5fea79434dc2c3d0e434f3afb0e7c2bb4beba95d'
-headers = \
-            {   'Accept': 'application/vnd.github.cloak-preview', \
-                    'Authorization': 'token %s' % token }
+username = "SeongjoonHong"
+token = "5fea79434dc2c3d0e434f3afb0e7c2bb4beba95d"
+headers = {
+    "Accept": "application/vnd.github.cloak-preview",
+    "Authorization": "token %s" % token,
+}
 
 ROOT_DIR = os.getcwd()
+
 
 @dataclass
 class Statistics:
@@ -127,13 +129,14 @@ def localization(target_branch):
     print (f"{WARNING}: {target_branch} has no bug.json")
   
 def generate_trace(target_branch):
-  bug_dir = f"{ROOT_DIR}/{target_branch}"
-  try:
-    bug = Bug.from_json(f"{bug_dir}/bug.json")
-    bug.generate_trace(bug_dir)
-    bug.to_json(bug_dir)
-  except: 
-    pass
+    bug_dir = f"{ROOT_DIR}/{target_branch}"
+    try:
+        bug = Bug.from_json(f"{bug_dir}/bug.json")
+        bug.generate_trace(bug_dir)
+        bug.to_json(bug_dir)
+    except:
+        pass
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--url", help="url")
@@ -149,18 +152,18 @@ args = parser.parse_args()
 if args.bug_id:
   target_branches = [f"{args.bug_id}-buggy"]
 else:
-  target_branches = [
-      os.path.basename(br)
-      for br in glob.glob(".git/refs/remotes/origin/benchmarks/*-buggy")
-  ]
+    target_branches = [
+        os.path.basename(br)
+        for br in glob.glob("../.git/refs/remotes/origin/benchmarks/*-buggy")
+    ]
 
 if args.all:
-  # for target_branch in target_branches:
-  #     Bug.configure(target_branch)
-  utils.multiprocess (Bug.configure, target_branches, n_cpus=10)
-    
+    # for target_branch in target_branches:
+    #     Bug.configure(target_branch)
+    utils.multiprocess(Bug.configure, target_branches, n_cpus=20)
+
 if args.statistics:
-  Statistics(target_branches).to_json()
+    Statistics(target_branches).to_json()
 
 if args.trace:
   utils.multiprocess (generate_trace, target_branches, n_cpus=20)
@@ -170,10 +173,12 @@ if args.localize:
   utils.multiprocess (localization, target_branches, n_cpus=20)
   
 if args.do_all:
-  def execute (dir):
-    cmd = args.do_all
-    utils.execute(cmd, dir=dir, verbosity=1)
-  utils.multiprocess (execute, target_branches, n_cpus=1)
- 
+
+    def execute(dir):
+        cmd = args.do_all
+        utils.execute(cmd, dir=dir, verbosity=1)
+
+    utils.multiprocess(execute, target_branches, n_cpus=1)
+
 if args.url:
-  get_repo_info(args.url)
+    get_repo_info(args.url)

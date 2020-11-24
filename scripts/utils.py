@@ -1,4 +1,5 @@
 import json
+import shutil
 import time
 import os, sys, glob
 import re
@@ -19,8 +20,8 @@ if os.path.isdir("logs") is False:
     os.mkdir("logs")
 
 logfile = open(
-    "logs/execute_log_%s.log" %
-    str(time.strftime("%m%d_%I%M", time.localtime())), 'w')
+    "logs/execute_log_%s.log" % str(time.strftime("%m%d_%I%M", time.localtime())), "w"
+)
 
 
 def has_field_and_true(dict, field):
@@ -66,27 +67,30 @@ def find_java_version(poms):
     for pom in poms:
         print(f" - parsing {pom}")
         root = ET.parse(pom).getroot()
-        nsmap = {"m": root.tag.rstrip("project").lstrip('{').rstrip('}')}
+        nsmap = {"m": root.tag.rstrip("project").lstrip("{").rstrip("}")}
         if root.find("m:properties/m:java.src.version", nsmap):
-            return root.find("m:properties/m:java.src.version",
-                             nsmap).text.split('.')[-1]  # 1.7, 1.8
+            return root.find("m:properties/m:java.src.version", nsmap).text.split(".")[
+                -1
+            ]  # 1.7, 1.8
         else:
-            plugins = root.findall(
-                "m:build/m:plugins/m:plugin", nsmap) + root.findall(
-                    "m:build/m:pluginManagement/m:plugins/m:plugin", nsmap)
+            plugins = root.findall("m:build/m:plugins/m:plugin", nsmap) + root.findall(
+                "m:build/m:pluginManagement/m:plugins/m:plugin", nsmap
+            )
             for plugin in plugins:
                 art = plugin.find("m:artifactId", nsmap)
                 if "compiler" in art.text and plugin.find(
-                        "m:configuration/m:source", nsmap):
-                    return plugin.find("m:configuration/m:source",
-                                       nsmap).text.split('.')[-1]
+                    "m:configuration/m:source", nsmap
+                ):
+                    return plugin.find("m:configuration/m:source", nsmap).text.split(
+                        "."
+                    )[-1]
 
             # Not found
             jdk = root.find("m:profiles/m:profile/m:activation/m:jdk", nsmap)
             if jdk is None:
                 continue  # default
             else:
-                return jdk.text[1:].split(',')[0].split('.')[-1]
+                return jdk.text[1:].split(",")[0].split(".")[-1]
     return None
 
 
@@ -118,7 +122,7 @@ def set_java_version(java_version, env=ENV):
             java_home = JDK_11
     except:
         java_home = JDK_8
-    
+
     env = deepcopy(env)
     env["JAVA_HOME"] = java_home
     return env
@@ -131,23 +135,29 @@ def get_mvn_command(java_version):
         return "mvn"
 
 
-def get_compile_command(cwd, project=None, java_version=None):
-    #skip_tests = "-DskipTests"
-    if os.path.isfile(f'{cwd}/pom.xml'):
-        return f"{get_mvn_command(java_version)} clean test-compile {MVN_OPTION}"
-    elif os.path.isfile(f'{cwd}/main.java'):
+def get_compile_command(
+    cwd,
+    project=None,
+    java_version=None,
+    phase="test-compile",
+    mvn_additional_options="",
+):
+    # skip_tests = "-DskipTests"
+    if os.path.isfile(f"{cwd}/pom.xml"):
+        return f"{get_mvn_command(java_version)} clean {phase} {MVN_OPTION} {mvn_additional_options}"
+    elif os.path.isfile(f"{cwd}/main.java"):
         return "javac main.java"  # for test
-    elif os.path.isfile(f'{cwd}/gradlew'):
+    elif os.path.isfile(f"{cwd}/gradlew"):
         return "./gradlew assemble"
-    elif os.path.isfile(f'{cwd}/build.xml'):
+    elif os.path.isfile(f"{cwd}/build.xml"):
         return "ant compile"
     else:
         return None
 
 
 def remove_terminal(str):
-    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-    return ansi_escape.sub('', str)
+    ansi_escape = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+    return ansi_escape.sub("", str)
 
 
 class Ret:
@@ -163,49 +173,50 @@ def execute(cmd, dir=None, env=None, timeout=1200, verbosity=0):
         print(f"EXECUTE {cmd} AT {os.path.basename(dir)}")
 
     start = timer()
-    try: 
-        process = Popen(cmd,
-                    shell=True,
-                    stdout=PIPE,
-                    stderr=PIPE,
-                    cwd=dir,
-                    env=env,
-                    preexec_fn=os.setsid)
+    try:
+        process = Popen(
+            cmd,
+            shell=True,
+            stdout=PIPE,
+            stderr=PIPE,
+            cwd=dir,
+            env=env,
+            preexec_fn=os.setsid,
+        )
         stdout, stderr = process.communicate(timeout=timeout)
         returncode = process.returncode
     except TimeoutExpired:
-        os.killpg(process.pid,
-                  signal.SIGINT)  # send signal to the process group
+        os.killpg(process.pid, signal.SIGINT)  # send signal to the process group
         print(f"{TIMEOUT} occurs during executing {cmd[:20]} at {dir}")
         stdout, stderr = process.communicate(timeout=timeout)
         returncode = process.returncode
     except OSError:
-        print (f"{ERROR}: failed to execute {cmd} at {dir} (maybe it is too long...)")
+        print(f"{ERROR}: failed to execute {cmd} at {dir} (maybe it is too long...)")
         stdout, stderr = b"", b""
         returncode = -1
 
     ret = Ret(stdout, stderr, returncode, timer() - start)
 
-    err_msg = "=== Execute %s ===\n  * return_code : %d\n  * stdout : %s\n  * stderr : %s\n  * dir : %s\n" \
-            % (cmd, ret.return_code, ret.stdout, ret.stderr, dir)
+    err_msg = (
+        "=== Execute %s ===\n  * return_code : %d\n  * stdout : %s\n  * stderr : %s\n  * dir : %s\n"
+        % (cmd, ret.return_code, ret.stdout, ret.stderr, dir)
+    )
     if ret.return_code != 0:
         if verbosity >= 1:
-            print(
-                f"{ERROR} - FAILED TO EXECUTE {cmd} AT {os.path.basename(dir)}"
-            )
+            print(f"{ERROR} - FAILED TO EXECUTE {cmd} AT {os.path.basename(dir)}")
         logfile.write(err_msg)
         logfile.flush()
     return ret
 
 
 def get_test_command(dir, test_classes=[], project=None, java_version=8):
-    if os.path.isfile(f'{dir}/pom.xml'):
+    if os.path.isfile(f"{dir}/pom.xml"):
         project_str = f"-pl {project}" if project else ""
-        test_classes = ','.join(test_classes)
+        test_classes = ",".join(test_classes)
         test_str = f"-Dtest={test_classes} -DfailIfNoTests=false"
-        return f'{get_mvn_command(java_version)} clean test -fn {project_str} {test_str} {MVN_OPTION}'
+        return f"{get_mvn_command(java_version)} clean test -fn {project_str} {test_str} {MVN_OPTION}"
     elif os.path.isfile(f"{dir}/build.xml"):
-        return "ant test -logfile \"results.txt\""
+        return 'ant test -logfile "results.txt"'
     elif os.path.isfile(f"{dir}/gradlew"):  # build.gradle
         return "./gradlew test"
     else:
@@ -214,15 +225,23 @@ def get_test_command(dir, test_classes=[], project=None, java_version=8):
 
 
 def read_json_from_file(json_filename: str):
-    json_file = open(json_filename, 'r')
+    json_file = open(json_filename, "r")
     json_str = json_file.read()
     return json.loads(json_str)
 
 
 def save_dict_to_jsonfile(json_filename: str, dict: Dict):
-    json_file = open(json_filename, 'w')
+    json_file = open(json_filename, "w")
     json_file.write(json.dumps(dict, indent=4))
 
-def multiprocess (fun, arg_list, n_cpus=4):
+
+def multiprocess(fun, arg_list, n_cpus=4):
     p = Pool(n_cpus)
     p.map(fun, arg_list)
+
+
+def copyfile(src, dst, inner=False, verbosity=0):
+    if os.path.isdir(src) and inner:
+        execute(f"cp -r {src}/* {dst}", dir=os.getcwd(), verbosity=verbosity)
+    else:
+        execute(f"cp -r {src} {dst}", dir=os.getcwd(), verbosity=verbosity)
