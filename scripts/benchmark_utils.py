@@ -48,6 +48,8 @@ class Statistics:
     self.no_patch_bugs: List[str] =        [] 
     self.not_compled_bugs: List[str] =     []
     self.no_validating_testcases = []
+ 
+    target_branches = [br for br in target_branches if os.path.isfile(f"{ROOT_DIR}/{br}/bug.json")]
   
     for target_branch in target_branches:
       print(f"{PROGRESS}: reading {target_branch}...")
@@ -116,6 +118,14 @@ def get_repo_info (url):
   execute(f"git commit -m \"add repo.json\"", ROOT_DIR)
   execute(f"git push", ROOT_DIR)
 
+def localization(target_branch):
+  bug_dir = f"{ROOT_DIR}/{target_branch}"
+  try:
+    bug = Bug.from_json(f"{bug_dir}/bug.json")
+    bug.localize(bug_dir)
+  except: 
+    print (f"{WARNING}: {target_branch} has no bug.json")
+  
 def generate_trace(target_branch):
   bug_dir = f"{ROOT_DIR}/{target_branch}"
   try:
@@ -131,12 +141,13 @@ parser.add_argument("--all",        action='store_true', default=False, help="do
 parser.add_argument("--statistics", action='store_true', default=False, help="statictics")
 parser.add_argument("--do_all", help="do cmd for all branches" )
 parser.add_argument("--trace", action='store_true', default=False, help="trace")
+parser.add_argument("--localize", action='store_true', default=False, help="localize")
 parser.add_argument("--get_repo", action='store_true', default=False, help="get repository info from commit url")
 parser.add_argument("--bug_id", help="get repository info from commit url")
 args = parser.parse_args()
 
 if args.bug_id:
-  target_branches = [args.bug_id]
+  target_branches = [f"{args.bug_id}-buggy"]
 else:
   target_branches = [
       os.path.basename(br)
@@ -155,6 +166,8 @@ if args.trace:
   utils.multiprocess (generate_trace, target_branches, n_cpus=20)
   # for target_branch in target_branches:
   #   generate_trace(target_branch
+if args.localize:
+  utils.multiprocess (localization, target_branches, n_cpus=20)
   
 if args.do_all:
   def execute (dir):

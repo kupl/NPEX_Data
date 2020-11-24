@@ -94,7 +94,7 @@ class TraceEntry:
         trace = [cls.parse_from_line(ln, dir) for ln in trace_lines]
         trace = [asdict(te) for te in trace if te]
         if trace == []:
-            print (f"{WARNING}: no trace.json is generated at {dir}")
+            print (f"{FAIL}: no trace.json is generated at {dir}")
             return False
         print (f"{SUCCESS}: trace.json is generated at {dir}")
         utils.save_dict_to_jsonfile(f"{dir}/trace.json", trace)
@@ -358,9 +358,8 @@ class Bug:
 
     def generate_trace(self, dir):
         self.checkout(dir)
-        # if os.path.isfile(f"{dir}/trace.json"):
-        #     print (f"{PROGRESS}: {self.bug_id} has already trace.json")
-        #     return True
+        if os.path.isfile(f"{dir}/trace.json"):
+            execute(f"rm trace.json", dir=dir)     
        
         if self.test_info == None:
             print (f"{WARNING}: {self.bug_id} has no test_info")
@@ -393,10 +392,12 @@ class Bug:
             print (f"{WARNING}: no trace.json for {self.bug_id}")
             return False
         self.checkout(dir)
+        if os.path.isdir (f"{dir}/infer-out"):
+            execute("rm -rf infer-out", dir=dir)
         env = utils.set_java_version(self.build_info.java_version)
-        ret_infer_compile = utils.execute (f"infer capture -- {self.build_info.build_command}", dir=dir, env=env)
+        ret_infer_compile = utils.execute (f"infer capture --java-version {self.build_info.java_version} -- {self.build_info.build_command}", dir=dir, env=env)
         if ret_infer_compile.return_code != 0:
-            print (f"{ERROR} cannot compile {self.bug_id}")
+            print (f"{ERROR} cannot infer-compile {self.bug_id}")
             return False
         
         ret_npex = utils.execute (f"infer npex", dir=dir)
@@ -409,6 +410,8 @@ class Bug:
             self.npe_info = new_npe_list
             self.patch_results = [] 
             print (f"{SUCCESS} new npes are found for {self.bug_id}")
+        else:
+            print (f"{FAIL} no new npes are found for {self.bug_id}")
         return True
 
     @staticmethod
@@ -444,7 +447,7 @@ class Bug:
             utils.execute (f"git push", dir=bug_dir)
         bug.localize(bug_dir)
             
-        if bug.patch_results == []:
+        if bug.patch_results == [] or not (os.path.isdir(f"{bug_dir}/patches")):
             bug.patch(bug_dir)
         
         bug.validate_patch(bug_dir)
