@@ -11,7 +11,7 @@ from colorama import Fore, Style  #type:ignore
 MVN_OLD = "/home/junhee/tools/apache-maven-3.2.5/bin/mvn"
 MVN_OPTION = "-V -B -Denforcer.skip=true -Dcheckstyle.skip=true -Dcobertura.skip=true -Drat.skip=true -Dlicense.skip=true -Dfindbugs.skip=true -Dgpg.skip=true -Dskip.npm=true -Dskip.gulp=true -Dskip.bower=true"
 MVN_SKIP_TESTS = "-Dtest=None -DfailIfNoTests=false"
-INFER = "/home/junhee/projects/npex-analyzer/infer/bin/infer"
+INFER = "/home/junhee/projects/npex-analyzer-1.0/infer/bin/infer"
 
 ERROR = f"{Fore.RED}[ERROR]{Style.RESET_ALL}"
 FAIL = f"{Fore.YELLOW}[FAIL]{Style.RESET_ALL}"
