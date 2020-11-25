@@ -1,2 +1,3 @@
-# NPEX
-NPE-X: no NPEs anymore + eXplainable NPE patch
+# NPEX Benchmarks
+ - A collection of NPE repair benchmarks
+ 
