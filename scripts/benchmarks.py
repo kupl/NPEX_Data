@@ -51,10 +51,7 @@ class Statistics:
         self.not_compled_bugs: List[str] = []
         self.no_validating_testcases = []
 
-        target_branches = [
-            br for br in target_branches
-            if os.path.isfile(f"{ROOT_DIR}/{br}/bug.json")
-        ]
+        target_branches = [br for br in target_branches if os.path.isfile(f"{ROOT_DIR}/{br}/bug.json")]
 
         for target_branch in target_branches:
             print(f"{PROGRESS}: reading {target_branch}...")
@@ -92,8 +89,7 @@ class Statistics:
         self.fix_rate = f"{self.fixed}/{self.has_validating_tc}"
 
     def to_json(self):
-        utils.save_dict_to_jsonfile(f"{ROOT_DIR}/statistics.json",
-                                    asdict(self))
+        utils.save_dict_to_jsonfile(f"{ROOT_DIR}/statistics.json", asdict(self))
 
 
 def get_repo_info(url):
@@ -101,17 +97,13 @@ def get_repo_info(url):
     org = url.split('/')[-4]
     repo = url.split('/')[-3]
     commit_id = url.split('/')[-1]
-    link = 'https://api.github.com/repos/%s/%s/commits/%s' % (org, repo,
-                                                              commit_id)
+    link = 'https://api.github.com/repos/%s/%s/commits/%s' % (org, repo, commit_id)
     res = requests.get(link, auth=(username, token), headers=headers)
     content = json.loads(res.content.decode("utf-8"))
 
     changed_files: List[str] = [file["filename"] for file in content["files"]]
     test_files = [file for file in changed_files if file.endswith("Test.java")]
-    patch_files = [
-        file for file in list(set(changed_files) - set(test_files))
-        if file.endswith(".java")
-    ]
+    patch_files = [file for file in list(set(changed_files) - set(test_files)) if file.endswith(".java")]
 
     ret = {
         "repo": repo,
@@ -149,46 +141,29 @@ def generate_trace(target_branch):
 
 def init_by_clone(target_branch):
     bug_dir = f"{ROOT_DIR}/{target_branch}"
-    execute(
-        f"git clone -b benchmarks/{target_branch} --single-branch https://github.com/kupl/NPEX_Data {bug_dir}",
-        ROOT_DIR)
+    execute(f"git clone -b benchmarks/{target_branch} --single-branch https://github.com/kupl/NPEX_Data {bug_dir}",
+            ROOT_DIR)
 
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--url", help="url")
 parser.add_argument("--all", action='store_true', default=False, help="do all")
-parser.add_argument("--init",
-                    action='store_true',
-                    default=False,
-                    help="init benchmarks")
-parser.add_argument("--statistics",
-                    action='store_true',
-                    default=False,
-                    help="statictics")
+parser.add_argument("--init", action='store_true', default=False, help="init benchmarks")
+parser.add_argument("--statistics", action='store_true', default=False, help="statictics")
 parser.add_argument("--do_all", help="do cmd for all branches")
-parser.add_argument("--trace",
-                    action='store_true',
-                    default=False,
-                    help="trace")
-parser.add_argument("--localize",
-                    action='store_true',
-                    default=False,
-                    help="localize")
-parser.add_argument("--get_repo",
-                    action='store_true',
-                    default=False,
-                    help="get repository info from commit url")
+parser.add_argument("--trace", action='store_true', default=False, help="trace")
+parser.add_argument("--localize", action='store_true', default=False, help="localize")
+parser.add_argument("--get_repo", action='store_true', default=False, help="get repository info from commit url")
 parser.add_argument("--bug_id", help="get repository info from commit url")
 args = parser.parse_args()
 
 if args.bug_id:
     target_branches = [f"{args.bug_id}-buggy"]
 else:
+    all_branches = utils.execute("git branch -a", dir=ROOT_DIR).stdout.splitlines()
     target_branches = [
-        os.path.basename(br)
-        for br in glob.glob(".git/refs/remotes/origin/benchmarks/*-buggy")
+        branch.strip('\n').split("/")[-1] for branch in all_branches if "benchmarks" in branch and "buggy" in branch
     ]
-
 if args.init:
     utils.multiprocess(init_by_clone, target_branches, n_cpus=5)
 
