@@ -18,10 +18,10 @@ from config import *
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-BENCHMARKS_DIRECTORY = "/home/june/project/NPEX_data/benchmarks"
-VFIX_DIRECTORY = "/home/june/project/vfix"
-JUNIT_JAR_PATH = "/home/june/project/vfix/jar/junit-4.13.1.jar"
-
+BENCHMARKS_DIRECTORY = "/media/4tb/npex/vfix/original"
+VFIX_DIRECTORY = "/media/4tb/npex/vfix/vfix"
+JUNIT_JAR_PATH = "/media/4tb/npex/vfix/vfix/jar/junit-4.13.1.jar"
+HAM_JAR_PATH = "/media/4tb/npex/vfix/vfix/jar/hamcrest-core-1.3.jar"
 
 @dataclass
 class Flag:
@@ -51,7 +51,7 @@ class VFixConfiguration:
 
 @dataclass
 class JavaSource:
-    CLASSPATH = f"target/*:{JUNIT_JAR_PATH}:."
+    CLASSPATH = f"target/*:{JUNIT_JAR_PATH}:{HAM_JAR_PATH}:."
 
     root: str
     name: str
@@ -202,8 +202,8 @@ class Proj:
             java_version=java_version,
             phase="package",
             mvn_additional_options=MVN_SKIP_TESTS,
-        )
-
+        ) 
+        
         if (
             ret := utils.execute(
                 compile_cmd,
@@ -291,6 +291,8 @@ class Pom:
             elem.tag = elem.tag[nsl:] if elem.tag.startswith(ns) else elem.tag
 
         plugins = tree.find("build/plugins")
+        if plugins == None:
+            plugins = tree.find("build/pluginManagement/plugins")
         if (jar_plugin := tree.find(".//*[.='maven-jar-plugin']/..")) :
             plugins.remove(jar_plugin)
         if (asm_plugin := tree.find(".//*[.='maven-jar-plugin']/..")) :
