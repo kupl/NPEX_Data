@@ -35,7 +35,9 @@ public class CommittedQueueBox implements QueueBox<CommittedQueueBox> {
 
     public CommittedQueueBox(CommittedQueueBox commitDepBox) {
         this.dots = new Dots(commitDepBox.dots);
-        this.dep = new Clock<>(commitDepBox.dep);
+        // NPEX_MODIFICATION
+        Clock<ExceptionSet> dep2 = commitDepBox.dep;
+        this.dep = new Clock<>(dep2);
         this.messageMap = new MessageMap(commitDepBox.messageMap);
     }
 
