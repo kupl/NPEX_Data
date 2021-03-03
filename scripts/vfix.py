@@ -14,6 +14,7 @@ from dacite import from_dict
 from benchmarks import Bug
 import xml.etree.ElementTree as ET
 import utils
+import shutil
 from config import *
 
 
@@ -138,7 +139,7 @@ class Proj:
         return from_dict(cls, utils.read_json_from_file(cache))
 
     @classmethod
-    def from_bug_id(cls, bug_id, overwrite=False):
+    def from_bug_id(cls, bug_id, clean):
         branch = bug_id if bug_id.endswith("-buggy") else f"{bug_id}-buggy"
         benchmark_dir = f"{BENCHMARKS_DIRECTORY}/{branch}"
         bug = Bug.from_json(f"{benchmark_dir}/bug.json")
@@ -147,12 +148,14 @@ class Proj:
         config_dir, source_dir, target_dir = (
             dirs := [f"{root_dir}/{dir}" for dir in ["config", "source", "target"]]
         )
-        if os.path.exists((cache := f"{root_dir}/{cls.Cache}")) and not overwrite:
+        if os.path.exists((cache := f"{root_dir}/{cls.Cache}")) and not clean:
             print(f"{bug_id}: cache found")
             return cls.load(cache)
         try:
+            shutil.rmtree(root_dir)
             npe = utils.read_json_from_file(f"{benchmark_dir}/npe.json")
-            [os.makedirs(d, exist_ok=overwrite) for d in dirs]
+            # check existence just to make sure that if root dir has been removed in clean mode
+            [os.makedirs(d, exist_ok=False) for d in dirs]
             utils.copyfile(benchmark_dir, source_dir, inner=True, verbosity=1)
             return cls(bug_id, bug, benchmark_dir, root_dir, *dirs, [Flag.INIT])
 
@@ -332,9 +335,9 @@ class Pom:
         tree.write(self.pom_path, method="xml")
 
 
-def run(bug_id):
+def run(bug_id, clean):
     try:
-        proj = Proj.from_bug_id(bug_id, overwrite=False)
+        proj = Proj.from_bug_id(bug_id, clean)
         proj.prepare()
         proj.build()
         proj.compile()
@@ -347,10 +350,11 @@ def run(bug_id):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--bug-id", help="get repository info from commit url")
+    parser.add_argument("--clean", action="store_true", default=False, help="remove vfix-cache and re-run all steps")
     args = parser.parse_args()
 
     if args.bug_id:
-        run(args.bug_id)
+        run(args.bug_id, args.clean)
 
     else:
         target_branches = [
