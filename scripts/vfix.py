@@ -14,6 +14,7 @@ from dacite import from_dict
 from benchmarks import Bug
 import xml.etree.ElementTree as ET
 import utils
+import shutil
 from config import *
 
 
@@ -138,7 +139,7 @@ class Proj:
         return from_dict(cls, utils.read_json_from_file(cache))
 
     @classmethod
-    def from_bug_id(cls, bug_id, overwrite=False):
+    def from_bug_id(cls, bug_id, clean):
         branch = bug_id if bug_id.endswith("-buggy") else f"{bug_id}-buggy"
         benchmark_dir = f"{BENCHMARKS_DIRECTORY}/{branch}"
         bug = Bug.from_json(f"{benchmark_dir}/bug.json")
@@ -147,12 +148,14 @@ class Proj:
         config_dir, source_dir, target_dir = (
             dirs := [f"{root_dir}/{dir}" for dir in ["config", "source", "target"]]
         )
-        if os.path.exists((cache := f"{root_dir}/{cls.Cache}")) and not overwrite:
+        if os.path.exists((cache := f"{root_dir}/{cls.Cache}")) and not clean:
             print(f"{bug_id}: cache found")
             return cls.load(cache)
         try:
+            shutil.rmtree(root_dir)
             npe = utils.read_json_from_file(f"{benchmark_dir}/npe.json")
-            [os.makedirs(d, exist_ok=overwrite) for d in dirs]
+            # check existence just to make sure that if root dir has been removed in clean mode
+            [os.makedirs(d, exist_ok=False) for d in dirs]
             utils.copyfile(benchmark_dir, source_dir, inner=True, verbosity=1)
             return cls(bug_id, bug, benchmark_dir, root_dir, *dirs, [Flag.INIT])
 
@@ -201,7 +204,7 @@ class Proj:
             project=None,
             java_version=java_version,
             phase="package",
-            mvn_additional_options=MVN_SKIP_TESTS,
+            mvn_additional_options=[MVN_SKIP_TESTS, "dependency:copy-dependencies"],
         ) 
         
         if (utils.execute(compile_cmd, dir=self.source_dir, env=utils.set_java_version(java_version), verbosity=1,).return_code != 0) :
@@ -271,6 +274,7 @@ class Proj:
 class Pom:
     pom_path: str
     tree: ET.ElementTree
+    DEPENDENCIES_DIR = "lib.dependencies"
 
     def __init__(self, pom_path):
         self.pom_path = pom_path
@@ -289,8 +293,8 @@ class Pom:
             plugins = tree.find("build/pluginManagement/plugins")
         if (jar_plugin := tree.find(".//*[.='maven-jar-plugin']/..")) and jar_plugin in plugins :
             plugins.remove(jar_plugin)
-        if (asm_plugin := tree.find(".//*[.='maven-jar-plugin']/..")) and jar_plugin in plugins :
-            plugins.remove(asm_plugin)
+        if (dep_plugin := tree.find(".//*[.='maven-dependency-plugin']/..")) and jar_plugin in plugins :
+            plugins.remove(dep_plugin)
 
         # Remove all <provided> tags
         for node in tree.findall(".//dependency[scope='provided']"):
@@ -306,29 +310,32 @@ class Pom:
             "</plugin>"
         )
 
-        asm_plugin = ET.XML(
+        dep_plugin = ET.XML(
             "<plugin>"
-            "<artifactId>maven-assembly-plugin</artifactId>"
-            "<version>3.0.0</version>"
-            "<configuration>"
-            "<descriptorRefs>"
-            "<descriptorRef>jar-with-dependencies</descriptorRef>"
-            "</descriptorRefs>"
-            "</configuration>"
-            "<executions>"
-            "<execution><phase>package</phase><goals><goal>single</goal></goals></execution>"
-            "</executions>"
+                "<groupId>org.apache.maven.plugins</groupId>"
+                "<artifactId>maven-dependency-plugin</artifactId>"
+                "<executions>"
+                    "<execution>"
+                        "<id>copy-dependencies</id>"
+                        "<phase>test-compile</phase>"
+                        "<goals><goal>copy-dependencies</goal></goals>"
+                        "<configuration>"
+                            "<outputDirectory>${project.build.directory}</outputDirectory>"
+                        "</configuration>"
+                    "</execution>"
+                "</executions>"
             "</plugin>"
         )
-        plugins.append(asm_plugin)
+
         plugins.append(jar_plugin)
+        plugins.append(dep_plugin)
 
         tree.write(self.pom_path, method="xml")
 
 
-def run(bug_id):
+def run(bug_id, clean):
     try:
-        proj = Proj.from_bug_id(bug_id, overwrite=False)
+        proj = Proj.from_bug_id(bug_id, clean)
         proj.prepare()
         proj.build()
         proj.compile()
@@ -341,10 +348,11 @@ def run(bug_id):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--bug-id", help="get repository info from commit url")
+    parser.add_argument("--clean", action="store_true", default=False, help="remove vfix-cache and re-run all steps")
     args = parser.parse_args()
 
     if args.bug_id:
-        run(args.bug_id)
+        run(args.bug_id, args.clean)
 
     else:
         target_branches = [
