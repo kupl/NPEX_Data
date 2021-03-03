@@ -140,11 +140,11 @@ def get_compile_command(
     project=None,
     java_version=None,
     phase="test-compile",
-    mvn_additional_options="",
+    mvn_additional_options=[],
 ):
     # skip_tests = "-DskipTests"
     if os.path.isfile(f"{cwd}/pom.xml"):
-        return f"{get_mvn_command(java_version)} clean {phase} {MVN_OPTION} {mvn_additional_options}"
+        return f"{get_mvn_command(java_version)} clean {phase} {MVN_OPTION} {' '.join(mvn_additional_options)}"
     elif os.path.isfile(f"{cwd}/main.java"):
         return "javac main.java"  # for test
     elif os.path.isfile(f"{cwd}/gradlew"):

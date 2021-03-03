@@ -204,7 +204,7 @@ class Proj:
             project=None,
             java_version=java_version,
             phase="package",
-            mvn_additional_options=MVN_SKIP_TESTS,
+            mvn_additional_options=[MVN_SKIP_TESTS, "dependency:copy-dependencies"],
         ) 
         
         if (
@@ -280,6 +280,7 @@ class Proj:
 class Pom:
     pom_path: str
     tree: ET.ElementTree
+    DEPENDENCIES_DIR = "lib.dependencies"
 
     def __init__(self, pom_path):
         self.pom_path = pom_path
@@ -298,8 +299,8 @@ class Pom:
             plugins = tree.find("build/pluginManagement/plugins")
         if (jar_plugin := tree.find(".//*[.='maven-jar-plugin']/..")) :
             plugins.remove(jar_plugin)
-        if (asm_plugin := tree.find(".//*[.='maven-jar-plugin']/..")) :
-            plugins.remove(asm_plugin)
+        if (dep_plugin := tree.find(".//*[.='maven-dependency-plugin']/")):
+            plugins.remove(dep_plugin)
 
         # Remove all <provided> tags
         for node in tree.findall(".//dependency[scope='provided']"):
@@ -315,22 +316,25 @@ class Pom:
             "</plugin>"
         )
 
-        asm_plugin = ET.XML(
+        dep_plugin = ET.XML(
             "<plugin>"
-            "<artifactId>maven-assembly-plugin</artifactId>"
-            "<version>3.0.0</version>"
-            "<configuration>"
-            "<descriptorRefs>"
-            "<descriptorRef>jar-with-dependencies</descriptorRef>"
-            "</descriptorRefs>"
-            "</configuration>"
-            "<executions>"
-            "<execution><phase>package</phase><goals><goal>single</goal></goals></execution>"
-            "</executions>"
+                "<groupId>org.apache.maven.plugins</groupId>"
+                "<artifactId>maven-dependency-plugin</artifactId>"
+                "<executions>"
+                    "<execution>"
+                        "<id>copy-dependencies</id>"
+                        "<phase>test-compile</phase>"
+                        "<goals><goal>copy-dependencies</goal></goals>"
+                        "<configuration>"
+                            "<outputDirectory>${project.build.directory}</outputDirectory>"
+                        "</configuration>"
+                    "</execution>"
+                "</executions>"
             "</plugin>"
         )
-        plugins.append(asm_plugin)
+
         plugins.append(jar_plugin)
+        plugins.append(dep_plugin)
 
         tree.write(self.pom_path, method="xml")
 
