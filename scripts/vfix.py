@@ -51,7 +51,7 @@ class VFixConfiguration:
 
 @dataclass
 class JavaSource:
-    CLASSPATH = f"target/*:{JUNIT_JAR_PATH}:{HAM_JAR_PATH}:."
+    CLASSPATH = f"target/*:target/dependency/*:{JUNIT_JAR_PATH}:{HAM_JAR_PATH}:."
 
     root: str
     name: str
@@ -204,26 +204,20 @@ class Proj:
             mvn_additional_options=MVN_SKIP_TESTS,
         ) 
         
-        if (
-            ret := utils.execute(
-                compile_cmd,
-                dir=self.source_dir,
-                env=utils.set_java_version(java_version),
-                verbosity=1,
-            ).return_code
-            != 0
-        ) :
+        if (utils.execute(compile_cmd, dir=self.source_dir, env=utils.set_java_version(java_version), verbosity=1,).return_code != 0) :
             return False
 
-        utils.copyfile(
-            f"{self.source_dir}/src/main/java", self.source_dir, inner=True, verbosity=1
-        )
-        utils.copyfile(
-            f"{self.source_dir}/target", self.target_dir, inner=True, verbosity=1
-        )
-        dep_jars = [
-            os.path.basename(jar) for jar in glob.glob(f"{self.target_dir}/*.jar")
-        ]
+        if (utils.execute("mvn dependency:copy-dependencies", dir=self.source_dir, env=utils.set_java_version(java_version), verbosity=1,).return_code != 0) :
+            return False
+
+        if os.path.isdir(f"{self.source_dir}/src"):
+            if os.path.isdir(f"{self.source_dir}/src/main/java"):
+                utils.copyfile(f"{self.source_dir}/src/main/java", self.source_dir, inner=True, verbosity=1)
+        else:
+            return False
+        utils.copyfile(f"{self.source_dir}/target", self.target_dir, inner=True, verbosity=1)
+        utils.copyfile(f"{self.source_dir}/target/dependency", self.target_dir, inner=True, verbosity=1)
+        dep_jars = [ os.path.basename(jar) for jar in glob.glob(f"{self.target_dir}/*.jar") ]
         self.vfixConfig = VFixConfiguration(self.nullpointer, deps=dep_jars)
         self.vfixConfig.write(f"{self.config_dir}/config")
         return True
@@ -293,9 +287,9 @@ class Pom:
         plugins = tree.find("build/plugins")
         if plugins == None:
             plugins = tree.find("build/pluginManagement/plugins")
-        if (jar_plugin := tree.find(".//*[.='maven-jar-plugin']/..")) :
+        if (jar_plugin := tree.find(".//*[.='maven-jar-plugin']/..")) and jar_plugin in plugins :
             plugins.remove(jar_plugin)
-        if (asm_plugin := tree.find(".//*[.='maven-jar-plugin']/..")) :
+        if (asm_plugin := tree.find(".//*[.='maven-jar-plugin']/..")) and jar_plugin in plugins :
             plugins.remove(asm_plugin)
 
         # Remove all <provided> tags
