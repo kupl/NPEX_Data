@@ -328,6 +328,9 @@ class Pom:
                         "<goals><goal>copy-dependencies</goal></goals>"
                     "</execution>"
                 "</executions>"
+                "<configuration>"
+                    "<outputDirectory>${session.executionRootDirectory}/target</outputDirectory>"
+                "</configuration>"
             "</plugin>"
         )
 
