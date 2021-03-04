@@ -72,13 +72,13 @@ class JavaSource:
         return True
 
     def compile(self):
-        self.compile_cmd = f"javac -cp {self.CLASSPATH} {self.get_source_path()}"
+        self.compile_cmd = f"javac -cp \"{self.CLASSPATH}\" {self.get_source_path()}"
         if utils.execute(self.compile_cmd, dir=self.root, verbosity=1).return_code != 0:
             return False
         return True
 
     def run_java(self, cwd, fp):
-        self.run_cmd = f"java -cp {self.CLASSPATH} {self.name}"
+        self.run_cmd = f"java -cp \"{self.CLASSPATH}\" {self.name}"
         ret = utils.execute(self.run_cmd, dir=cwd)
         write = False
         for line in ret.stderr.splitlines():
@@ -317,11 +317,8 @@ class Pom:
                 "<executions>"
                     "<execution>"
                         "<id>copy-dependencies</id>"
-                        "<phase>test-compile</phase>"
+                        "<phase>compile</phase>"
                         "<goals><goal>copy-dependencies</goal></goals>"
-                        "<configuration>"
-                            "<outputDirectory>${project.build.directory}</outputDirectory>"
-                        "</configuration>"
                     "</execution>"
                 "</executions>"
             "</plugin>"
