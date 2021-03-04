@@ -188,6 +188,10 @@ class Proj:
 
     @step(flag=Flag.NPE_FOUND, failure_msg="could not find npe")
     def prepare(self):
+        # Set java version locally via jenv
+        jenv_cmd = f'jenv local 1.{self.bug.build_info.java_version}'
+        utils.execute(jenv_cmd, dir=self.source_dir)
+
         npe = utils.read_json_from_file(f"{self.benchmark_dir}/npe.json")
         if "nullpointer" in npe:
             self.nullpointer = npe["nullpointer"]
@@ -210,16 +214,19 @@ class Proj:
         if (utils.execute(compile_cmd, dir=self.source_dir, env=utils.set_java_version(java_version), verbosity=1,).return_code != 0) :
             return False
 
-        if (utils.execute("mvn dependency:copy-dependencies", dir=self.source_dir, env=utils.set_java_version(java_version), verbosity=1,).return_code != 0) :
-            return False
-
+        os.makedirs(f"{self.target_dir}/classes")
+        os.makedirs(f"{self.target_dir}/test-classes")
         if os.path.isdir(f"{self.source_dir}/src"):
             if os.path.isdir(f"{self.source_dir}/src/main/java"):
                 utils.copyfile(f"{self.source_dir}/src/main/java", self.source_dir, inner=True, verbosity=1)
+            for testjar in (glob.glob(f"{self.source_dir}/**/target/*-tests.jar")):
+                utils.copyfile(testjar, f"{self.source_dir}/target/", verbosity=2)
         else:
             return False
         utils.copyfile(f"{self.source_dir}/target", self.target_dir, inner=True, verbosity=1)
         utils.copyfile(f"{self.source_dir}/target/dependency", self.target_dir, inner=True, verbosity=1)
+
+
         dep_jars = [ os.path.basename(jar) for jar in glob.glob(f"{self.target_dir}/*.jar") ]
         self.vfixConfig = VFixConfiguration(self.nullpointer, deps=dep_jars)
         self.vfixConfig.write(f"{self.config_dir}/config")
