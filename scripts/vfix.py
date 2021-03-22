@@ -152,7 +152,7 @@ class Proj:
             print(f"{bug_id}: cache found")
             return cls.load(cache)
         try:
-            shutil.rmtree(root_dir)
+            shutil.rmtree(root_dir, ignore_errors=True)
             npe = utils.read_json_from_file(f"{benchmark_dir}/npe.json")
             # check existence just to make sure that if root dir has been removed in clean mode
             [os.makedirs(d, exist_ok=False) for d in dirs]
@@ -334,7 +334,7 @@ class Pom:
             "</plugin>"
         )
 
-        plugins.append(jar_plugin)
+        # plugins.append(jar_plugin)
         plugins.append(dep_plugin)
 
         tree.write(self.pom_path, method="xml")
